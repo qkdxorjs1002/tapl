@@ -78,9 +78,11 @@ Use `.agent-workflow/request.md` for complex tasks or tasks that require approva
 ## 5. Plan
 
 When planning is needed, derive `.agent-workflow/plan.md` from `.agent-workflow/request.md`.
-Use Plan Mode for planning. In Plan Mode, prioritize requirement clarification, environment inspection, impact analysis, execution ordering, and verification design before implementation.
-Do not perform implementation, refactoring, test changes, documentation changes, or multi-file changes before execution approval.
 
+- Use Plan Mode first for tasks that require planning, so requirements, impact scope, execution order, and verification methods are clarified before execution.
+- If implementation, refactoring, test additions or changes, project documentation changes, or multi-file changes are expected, finalize the execution plan in Plan Mode before requesting user approval.
+- Before approval, only inspect relevant files, search the repository, check status, and run dry-run commands that do not create changes.
+- Before approval, do not modify source code, tests, documentation, or configuration files.
 - Assign stable IDs starting from `SPEC-001` to implementation specs.
 - Each `SPEC-*` must trace back to one or more `REQ-*` IDs.
 - Include the approach, affected files or interfaces, execution order, dependencies, risks, edge cases, assumptions, and verification method as needed.
@@ -103,10 +105,12 @@ Example:
 
 ```markdown
 ### Phase 1: Parser
+
 - [ ] TASK-001 Add cursor parser. Source: SPEC-001. Verify: parser unit tests.
 - [ ] TASK-002 Add pagination test. Source: SPEC-001. Verify: failing case passes.
 
 ### Next Phase Preview
+
 - TASK-003 Wire parser into list endpoint. Source: SPEC-002.
 ```
 
