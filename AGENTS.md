@@ -62,7 +62,7 @@ Not allowed before approval:
 - Run formatters or commands that rewrite files.
 - Run migrations, refactor code, add or modify tests, or make implementation changes.
 
-Reduce uncertainty by inspecting the actual environment first. If a decision is still needed, ask with `request_user_input` and include 2–3 practical options or a recommendation when useful.
+Reduce uncertainty by inspecting the actual environment first. If a decision is still needed, ask with `request_user_input` and include 3–4 practical options or a recommendation when useful.
 
 ## 4. Requirements
 
@@ -79,7 +79,7 @@ Use `.agent-workflow/request.md` for complex tasks or tasks that require approva
 
 When planning is needed, derive `.agent-workflow/plan.md` from `.agent-workflow/request.md`.
 
-- Use Plan Mode first for tasks that require planning, so requirements, impact scope, execution order, and verification methods are clarified before execution.
+- Use `Plan Mode` first for tasks that require planning, so requirements, impact scope, execution order, and verification methods are clarified before execution.
 - If implementation, refactoring, test additions or changes, project documentation changes, or multi-file changes are expected, finalize the execution plan in Plan Mode before requesting user approval.
 - Before approval, only inspect relevant files, search the repository, check status, and run dry-run commands that do not create changes.
 - Before approval, do not modify source code, tests, documentation, or configuration files.
