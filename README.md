@@ -2,53 +2,58 @@
 
 [한국어](README.ko.md)
 
-This repository contains working rules for how an agent should operate inside a project. The central document is `AGENTS.md`, and `config.toml` supports the default agent runtime configuration.
+This repository contains a compact operating workflow for coding agents. The source of truth is `AGENTS.md`: it defines how an agent should inspect context, record requirements, plan work, request execution approval, make changes, verify results, and archive workflow state.
 
-## Core Philosophy
+## What This Is
 
-The philosophy in `AGENTS.md` favors controlled execution over rushing into changes. Requirements are clarified first, then a plan is written, and only after user approval are actual changes made. This flow is not ceremony for its own sake; it is a safeguard against guessed scope, accidental expansion, and damage to user-owned changes.
+`AGENTS.md` is designed for projects where agent work should stay controlled and traceable. It favors a short approval-based workflow over immediate edits to project files.
 
-The document emphasizes these principles:
+The workflow is built around these rules:
 
-- Requirements are recorded with `REQ-*` IDs so the agreed scope stays explicit.
-- Implementation direction is described with `SPEC-*` IDs, connecting requirements to execution.
-- Execution work is split into `TASK-*` IDs so ordering and verification are visible.
-- Planning and execution are separated, and project file changes require user approval first.
-- The repository's actual state is inspected before acting to reduce unnecessary assumptions.
-- Completed work and remaining work are separated so current progress stays traceable.
-- Changes made by the user or other tools must not be reverted or overwritten.
+- Inspect the active workflow and worktree before starting non-trivial work.
+- Record confirmed requirements before planning complex or approval-gated changes.
+- Plan before implementation, and connect each plan item back to a requirement.
+- Ask for execution approval before modifying durable project files.
+- Keep task state current while work is being executed.
+- Verify the result before marking work complete.
+- Archive workflow files when there is no remaining actionable work.
+- Never overwrite, discard, commit, push, rebase, or reset user changes unless explicitly asked.
 
-## Workflow Documents
+## Workflow Files
 
-`AGENTS.md` defines these workflow documents for use when needed:
+Active workflow files live under `.agent-workflow/`. They are working state, not project deliverables, and should stay short, practical, and current.
 
-- `__REQ.md`: requirement summary and confirmation
-- `__PLAN.md`: execution plan connected to requirements
-- `__TASK.md`: active work list
-- `__TASK.done.md`: completed and verified work list
-- `__SPEEDWAGON.md`: notes from external searches
+- `.agent-workflow/request.md`: confirmed requirements, assumptions, open questions, exclusions, and references.
+- `.agent-workflow/plan.md`: objective, constraints, selected approach, affected files, execution order, risks, validation, and approval items.
+- `.agent-workflow/task.md`: current executable tasks with `TASK-*` IDs and explicit states.
+- `.agent-workflow/task.recent.md`: recently completed tasks and verification summary.
+- `.agent-workflow/speedwagon.md`: decision-relevant external findings.
+- `.agent-workflow/archive/<timestamp>-<task-slug>/`: archived workflow history with a concise summary.
 
-These files are treated as working notes. The principle is to create only what is needed and keep it short, practical, and current.
+Use only the files needed for the current task. When active workflow files are stale or complete, archive them instead of letting them become logs.
+
+## ID Conventions
+
+The workflow uses stable IDs to keep decisions traceable:
+
+- `REQ-*` for confirmed requirements.
+- `SPEC-*` for plan items that trace back to requirements.
+- `TASK-*` for executable work that traces back to plan items.
+
+These IDs are not ceremony. They make it clear what was requested, what approach was approved, and what was actually executed.
 
 ## Repository Layout
 
-- `AGENTS.md`: agent work rules and approval-based workflow
-- `config.toml`: model, reasoning effort, personality, and feature flag settings
+- `AGENTS.md`: the workflow and operating rules.
+- `README.md`: English overview.
+- `README.ko.md`: Korean overview.
 
-## Application Guide
+## Applying The Workflow
 
-### Global
+For a project, place `AGENTS.md` at the project root so agents can read it before working. For a global default, copy or merge the relevant rules into your agent's global instructions.
 
-- Apply `AGENTS.md` to `~/.codex/AGENTS.md`.
-- Merge `config.toml` into `~/.codex/config.toml`.
-
-### Project
-
-- Apply `AGENTS.md` to the workspace `./AGENTS.md`.
-- Merge `config.toml` into `./.codex/config.toml`.
-
-For `config.toml`, merge the relevant settings into the existing file instead of replacing unrelated local configuration.
+The workflow does not require every file for every request. Small questions may need no workflow files. Non-trivial or approval-gated work should use the minimum set needed to keep requirements, planning, tasks, and verification clear.
 
 ## Operating View
 
-The rules in this repository treat the agent as a collaborator, not an independent executor. The agent should read context first, turn uncertainty into questions, get approval before making changes, and report verification results after execution. Good work is therefore not just a changed file; it is a traceable state that shows why the change was made and which requirements it satisfied.
+This repository treats an agent as a careful collaborator, not an autonomous executor. The expected pattern is: read the current state, clarify scope, plan the change, ask before editing durable files, verify the result, and report what changed.

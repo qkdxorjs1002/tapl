@@ -138,3 +138,129 @@ When work finishes, report briefly:
 - verification commands and results,
 - remaining risks or blocked work,
 - whether workflow files were archived.
+
+## 10. Minimal File Formats
+
+Use these compact formats by default. Add sections only when they are useful.
+
+### `.agent-workflow/request.md`
+
+```md
+# Request
+
+## Summary
+Brief summary of the user request.
+
+## Requirements
+- REQ-001: Confirmed requirement.
+- REQ-002: Confirmed requirement.
+
+## Assumptions
+- ASSUMPTION-001: Current working assumption.
+
+## Open Questions
+- QUESTION-001: Question requiring user input.
+
+## Out of Scope
+- Item intentionally excluded.
+
+## References
+- Source or file path: short reason it matters.
+```
+
+### `.agent-workflow/plan.md`
+
+```md
+# Plan
+
+## Objective
+What this plan will achieve.
+
+## Specs
+- SPEC-001: Implementation spec. (REQ-001)
+  - Affected files/interfaces: path or component
+  - Validation: command or check
+
+## Execution Order
+1. SPEC-001
+2. SPEC-002
+
+## Risks
+- Risk and mitigation.
+
+## Approval Needed
+- Decision or execution approval needed from the user.
+```
+
+### `.agent-workflow/task.md`
+
+```md
+# Tasks
+
+## Phase 1: Phase name
+
+- TASK-001 [Pending]: Task title (SPEC-001)
+  - Action: Concrete action to perform
+  - Verification: Command or check
+
+- TASK-002 [Blocked]: Task title (SPEC-002)
+  - Blocker: What is blocked
+  - Next action: What is needed to unblock
+```
+
+### `.agent-workflow/task.recent.md`
+
+```md
+# Recent Tasks
+
+## Phase 1: Phase name
+
+- TASK-001 [Completed]: Task title (SPEC-001)
+  - Result: What changed
+  - Verification: Command/check and result
+
+## Notes
+- Important follow-up or caveat.
+```
+
+### `.agent-workflow/speedwagon.md`
+
+```md
+# External Findings
+
+- FINDING-001: Finding title (REQ-001, SPEC-001)
+  - Source: link or document path
+  - Finding: Short decision-relevant fact
+  - Impact: How it affects the plan or verification
+```
+
+### `.agent-workflow/archive/<timestamp>-<task-slug>/summary.md`
+
+```md
+# Archive Summary
+
+## Original Request
+Brief summary.
+
+## Final Requirements
+- REQ-001: Requirement summary.
+
+## Selected Plan
+Short summary of the chosen approach.
+
+## Completed Work
+- TASK-001: Result summary.
+
+## Verification
+- Command/check: result.
+
+## Remaining Work
+- Blocked, skipped, or deferred work, if any.
+
+## Archived Files
+- request.md
+- plan.md
+- task.md
+- task.recent.md
+- speedwagon.md
+```
