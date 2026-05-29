@@ -32,7 +32,7 @@ Use only the files needed for the current task.
 - `.agent-workflow/task.md`: current executable tasks.
 - `.agent-workflow/task.recent.md`: recently completed tasks and verification summary.
 - `.agent-workflow/speedwagon.md`: external findings that affect requirements, specs, tasks, or verification.
-- `.agent-workflow/archive/index.md`: compact lookup index for archived workflow summaries.
+- `.agent-workflow/index.md`: compact lookup index for archived workflow summaries.
 - `.agent-workflow/archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/`: archived workflow history.
 
 ## 3. Requirements
@@ -41,7 +41,7 @@ For complex or approval-requiring work, create or update `.agent-workflow/reques
 
 Before finalizing requirements:
 
-- Check `.agent-workflow/archive/index.md` first when prior workflow context may be useful, then open only the relevant archived `summary.md` or workflow files.
+- Check `.agent-workflow/index.md` first when prior workflow context may be useful, then open only the relevant archived `summary.md` or workflow files.
 - Inspect repository files, documentation, or tools instead of guessing.
 - Record concise references and confirmed facts only.
 - Assign stable requirement IDs: `REQ-001`, `REQ-002`, etc.
@@ -131,11 +131,11 @@ Include existing workflow files and a concise `summary.md` with:
 
 Maintain an archive summary index at:
 
-`.agent-workflow/archive/index.md`
+`.agent-workflow/index.md`
 
 Use `index.md` as the first lookup point before scanning archive folders. The index should let agents find relevant prior work by task, date, summary, keywords, and archive path without reading every archived file.
 
-After creating or updating an archive, update `archive/index.md` with one concise entry:
+After creating or updating an archive, update `index.md` with one concise entry:
 
 - timestamp,
 - task slug,
@@ -252,7 +252,7 @@ What this plan will achieve.
   - Impact: How it affects the plan or verification
 ```
 
-### `.agent-workflow/archive/index.md`
+### `.agent-workflow/index.md`
 
 ```md
 # Archive Index
