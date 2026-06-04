@@ -15,7 +15,7 @@ Write workflow documents in the user's language unless asked otherwise. Keep the
 
 At the start of every non-trivial user request, inspect `.agent-workflow/` if it exists.
 
-- If active workflow files contain remaining actionable work, use `request_user_input` before starting the new request.
+- If active workflow files contain remaining actionable work, use `request_user_input` Tool before starting the new request.
 - Ask whether to:
   1. do the remaining work first,
   2. combine it with the new request,
@@ -30,7 +30,6 @@ Use only the files needed for the current task.
 - `.agent-workflow/request.md`: confirmed requirements, assumptions, open questions, out-of-scope items, and relevant references.
 - `.agent-workflow/plan.md`: approved or proposed execution plan.
 - `.agent-workflow/task.md`: current executable tasks.
-- `.agent-workflow/task.recent.md`: recently completed tasks and verification summary.
 - `.agent-workflow/speedwagon.md`: external findings that affect requirements, specs, tasks, or verification.
 - `.agent-workflow/index.md`: compact lookup index for archived workflow summaries.
 - `.agent-workflow/archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/`: archived workflow history.
@@ -48,11 +47,15 @@ Before finalizing requirements:
 - Keep assumptions and open questions separate.
 - Do not finalize planning until requirements are clear enough to execute safely.
 
-## 4. Plan Mode
+## 4. Plan
 
-Planning comes before implementation.
+Planning must happen before implementation.
 
-Use Plan Mode to create or update `.agent-workflow/plan.md`.
+First, draft the implementation plan without writing files.
+
+During planning, use `request_user_input` Tool whenever any ambiguity, trade-off, or implementation choice could affect scope, risk, compatibility, cost, or direction. Ask as many times as needed until all material ambiguities are resolved.
+
+Only after the user confirms the finalized plan, create or update `.agent-workflow/plan.md`.
 
 The plan must include only what is needed:
 
@@ -68,8 +71,6 @@ The plan must include only what is needed:
 Assign stable spec IDs: `SPEC-001`, `SPEC-002`, etc.
 Each `SPEC-*` must trace to one or more `REQ-*`.
 
-Use `request_user_input` when plan choices materially affect scope, risk, compatibility, cost, or implementation direction. Revise `plan.md` after user feedback.
-
 ## 5. Tasks
 
 After the plan is clear, create or update `.agent-workflow/task.md`.
@@ -77,21 +78,30 @@ After the plan is clear, create or update `.agent-workflow/task.md`.
 - Split work into phases and tasks.
 - Assign stable task IDs: `TASK-001`, `TASK-002`, etc.
 - Each task must reference its source `SPEC-*`.
+- Each task must include a `Task Level` from `1` to `5`.
+- Each task must specify the required Subagent based on its level.
 - Each task should include verification when applicable.
 - Use explicit states: `Pending`, `In Progress`, `Completed`, `Blocked`, or `Skipped`.
 - Keep `task.md` focused on the current execution window and next useful step.
 
-Before implementation starts, use `request_user_input` to ask whether to execute the prepared `task.md`.
+Task level mapping:
+
+- Level `1-2`: `junior-worker`
+- Level `2-3`: `senior-worker`
+- Level `3-5`: `specialist-worker`
+
+Before implementation starts, use `request_user_input` Tool to ask whether to execute the prepared `task.md`.
 
 ## 6. Execution
 
 After approval, execute tasks phase by phase.
 
 - Execute approved tasks from top to bottom.
+- Use the specified Subagent for every task execution.
+- Do not execute implementation work directly without a Subagent.
 - Mark a task `Completed` only after implementation and verification are done.
 - Mark blocked work as `Blocked` with the next required action.
 - Keep blocked, skipped, pending, or unverified work in `task.md`.
-- Move completed and verified work to `task.recent.md`, then remove it from `task.md`.
 - If scope or implementation changes materially, update workflow files and ask the user before continuing.
 
 ## 7. External Findings
@@ -219,26 +229,15 @@ What this plan will achieve.
 
 - TASK-001 [Pending]: Task title (SPEC-001)
   - Action: Concrete action to perform
+  - Task Level: task level
   - Verification: Command or check
+  - Result: What changed
 
 - TASK-002 [Blocked]: Task title (SPEC-002)
   - Blocker: What is blocked
+  - Task Level: task level
   - Next action: What is needed to unblock
-```
-
-### `.agent-workflow/task.recent.md`
-
-```md
-# Recent Tasks
-
-## Phase 1: Phase name
-
-- TASK-001 [Completed]: Task title (SPEC-001)
   - Result: What changed
-  - Verification: Command/check and result
-
-## Notes
-- Important follow-up or caveat.
 ```
 
 ### `.agent-workflow/speedwagon.md`
@@ -290,6 +289,5 @@ Short summary of the chosen approach.
 - request.md
 - plan.md
 - task.md
-- task.recent.md
 - speedwagon.md
 ```
