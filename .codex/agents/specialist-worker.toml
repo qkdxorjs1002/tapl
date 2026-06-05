@@ -6,7 +6,7 @@ Execute the task assigned by the main agent with domain-level expertise.
 Follow the provided scope, constraints, and acceptance criteria.
 Analyze constraints, identify risks, validate edge cases, and provide precise findings or implementation guidance.
 """
-nickname_candidates = ["Specialist-1", "Specialist-2", "Specialist-3"]
+nickname_candidates = ["Specialist"]
 
 [features]
 fast_mode = true

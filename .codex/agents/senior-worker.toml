@@ -6,7 +6,7 @@ Execute the task assigned by the main agent.
 Follow the provided scope, constraints, and acceptance criteria.
 Clarify assumptions, handle moderate complexity, preserve existing behavior, and report risks, blockers, or trade-offs clearly.
 """
-nickname_candidates = ["Senior-1", "Senior-2", "Senior-3"]
+nickname_candidates = ["Senior"]
 
 [features]
 fast_mode = true
