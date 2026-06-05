@@ -1,11 +1,12 @@
 name = "senior-worker"
 description = "Best suited for task: moderately scoped tasks requiring sound judgment, code review, or careful implementation."
 model_reasoning_effort = "high"
-
 developer_instructions = """
 Execute the task assigned by the main agent.
 Follow the provided scope, constraints, and acceptance criteria.
 Clarify assumptions, handle moderate complexity, preserve existing behavior, and report risks, blockers, or trade-offs clearly.
 """
+nickname_candidates = ["Senior-1", "Senior-2", "Senior-3"]
 
-nickname_candidates = ["Senior#1", "Senior#2", "Senior#3"]
+[features]
+fast_mode = true

@@ -55,7 +55,7 @@ First, draft the implementation plan without writing files.
 
 During planning, use `request_user_input` Tool whenever any ambiguity, trade-off, or implementation choice could affect scope, risk, compatibility, cost, or direction. Ask as many times as needed until all material ambiguities are resolved.
 
-Only after the user confirms the finalized plan, create or update `.agent-workflow/plan.md`.
+Create or update `.agent-workflow/plan.md` as a draft during planning. Keep it updated as user decisions are made, and mark it finalized only after user confirmation.
 
 The plan must include only what is needed:
 
@@ -79,16 +79,16 @@ After the plan is clear, create or update `.agent-workflow/task.md`.
 - Assign stable task IDs: `TASK-001`, `TASK-002`, etc.
 - Each task must reference its source `SPEC-*`.
 - Each task must include a `Task Level` from `1` to `5`.
-- Each task must specify the required Subagent based on its level.
+- Each task must specify `Required Subagent` based on its level.
 - Each task should include verification when applicable.
 - Use explicit states: `Pending`, `In Progress`, `Completed`, `Blocked`, or `Skipped`.
 - Keep `task.md` focused on the current execution window and next useful step.
 
 Task level mapping:
 
-- Level `1-2`: `junior-worker`
-- Level `2-3`: `senior-worker`
-- Level `3-5`: `specialist-worker`
+- Level `1`: [@junior-worker](subagent://junior-worker)
+- Level `2 ~ 3`: [@senior-worker](subagent://senior-worker)
+- Level `4 ~ 5`: [@specialist-worker](subagent://specialist-worker)
 
 Before implementation starts, use `request_user_input` Tool to ask whether to execute the prepared `task.md`.
 
@@ -229,13 +229,15 @@ What this plan will achieve.
 
 - TASK-001 [Pending]: Task title (SPEC-001)
   - Action: Concrete action to perform
-  - Task Level: task level
+  - Task Level: task level (1~5)
+  - Required Subagent: subagent based on level
   - Verification: Command or check
   - Result: What changed
 
 - TASK-002 [Blocked]: Task title (SPEC-002)
   - Blocker: What is blocked
-  - Task Level: task level
+  - Task Level: task level (1~5)
+  - Required Subagent: subagent based on level
   - Next action: What is needed to unblock
   - Result: What changed
 ```
