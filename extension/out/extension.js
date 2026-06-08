@@ -276,12 +276,12 @@ async function renderOverviewView() {
     const taskDocument = documents.find(({ document }) => document.filename === 'task.md');
     const taskSummary = summarizeTasks(taskDocument?.content);
     const archiveFolders = await listArchiveFolders(vscode.Uri.joinPath(workflowUri, ARCHIVE_DIR));
-    const sections = documents.map(({ document, uri, content }) => renderDocumentCard({
+    const sections = documents.map(({ document, uri, content }) => ({
         title: document.label,
         source: relativePath(uri),
         content,
         missingText: `${document.filename} does not exist.`
-    })).join('');
+    }));
     const archiveItems = archiveFolders.length > 0
         ? `<ul class="archive-list">${archiveFolders.slice(0, 8).map((folder) => `<li><span>${escapeHtml(folder)}</span><code>${escapeHtml(`${WORKFLOW_DIR}/${ARCHIVE_DIR}/${folder}`)}</code></li>`).join('')}</ul>`
         : '<p class="muted">No workflow archives found.</p>';
@@ -305,9 +305,7 @@ async function renderOverviewView() {
       ${renderStatusPill('Skipped', taskSummary.skipped)}
     </section>
     <main class="layout">
-      <section class="document-stack">
-        ${sections}
-      </section>
+      ${renderDocumentTabs('active-workflow-documents', sections)}
       <aside class="side-panel">
         <h2>Archives</h2>
         ${archiveItems}
@@ -338,17 +336,22 @@ async function renderArchiveView(archiveUri, title) {
         .filter(([name, type]) => (type & vscode.FileType.File) !== 0 && name.endsWith('.md'))
         .map(([name]) => name)
         .sort(compareArchiveDocuments);
-    const cards = markdownFiles.length > 0
-        ? (await Promise.all(markdownFiles.map(async (filename) => {
+    const documents = markdownFiles.length > 0
+        ? await Promise.all(markdownFiles.map(async (filename) => {
             const uri = vscode.Uri.joinPath(archiveUri, filename);
-            return renderDocumentCard({
+            return {
                 title: archiveDocumentLabel(filename),
                 source: relativePath(uri),
                 content: await readMarkdownFile(uri),
                 missingText: `${filename} does not exist.`
-            });
-        }))).join('')
-        : '<section class="doc-card"><p class="muted">No Markdown files in this archive.</p></section>';
+            };
+        }))
+        : [];
+    const body = documents.length > 1
+        ? renderDocumentTabs('archive-documents', documents)
+        : documents.length === 1
+            ? renderDocumentCard(documents[0])
+            : '<section class="doc-card"><p class="muted">No Markdown files in this archive.</p></section>';
     return `
     <header class="hero compact">
       <p class="eyebrow">${escapeHtml(relativePath(archiveUri))}</p>
@@ -356,7 +359,7 @@ async function renderArchiveView(archiveUri, title) {
       <p class="lede">${markdownFiles.length} Markdown document${markdownFiles.length === 1 ? '' : 's'}</p>
     </header>
     <main class="single-document">
-      ${cards}
+      ${body}
     </main>
   `;
 }
@@ -393,6 +396,31 @@ function renderDocumentCard(options) {
         ${body}
       </div>
     </article>
+  `;
+}
+function renderDocumentTabs(groupId, documents) {
+    if (documents.length === 0) {
+        return '<section class="doc-card"><p class="muted">No workflow documents found.</p></section>';
+    }
+    const safeGroupId = sanitizeHtmlId(groupId);
+    const tabs = documents.map((document, index) => {
+        const tabId = `${safeGroupId}-${index}`;
+        const checked = index === 0 ? ' checked' : '';
+        return `
+      <input class="tab-radio" type="radio" name="${safeGroupId}" id="${tabId}"${checked}>
+      <label class="tab-label" for="${tabId}">
+        <span>${escapeHtml(document.title)}</span>
+        <small>${escapeHtml(document.source.split('/').pop() ?? document.source)}</small>
+      </label>
+      <section class="tab-panel">
+        ${renderDocumentCard(document)}
+      </section>
+    `;
+    }).join('');
+    return `
+    <section class="document-tabs" aria-label="Workflow documents">
+      ${tabs}
+    </section>
   `;
 }
 function renderEmptyView(title, message) {
@@ -489,7 +517,8 @@ function renderMarkdown(markdown) {
         codeLines = [];
         inCodeBlock = false;
     };
-    for (const line of lines) {
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
         if (line.startsWith('```')) {
             if (inCodeBlock) {
                 closeCodeBlock();
@@ -514,6 +543,20 @@ function renderMarkdown(markdown) {
             closeList();
             const level = heading[1].length;
             html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+            continue;
+        }
+        const workflowItem = parseWorkflowItemLine(line);
+        if (workflowItem) {
+            closeList();
+            while (index + 1 < lines.length) {
+                const detail = /^\s{2,}-\s+(.+)$/.exec(lines[index + 1]);
+                if (!detail) {
+                    break;
+                }
+                workflowItem.details.push(detail[1]);
+                index += 1;
+            }
+            html.push(renderWorkflowItemBlock(workflowItem));
             continue;
         }
         const unordered = /^-\s+(.+)$/.exec(line);
@@ -542,6 +585,35 @@ function renderMarkdown(markdown) {
         closeCodeBlock();
     }
     return html.join('\n');
+}
+function parseWorkflowItemLine(line) {
+    const match = /^-\s+((?:REQ|SPEC|TASK|FINDING|ASSUMPTION|QUESTION)-\d{3})(.*)$/.exec(line);
+    if (!match) {
+        return undefined;
+    }
+    return {
+        id: match[1],
+        kind: match[1].split('-')[0].toLowerCase(),
+        title: match[2].replace(/^:\s*/, '').trim(),
+        details: []
+    };
+}
+function renderWorkflowItemBlock(item) {
+    const title = item.title.length > 0
+        ? `<div class="workflow-item-title">${renderInlineMarkdown(item.title)}</div>`
+        : '';
+    const details = item.details.length > 0
+        ? `<ul class="workflow-item-details">${item.details.map((detail) => `<li>${renderInlineMarkdown(detail)}</li>`).join('')}</ul>`
+        : '';
+    return `
+    <article class="workflow-item-block workflow-item-${escapeHtml(item.kind)}">
+      <div class="workflow-item-heading">
+        <span class="workflow-item-id">${escapeHtml(item.id)}</span>
+        ${title}
+      </div>
+      ${details}
+    </article>
+  `;
 }
 function renderInlineMarkdown(value) {
     return renderStatusTokensOutsideCode(escapeHtml(value)
@@ -714,6 +786,85 @@ function renderPage(webview, body) {
       gap: 16px;
     }
 
+    .document-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      align-items: stretch;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .layout > .document-tabs,
+    .single-document > .document-tabs {
+      min-width: 0;
+    }
+
+    .tab-radio {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .tab-label {
+      display: inline-flex;
+      flex: 1 1 150px;
+      order: 1;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      min-width: 0;
+      min-height: 46px;
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .tab-label span,
+    .tab-label small {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab-label span {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .tab-label small {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--vscode-editor-font-family);
+    }
+
+    .tab-radio:checked + .tab-label {
+      border-color: var(--accent);
+      background: var(--panel-alt);
+      box-shadow: inset 0 -2px 0 var(--accent);
+    }
+
+    .tab-radio:focus-visible + .tab-label {
+      outline: 1px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .tab-panel {
+      display: none;
+      order: 2;
+      flex: 1 0 100%;
+      min-width: 0;
+    }
+
+    .tab-radio:checked + .tab-label + .tab-panel {
+      display: block;
+    }
+
     .single-document {
       padding: 24px 36px 40px;
     }
@@ -785,9 +936,64 @@ function renderPage(webview, body) {
       margin-top: 4px;
     }
 
+    .workflow-item-block {
+      margin: 12px 0;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .workflow-item-heading {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .workflow-item-id {
+      flex: 0 0 auto;
+      padding: 1px 7px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-alt);
+      color: var(--link);
+      font-family: var(--vscode-editor-font-family);
+      font-size: 0.82em;
+      font-weight: 700;
+      line-height: 1.6;
+    }
+
+    .workflow-item-title {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      column-gap: 6px;
+      row-gap: 4px;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+
+    .workflow-item-details {
+      display: grid;
+      gap: 5px;
+      margin: 10px 0 0;
+      padding-left: 20px;
+      color: var(--muted);
+    }
+
+    .workflow-item-details li {
+      overflow-wrap: anywhere;
+    }
+
     .task-status-badge {
       display: inline-flex;
       align-items: center;
+      flex: 0 0 auto;
       min-height: 20px;
       padding: 1px 7px;
       border: 1px solid currentColor;
@@ -795,9 +1001,9 @@ function renderPage(webview, body) {
       background: var(--panel);
       font-size: 0.78em;
       font-weight: 600;
-      line-height: 1.4;
+      line-height: 1.25;
       white-space: nowrap;
-      vertical-align: baseline;
+      vertical-align: middle;
     }
 
     .task-status-pending {
@@ -912,6 +1118,16 @@ function renderPage(webview, body) {
       .hero h1 {
         font-size: 24px;
       }
+
+      .tab-label {
+        flex-basis: 130px;
+      }
+
+      .workflow-item-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+      }
     }
   </style>
 </head>
@@ -972,6 +1188,10 @@ function relativePath(uri) {
 }
 function normalizeUriPath(value) {
     return value.replace(/\/+$/, '');
+}
+function sanitizeHtmlId(value) {
+    const normalized = value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+    return normalized.length > 0 ? normalized : 'workflow-tabs';
 }
 function compareArchiveDocuments(left, right) {
     const leftIndex = ARCHIVE_DOCUMENT_ORDER.indexOf(left);
