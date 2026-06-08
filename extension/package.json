@@ -1,7 +1,7 @@
 {
   "name": "replta-workflow-viewer",
   "displayName": "REPLTA Workflow Viewer",
-  "description": "View .agent-workflow documents and archives through VSCode's built-in Markdown preview.",
+  "description": "View .agent-workflow documents and archives in a dedicated VSCode Webview dashboard.",
   "version": "0.1.0",
   "publisher": "replta",
   "license": "UNLICENSED",
@@ -16,7 +16,8 @@
     "onView:repltaWorkflow.archives",
     "onCommand:repltaWorkflow.refresh",
     "onCommand:repltaWorkflow.openOverview",
-    "onCommand:repltaWorkflow.openMarkdownPreview"
+    "onCommand:repltaWorkflow.openDocument",
+    "onCommand:repltaWorkflow.openArchive"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -32,16 +33,22 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "repltaWorkflow.openMarkdownPreview",
-        "title": "Open Markdown Preview",
+        "command": "repltaWorkflow.openDocument",
+        "title": "Open Workflow Document",
         "category": "REPLTA Workflow",
         "icon": "$(open-preview)"
       },
       {
         "command": "repltaWorkflow.openOverview",
-        "title": "Open Workflow Overview",
+        "title": "Open Workflow Dashboard",
         "category": "REPLTA Workflow",
         "icon": "$(preview)"
+      },
+      {
+        "command": "repltaWorkflow.openArchive",
+        "title": "Open Workflow Archive",
+        "category": "REPLTA Workflow",
+        "icon": "$(archive)"
       }
     ],
     "viewsContainers": {
@@ -80,8 +87,13 @@
           "group": "inline"
         },
         {
-          "command": "repltaWorkflow.openMarkdownPreview",
+          "command": "repltaWorkflow.openDocument",
           "when": "viewItem == workflowFile",
+          "group": "inline"
+        },
+        {
+          "command": "repltaWorkflow.openArchive",
+          "when": "viewItem == workflowArchive",
           "group": "inline"
         }
       ]

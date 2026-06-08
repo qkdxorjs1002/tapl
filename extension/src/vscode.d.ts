@@ -46,6 +46,12 @@ declare module 'vscode' {
     SymbolicLink = 64
   }
 
+  export enum ViewColumn {
+    One = 1,
+    Two = 2,
+    Three = 3
+  }
+
   export interface TreeItemLabel {
     label: string;
     highlights?: [number, number][];
@@ -77,6 +83,26 @@ declare module 'vscode' {
     onDidDelete(listener: (uri: Uri) => unknown): Disposable;
   }
 
+  export interface Webview {
+    html: string;
+    cspSource: string;
+  }
+
+  export interface WebviewOptions {
+    enableScripts?: boolean;
+  }
+
+  export interface WebviewPanelOptions {
+    retainContextWhenHidden?: boolean;
+  }
+
+  export interface WebviewPanel extends Disposable {
+    title: string;
+    webview: Webview;
+    reveal(viewColumn?: ViewColumn): void;
+    onDidDispose(listener: () => unknown): Disposable;
+  }
+
   export interface FileStat {
     type: FileType;
   }
@@ -89,15 +115,16 @@ declare module 'vscode' {
     getChildren(element?: T): Thenable<T[]> | T[];
   }
 
-  export interface TextDocumentContentProvider {
-    onDidChange?: Event<Uri>;
-    provideTextDocumentContent(uri: Uri): ProviderResult<string>;
-  }
-
   export type ProviderResult<T> = T | undefined | null | Thenable<T | undefined | null>;
 
   export namespace window {
     export function registerTreeDataProvider<T>(viewId: string, treeDataProvider: TreeDataProvider<T>): Disposable;
+    export function createWebviewPanel(
+      viewType: string,
+      title: string,
+      showOptions: ViewColumn,
+      options?: WebviewPanelOptions & WebviewOptions
+    ): WebviewPanel;
     export function showInformationMessage(message: string): Thenable<string | undefined>;
     export function showWarningMessage(message: string): Thenable<string | undefined>;
   }
@@ -110,7 +137,6 @@ declare module 'vscode' {
       readFile(uri: Uri): Thenable<Uint8Array>;
     };
     export function createFileSystemWatcher(globPattern: RelativePattern): FileSystemWatcher;
-    export function registerTextDocumentContentProvider(scheme: string, provider: TextDocumentContentProvider): Disposable;
   }
 
   export namespace commands {

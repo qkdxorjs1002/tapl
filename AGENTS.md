@@ -99,7 +99,7 @@ After approval, execute tasks phase by phase.
 - Execute approved tasks from top to bottom.
 - Use the specified Subagent for every task execution.
 - Do not execute implementation work directly without a Subagent.
-- Subagents may only modify `.agent-workflow/task.md`; all other workflow files are read-only context.
+- Subagents may read-only all workflow files.
 - Subagent timeouts are system-enforced. Check status every 5 minutes and wait calmly until completion, failure, or timeout.
 - Mark a task `Completed` only after implementation and verification are done.
 - Mark blocked work as `Blocked` with the next required action.
