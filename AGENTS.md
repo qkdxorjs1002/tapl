@@ -10,6 +10,8 @@ Write workflow documents in the user's language unless asked otherwise. Keep the
 - Do not commit, push, rebase, reset, discard changes, or include workflow files in commits unless explicitly requested.
 - Check the worktree before and after work when practical. Never overwrite user changes.
 - Keep active workflow files as current-state snapshots, not logs.
+- Subagents are granted read-only access to all workflow files and must not modify them.
+- Subagent timeouts are system-enforced. Check status every 5 minutes and wait calmly until completion, failure, or timeout.
 
 ## 1. Request Startup
 
@@ -60,6 +62,7 @@ Create or update `plan.md` as a draft during planning. Keep it updated as user d
 The plan must include only what is needed:
 
 - objective,
+- per-item goals,
 - constraints and assumptions,
 - selected approach,
 - affected files or interfaces,
@@ -69,6 +72,7 @@ The plan must include only what is needed:
 - items requiring approval.
 
 Assign stable spec IDs: `SPEC-001`, `SPEC-002`, etc.
+Each `SPEC-*` must include a concise `Goal` that states the intended outcome for that plan item.
 Each `SPEC-*` must trace to one or more `REQ-*`.
 
 ## 5. Tasks
@@ -77,6 +81,7 @@ After the plan is clear, create or update `task.md`.
 
 - Split work into phases and tasks.
 - Assign stable task IDs: `TASK-001`, `TASK-002`, etc.
+- Each task must include a concise `Goal` that states the intended outcome for that task.
 - Each task must reference its source `SPEC-*`.
 - Each task must specify `Required Subagent` based on its routing.
 - Each task should include verification when applicable.
@@ -110,9 +115,6 @@ After approval, execute tasks phase by phase.
 
 - Execute approved tasks from top to bottom.
 - Use the specified Subagent for every task execution.
-- Do not execute implementation work directly without a Subagent.
-- Subagents are granted read-only access to all workflow files and must not modify them.
-- Subagent timeouts are system-enforced. Check status every 5 minutes and wait calmly until completion, failure, or timeout.
 - Mark a task `Completed` only after implementation and verification are done.
 - Mark blocked work as `Blocked` with the next required action.
 - Keep blocked, skipped, pending, or unverified work in `task.md`.
@@ -219,6 +221,7 @@ What this plan will achieve.
 
 ## Specs
 - SPEC-001: Implementation spec. (REQ-001)
+  - Goal: Concrete outcome this spec must achieve.
   - Affected files/interfaces: path or component
   - Validation: command or check
 
@@ -240,6 +243,7 @@ What this plan will achieve.
 ## Phase 1: Phase name
 
 - TASK-001 [Pending]: Task title (SPEC-001)
+  - Goal: Concrete outcome this task must achieve
   - Action: Concrete action to perform
   - Required Subagent: subagent based on task routing
   - Verification: Command or check
