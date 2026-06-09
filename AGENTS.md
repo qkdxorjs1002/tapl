@@ -27,20 +27,20 @@ At the start of every non-trivial user request, inspect `.agent-workflow/` if it
 
 Use only the files needed for the current task.
 
-- `.agent-workflow/request.md`: confirmed requirements, assumptions, open questions, out-of-scope items, and relevant references.
-- `.agent-workflow/plan.md`: approved or proposed execution plan.
-- `.agent-workflow/task.md`: current executable tasks.
-- `.agent-workflow/speedwagon.md`: external findings that affect requirements, specs, tasks, or verification.
-- `.agent-workflow/index.md`: compact lookup index for archived workflow summaries.
-- `.agent-workflow/archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/`: archived workflow history.
+- `request.md`: confirmed requirements, assumptions, open questions, out-of-scope items, and relevant references.
+- `plan.md`: approved or proposed execution plan.
+- `task.md`: current executable tasks.
+- `speedwagon.md`: external findings that affect requirements, specs, tasks, or verification.
+- `index.md`: compact lookup index for archived workflow summaries.
+- `archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/`: archived workflow history.
 
 ## 3. Requirements
 
-For complex or approval-requiring work, create or update `.agent-workflow/request.md`.
+For complex or approval-requiring work, create or update `request.md`.
 
 Before finalizing requirements:
 
-- Check `.agent-workflow/index.md` first when prior workflow context may be useful, then open only the relevant archived `summary.md` or workflow files.
+- Check `index.md` first when prior workflow context may be useful, then open only the relevant archived `summary.md` or workflow files.
 - Inspect repository files, documentation, or tools instead of guessing.
 - Record concise references and confirmed facts only.
 - Assign stable requirement IDs: `REQ-001`, `REQ-002`, etc.
@@ -55,7 +55,7 @@ First, draft the implementation plan without writing files.
 
 During planning, use `request_user_input` Tool whenever any ambiguity, trade-off, or implementation choice could affect scope, risk, compatibility, cost, or direction. Ask as many times as needed until all material ambiguities are resolved.
 
-Create or update `.agent-workflow/plan.md` as a draft during planning. Keep it updated as user decisions are made, and mark it finalized only after user confirmation.
+Create or update `plan.md` as a draft during planning. Keep it updated as user decisions are made, and mark it finalized only after user confirmation.
 
 The plan must include only what is needed:
 
@@ -73,22 +73,34 @@ Each `SPEC-*` must trace to one or more `REQ-*`.
 
 ## 5. Tasks
 
-After the plan is clear, create or update `.agent-workflow/task.md`.
+After the plan is clear, create or update `task.md`.
 
 - Split work into phases and tasks.
 - Assign stable task IDs: `TASK-001`, `TASK-002`, etc.
 - Each task must reference its source `SPEC-*`.
-- Each task must include a `Task Level` from `1` to `5`.
-- Each task must specify `Required Subagent` based on its level.
+- Each task must specify `Required Subagent` based on its routing.
 - Each task should include verification when applicable.
 - Use explicit states: `Pending`, `In Progress`, `Completed`, `Blocked`, or `Skipped`.
 - Keep `task.md` focused on the current execution window and next useful step.
 
-Task level mapping:
+Task routing:
 
-- Level `1`: [@junior-worker](subagent://junior-worker)
-- Level `2 ~ 3`: [@senior-worker](subagent://senior-worker)
-- Level `4 ~ 5`: [@specialist-worker](subagent://specialist-worker)
+[@junior-worker](subagent://junior-worker):
+- Low-risk mechanical changes
+- Formatting, small docs, simple test updates
+- No public API, schema, auth, payment, security, concurrency changes
+
+[@senior-worker](subagent://senior-worker):
+- Normal feature work, refactoring, bug fixes
+- Multi-file changes with clear tests
+- Backward compatibility required
+
+[@specialist-worker](subagent://specialist-worker):
+- Security, auth, permissions
+- Database schema or migrations
+- Payments, billing, data loss risk
+- Performance-critical or concurrency-sensitive code
+- Public API or compatibility-sensitive changes
 
 Before implementation starts, use `request_user_input` Tool to ask whether to execute the prepared `task.md`.
 
@@ -108,7 +120,7 @@ After approval, execute tasks phase by phase.
 
 ## 7. External Findings
 
-When external search or documentation review affects the task, record only decision-relevant findings in `.agent-workflow/speedwagon.md`.
+When external search or documentation review affects the task, record only decision-relevant findings in `speedwagon.md`.
 
 Each entry should be concise:
 
@@ -130,7 +142,7 @@ Archive workflow files when:
 
 Archive to:
 
-`.agent-workflow/archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/`
+`archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/`
 
 Include existing workflow files and a concise `summary.md` with:
 
@@ -143,7 +155,7 @@ Include existing workflow files and a concise `summary.md` with:
 
 Maintain an archive summary index at:
 
-`.agent-workflow/index.md`
+`index.md`
 
 Use `index.md` as the first lookup point before scanning archive folders. The index should let agents find relevant prior work by task, date, summary, keywords, and archive path without reading every archived file.
 
@@ -173,7 +185,7 @@ When work finishes, report briefly:
 
 Use these compact formats by default. Add sections only when they are useful.
 
-### `.agent-workflow/request.md`
+### `request.md`
 
 ```md
 # Request
@@ -183,7 +195,6 @@ Brief summary of the user request.
 
 ## Requirements
 - REQ-001: Confirmed requirement.
-- REQ-002: Confirmed requirement.
 
 ## Assumptions
 - ASSUMPTION-001: Current working assumption.
@@ -198,7 +209,7 @@ Brief summary of the user request.
 - Source or file path: short reason it matters.
 ```
 
-### `.agent-workflow/plan.md`
+### `plan.md`
 
 ```md
 # Plan
@@ -213,7 +224,6 @@ What this plan will achieve.
 
 ## Execution Order
 1. SPEC-001
-2. SPEC-002
 
 ## Risks
 - Risk and mitigation.
@@ -222,7 +232,7 @@ What this plan will achieve.
 - Decision or execution approval needed from the user.
 ```
 
-### `.agent-workflow/task.md`
+### `task.md`
 
 ```md
 # Tasks
@@ -231,20 +241,17 @@ What this plan will achieve.
 
 - TASK-001 [Pending]: Task title (SPEC-001)
   - Action: Concrete action to perform
-  - Task Level: task level (1~5)
-  - Required Subagent: subagent based on level
+  - Required Subagent: subagent based on task routing
   - Verification: Command or check
   - Result: What changed
 
 - TASK-002 [Blocked]: Task title (SPEC-002)
+  ...
   - Blocker: What is blocked
-  - Task Level: task level (1~5)
-  - Required Subagent: subagent based on level
   - Next action: What is needed to unblock
-  - Result: What changed
 ```
 
-### `.agent-workflow/speedwagon.md`
+### `speedwagon.md`
 
 ```md
 # External Findings
@@ -255,18 +262,18 @@ What this plan will achieve.
   - Impact: How it affects the plan or verification
 ```
 
-### `.agent-workflow/index.md`
+### `index.md`
 
 ```md
 # Archive Index
 
-- `.agent-workflow/archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/`
+- `archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/`
   - Summary: Short summary of the archived workflow.
   - Keywords: Key requirements, domains, files, components, or decision topics.
   - Remaining: Remaining, blocked, skipped, or deferred work. Use `None` if there is no remaining work.
 ```
 
-### `.agent-workflow/archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/summary.md`
+### `archive/<timestamp[yyyyMMdd-HHmmss]>-<task-slug>/summary.md`
 
 ```md
 # Archive Summary
@@ -290,8 +297,5 @@ Short summary of the chosen approach.
 - Blocked, skipped, or deferred work, if any.
 
 ## Archived Files
-- request.md
-- plan.md
-- task.md
-- speedwagon.md
+- Archived file list
 ```
