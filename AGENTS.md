@@ -53,11 +53,9 @@ Before finalizing requirements:
 
 Planning must happen before implementation.
 
-Do not modify source code, tests, configs, migrations, generated files, or other durable project artifacts during planning. Only workflow planning files may be created or updated.
-
 During planning, create or update `.agent-workflow/plan.md` as a draft. Keep it current as decisions are made. Mark it finalized only after explicit user confirmation.
 
-Before finalizing the plan, use `request_user_input` whenever an ambiguity, trade-off, or implementation choice could affect scope, risk, compatibility, cost, architecture, UX, data model, public interface, or implementation direction. Ask again as needed until all material ambiguities are resolved.
+Before finalizing the plan, use `request_user_input` Tool to ask whenever an ambiguity, trade-off, or implementation choice could affect scope, risk, compatibility, cost, architecture, UX, data model, public interface, or implementation direction. Ask again as needed until all material ambiguities are resolved.
 
 The plan must be concise but sufficiently detailed to guide implementation without guesswork. Include only what is needed:
 - objective,
