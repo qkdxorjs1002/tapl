@@ -1,4 +1,4 @@
-# REPLTA.MD
+# AGENTS.md
 
 [English](README.md)
 
