@@ -3,5 +3,5 @@ model_reasoning_effort = "xhigh"
 personality = "pragmatic"
 
 [features]
-multi_agent_v2 = true
+multi_agent = true
 default_mode_request_user_input = true
