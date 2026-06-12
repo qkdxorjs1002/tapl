@@ -265,10 +265,16 @@ class WorkflowWebviewManager {
         }
     }
     async handleMessage(message) {
-        if (!isRecord(message) || message.command !== 'openArchive' || typeof message.archiveFolder !== 'string') {
+        if (!isRecord(message) || typeof message.command !== 'string') {
             return;
         }
-        await this.openArchiveFromDashboard(message.archiveFolder);
+        if (message.command === 'openOverview') {
+            await this.openOverview();
+            return;
+        }
+        if (message.command === 'openArchive' && typeof message.archiveFolder === 'string') {
+            await this.openArchiveFromDashboard(message.archiveFolder);
+        }
     }
     async openArchiveFromDashboard(folderName) {
         const root = getWorkspaceRoot();
@@ -376,6 +382,12 @@ async function renderArchiveView(archiveUri, title) {
             ? renderDocumentCard(documents[0])
             : '<section class="doc-card"><p class="muted">No Markdown files in this archive.</p></section>';
     return `
+    <nav class="page-actions" aria-label="Archive navigation">
+      <button class="dashboard-button" type="button" data-open-overview>
+        <span aria-hidden="true">Home</span>
+        <span>Workflow Dashboard</span>
+      </button>
+    </nav>
     <header class="hero compact">
       <p class="eyebrow">${escapeHtml(relativePath(archiveUri))}</p>
       <h1>${escapeHtml(title)}</h1>
@@ -770,6 +782,49 @@ function renderPage(webview, body, viewStateKey) {
       padding: 32px 36px 24px;
       border-bottom: 1px solid var(--border);
       background: var(--panel);
+    }
+
+    .page-actions {
+      display: flex;
+      align-items: center;
+      padding: 14px 36px 0;
+      background: var(--panel);
+    }
+
+    .page-actions + .hero {
+      padding-top: 18px;
+    }
+
+    .dashboard-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      max-width: 100%;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-alt);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 600;
+    }
+
+    .dashboard-button:hover {
+      border-color: var(--accent);
+      color: var(--link);
+    }
+
+    .dashboard-button:focus-visible {
+      outline: 1px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .dashboard-button span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .hero.compact {
@@ -1260,6 +1315,7 @@ function renderPage(webview, body, viewStateKey) {
 
     @media (max-width: 560px) {
       .hero,
+      .page-actions,
       .summary-grid,
       .status-strip,
       .layout,
@@ -1366,6 +1422,13 @@ function renderPage(webview, body, viewStateKey) {
 
     document.addEventListener('click', (event) => {
       const target = event.target instanceof Element ? event.target : null;
+      const dashboardButton = target?.closest('[data-open-overview]');
+      if (dashboardButton instanceof HTMLElement) {
+        saveViewState();
+        vscode.postMessage({ command: 'openOverview' });
+        return;
+      }
+
       const archiveButton = target?.closest('[data-archive-folder]');
       if (!(archiveButton instanceof HTMLElement)) {
         return;

@@ -2,7 +2,7 @@
   "name": "replta-workflow-viewer",
   "displayName": "REPLTA Workflow Viewer",
   "description": "View .agent-workflow documents and archives in a dedicated VSCode Webview dashboard.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "paragonnov",
   "license": "MIT",
   "engines": {
