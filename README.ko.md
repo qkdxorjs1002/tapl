@@ -26,7 +26,6 @@
 - `.agent-workflow/request.md`: 확인된 요구사항, 가정, 열린 질문, 제외 범위, 참고 자료.
 - `.agent-workflow/plan.md`: 목표, 제약, 선택한 접근, 영향 파일, 실행 순서, 위험, 검증, 승인 필요 항목.
 - `.agent-workflow/task.md`: `TASK-*` ID와 명시적 상태를 가진 현재 실행 작업.
-- `.agent-workflow/task.recent.md`: 최근 완료 작업과 검증 요약.
 - `.agent-workflow/speedwagon.md`: 의사결정에 영향을 주는 외부 확인 사항.
 - `.agent-workflow/archive/<timestamp>-<task-slug>/`: 간결한 요약을 포함한 보관된 워크플로 기록.
 
@@ -45,12 +44,22 @@
 ## 저장소 구성
 
 - `AGENTS.md`: 워크플로와 작업 규칙.
+- `.codex/config.toml`: 모델, 추론 강도, 성격, 활성 기능을 포함한 이 설정의 Codex 기본값.
+- `.codex/agents/`: `junior-worker`, `senior-worker`, `specialist-worker` 하위 에이전트 정의.
 - `README.md`: 영어 개요.
 - `README.ko.md`: 한국어 개요.
 
 ## 적용 방법
 
-프로젝트에 적용할 때는 에이전트가 작업 전에 읽을 수 있도록 `AGENTS.md`를 프로젝트 루트에 둔다. 전역 기본값으로 쓰려면 필요한 규칙을 에이전트의 전역 지침에 복사하거나 병합한다.
+프로젝트에 적용할 때는 에이전트가 작업 전에 읽을 수 있도록 `AGENTS.md`를 프로젝트 루트에 둔다. `AGENTS.md`는 프로젝트 워크플로 규칙을 정의한다. 현재 상태 확인, 필요한 경우 요구사항 기록, 계획, 지속 파일 수정 전 승인 요청, 실행, 검증, 보관이 그 흐름이다.
+
+`.codex` 파일은 이 규칙을 따르는 Codex 동작을 조정한다. 현재 설정에는 `multi_agent = true`, `default_mode_request_user_input = true`, 그리고 junior, senior, specialist 작업 라우팅을 위한 worker 에이전트가 포함되어 있다.
+
+전역으로 적용하려면 이 저장소의 `.codex/config.toml` 내용을 전역 Codex 설정 파일(보통 `~/.codex/config.toml`)에 병합하고, `.codex/agents/`의 agent TOML 파일들을 전역 agent 디렉터리(보통 `~/.codex/agents/`)에 복사한다. 이미 모델, 승인, 기능, 에이전트 설정이 있다면 무작정 덮어쓰지 말고 필요한 항목만 조심해서 병합한다.
+
+한 프로젝트에만 적용하려면 대상 프로젝트 루트에 `AGENTS.md`와 함께 `<project>/.codex/config.toml`, `<project>/.codex/agents/`를 둔다. 이렇게 하면 프로젝트별 동작을 그 프로젝트와 함께 버전 관리할 수 있다.
+
+여러 저장소에서 같은 개인 기본값을 쓰려면 전역 설정을 선택한다. 팀 규칙, 저장소별 워크플로 동작, 프로젝트와 함께 전달되어야 하는 에이전트가 필요하면 프로젝트 수준 설정을 선택한다.
 
 모든 요청에 모든 워크플로 파일이 필요한 것은 아니다. 작은 질문에는 워크플로 파일이 필요 없을 수 있다. 중요하거나 승인이 필요한 작업에는 요구사항, 계획, 작업, 검증이 분명해지도록 필요한 최소 파일만 사용한다.
 

@@ -26,7 +26,6 @@ Active workflow files live under `.agent-workflow/`. They are working state, not
 - `.agent-workflow/request.md`: confirmed requirements, assumptions, open questions, exclusions, and references.
 - `.agent-workflow/plan.md`: objective, constraints, selected approach, affected files, execution order, risks, validation, and approval items.
 - `.agent-workflow/task.md`: current executable tasks with `TASK-*` IDs and explicit states.
-- `.agent-workflow/task.recent.md`: recently completed tasks and verification summary.
 - `.agent-workflow/speedwagon.md`: decision-relevant external findings.
 - `.agent-workflow/archive/<timestamp>-<task-slug>/`: archived workflow history with a concise summary.
 
@@ -45,12 +44,22 @@ These IDs are not ceremony. They make it clear what was requested, what approach
 ## Repository Layout
 
 - `AGENTS.md`: the workflow and operating rules.
+- `.codex/config.toml`: Codex defaults for this setup, including model, reasoning effort, personality, and enabled features.
+- `.codex/agents/`: subagent definitions for `junior-worker`, `senior-worker`, and `specialist-worker`.
 - `README.md`: English overview.
 - `README.ko.md`: Korean overview.
 
 ## Applying The Workflow
 
-For a project, place `AGENTS.md` at the project root so agents can read it before working. For a global default, copy or merge the relevant rules into your agent's global instructions.
+For a project, place `AGENTS.md` at the project root so agents can read it before working. `AGENTS.md` defines the project workflow rules: inspect state, record requirements when needed, plan, ask before durable edits, execute, verify, and archive.
+
+The `.codex` files customize Codex behavior around those rules. The current setup includes `multi_agent = true`, `default_mode_request_user_input = true`, and worker agents for junior, senior, and specialist task routing.
+
+To apply the `.codex` setup globally, merge this repo's `.codex/config.toml` into your global Codex config file, usually `~/.codex/config.toml`, and copy the agent TOML files from `.codex/agents/` into the global agent directory, usually `~/.codex/agents/`. Merge carefully instead of blindly overwriting existing settings, especially if you already have model, approval, feature, or agent configuration.
+
+To apply it to one project, place `<project>/.codex/config.toml` and `<project>/.codex/agents/` in that project's root alongside `AGENTS.md`. This keeps project-specific behavior versioned with the project.
+
+Use global configuration for personal defaults you want across repositories. Use project-level configuration for team rules, repo-specific workflow behavior, or agents that should travel with the project.
 
 The workflow does not require every file for every request. Small questions may need no workflow files. Non-trivial or approval-gated work should use the minimum set needed to keep requirements, planning, tasks, and verification clear.
 
