@@ -94,17 +94,23 @@ Codex home 또는 대상 저장소에 필요한 형태로 복사합니다.
 
 ### `taplctl` 설치
 
-이 저장소에서 local development 또는 HEAD install을 할 때:
+Homebrew 사용시:
 
 ```sh
-brew install --HEAD ./tap/Formula/taplctl.rb
+brew tap qkdxorjs1002/tap
+brew trust --formula qkdxorjs1002/tap/taplctl
+brew install taplctl
 ```
 
 그 다음 Codex workflow wiring을 설치합니다.
 
 ```sh
+# 사용자 폴더 전역 적용시
 taplctl install user
+
+# 현재 Repo에 적용시
 taplctl install repo
+
 taplctl doctor --json
 ```
 

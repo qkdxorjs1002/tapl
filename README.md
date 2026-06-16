@@ -98,17 +98,23 @@ copy those templates into the user Codex home or target repository as needed.
 
 ### Install `taplctl`
 
-For local development or a HEAD install from this repository:
+For Homebrew:
 
 ```sh
-brew install --HEAD ./tap/Formula/taplctl.rb
+brew tap qkdxorjs1002/tap
+brew trust --formula qkdxorjs1002/tap/taplctl
+brew install taplctl
 ```
 
 Then install Codex workflow wiring:
 
 ```sh
+# For ~/
 taplctl install user
+
+# For repo
 taplctl install repo
+
 taplctl doctor --json
 ```
 
