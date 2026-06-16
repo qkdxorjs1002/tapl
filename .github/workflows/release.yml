@@ -184,7 +184,7 @@ jobs:
             exit 1
           fi
 
-          ruby "${brew_files[@]}" <<'RUBY'
+          ruby - "${brew_files[@]}" <<'RUBY'
           files = ARGV
           version = ENV.fetch("RELEASE_VERSION")
           wheel_url = ENV.fetch("WHEEL_URL")
