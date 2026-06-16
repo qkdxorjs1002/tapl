@@ -1,2 +1,9 @@
 .DS_Store
-.agent-workflow/
+/.tapl/*
+!/.tapl/config.toml
+/tapl/.tapl/*
+!/tapl/.tapl/config.toml
+tapl/.venv/
+tapl/dist/
+__pycache__/
+vscode-extension/tapl-workflow-viewer-*.vsix

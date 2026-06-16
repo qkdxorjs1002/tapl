@@ -1,0 +1,19 @@
+[search]
+# Search mode: semantic, bm25, word, or hybrid.
+mode = "hybrid"
+
+# Hybrid search blends semantic rank and BM25 rank.
+# 0.65 keeps concept search dominant while preserving exact keyword matches.
+hybrid_semantic_ratio = 0.65
+
+[plan-task-execute]
+use_level_subagent = true
+
+# Aggressiveness: minimal, auto, or force.
+level_subagent_aggressiveness = "auto"
+
+# Plan detail: minimal, less_detailed, detailed, or very_detailed.
+plan_detail = "detailed"
+
+# Task split granularity: minimal, less_granular, granular, or very_granular.
+task_granularity = "granular"

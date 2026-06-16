@@ -1,0 +1,7 @@
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+personality = "pragmatic"
+
+[features]
+multi_agent = true
+default_mode_request_user_input = true

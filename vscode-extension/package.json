@@ -1,0 +1,113 @@
+{
+  "name": "tapl-workflow-viewer",
+  "displayName": "tapl Workflow Viewer",
+  "description": "View tapl SQLite workflow state through the taplctl CLI.",
+  "version": "0.2.0",
+  "publisher": "paragonnov",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:taplWorkflow.active",
+    "onView:taplWorkflow.archives",
+    "onCommand:taplWorkflow.refresh",
+    "onCommand:taplWorkflow.openOverview",
+    "onCommand:taplWorkflow.openArchive",
+    "onCommand:taplWorkflow.search"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npx --yes @vscode/vsce package --allow-missing-repository --out tapl-workflow-viewer-$npm_package_version.vsix"
+  },
+  "contributes": {
+    "configuration": {
+      "title": "tapl Workflow",
+      "properties": {
+        "taplWorkflow.taplctlPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path or command name for taplctl. Leave empty to search PATH plus common Homebrew locations."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "taplWorkflow.refresh",
+        "title": "Refresh Workflow Views",
+        "category": "tapl Workflow",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "taplWorkflow.openOverview",
+        "title": "Open tapl Dashboard",
+        "category": "tapl Workflow",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "taplWorkflow.openArchive",
+        "title": "Open tapl Archive",
+        "category": "tapl Workflow",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "taplWorkflow.search",
+        "title": "Search tapl Workflow",
+        "category": "tapl Workflow",
+        "icon": "$(search)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "taplWorkflow",
+          "title": "tapl",
+          "icon": "resources/workflow.svg"
+        }
+      ]
+    },
+    "views": {
+      "taplWorkflow": [
+        {
+          "id": "taplWorkflow.active",
+          "name": "Active"
+        },
+        {
+          "id": "taplWorkflow.archives",
+          "name": "Archives"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "taplWorkflow.refresh",
+          "when": "view == taplWorkflow.active || view == taplWorkflow.archives",
+          "group": "navigation"
+        },
+        {
+          "command": "taplWorkflow.search",
+          "when": "view == taplWorkflow.active",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "taplWorkflow.openOverview",
+          "when": "viewItem == tapl-overview",
+          "group": "inline"
+        },
+        {
+          "command": "taplWorkflow.openArchive",
+          "when": "viewItem == tapl-archive",
+          "group": "inline"
+        }
+      ]
+    }
+  }
+}

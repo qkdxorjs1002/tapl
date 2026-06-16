@@ -1,68 +1,267 @@
-# AGENTS.md
+<p align="center">
+  <img src="assets/tapl-readme-hero-with-text.png" alt="tapl: Harness over prompting. State over files." />
+</p>
+
+# tapl
 
 [한국어](README.ko.md)
 
-This repository contains a compact operating workflow for coding agents. The source of truth is `AGENTS.md`: it defines how an agent should inspect context, record requirements, plan work, request execution approval, make changes, verify results, and archive workflow state.
+`tapl` is a workflow harness for Codex. It installs one user-global
+`taplctl` command, keeps each repository's workflow state local in SQLite, and
+uses Codex hooks to make agent work traceable, resumable, and inspectable.
 
-## What This Is
+## Introduction
 
-`AGENTS.md` is designed for projects where agent work should stay controlled and traceable. It favors a short approval-based workflow over immediate edits to project files.
+Agent work often starts as a prompt, but real engineering work needs more than
+prompt text. It needs a current plan, executable tasks, findings, lifecycle
+events, searchable history, and a clear point where tool use can be observed or
+blocked.
 
-The workflow is built around these rules:
+`tapl` provides that small control plane. It does not replace the agent. It gives
+the agent a durable workflow surface that survives context compression, session
+resumes, and long-running repository work.
 
-- Inspect the active workflow and worktree before starting non-trivial work.
-- Record confirmed requirements before planning complex or approval-gated changes.
-- Plan before implementation, and connect each plan item back to a requirement.
-- Ask for execution approval before modifying durable project files.
-- Keep task state current while work is being executed.
-- Verify the result before marking work complete.
-- Archive workflow files when there is no remaining actionable work.
-- Never overwrite, discard, commit, push, rebase, or reset user changes unless explicitly asked.
+## What It Is
 
-## Workflow Files
+`tapl` is made of five pieces:
 
-Active workflow files live under `.agent-workflow/`. They are working state, not project deliverables, and should stay short, practical, and current.
+- `taplctl`: the CLI used by agents, hooks, humans, and the VS Code viewer.
+- `.tapl/tapl.db`: a repo-local SQLite database for active runs, plans, tasks,
+  findings, approvals, events, archives, and embeddings.
+- Codex hooks: lifecycle wiring for `SessionStart`, `UserPromptSubmit`,
+  `PreToolUse`, `PermissionRequest`, `PostToolUse`, and `Stop`.
+- Lifecycle context: short state-aware instructions generated from the current
+  repo DB and config.
+- Search and archive tools: FTS and semantic search over current and completed
+  work.
 
-- `.agent-workflow/request.md`: confirmed requirements, assumptions, open questions, exclusions, and references.
-- `.agent-workflow/plan.md`: objective, constraints, selected approach, affected files, execution order, risks, validation, and approval items.
-- `.agent-workflow/task.md`: current executable tasks with `TASK-*` IDs and explicit states.
-- `.agent-workflow/speedwagon.md`: decision-relevant external findings.
-- `.agent-workflow/archive/<timestamp>-<task-slug>/`: archived workflow history with a concise summary.
+The installed command is global; the workflow state is local to the repository.
+That split keeps installation simple while preventing one workspace's state from
+leaking into another.
 
-Use only the files needed for the current task. When active workflow files are stale or complete, archive them instead of letting them become logs.
+## Why Use It
 
-## ID Conventions
+Use `tapl` when Codex work should be auditable and recoverable:
 
-The workflow uses stable IDs to keep decisions traceable:
+- Long tasks can be resumed from stored plan/task state.
+- Prior decisions and findings can be searched instead of rediscovered.
+- Hooks can warn before durable edits happen without active workflow state.
+- Completed work can be archived into searchable history.
+- Human and agent views read the same SQLite state through the same CLI.
+- A repository no longer needs `AGENTS.md` to act as the workflow source of
+  truth.
 
-- `REQ-*` for confirmed requirements.
-- `SPEC-*` for plan items that trace back to requirements.
-- `TASK-*` for executable work that traces back to plan items.
+The practical result is less dependence on prompt memory and more dependence on
+state that tools can inspect.
 
-These IDs are not ceremony. They make it clear what was requested, what approach was approved, and what was actually executed.
+## Philosophy
+
+- **Harness over prompting**: prompts guide intent; hooks and state hold the
+  workflow boundary.
+- **State over files**: active workflow records live in SQLite instead of a
+  scattered pile of Markdown files.
+- **Search over manual indexes**: past work should be discoverable without
+  maintaining a hand-written index.
+- **Observe before enforce**: start by recording lifecycle events and warnings;
+  turn on blocking only where the workflow has proven useful.
+- **Global command, repo-local state**: install `taplctl` once, keep each
+  repository's `.tapl/tapl.db` separate.
+- **Agent and hook separation**: the agent interprets user intent; hooks guard
+  lifecycle and tool-use boundaries.
+
+## Principles
+
+`tapl` follows a small operating model:
+
+1. Codex starts or receives a prompt.
+2. Hooks call `taplctl hook-event` and load the current repo state.
+3. The agent inspects `taplctl status` and searches prior work when the task is
+   non-trivial.
+4. The agent records a plan and executable tasks before durable edits.
+5. `PreToolUse` and `PostToolUse` hooks observe or enforce the workflow
+   boundary.
+6. Completed work is archived and can be found later with `taplctl search`.
+
+The source templates used by installation live in `tapl/.codex` and
+`tapl/.tapl/config.toml`. `taplctl install user` and `taplctl install repo`
+copy those templates into the user Codex home or target repository as needed.
+
+## Installation
+
+### Requirements
+
+- Python 3.11 or newer. The bundled Homebrew formula uses `python@3.12`.
+- SQLite with FTS5 and extension loading support.
+- Homebrew, if installing with the bundled formula.
+- `uv`, if developing or building from source.
+- VS Code, only if you want the optional workflow viewer.
+
+### Install `taplctl`
+
+For local development or a HEAD install from this repository:
+
+```sh
+brew install --HEAD ./tap/Formula/taplctl.rb
+```
+
+Then install Codex workflow wiring:
+
+```sh
+taplctl install user
+taplctl install repo
+taplctl doctor --json
+```
+
+`install user` writes user-level Codex hook and agent templates. `install repo`
+writes repo-local hook/config files and initializes `.tapl/tapl.db`.
+
+For source development:
+
+```sh
+cd tapl
+uv sync
+uv run taplctl --version
+uv build
+```
+
+## Usage
+
+Inspect the current workflow state:
+
+```sh
+taplctl status --json
+taplctl validate --json
+taplctl context --event UserPromptSubmit --json
+```
+
+Record a plan:
+
+```sh
+taplctl plan upsert \
+  --id SPEC-EXAMPLE \
+  --title "Example implementation plan" \
+  --summary "Explain the approach" \
+  --status Finalized \
+  --json
+```
+
+Record executable tasks:
+
+```sh
+taplctl task upsert \
+  --id TASK-EXAMPLE \
+  --title "Implement the change" \
+  --status "In Progress" \
+  --goal "Make the requested change" \
+  --action "Edit the relevant files" \
+  --required-subagent "@junior-worker" \
+  --verification "Run focused checks" \
+  --json
+```
+
+Add findings and search history:
+
+```sh
+taplctl finding add \
+  --title "Important implementation note" \
+  --finding "What was learned" \
+  --impact "Why it matters" \
+  --json
+
+taplctl search "workflow dashboard" --json
+```
+
+Archive completed work:
+
+```sh
+taplctl archive create \
+  --slug completed-change \
+  --summary "What was completed and how it was verified" \
+  --json
+```
+
+Rebuild the semantic search index:
+
+```sh
+taplctl reindex --json
+```
+
+The VS Code extension in `vscode-extension/` reads the same state through
+`taplctl status`, `taplctl archive list`, `taplctl search`, and
+`taplctl item show`.
+
+## Dependency List
+
+Runtime dependencies from `tapl/pyproject.toml`:
+
+| Dependency | Purpose |
+| --- | --- |
+| Python `>=3.11` | Runtime for the `taplctl` CLI. |
+| `numpy>=1.26` | Numeric support for embedding and vector operations. |
+| `sentence-transformers>=5.0.0` | Semantic embeddings for archive/search. |
+| `sqlite-vec>=0.1.6` | SQLite vector search extension. |
+| SQLite FTS5 | Keyword search fallback and hybrid search support. |
+
+Development and packaging dependencies:
+
+| Dependency | Purpose |
+| --- | --- |
+| `uv` | Source environment, lockfile, and package build workflow. |
+| `pytest>=8` | Python test dependency. |
+| `pyyaml>=6.0` | Test/development dependency. |
+| Homebrew | Local formula install and formula testing. |
+| Node.js and npm | VS Code extension build workflow. |
+| TypeScript | Compile `vscode-extension/src` into `vscode-extension/out`. |
+| VS Code `^1.90.0` | Optional workflow viewer host. |
+
+After installation, `taplctl doctor --json` reports dependency status:
+
+```json
+{
+  "numpy": true,
+  "sentence_transformers": true,
+  "sqlite_vec": true
+}
+```
 
 ## Repository Layout
 
-- `AGENTS.md`: the workflow and operating rules.
-- `.codex/config.toml`: Codex defaults for this setup, including model, reasoning effort, personality, and enabled features.
-- `.codex/agents/`: subagent definitions for `junior-worker`, `senior-worker`, and `specialist-worker`.
-- `README.md`: English overview.
-- `README.ko.md`: Korean overview.
+```text
+.
+├── .codex/                    # Repo-local files produced by taplctl install repo
+├── .tapl/config.toml          # Repo-local runtime config
+├── tapl/.codex/               # Codex hook and agent templates packaged with taplctl
+├── tapl/.tapl/config.toml     # Default tapl config template
+├── tapl/taplctl/              # Python CLI and workflow harness implementation
+├── tapl/tests/                # Python tests
+├── tapl/pyproject.toml        # taplctl package metadata
+├── tap/Formula/taplctl.rb     # Homebrew formula
+├── vscode-extension/          # Optional VS Code workflow viewer
+├── README.md                  # English README
+└── README.ko.md               # Korean README
+```
 
-## Applying The Workflow
+Runtime state and local build output are intentionally not part of the source
+contract:
 
-For a project, place `AGENTS.md` at the project root so agents can read it before working. `AGENTS.md` defines the project workflow rules: inspect state, record requirements when needed, plan, ask before durable edits, execute, verify, and archive.
+```text
+.tapl/tapl.db
+tapl/.venv/
+tapl/dist/
+```
 
-The `.codex` files customize Codex behavior around those rules. The current setup includes `multi_agent = true`, `default_mode_request_user_input = true`, and worker agents for junior, senior, and specialist task routing.
+## Development Checks
 
-To apply the `.codex` setup globally, merge this repo's `.codex/config.toml` into your global Codex config file, usually `~/.codex/config.toml`, and copy the agent TOML files from `.codex/agents/` into the global agent directory, usually `~/.codex/agents/`. Merge carefully instead of blindly overwriting existing settings, especially if you already have model, approval, feature, or agent configuration.
+```sh
+uv --directory tapl sync --extra test
+uv --directory tapl run --extra test python -m unittest discover -s tests
+uv --directory tapl build
+npm --prefix vscode-extension run compile
+ruby -c tap/Formula/taplctl.rb
+git diff --check
+taplctl validate --json
+```
 
-To apply it to one project, place `<project>/.codex/config.toml` and `<project>/.codex/agents/` in that project's root alongside `AGENTS.md`. This keeps project-specific behavior versioned with the project.
+## License
 
-Use global configuration for personal defaults you want across repositories. Use project-level configuration for team rules, repo-specific workflow behavior, or agents that should travel with the project.
-
-The workflow does not require every file for every request. Small questions may need no workflow files. Non-trivial or approval-gated work should use the minimum set needed to keep requirements, planning, tasks, and verification clear.
-
-## Operating View
-
-This repository treats an agent as a careful collaborator, not an autonomous executor. The expected pattern is: read the current state, clarify scope, plan the change, ask before editing durable files, verify the result, and report what changed.
+MIT. See [LICENSE.md](LICENSE.md).

@@ -1,4 +1,3 @@
-.agent-workflow/**
 .git/**
 .codex/**
 out/**/*.map

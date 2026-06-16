@@ -1,68 +1,263 @@
-# AGENTS.md
+<p align="center">
+  <img src="assets/tapl-readme-hero-with-text.png" alt="tapl: Harness over prompting. State over files." />
+</p>
+
+# tapl
 
 [English](README.md)
 
-이 저장소는 코딩 에이전트를 위한 간결한 작업 워크플로를 담고 있다. 기준 문서는 `AGENTS.md`다. 에이전트가 맥락을 확인하고, 요구사항을 기록하고, 계획을 세우고, 실행 승인을 받은 뒤 변경하고, 결과를 검증하고, 워크플로 상태를 보관하는 방식을 정의한다.
+`tapl`은 Codex를 위한 workflow harness입니다. 사용자 전역에는 하나의
+`taplctl` command를 설치하고, 각 저장소의 workflow state는 SQLite로
+repo-local에 보관하며, Codex hook으로 agent 작업을 추적 가능하고 다시
+이어갈 수 있게 만듭니다.
 
-## 목적
+## 소개
 
-`AGENTS.md`는 에이전트 작업을 통제 가능하고 추적 가능한 상태로 유지해야 하는 프로젝트를 위한 문서다. 프로젝트 파일을 바로 수정하는 대신, 짧은 승인 기반 흐름을 우선한다.
+Agent 작업은 보통 프롬프트에서 시작하지만, 실제 개발 작업에는 프롬프트
+텍스트만으로 부족한 부분이 있습니다. 현재 plan, 실행 가능한 task, finding,
+lifecycle event, 검색 가능한 history, tool 사용을 관찰하거나 차단할 경계가
+필요합니다.
 
-핵심 규칙은 다음과 같다.
+`tapl`은 그 작은 제어면을 제공합니다. Agent를 대체하지 않고, context 압축,
+session resume, 긴 repository 작업을 지나도 남아 있는 durable workflow surface를
+agent에게 제공합니다.
 
-- 중요 작업을 시작하기 전에 활성 워크플로와 작업트리를 확인한다.
-- 복잡하거나 승인이 필요한 변경은 계획 전에 확인된 요구사항을 기록한다.
-- 구현 전에 계획을 세우고, 각 계획 항목을 요구사항에 연결한다.
-- 지속되는 프로젝트 파일을 수정하기 전에 실행 승인을 요청한다.
-- 실행 중에는 작업 상태를 현재 상태로 유지한다.
-- 완료 처리 전에 결과를 검증한다.
-- 남은 실행 작업이 없으면 워크플로 파일을 보관한다.
-- 명시적 요청 없이 사용자 변경사항을 덮어쓰거나, 폐기하거나, 커밋하거나, 푸시하거나, 리베이스하거나, 리셋하지 않는다.
+## 이게 무엇인지
 
-## 워크플로 파일
+`tapl`은 다섯 가지로 구성됩니다.
 
-활성 워크플로 파일은 `.agent-workflow/` 아래에 둔다. 이 파일들은 프로젝트 산출물이 아니라 작업 상태이며, 짧고 실용적이며 현재 상태에 맞게 유지해야 한다.
+- `taplctl`: agent, hook, 사람, VS Code viewer가 함께 사용하는 CLI.
+- `.tapl/tapl.db`: active run, plan, task, finding, approval, event, archive,
+  embedding을 저장하는 repo-local SQLite DB.
+- Codex hooks: `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
+  `PermissionRequest`, `PostToolUse`, `Stop` lifecycle wiring.
+- Lifecycle context: 현재 repo DB와 config에서 생성되는 짧은 상태 기반 안내.
+- Search/archive 도구: 현재 작업과 완료된 작업을 FTS 및 semantic search로 찾는 기능.
 
-- `.agent-workflow/request.md`: 확인된 요구사항, 가정, 열린 질문, 제외 범위, 참고 자료.
-- `.agent-workflow/plan.md`: 목표, 제약, 선택한 접근, 영향 파일, 실행 순서, 위험, 검증, 승인 필요 항목.
-- `.agent-workflow/task.md`: `TASK-*` ID와 명시적 상태를 가진 현재 실행 작업.
-- `.agent-workflow/speedwagon.md`: 의사결정에 영향을 주는 외부 확인 사항.
-- `.agent-workflow/archive/<timestamp>-<task-slug>/`: 간결한 요약을 포함한 보관된 워크플로 기록.
+설치된 command는 전역이고 workflow state는 저장소별 local입니다. 이 분리는
+설치를 단순하게 유지하면서도 한 workspace의 상태가 다른 workspace로 새지 않게
+합니다.
 
-현재 작업에 필요한 파일만 사용한다. 활성 워크플로 파일이 오래됐거나 완료됐다면 로그처럼 방치하지 말고 보관한다.
+## 왜 사용하는지
 
-## ID 규칙
+Codex 작업을 감사 가능하고 복구 가능하게 만들어야 할 때 `tapl`을 사용합니다.
 
-워크플로는 안정적인 ID로 결정을 추적한다.
+- 긴 작업을 저장된 plan/task state에서 다시 이어갈 수 있습니다.
+- 이전 결정과 finding을 다시 발견하지 않고 검색할 수 있습니다.
+- Active workflow state 없이 durable edit가 일어나려 할 때 hook이 경고할 수 있습니다.
+- 완료된 작업을 archive로 남겨 이후 검색할 수 있습니다.
+- 사람과 agent가 같은 CLI를 통해 같은 SQLite state를 읽습니다.
+- `AGENTS.md`를 workflow source of truth로 쓰지 않아도 됩니다.
 
-- `REQ-*`: 확인된 요구사항.
-- `SPEC-*`: 요구사항에 연결된 계획 항목.
-- `TASK-*`: 계획 항목에 연결된 실행 작업.
+실용적인 효과는 프롬프트 기억에 덜 의존하고, 도구가 확인할 수 있는 상태에 더
+의존하게 되는 것입니다.
 
-이 ID들은 형식만을 위한 것이 아니다. 무엇이 요청됐고, 어떤 접근이 승인됐으며, 실제로 무엇을 실행했는지 분명하게 만든다.
+## 철학
 
-## 저장소 구성
+- **프롬프트보다 harness**: 프롬프트는 의도를 안내하고, hook과 state는 workflow
+  경계를 지킵니다.
+- **파일보다 상태**: 진행 중인 workflow record는 흩어진 Markdown 대신 SQLite에
+  저장합니다.
+- **수동 index보다 검색**: 과거 작업은 손으로 관리하는 index 없이 발견할 수 있어야
+  합니다.
+- **enforce 전에 observe**: 먼저 lifecycle event와 warning을 기록하고, 유용성이
+  확인된 경계에서만 blocking을 켭니다.
+- **전역 command, repo-local state**: `taplctl`은 한 번 설치하고, 각 저장소의
+  `.tapl/tapl.db`는 분리합니다.
+- **agent와 hook의 역할 분리**: agent는 사용자 의도를 해석하고, hook은 lifecycle과
+  tool-use 경계를 지킵니다.
 
-- `AGENTS.md`: 워크플로와 작업 규칙.
-- `.codex/config.toml`: 모델, 추론 강도, 성격, 활성 기능을 포함한 이 설정의 Codex 기본값.
-- `.codex/agents/`: `junior-worker`, `senior-worker`, `specialist-worker` 하위 에이전트 정의.
-- `README.md`: 영어 개요.
-- `README.ko.md`: 한국어 개요.
+## 원리
 
-## 적용 방법
+`tapl`은 작은 운영 모델을 따릅니다.
 
-프로젝트에 적용할 때는 에이전트가 작업 전에 읽을 수 있도록 `AGENTS.md`를 프로젝트 루트에 둔다. `AGENTS.md`는 프로젝트 워크플로 규칙을 정의한다. 현재 상태 확인, 필요한 경우 요구사항 기록, 계획, 지속 파일 수정 전 승인 요청, 실행, 검증, 보관이 그 흐름이다.
+1. Codex가 시작되거나 사용자의 prompt를 받습니다.
+2. Hook이 `taplctl hook-event`를 호출하고 현재 repo state를 읽습니다.
+3. 작업이 non-trivial이면 agent가 `taplctl status`를 확인하고 과거 작업을 검색합니다.
+4. Durable edit 전에 plan과 실행 가능한 task를 기록합니다.
+5. `PreToolUse`와 `PostToolUse` hook이 workflow boundary를 observe 또는 enforce합니다.
+6. 완료된 작업은 archive로 남기고 이후 `taplctl search`로 찾습니다.
 
-`.codex` 파일은 이 규칙을 따르는 Codex 동작을 조정한다. 현재 설정에는 `multi_agent = true`, `default_mode_request_user_input = true`, 그리고 junior, senior, specialist 작업 라우팅을 위한 worker 에이전트가 포함되어 있다.
+설치에 사용되는 source template은 `tapl/.codex`와 `tapl/.tapl/config.toml`에
+있습니다. `taplctl install user`와 `taplctl install repo`는 이 template을 사용자
+Codex home 또는 대상 저장소에 필요한 형태로 복사합니다.
 
-전역으로 적용하려면 이 저장소의 `.codex/config.toml` 내용을 전역 Codex 설정 파일(보통 `~/.codex/config.toml`)에 병합하고, `.codex/agents/`의 agent TOML 파일들을 전역 agent 디렉터리(보통 `~/.codex/agents/`)에 복사한다. 이미 모델, 승인, 기능, 에이전트 설정이 있다면 무작정 덮어쓰지 말고 필요한 항목만 조심해서 병합한다.
+## 설치방법
 
-한 프로젝트에만 적용하려면 대상 프로젝트 루트에 `AGENTS.md`와 함께 `<project>/.codex/config.toml`, `<project>/.codex/agents/`를 둔다. 이렇게 하면 프로젝트별 동작을 그 프로젝트와 함께 버전 관리할 수 있다.
+### 필요 환경
 
-여러 저장소에서 같은 개인 기본값을 쓰려면 전역 설정을 선택한다. 팀 규칙, 저장소별 워크플로 동작, 프로젝트와 함께 전달되어야 하는 에이전트가 필요하면 프로젝트 수준 설정을 선택한다.
+- Python 3.11 이상. 함께 제공하는 Homebrew formula는 `python@3.12`를 사용합니다.
+- FTS5와 extension loading을 지원하는 SQLite.
+- 함께 제공하는 formula로 설치할 경우 Homebrew.
+- Source 개발 또는 build를 할 경우 `uv`.
+- Workflow viewer를 사용할 경우에만 VS Code.
 
-모든 요청에 모든 워크플로 파일이 필요한 것은 아니다. 작은 질문에는 워크플로 파일이 필요 없을 수 있다. 중요하거나 승인이 필요한 작업에는 요구사항, 계획, 작업, 검증이 분명해지도록 필요한 최소 파일만 사용한다.
+### `taplctl` 설치
 
-## 운영 관점
+이 저장소에서 local development 또는 HEAD install을 할 때:
 
-이 저장소는 에이전트를 자율 실행자가 아니라 신중한 협업자로 본다. 기대하는 흐름은 현재 상태를 읽고, 범위를 확인하고, 변경을 계획하고, 지속 파일을 수정하기 전에 승인을 받고, 결과를 검증한 뒤 무엇이 바뀌었는지 보고하는 것이다.
+```sh
+brew install --HEAD ./tap/Formula/taplctl.rb
+```
+
+그 다음 Codex workflow wiring을 설치합니다.
+
+```sh
+taplctl install user
+taplctl install repo
+taplctl doctor --json
+```
+
+`install user`는 사용자 레벨 Codex hook과 agent template을 기록합니다.
+`install repo`는 repo-local hook/config 파일을 만들고 `.tapl/tapl.db`를
+초기화합니다.
+
+Source 개발:
+
+```sh
+cd tapl
+uv sync
+uv run taplctl --version
+uv build
+```
+
+## 사용 방법
+
+현재 workflow state 확인:
+
+```sh
+taplctl status --json
+taplctl validate --json
+taplctl context --event UserPromptSubmit --json
+```
+
+Plan 기록:
+
+```sh
+taplctl plan upsert \
+  --id SPEC-EXAMPLE \
+  --title "Example implementation plan" \
+  --summary "Explain the approach" \
+  --status Finalized \
+  --json
+```
+
+실행 가능한 task 기록:
+
+```sh
+taplctl task upsert \
+  --id TASK-EXAMPLE \
+  --title "Implement the change" \
+  --status "In Progress" \
+  --goal "Make the requested change" \
+  --action "Edit the relevant files" \
+  --required-subagent "@junior-worker" \
+  --verification "Run focused checks" \
+  --json
+```
+
+Finding 추가와 history 검색:
+
+```sh
+taplctl finding add \
+  --title "Important implementation note" \
+  --finding "What was learned" \
+  --impact "Why it matters" \
+  --json
+
+taplctl search "workflow dashboard" --json
+```
+
+완료된 작업 archive:
+
+```sh
+taplctl archive create \
+  --slug completed-change \
+  --summary "What was completed and how it was verified" \
+  --json
+```
+
+Semantic search index 재생성:
+
+```sh
+taplctl reindex --json
+```
+
+`vscode-extension/`의 VS Code extension은 `taplctl status`,
+`taplctl archive list`, `taplctl search`, `taplctl item show`를 통해 같은 state를
+읽습니다.
+
+## 의존성 목록
+
+`tapl/pyproject.toml` 기준 runtime dependency:
+
+| 의존성 | 용도 |
+| --- | --- |
+| Python `>=3.11` | `taplctl` CLI runtime. |
+| `numpy>=1.26` | Embedding과 vector operation을 위한 numeric support. |
+| `sentence-transformers>=5.0.0` | Archive/search용 semantic embedding. |
+| `sqlite-vec>=0.1.6` | SQLite vector search extension. |
+| SQLite FTS5 | Keyword search fallback과 hybrid search 지원. |
+
+개발 및 packaging dependency:
+
+| 의존성 | 용도 |
+| --- | --- |
+| `uv` | Source environment, lockfile, package build workflow. |
+| `pytest>=8` | Python test dependency. |
+| `pyyaml>=6.0` | Test/development dependency. |
+| Homebrew | Local formula install과 formula test. |
+| Node.js 및 npm | VS Code extension build workflow. |
+| TypeScript | `vscode-extension/src`를 `vscode-extension/out`으로 compile. |
+| VS Code `^1.90.0` | Optional workflow viewer host. |
+
+설치 후 `taplctl doctor --json`으로 dependency 상태를 확인할 수 있습니다.
+
+```json
+{
+  "numpy": true,
+  "sentence_transformers": true,
+  "sqlite_vec": true
+}
+```
+
+## 저장소 구조
+
+```text
+.
+├── .codex/                    # taplctl install repo가 생성하는 repo-local 파일
+├── .tapl/config.toml          # Repo-local runtime config
+├── tapl/.codex/               # taplctl package에 포함되는 Codex hook/agent template
+├── tapl/.tapl/config.toml     # 기본 tapl config template
+├── tapl/taplctl/              # Python CLI와 workflow harness 구현
+├── tapl/tests/                # Python tests
+├── tapl/pyproject.toml        # taplctl package metadata
+├── tap/Formula/taplctl.rb     # Homebrew formula
+├── vscode-extension/          # Optional VS Code workflow viewer
+├── README.md                  # English README
+└── README.ko.md               # Korean README
+```
+
+Runtime state와 local build output은 source contract에 포함하지 않습니다.
+
+```text
+.tapl/tapl.db
+tapl/.venv/
+tapl/dist/
+```
+
+## 개발 검증
+
+```sh
+uv --directory tapl sync --extra test
+uv --directory tapl run --extra test python -m unittest discover -s tests
+uv --directory tapl build
+npm --prefix vscode-extension run compile
+ruby -c tap/Formula/taplctl.rb
+git diff --check
+taplctl validate --json
+```
+
+## 라이선스
+
+MIT. [LICENSE.md](LICENSE.md)를 참고하세요.

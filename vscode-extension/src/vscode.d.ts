@@ -108,6 +108,16 @@ declare module 'vscode' {
     type: FileType;
   }
 
+  export interface InputBoxOptions {
+    prompt?: string;
+    value?: string;
+    placeHolder?: string;
+  }
+
+  export interface WorkspaceConfiguration {
+    get<T>(section: string, defaultValue: T): T;
+  }
+
   export type Event<T> = (listener: (e: T) => unknown) => Disposable;
 
   export interface TreeDataProvider<T> {
@@ -128,6 +138,7 @@ declare module 'vscode' {
     ): WebviewPanel;
     export function showInformationMessage(message: string): Thenable<string | undefined>;
     export function showWarningMessage(message: string): Thenable<string | undefined>;
+    export function showInputBox(options?: InputBoxOptions): Thenable<string | undefined>;
   }
 
   export namespace workspace {
@@ -137,6 +148,7 @@ declare module 'vscode' {
       readDirectory(uri: Uri): Thenable<[string, FileType][]>;
       readFile(uri: Uri): Thenable<Uint8Array>;
     };
+    export function getConfiguration(section?: string): WorkspaceConfiguration;
     export function createFileSystemWatcher(globPattern: RelativePattern): FileSystemWatcher;
   }
 
@@ -149,4 +161,30 @@ declare module 'vscode' {
 declare class TextDecoder {
   constructor(label?: string);
   decode(input?: Uint8Array): string;
+}
+
+declare function setTimeout(handler: () => void, timeout?: number): number;
+declare function clearTimeout(handle?: number): void;
+declare const process: {
+  env: Record<string, string | undefined>;
+  platform: string;
+};
+
+declare module 'child_process' {
+  export interface ExecFileOptions {
+    cwd?: string;
+    timeout?: number;
+    env?: Record<string, string | undefined>;
+  }
+
+  export function execFile(
+    command: string,
+    args: readonly string[],
+    options: ExecFileOptions,
+    callback: (error: Error | null, stdout: string, stderr: string) => void
+  ): void;
+}
+
+declare module 'path' {
+  export function join(...paths: string[]): string;
 }
