@@ -510,6 +510,7 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
         ]
 
     archives = list_archives(conn, limit=8)
+    archive_count = int(conn.execute("SELECT COUNT(*) FROM archives").fetchone()[0])
     recent_events = [
         row_to_dict(row)
         for row in conn.execute(
@@ -527,6 +528,7 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
         "tasks": tasks,
         "findings": findings,
         "archives": archives,
+        "archive_count": archive_count,
         "recent_events": recent_events,
     }
 

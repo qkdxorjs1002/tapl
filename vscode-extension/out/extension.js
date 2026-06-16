@@ -58,7 +58,6 @@ const DEFAULT_STATUS = {
     plans: [],
     tasks: [],
     findings: [],
-    archives: [],
     recent_events: [],
     schema: {}
 };
@@ -292,17 +291,21 @@ class WorkflowWebviewManager {
             return renderPage(webview, renderSearchItemView(this.currentView.result, this.currentView.detail), `search-item:${this.currentView.result.id ?? this.currentView.result.stable_id}`);
         }
         if (this.currentView.type === 'debug') {
-            const status = await safeTapl(['status', '--json']);
+            const status = await safeTapl(['status', '--json', '--include-events']);
             if (!status.ok) {
                 return renderPage(webview, renderError(status.error), 'error');
             }
             return renderPage(webview, renderDebugView(status.value), 'debug');
         }
-        const status = await safeTapl(['status', '--json']);
+        const status = await safeTapl(['status', '--json', '--full']);
         if (!status.ok) {
             return renderPage(webview, renderError(status.error), 'error');
         }
-        return renderPage(webview, renderOverview(status.value, this.lastSearch?.query ?? ''), 'overview');
+        const archives = await safeArchives(8);
+        if (!archives.ok) {
+            return renderPage(webview, renderError(archives.error), 'error');
+        }
+        return renderPage(webview, renderOverview(status.value, archives.value, this.lastSearch?.query ?? ''), 'overview');
     }
     async handleMessage(message) {
         if (!isRecord(message) || typeof message.command !== 'string') {
@@ -389,7 +392,7 @@ class WorkflowWebviewManager {
         void vscode.window.showWarningMessage(detail.error);
     }
 }
-function renderOverview(status, searchQuery = '') {
+function renderOverview(status, archives, searchQuery = '') {
     const taskCounts = status.task_counts || DEFAULT_STATUS.task_counts;
     const activeSummary = status.active_run
         ? String(status.active_run.request_summary || status.active_run.slug || 'active')
@@ -434,7 +437,7 @@ function renderOverview(status, searchQuery = '') {
     <section class="metrics">
       ${metric('Active', status.active_run ? 'Yes' : 'No', activeSummary)}
       ${metric('Tasks', String(status.tasks.length), `${status.incomplete_tasks} incomplete`)}
-      ${metric('Archives', String(status.archives.length), 'stored in tapl DB')}
+      ${metric('Archives', String(archives.length), 'recent archived runs')}
       ${metric('Search', status.schema.embedding_model ? 'Ready' : 'FTS', status.schema.embedding_model || 'keyword fallback')}
     </section>
     <section class="status-strip">
@@ -451,7 +454,7 @@ function renderOverview(status, searchQuery = '') {
       ${workflowTabs.map(renderWorkflowTabPanel).join('')}
       <section class="panel">
         <h2>Archives</h2>
-        ${status.archives.length ? status.archives.map(renderArchiveSummary).join('') : '<p class="muted">No archives.</p>'}
+        ${archives.length ? archives.map(renderArchiveSummary).join('') : '<p class="muted">No archives.</p>'}
       </section>
     </main>
     <footer class="debug-footer">
@@ -836,8 +839,12 @@ async function safeTapl(args) {
         return { ok: false, error: error instanceof Error ? error.message : 'Failed to parse taplctl JSON.' };
     }
 }
-async function safeArchives() {
-    const result = await runTapl(['archive', 'list', '--json']);
+async function safeArchives(limit) {
+    const args = ['archive', 'list', '--json'];
+    if (limit !== undefined) {
+        args.push('--limit', String(limit));
+    }
+    const result = await runTapl(args);
     if (!result.ok) {
         return result;
     }

@@ -87,6 +87,40 @@ class TaplCliTests(unittest.TestCase):
             status = self.run_cli(db_path, "status", "--json")
             payload = json.loads(status.stdout)
             self.assertEqual(payload["task_counts"]["In Progress"], 1)
+            self.assertEqual(payload["counts"]["tasks"], 1)
+            self.assertEqual(payload["counts"]["archives"], 0)
+            self.assertNotIn("recent_events", payload)
+            self.assertNotIn("archives", payload)
+            self.assertNotIn("body", payload["tasks"][0])
+            self.assertNotIn("goal", payload["tasks"][0])
+
+            full_status = self.run_cli(db_path, "status", "--json", "--full")
+            self.assertEqual(full_status.returncode, 0, full_status.stderr)
+            full_payload = json.loads(full_status.stdout)
+            self.assertNotIn("recent_events", full_payload)
+            self.assertNotIn("archives", full_payload)
+            self.assertIn("body", full_payload["tasks"][0])
+            self.assertEqual(full_payload["tasks"][0]["goal"], "Create DB-backed workflow state")
+
+            event = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "PreToolUse",
+                "--mode",
+                "observe",
+                "--tool",
+                "Bash",
+                "--json",
+                input_text='{"tool_input": {"command": "taplctl status --json"}}',
+            )
+            self.assertEqual(event.returncode, 0, event.stderr)
+            event_status = self.run_cli(db_path, "status", "--json", "--include-events")
+            self.assertEqual(event_status.returncode, 0, event_status.stderr)
+            event_payload = json.loads(event_status.stdout)
+            self.assertEqual(event_payload["recent_events"][0]["event_type"], "PreToolUse")
+            self.assertNotIn("archives", event_payload)
+            self.assertNotIn("payload_json", event_payload["recent_events"][0])
 
             status_text = self.run_cli(db_path, "status")
             self.assertEqual(status_text.returncode, 0, status_text.stderr)
@@ -776,8 +810,14 @@ task_granularity = "very_granular"
             self.assertEqual(status.returncode, 0, status.stderr)
             status_payload = json.loads(status.stdout)
             self.assertIsNone(status_payload["active_run"])
-            self.assertEqual(len(status_payload["archives"]), 1)
-            self.assertEqual(status_payload["archives"][0]["slug"], "ship-auto-archive")
+            self.assertEqual(status_payload["counts"]["archives"], 1)
+            self.assertNotIn("archives", status_payload)
+
+            archives = self.run_cli(db_path, "archive", "list", "--json")
+            self.assertEqual(archives.returncode, 0, archives.stderr)
+            archives_payload = json.loads(archives.stdout)
+            self.assertEqual(len(archives_payload["archives"]), 1)
+            self.assertEqual(archives_payload["archives"][0]["slug"], "ship-auto-archive")
 
             detail = self.run_cli(db_path, "archive", "show", "--id", "ship-auto-archive", "--json")
             self.assertEqual(detail.returncode, 0, detail.stderr)

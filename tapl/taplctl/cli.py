@@ -55,6 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = sub.add_parser("status", help="Show active workflow state.")
     status.add_argument("--json", action="store_true")
+    status.add_argument("--full", action="store_true", help="Include full plan/task/finding item details.")
+    status.add_argument(
+        "--include-events",
+        action="store_true",
+        help="Include recent hook event summaries. Event payloads are not included.",
+    )
+    status.add_argument("--events-limit", type=int, default=12, help="Recent hook events to include.")
     status.set_defaults(handler=cmd_status)
 
     validate = sub.add_parser("validate", help="Validate tapl database state.")
@@ -227,8 +234,81 @@ def cmd_status(args: argparse.Namespace) -> int:
         conn,
         settings.plan_task_execute,
     )
+    payload = status_output_payload(
+        payload,
+        full=args.full,
+        include_events=args.include_events,
+        events_limit=args.events_limit,
+    )
     emit(payload, args.json)
     return 0
+
+
+STATUS_COMPACT_ITEM_FIELDS = (
+    "id",
+    "stable_id",
+    "kind",
+    "title",
+    "status",
+    "source",
+    "archived",
+    "created_at",
+    "updated_at",
+)
+
+STATUS_EVENT_SUMMARY_FIELDS = (
+    "id",
+    "run_id",
+    "event_type",
+    "tool_name",
+    "mode",
+    "message",
+    "created_at",
+)
+
+
+def status_output_payload(
+    payload: dict[str, Any],
+    *,
+    full: bool = False,
+    include_events: bool = False,
+    events_limit: int = 12,
+) -> dict[str, Any]:
+    plans = list(payload.get("plans") or [])
+    tasks = list(payload.get("tasks") or [])
+    findings = list(payload.get("findings") or [])
+    archive_count = int(payload.get("archive_count") or len(payload.get("archives") or []))
+    projected: dict[str, Any] = {
+        "schema": payload.get("schema") or {},
+        "active_run": payload.get("active_run"),
+        "task_counts": payload.get("task_counts") or {},
+        "incomplete_tasks": payload.get("incomplete_tasks", 0),
+        "counts": {
+            "plans": len(plans),
+            "tasks": len(tasks),
+            "findings": len(findings),
+            "archives": archive_count,
+        },
+        "plans": plans if full else [compact_status_item(item) for item in plans],
+        "tasks": tasks if full else [compact_status_item(item) for item in tasks],
+        "findings": findings if full else [compact_status_item(item) for item in findings],
+    }
+    for key in ("config", "plan_task_execute"):
+        if key in payload:
+            projected[key] = payload[key]
+    if include_events:
+        limit = max(events_limit, 0)
+        events = list(payload.get("recent_events") or [])[:limit]
+        projected["recent_events"] = [compact_status_event(event) for event in events]
+    return projected
+
+
+def compact_status_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {key: item[key] for key in STATUS_COMPACT_ITEM_FIELDS if key in item}
+
+
+def compact_status_event(event: dict[str, Any]) -> dict[str, Any]:
+    return {key: event[key] for key in STATUS_EVENT_SUMMARY_FIELDS if key in event}
 
 
 def cmd_validate(args: argparse.Namespace) -> int:

@@ -155,8 +155,8 @@ def auto_archive_slug(active_run: dict[str, Any] | None) -> str:
 
 def auto_archive_summary(active_run: dict[str, Any] | None) -> str:
     if active_run and active_run.get("request_summary"):
-        return f"Auto-archived completed workflow: {active_run['request_summary']}"
-    return "Auto-archived completed workflow."
+        return active_run['request_summary']
+    return "archived workflow"
 
 
 def infer_tool_name(payload: dict[str, Any]) -> str | None:
