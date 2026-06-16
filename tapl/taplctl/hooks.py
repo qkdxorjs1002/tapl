@@ -65,7 +65,8 @@ def handle_event(
             message = (
                 "tapl: durable edit requires an active tapl run with planned tasks. "
                 f"{tapl_context.taplctl_execution_guidance()} "
-                "Then run its `status --json` command, create/update plan and task state, then retry."
+                f"{tapl_context.taplctl_command_guidance()} "
+                "Create/update plan and task state, then retry."
             )
             block = mode == "enforce"
         else:

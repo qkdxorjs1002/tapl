@@ -26,6 +26,13 @@ def taplctl_argument_guidance() -> str:
     )
 
 
+def taplctl_command_guidance() -> str:
+    return (
+        "Use `taplctl status --json` for state. Search takes one query argument: "
+        "`taplctl search '<query>' --json`, not separate unquoted words."
+    )
+
+
 def build_context(
     conn: sqlite3.Connection,
     *,
@@ -46,7 +53,7 @@ def build_context(
         },
         "config": settings.as_dict(),
         "plan_task_execute": plan_task,
-        "instructions": instructions(settings.plan_task_execute),
+        "instructions": instructions(settings.plan_task_execute, event=event),
         "next_actions": next_actions(state, plan_task, event),
         "prompt_summary": prompt_summary(payload or {}),
     }
@@ -57,7 +64,6 @@ def format_context(packet: dict[str, Any]) -> str:
     counts = packet["counts"]
     lines = [
         "tapl context:",
-        "- Use SQLite state, hook feedback, and the global taplctl command as the workflow source of truth.",
     ]
     if run["present"]:
         summary = f"active run: {run['request_summary']}" if run["request_summary"] else "active run present"
@@ -83,12 +89,39 @@ def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def instructions(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
+def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> list[str]:
+    allowed_subagents = ", ".join(validation.LEVEL_SUBAGENTS)
+    task_statuses = "Pending, In Progress, Completed, Blocked, Skipped"
+    base = [
+        "Use SQLite state, hook feedback, and the global taplctl command as the workflow source of truth.",
+        taplctl_command_guidance(),
+    ]
+
+    if event == "SessionStart":
+        return [
+            *base,
+            "SessionStart is bootstrap context; wait for the user's concrete request before creating new plan/task records.",
+            taplctl_execution_guidance(),
+            f"Task statuses: {task_statuses}. Required subagents: {allowed_subagents}.",
+        ]
+
+    if event == "UserPromptSubmit":
+        return [
+            *base,
+            "For non-trivial work, inspect state/search first, then upsert a plan and executable tasks before durable edits.",
+            taplctl_argument_guidance(),
+            f"Required subagents must be one of: {allowed_subagents}. Do not use level names such as `level2`.",
+            "Keep task status current and write tapl records in the user's language unless asked otherwise.",
+            f"Plan detail: {validation.plan_detail_guidance(settings.plan_detail)}",
+            f"Task splitting: {validation.task_granularity_guidance(settings.task_granularity)}",
+        ]
+
     return [
+        *base,
         "No separate agent guide is required; lifecycle hooks provide tapl operating context.",
         taplctl_execution_guidance(),
         taplctl_argument_guidance(),
-        "For non-trivial work, inspect status/search, record plan state, record executable tasks, then keep task status current.",
+        "For non-trivial work, inspect state/search, record plan state, record executable tasks, then keep task status current.",
         "Write plan, task, finding, and archive text in the user's language unless asked otherwise.",
         f"Plan detail: {validation.plan_detail_guidance(settings.plan_detail)}",
         f"Task splitting: {validation.task_granularity_guidance(settings.task_granularity)}",
@@ -98,12 +131,19 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
 
 def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str) -> list[str]:
     actions: list[str] = []
+    covered_issue_codes: set[str] = set()
+    if event == "SessionStart":
+        if state.get("incomplete_tasks", 0):
+            actions.append("After the user request, resume or update the incomplete task state before new durable edits.")
+        return actions
+
     if not state.get("active_run"):
         actions.append("Create an active workflow run before durable work.")
         return actions
 
     if not state.get("plans"):
         actions.append("Create or update plan state with `taplctl plan upsert`.")
+        covered_issue_codes.add("missing_plan")
     if not state.get("tasks"):
         actions.append("Create executable task state with `taplctl task upsert` before durable edits.")
     if state.get("incomplete_tasks", 0):
@@ -112,6 +152,8 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str) -
         actions.append("Archive completed work with `taplctl archive create`.")
 
     for issue in (plan_task.get("issues") or [])[:3]:
+        if issue.get("code") in covered_issue_codes:
+            continue
         actions.append(f"{issue['message']} {issue['remediation']}")
     return actions
 

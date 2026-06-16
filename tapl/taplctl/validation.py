@@ -202,13 +202,14 @@ def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
 
 
 def level_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    allowed = ", ".join(LEVEL_SUBAGENTS)
     if not settings.use_level_subagent:
         return "Level subagent routing is disabled."
     if settings.level_subagent_aggressiveness == "minimal":
-        return "Set a level subagent only for obvious risk or explicit routing."
+        return f"Set a level subagent only for obvious risk or explicit routing. Allowed values: {allowed}."
     if settings.level_subagent_aggressiveness == "force":
-        return "Every executable task must use @junior-worker, @senior-worker, or @specialist-worker."
-    return "Choose a level subagent automatically based on task risk."
+        return f"Every executable task must use one of: {allowed}."
+    return f"Choose one of {allowed} based on task risk; do not use level labels such as `level2`."
 
 
 def plan_detail_guidance(value: str) -> str:

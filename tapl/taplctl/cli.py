@@ -446,12 +446,28 @@ def cmd_hook_event(args: argparse.Namespace) -> int:
         tapl_settings=settings,
         plan_task_settings=settings.plan_task_execute,
     )
-    if args.json:
+    emit_hook_outcome(outcome, args.json)
+    return 2 if outcome.get("block") else 0
+
+
+def emit_hook_outcome(outcome: dict[str, Any], as_json: bool) -> None:
+    if as_json:
         print_json(outcome)
-    elif outcome.get("message"):
+        return
+
+    if outcome.get("event") == "Stop":
+        if outcome.get("block"):
+            print_json(
+                {
+                    "decision": "block",
+                    "reason": outcome.get("message") or "tapl blocked Stop hook.",
+                }
+            )
+        return
+
+    if outcome.get("message"):
         stream = sys.stderr if outcome.get("block") else sys.stdout
         print(outcome["message"], file=stream)
-    return 2 if outcome.get("block") else 0
 
 
 def payload_cwd(payload: dict[str, Any]) -> Path | None:
@@ -488,6 +504,8 @@ def humanize(payload: dict[str, Any]) -> str:
         lines = [f"{archive['created_at']} {archive['slug']}: {archive['summary']}"]
         lines.extend(f"{item['kind']} {item['stable_id']} {item['title']}" for item in payload["items"])
         return "\n".join(lines)
+    if "active_run" in payload and "task_counts" in payload:
+        return humanize_status(payload)
     if "item" in payload:
         item = payload["item"]
         return f"{item['kind']} {item['stable_id']} {item['title']}"
@@ -496,3 +514,32 @@ def humanize(payload: dict[str, Any]) -> str:
     if "results" in payload:
         return "\n".join(f"{item['stable_id']} {item['title']}" for item in payload["results"]) or "no results"
     return "ok" if payload.get("ok") else str(payload)
+
+
+def humanize_status(payload: dict[str, Any]) -> str:
+    run = payload.get("active_run")
+    if isinstance(run, dict):
+        request = run.get("request_summary") or "active"
+        lines = [f"active run: {request}"]
+    else:
+        lines = ["active run: none"]
+
+    task_counts = payload.get("task_counts") if isinstance(payload.get("task_counts"), dict) else {}
+    plans = payload.get("plans") if isinstance(payload.get("plans"), list) else []
+    tasks = payload.get("tasks") if isinstance(payload.get("tasks"), list) else []
+    findings = payload.get("findings") if isinstance(payload.get("findings"), list) else []
+    incomplete = payload.get("incomplete_tasks", 0)
+
+    lines.append(
+        f"plans: {len(plans)}, tasks: {len(tasks)}, findings: {len(findings)}, incomplete tasks: {incomplete}"
+    )
+    if task_counts:
+        ordered = [f"{status}={task_counts.get(status, 0)}" for status in db.TASK_STATUSES]
+        lines.append("task counts: " + ", ".join(ordered))
+
+    plan_task_execute = payload.get("plan_task_execute")
+    if isinstance(plan_task_execute, dict):
+        issue_text = validation.format_issues(plan_task_execute, max_items=3)
+        if issue_text:
+            lines.append(issue_text)
+    return "\n".join(lines)

@@ -88,6 +88,12 @@ class TaplCliTests(unittest.TestCase):
             payload = json.loads(status.stdout)
             self.assertEqual(payload["task_counts"]["In Progress"], 1)
 
+            status_text = self.run_cli(db_path, "status")
+            self.assertEqual(status_text.returncode, 0, status_text.stderr)
+            self.assertIn("active run:", status_text.stdout)
+            self.assertIn("incomplete tasks: 1", status_text.stdout)
+            self.assertNotEqual(status_text.stdout.strip(), "no archives")
+
             search = self.run_cli(db_path, "search", "workflow", "--json")
             results = json.loads(search.stdout)["results"]
             self.assertEqual(results[0]["stable_id"], "TASK-001")
@@ -259,14 +265,22 @@ level_subagent_aggressiveness = "force"
             payload = json.loads(context.stdout)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["event"], "SessionStart")
-            self.assertIn("No separate agent guide is required", "\n".join(payload["instructions"]))
+            self.assertIn("SessionStart is bootstrap context", "\n".join(payload["instructions"]))
             self.assertIn("Assume `taplctl` is installed as a user-global command", "\n".join(payload["instructions"]))
             self.assertIn("never `$taplctl`", "\n".join(payload["instructions"]))
             self.assertIn("configure hooks with `taplctl install user`", "\n".join(payload["instructions"]))
             self.assertIn("keep workflow DB/config in the current repo workspace", "\n".join(payload["instructions"]))
-            self.assertIn("quote every argument", "\n".join(payload["instructions"]))
-            self.assertIn("never `--status In Progress`", "\n".join(payload["instructions"]))
-            self.assertIn("Create an active workflow run", "\n".join(payload["next_actions"]))
+            self.assertIn("taplctl status --json", "\n".join(payload["instructions"]))
+            self.assertIn("taplctl search '<query>' --json", "\n".join(payload["instructions"]))
+            self.assertIn("@senior-worker", "\n".join(payload["instructions"]))
+            self.assertEqual(payload["next_actions"], [])
+
+            prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
+            prompt_payload = json.loads(prompt_context.stdout)
+            self.assertIn("quote every argument", "\n".join(prompt_payload["instructions"]))
+            self.assertIn("never `--status In Progress`", "\n".join(prompt_payload["instructions"]))
+            self.assertIn("Do not use level names such as `level2`", "\n".join(prompt_payload["instructions"]))
+            self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
 
             self.run_cli(
                 db_path,
@@ -283,18 +297,27 @@ level_subagent_aggressiveness = "force"
             )
             active_context = self.run_cli(db_path, "context", "--event", "SessionStart", "--json")
             active_payload = json.loads(active_context.stdout)
-            self.assertIn("Create or update plan state", "\n".join(active_payload["next_actions"]))
+            self.assertEqual(len(active_payload["next_actions"]), 1)
+            self.assertIn("resume or update the incomplete task state", active_payload["next_actions"][0])
+
+            active_prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
+            active_prompt_payload = json.loads(active_prompt_context.stdout)
+            self.assertIn("Create or update plan state", "\n".join(active_prompt_payload["next_actions"]))
 
             text = self.run_cli(db_path, "context", "--event", "SessionStart")
             self.assertEqual(text.returncode, 0, text.stderr)
             self.assertIn("tapl context:", text.stdout)
-            self.assertIn("No separate agent guide is required", text.stdout)
+            self.assertIn("SessionStart is bootstrap context", text.stdout)
             self.assertIn("Assume `taplctl` is installed as a user-global command", text.stdout)
             self.assertIn("never `$taplctl`", text.stdout)
             self.assertIn("configure hooks with `taplctl install user`", text.stdout)
             self.assertIn("keep workflow DB/config in the current repo workspace", text.stdout)
-            self.assertIn("quote every argument", text.stdout)
-            self.assertIn("never `--status In Progress`", text.stdout)
+
+            prompt_text = self.run_cli(db_path, "context", "--event", "UserPromptSubmit")
+            self.assertEqual(prompt_text.returncode, 0, prompt_text.stderr)
+            self.assertIn("tapl context:", prompt_text.stdout)
+            self.assertIn("quote every argument", prompt_text.stdout)
+            self.assertIn("never `--status In Progress`", prompt_text.stdout)
 
     def test_install_user_writes_taplctl_hooks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -618,7 +641,9 @@ task_granularity = "very_granular"
             )
             self.assertEqual(event.returncode, 0, event.stderr)
             self.assertIn("tapl context:", event.stdout)
-            self.assertIn("No separate agent guide is required", event.stdout)
+            self.assertIn("taplctl status --json", event.stdout)
+            self.assertIn("taplctl search '<query>' --json", event.stdout)
+            self.assertIn("Do not use level names such as `level2`", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
 
             event_json = self.run_cli(
@@ -635,6 +660,48 @@ task_granularity = "very_granular"
             payload = json.loads(event_json.stdout)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["context"]["prompt_summary"], "Implement lifecycle context")
+
+    def test_stop_hook_observe_is_silent_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            prompt = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                input_text='{"prompt": "Create a run without plans"}',
+            )
+            self.assertEqual(prompt.returncode, 0, prompt.stderr)
+
+            stopped = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "Stop",
+                "--mode",
+                "observe",
+                input_text="{}",
+            )
+            self.assertEqual(stopped.returncode, 0, stopped.stderr)
+            self.assertEqual(stopped.stdout, "")
+            self.assertEqual(stopped.stderr, "")
+
+            stopped_json = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "Stop",
+                "--mode",
+                "observe",
+                "--json",
+                input_text="{}",
+            )
+            self.assertEqual(stopped_json.returncode, 0, stopped_json.stderr)
+            payload = json.loads(stopped_json.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertIn("missing_plan", payload["message"])
 
     def test_hook_event_uses_payload_cwd_for_repo_db(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
