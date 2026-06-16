@@ -1279,6 +1279,12 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     h1 { font-size: 28px; margin-bottom: 0; }
     h2 { font-size: 15px; }
     h3 { font-size: 13px; margin-bottom: 8px; }
+    h1, h2, h3, p, small, pre, .archive-summary, .archive-time, .item-head strong {
+      min-width: 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
     pre {
       white-space: pre-wrap;
       margin: 8px 0 0;
@@ -1313,6 +1319,7 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--panel);
+      min-width: 0;
     }
     .metric {
       padding: 12px;
@@ -1327,6 +1334,7 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     .pill, .badge {
       display: inline-flex;
       align-items: center;
+      flex: 0 0 auto;
       min-height: 22px;
       border-radius: 999px;
       padding: 2px 8px;
@@ -1404,6 +1412,7 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     .archive-summary {
       display: block;
       margin-top: 4px;
+      min-width: 0;
     }
     .archive-time {
       display: block;
@@ -1418,6 +1427,7 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
       gap: 8px;
       align-items: center;
       margin-bottom: 6px;
+      min-width: 0;
     }
     form {
       display: flex;
@@ -1449,6 +1459,8 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     }
     .detail-row strong {
       overflow-wrap: anywhere;
+      min-width: 0;
+      word-break: break-word;
       font-weight: 600;
     }
     .debug-footer {
