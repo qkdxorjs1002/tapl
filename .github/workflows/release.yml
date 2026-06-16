@@ -107,9 +107,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          npm install --no-save --package-lock=false typescript @types/node @vscode/vsce
+          npm install --package-lock=false
           npm run compile
-          npx --yes @vscode/vsce package \
+          npm exec -- vsce package \
             --allow-missing-repository \
             --out "../release-dist/tapl-workflow-viewer-${RELEASE_VERSION}.vsix"
 
