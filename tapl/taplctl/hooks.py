@@ -45,9 +45,11 @@ def handle_event(
     record_run_id: str | None = None
     archive: sqlite3.Row | None = None
 
-    if event in {"SessionStart", "UserPromptSubmit"}:
-        request_summary = prompt_summary(payload) if event == "UserPromptSubmit" else ""
+    if event == "UserPromptSubmit":
+        request_summary = prompt_summary(payload)
         db.ensure_active_run(conn, request_summary=request_summary)
+
+    if event in {"SessionStart", "UserPromptSubmit"}:
         resolved_settings = tapl_settings or tapl_config.TaplConfig(
             path="",
             exists=False,

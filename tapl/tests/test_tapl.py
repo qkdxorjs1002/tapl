@@ -695,6 +695,47 @@ task_granularity = "very_granular"
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["context"]["prompt_summary"], "Implement lifecycle context")
 
+    def test_session_start_hook_does_not_create_active_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            session = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "SessionStart",
+                "--mode",
+                "observe",
+                "--json",
+                input_text="{}",
+            )
+            self.assertEqual(session.returncode, 0, session.stderr)
+            session_payload = json.loads(session.stdout)
+            self.assertTrue(session_payload["ok"])
+            self.assertFalse(session_payload["context"]["active_run"]["present"])
+
+            status = self.run_cli(db_path, "status", "--json")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            status_payload = json.loads(status.stdout)
+            self.assertIsNone(status_payload["active_run"])
+
+            prompt = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Start real work"}',
+            )
+            self.assertEqual(prompt.returncode, 0, prompt.stderr)
+            prompt_payload = json.loads(prompt.stdout)
+            self.assertTrue(prompt_payload["context"]["active_run"]["present"])
+            self.assertEqual(
+                prompt_payload["context"]["active_run"]["request_summary"],
+                "Start real work",
+            )
+
     def test_stop_hook_observe_is_silent_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
