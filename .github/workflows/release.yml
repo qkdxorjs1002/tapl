@@ -214,7 +214,7 @@ jobs:
           url_indent = url_match[1]
           lines[url_index] = replacement_line(
             lines[url_index],
-            "#{url_indent}url \"#{wheel_url}\"#{url_match[2]}",
+            "#{url_indent}url \"#{wheel_url}\"",
           )
 
           sha_index = lines.index { |line| line.match?(/^#{Regexp.escape(url_indent)}sha256\b/) }
