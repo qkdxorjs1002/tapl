@@ -192,16 +192,40 @@ jobs:
           wheel_sha256 = ENV.fetch("WHEEL_SHA256")
 
           text = File.read(file)
+          lines = text.lines
 
-          updated_version = text.sub!(/^(\s*)version\s+["'][^"']+["'](.*)$/, "\\1version \"#{version}\"\\2")
-          updated_url = text.sub!(/^(\s*)url\s+["'][^"']+["'](.*)$/, "\\1url \"#{wheel_url}\"\\2")
-          updated_sha = text.sub!(/^(\s*)sha256\s+(?::no_check|["'][^"']+["'])(.*)$/, "\\1sha256 \"#{wheel_sha256}\"\\2")
+          def replacement_line(line, content)
+            line.end_with?("\n") ? "#{content}\n" : content
+          end
 
-          raise "Could not update version in #{file}" unless updated_version
-          raise "Could not update url in #{file}" unless updated_url
-          raise "Could not update sha256 in #{file}" unless updated_sha
+          version_index = lines.index { |line| line.match?(/^(\s*)version\s+["'][^"']+["'](.*)$/) }
+          raise "Could not update version in #{file}" unless version_index
 
-          File.write(file, text)
+          version_match = lines[version_index].match(/^(\s*)version\s+["'][^"']+["'](.*)$/)
+          lines[version_index] = replacement_line(
+            lines[version_index],
+            "#{version_match[1]}version \"#{version}\"#{version_match[2]}",
+          )
+
+          url_index = lines.index { |line| line.match?(/^(\s*)url\s+["'][^"']+["'](.*)$/) }
+          raise "Could not update url in #{file}" unless url_index
+
+          url_match = lines[url_index].match(/^(\s*)url\s+["'][^"']+["'](.*)$/)
+          url_indent = url_match[1]
+          lines[url_index] = replacement_line(
+            lines[url_index],
+            "#{url_indent}url \"#{wheel_url}\"#{url_match[2]}",
+          )
+
+          sha_index = lines.index { |line| line.match?(/^#{Regexp.escape(url_indent)}sha256\b/) }
+          sha_line = "#{url_indent}sha256 \"#{wheel_sha256}\""
+          if sha_index
+            lines[sha_index] = replacement_line(lines[sha_index], sha_line)
+          else
+            lines.insert(url_index + 1, "#{sha_line}\n")
+          end
+
+          File.write(file, lines.join)
           RUBY
 
           tap_path="${brew_file#homebrew-tap/}"
