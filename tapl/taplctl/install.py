@@ -282,6 +282,7 @@ use_level_subagent = {str(config.DEFAULT_USE_LEVEL_SUBAGENT).lower()}
 level_subagent_aggressiveness = "{config.DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS}"
 plan_detail = "{config.DEFAULT_PLAN_DETAIL}"
 task_granularity = "{config.DEFAULT_TASK_GRANULARITY}"
+require_execution_approval = {str(config.DEFAULT_REQUIRE_EXECUTION_APPROVAL).lower()}
 """
 
 

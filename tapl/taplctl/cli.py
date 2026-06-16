@@ -123,6 +123,24 @@ def build_parser() -> argparse.ArgumentParser:
     finding_add.add_argument("--json", action="store_true")
     finding_add.set_defaults(handler=cmd_finding_add)
 
+    approval = sub.add_parser("approval", help="Manage explicit workflow approvals.")
+    approval_sub = approval.add_subparsers(dest="approval_command")
+    approval_record = approval_sub.add_parser("record")
+    approval_record.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND)
+    approval_record.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS)
+    approval_record.add_argument("--prompt", default="")
+    approval_record.add_argument("--json", action="store_true")
+    approval_record.set_defaults(handler=cmd_approval_record)
+    approval_status = approval_sub.add_parser("status")
+    approval_status.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND)
+    approval_status.add_argument("--json", action="store_true")
+    approval_status.set_defaults(handler=cmd_approval_status)
+    approval_list = approval_sub.add_parser("list")
+    approval_list.add_argument("--kind", default="")
+    approval_list.add_argument("--limit", type=int, default=10)
+    approval_list.add_argument("--json", action="store_true")
+    approval_list.set_defaults(handler=cmd_approval_list)
+
     item = sub.add_parser("item", help="Inspect workflow items.")
     item_sub = item.add_subparsers(dest="item_command")
     item_show = item_sub.add_parser("show")
@@ -293,7 +311,7 @@ def status_output_payload(
         "tasks": tasks if full else [compact_status_item(item) for item in tasks],
         "findings": findings if full else [compact_status_item(item) for item in findings],
     }
-    for key in ("config", "plan_task_execute"):
+    for key in ("config", "plan_task_execute", "approvals"):
         if key in payload:
             projected[key] = payload[key]
     if include_events:
@@ -448,6 +466,30 @@ def cmd_finding_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_approval_record(args: argparse.Namespace) -> int:
+    approval = db.record_approval(
+        open_conn(args),
+        kind=args.kind,
+        decision=args.decision,
+        prompt=args.prompt,
+    )
+    emit({"ok": True, "approval": db.row_to_dict(approval)}, args.json)
+    return 0
+
+
+def cmd_approval_status(args: argparse.Namespace) -> int:
+    status = db.approval_status(open_conn(args), kind=args.kind)
+    emit({"ok": True, "approval": status}, args.json)
+    return 0
+
+
+def cmd_approval_list(args: argparse.Namespace) -> int:
+    kind = args.kind.strip() or None
+    approvals = db.list_approvals(open_conn(args), kind=kind, limit=args.limit)
+    emit({"ok": True, "approvals": approvals}, args.json)
+    return 0
+
+
 def cmd_item_show(args: argparse.Namespace) -> int:
     item = db.item_detail(open_conn(args), args.id)
     if item is None:
@@ -589,6 +631,14 @@ def humanize(payload: dict[str, Any]) -> str:
     if "item" in payload:
         item = payload["item"]
         return f"{item['kind']} {item['stable_id']} {item['title']}"
+    if "approval" in payload:
+        approval = payload["approval"]
+        return f"approval {approval.get('kind', '')}: {approval.get('state') or approval.get('decision')}"
+    if "approvals" in payload:
+        approvals = payload["approvals"]
+        return "\n".join(
+            f"{item['decided_at']} {item['kind']} {item['decision']}: {item['prompt']}" for item in approvals
+        ) or "no approvals"
     if "archives" in payload:
         return "\n".join(f"{item['created_at']} {item['slug']}: {item['summary']}" for item in payload["archives"]) or "no archives"
     if "results" in payload:

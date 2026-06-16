@@ -18,6 +18,7 @@ DEFAULT_USE_LEVEL_SUBAGENT = True
 DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS = "auto"
 DEFAULT_PLAN_DETAIL = "detailed"
 DEFAULT_TASK_GRANULARITY = "granular"
+DEFAULT_REQUIRE_EXECUTION_APPROVAL = True
 
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
 LEVEL_SUBAGENT_AGGRESSIVENESS = ("minimal", "auto", "force")
@@ -48,6 +49,7 @@ class PlanTaskExecuteConfig:
     level_subagent_aggressiveness: str = DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS
     plan_detail: str = DEFAULT_PLAN_DETAIL
     task_granularity: str = DEFAULT_TASK_GRANULARITY
+    require_execution_approval: bool = DEFAULT_REQUIRE_EXECUTION_APPROVAL
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +57,7 @@ class PlanTaskExecuteConfig:
             "level_subagent_aggressiveness": self.level_subagent_aggressiveness,
             "plan_detail": self.plan_detail,
             "task_granularity": self.task_granularity,
+            "require_execution_approval": self.require_execution_approval,
         }
 
 
@@ -171,6 +174,15 @@ def load(
             setting(plan_task_data, "task_granularity", "task-granularity", default=DEFAULT_TASK_GRANULARITY),
             TASK_GRANULARITIES,
             "plan_task_execute.task_granularity",
+        ),
+        require_execution_approval=boolean(
+            setting(
+                plan_task_data,
+                "require_execution_approval",
+                "require-execution-approval",
+                default=DEFAULT_REQUIRE_EXECUTION_APPROVAL,
+            ),
+            "plan_task_execute.require_execution_approval",
         ),
     )
     return TaplConfig(

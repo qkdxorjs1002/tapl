@@ -158,7 +158,7 @@ Plan 기록:
 taplctl plan upsert \
   --id SPEC-EXAMPLE \
   --title "Example implementation plan" \
-  --summary "Explain the approach" \
+  --summary "REQ-001: 접근, 영향 파일, 실행 순서, 위험, 검증 방법을 기록한다." \
   --status Finalized \
   --json
 ```
@@ -170,12 +170,28 @@ taplctl task upsert \
   --id TASK-EXAMPLE \
   --title "Implement the change" \
   --status "In Progress" \
+  --spec-id SPEC-EXAMPLE \
   --goal "Make the requested change" \
   --action "Edit the relevant files" \
   --required-subagent "@junior-worker" \
   --verification "Run focused checks" \
   --json
 ```
+
+durable edit 전에 명시적 실행 승인을 기록합니다.
+
+```sh
+taplctl approval record \
+  --decision approved \
+  --prompt "Execute TASK-EXAMPLE from SPEC-EXAMPLE" \
+  --json
+
+taplctl approval status --json
+```
+
+실행 가능한 task가 남아 있는 상태에서 새 prompt가 들어오면 lifecycle context는
+남은 일을 먼저 할지, 새 요청과 합칠지, 보류하거나 archive할지, active run을
+버리고 새로 시작할지를 물으라고 안내합니다.
 
 Finding 추가와 history 검색:
 
@@ -197,6 +213,10 @@ taplctl archive create \
   --summary "What was completed and how it was verified" \
   --json
 ```
+
+완료 보고에는 변경 파일과 동작, 검증 명령과 결과, 남은 위험 또는 block된 일,
+workflow archive 여부를 짧게 포함합니다. Archive summary에는 원 요청, 선택한
+계획, 완료된 task와 결과, 검증, 남은 일을 compact하게 남깁니다.
 
 Semantic search index 재생성:
 

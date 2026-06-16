@@ -162,7 +162,7 @@ Record a plan:
 taplctl plan upsert \
   --id SPEC-EXAMPLE \
   --title "Example implementation plan" \
-  --summary "Explain the approach" \
+  --summary "REQ-001: Explain the approach, affected files, execution order, risks, and validation." \
   --status Finalized \
   --json
 ```
@@ -174,12 +174,29 @@ taplctl task upsert \
   --id TASK-EXAMPLE \
   --title "Implement the change" \
   --status "In Progress" \
+  --spec-id SPEC-EXAMPLE \
   --goal "Make the requested change" \
   --action "Edit the relevant files" \
   --required-subagent "@junior-worker" \
   --verification "Run focused checks" \
   --json
 ```
+
+Before durable edits, record explicit execution approval:
+
+```sh
+taplctl approval record \
+  --decision approved \
+  --prompt "Execute TASK-EXAMPLE from SPEC-EXAMPLE" \
+  --json
+
+taplctl approval status --json
+```
+
+If a new prompt arrives while executable tasks remain, the lifecycle context
+instructs the agent to ask whether to finish the remaining work first, combine
+it with the new request, defer or archive it, or discard the active run and
+start fresh.
 
 Add findings and search history:
 
@@ -201,6 +218,12 @@ taplctl archive create \
   --summary "What was completed and how it was verified" \
   --json
 ```
+
+Completion reports should briefly state changed files and behavior,
+verification commands and results, remaining risks or blocked work, and whether
+the workflow was archived. Archive summaries should compactly capture the
+original request, selected plan, completed tasks and results, verification, and
+remaining work.
 
 Rebuild the semantic search index:
 

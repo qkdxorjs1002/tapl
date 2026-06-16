@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any
 
@@ -31,7 +32,10 @@ def validate_plan_task_execute(
     issues: list[dict[str, Any]] = []
     issues.extend(validate_level_subagents(tasks, settings))
     issues.extend(validate_plan_detail(plans, settings))
+    issues.extend(validate_plan_content(plans, settings))
     issues.extend(validate_task_granularity(plans, tasks, settings))
+    issues.extend(validate_task_content(tasks, settings))
+    issues.extend(validate_execution_approval(state, tasks, settings))
     errors = [item for item in issues if item["severity"] == "error"]
     warnings = [item for item in issues if item["severity"] == "warning"]
     return {
@@ -184,6 +188,107 @@ def validate_task_granularity(
     ]
 
 
+def validate_plan_content(
+    plans: list[dict[str, Any]],
+    settings: tapl_config.PlanTaskExecuteConfig,
+) -> list[dict[str, Any]]:
+    if settings.plan_detail in {"minimal", "less_detailed"} or not plans:
+        return []
+
+    body = "\n".join(str(plan.get("body") or plan.get("title") or "") for plan in plans).strip()
+    missing: list[str] = []
+    if not has_any(body, ("REQ-", "Trace:", "requirements trace", "요구사항")):
+        missing.append("requirements trace")
+    if not has_any(body, ("Validation:", "Verification:", "validation", "verification", "검증")):
+        missing.append("validation strategy")
+
+    if not missing:
+        return []
+    return [
+        issue(
+            "warning",
+            "plan_content_missing_guidance",
+            f"Plan content is missing: {', '.join(missing)}.",
+            "Include objective, REQ trace, selected approach, affected files/interfaces, execution order, risks, and validation.",
+        )
+    ]
+
+
+def validate_task_content(
+    tasks: list[dict[str, Any]],
+    settings: tapl_config.PlanTaskExecuteConfig,
+) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    for task in tasks:
+        status = task_status(task)
+        if status == "Skipped":
+            continue
+
+        stable_id = str(task.get("stable_id") or task.get("task_id") or "task")
+        missing: list[str] = []
+        if status in EXECUTABLE_STATUSES:
+            required_fields = ("spec_id", "goal", "action", "verification")
+            for field in required_fields:
+                if not str(task.get(field) or "").strip():
+                    missing.append(field)
+            if settings.use_level_subagent and not str(task.get("required_subagent") or "").strip():
+                missing.append("required_subagent")
+            if status == "Blocked":
+                for field in ("blocker", "next_action"):
+                    if not str(task.get(field) or "").strip():
+                        missing.append(field)
+        elif status == "Completed":
+            for field in ("verification", "result"):
+                if not str(task.get(field) or "").strip():
+                    missing.append(field)
+
+        if missing:
+            issues.append(
+                issue(
+                    "warning",
+                    "task_content_missing_fields",
+                    f"{stable_id} is missing task field(s): {', '.join(missing)}.",
+                    "Record task goal, source SPEC, action, required subagent, verification, and result or blocker details as applicable.",
+                    stable_id=stable_id,
+                )
+            )
+    return issues
+
+
+def validate_execution_approval(
+    state: dict[str, Any],
+    tasks: list[dict[str, Any]],
+    settings: tapl_config.PlanTaskExecuteConfig,
+) -> list[dict[str, Any]]:
+    if not executable_tasks(tasks):
+        return []
+
+    approval = (state.get("approvals") or {}).get(db.DEFAULT_APPROVAL_KIND) or {}
+    approval_state = str(approval.get("state") or "")
+    if approval_state == "approved":
+        return []
+
+    if approval_state == "rejected":
+        return [
+            issue(
+                "error",
+                "execution_approval_rejected",
+                "Execution approval was explicitly rejected for the active run.",
+                "Resolve the rejected approval or record a new approval before durable edits.",
+            )
+        ]
+
+    severity = "error" if settings.require_execution_approval else "warning"
+    return [
+        issue(
+            severity,
+            "execution_approval_missing",
+            "Executable tasks exist but execution approval is not recorded.",
+            "Ask the user whether to execute the prepared tasks, then record approval with `taplctl approval record --decision approved --prompt '<approved scope>' --json`.",
+        )
+    ]
+
+
 def executable_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [task for task in tasks if task_status(task) in EXECUTABLE_STATUSES]
 
@@ -192,12 +297,20 @@ def task_status(task: dict[str, Any]) -> str:
     return str(task.get("status") or "")
 
 
+def has_any(text: str, needles: tuple[str, ...]) -> bool:
+    lowered = text.lower()
+    return any(needle.lower() in lowered for needle in needles) or bool(re.search(r"\bREQ-\d+\b", text))
+
+
 def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
     return {
         "allowed_level_subagents": list(LEVEL_SUBAGENTS),
         "level_subagent": level_subagent_guidance(settings),
         "plan_detail": plan_detail_guidance(settings.plan_detail),
+        "plan_format": plan_format_guidance(),
         "task_granularity": task_granularity_guidance(settings.task_granularity),
+        "task_format": task_format_guidance(settings),
+        "execution_approval": execution_approval_guidance(settings),
     }
 
 
@@ -221,6 +334,13 @@ def plan_detail_guidance(value: str) -> str:
     }[value]
 
 
+def plan_format_guidance() -> str:
+    return (
+        "Plan records should include objective, related REQ-* trace, selected approach, "
+        "affected files/interfaces, execution order, risks, validation, and approval needs when applicable."
+    )
+
+
 def task_granularity_guidance(value: str) -> str:
     return {
         "minimal": "Use one executable task unless phases are truly separate.",
@@ -228,6 +348,24 @@ def task_granularity_guidance(value: str) -> str:
         "granular": "Split by meaningful implementation and verification steps.",
         "very_granular": "Split every independent edit, migration, and verification step.",
     }[value]
+
+
+def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    subagent = "required_subagent, " if settings.use_level_subagent else ""
+    return (
+        f"Executable tasks should include source spec_id, goal, action, {subagent}verification, "
+        "and result when completed; blocked tasks should include blocker and next_action."
+    )
+
+
+def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    base = (
+        "Before durable edits, ask the user whether to execute the prepared tasks and record it with "
+        "`taplctl approval record --decision approved --prompt '<approved scope>' --json`."
+    )
+    if settings.require_execution_approval:
+        return base + " Missing execution approval is a validation error."
+    return base + " Missing execution approval is a warning, and enforce-mode hooks block on it."
 
 
 def task_granularity_remediation(value: str) -> str:

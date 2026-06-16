@@ -17,3 +17,6 @@ plan_detail = "detailed"
 
 # Task split granularity: minimal, less_granular, granular, or very_granular.
 task_granularity = "granular"
+
+# When true, executable tasks require recorded user approval before durable edits.
+require_execution_approval = true

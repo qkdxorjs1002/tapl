@@ -79,7 +79,7 @@ def handle_event(
             issue_message = validation.format_issues(check)
             if issue_message:
                 message = combine_messages(message, issue_message)
-            if check["errors"] and mode == "enforce":
+            if mode == "enforce" and (check["errors"] or has_execution_approval_issue(check)):
                 block = True
 
     if event == "Stop":
@@ -101,7 +101,7 @@ def handle_event(
             archive = db.archive_active_run(
                 conn,
                 slug=auto_archive_slug(active),
-                summary=auto_archive_summary(active),
+                summary=auto_archive_summary(state),
             )
             message = combine_messages(
                 message,
@@ -136,6 +136,13 @@ def combine_messages(*messages: str) -> str:
     return "\n".join(message for message in messages if message)
 
 
+def has_execution_approval_issue(check: dict[str, Any]) -> bool:
+    return any(
+        item.get("code") in {"execution_approval_missing", "execution_approval_rejected"}
+        for item in check.get("issues") or []
+    )
+
+
 def should_auto_archive_on_stop(state: dict[str, Any], check: dict[str, Any], block: bool) -> bool:
     return bool(
         state.get("active_run")
@@ -155,10 +162,51 @@ def auto_archive_slug(active_run: dict[str, Any] | None) -> str:
     return slug[:80].strip("-") or "completed-run"
 
 
-def auto_archive_summary(active_run: dict[str, Any] | None) -> str:
-    if active_run and active_run.get("request_summary"):
-        return active_run['request_summary']
-    return "archived workflow"
+def auto_archive_summary(state: dict[str, Any]) -> str:
+    active_run = state.get("active_run") if isinstance(state.get("active_run"), dict) else None
+    request = str(active_run.get("request_summary") or "").strip() if active_run else ""
+    plans = state.get("plans") if isinstance(state.get("plans"), list) else []
+    tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
+    completed_tasks = [task for task in tasks if task.get("status") == "Completed"]
+    remaining = int(state.get("incomplete_tasks") or 0)
+
+    parts = [
+        f"Original request: {request or 'archived workflow'}",
+        f"Selected plan: {summarize_items(plans, fallback='None')}",
+        f"Completed tasks: {summarize_items(completed_tasks, fallback='None', include_result=True)}",
+        f"Verification: {summarize_verification(completed_tasks)}",
+        f"Remaining work: {'None' if remaining == 0 else str(remaining)}",
+    ]
+    return compact_text("; ".join(parts), limit=1000)
+
+
+def summarize_items(items: list[dict[str, Any]], *, fallback: str, include_result: bool = False) -> str:
+    if not items:
+        return fallback
+    summaries: list[str] = []
+    for item in items[:4]:
+        label = " ".join(str(part) for part in (item.get("stable_id"), item.get("title")) if part).strip()
+        result = str(item.get("result") or "").strip() if include_result else ""
+        summaries.append(f"{label}: {result}" if result else label)
+    if len(items) > 4:
+        summaries.append(f"+{len(items) - 4} more")
+    return ", ".join(summaries)
+
+
+def summarize_verification(tasks: list[dict[str, Any]]) -> str:
+    values = []
+    for task in tasks:
+        verification = str(task.get("verification") or "").strip()
+        if verification and verification not in values:
+            values.append(verification)
+    return ", ".join(values[:4]) if values else "Not recorded"
+
+
+def compact_text(text: str, *, limit: int) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3].rstrip() + "..."
 
 
 def infer_tool_name(payload: dict[str, Any]) -> str | None:

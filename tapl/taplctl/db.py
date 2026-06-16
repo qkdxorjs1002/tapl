@@ -17,6 +17,8 @@ DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
 TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
+DEFAULT_APPROVAL_KIND = "execution"
+APPROVAL_DECISIONS = ("approved", "rejected")
 
 
 def utc_now() -> str:
@@ -395,6 +397,121 @@ def add_finding(
     return item
 
 
+def record_approval(
+    conn: sqlite3.Connection,
+    *,
+    kind: str = DEFAULT_APPROVAL_KIND,
+    decision: str,
+    prompt: str = "",
+    run_id: str | None = None,
+) -> sqlite3.Row:
+    if decision not in APPROVAL_DECISIONS:
+        raise ValueError(f"invalid approval decision: {decision}")
+
+    run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() if run_id else active_run(conn)
+    if not run:
+        raise ValueError("no active workflow run for approval")
+
+    now = utc_now()
+    conn.execute(
+        """
+        INSERT INTO approvals(run_id, kind, prompt, decision, decided_at)
+        VALUES(?, ?, ?, ?, ?)
+        """,
+        (run["id"], kind, prompt, decision, now),
+    )
+    conn.commit()
+    return conn.execute("SELECT * FROM approvals WHERE id = last_insert_rowid()").fetchone()
+
+
+def latest_approval(
+    conn: sqlite3.Connection,
+    *,
+    kind: str = DEFAULT_APPROVAL_KIND,
+    run_id: str | None = None,
+) -> sqlite3.Row | None:
+    run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() if run_id else active_run(conn)
+    if not run:
+        return None
+    return conn.execute(
+        """
+        SELECT *
+        FROM approvals
+        WHERE run_id = ? AND kind = ?
+        ORDER BY decided_at DESC, id DESC
+        LIMIT 1
+        """,
+        (run["id"], kind),
+    ).fetchone()
+
+
+def approval_status(
+    conn: sqlite3.Connection,
+    *,
+    kind: str = DEFAULT_APPROVAL_KIND,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() if run_id else active_run(conn)
+    if not run:
+        return {
+            "kind": kind,
+            "state": "not_applicable",
+            "approved": False,
+            "decision": "",
+            "prompt": "",
+            "decided_at": "",
+        }
+
+    row = latest_approval(conn, kind=kind, run_id=run["id"])
+    if row is None:
+        return {
+            "kind": kind,
+            "state": "missing",
+            "approved": False,
+            "decision": "",
+            "prompt": "",
+            "decided_at": "",
+        }
+
+    decision = row["decision"]
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "state": decision,
+        "approved": decision == "approved",
+        "decision": decision,
+        "prompt": row["prompt"],
+        "decided_at": row["decided_at"],
+    }
+
+
+def list_approvals(
+    conn: sqlite3.Connection,
+    *,
+    kind: str | None = None,
+    run_id: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() if run_id else active_run(conn)
+    if not run:
+        return []
+
+    sql = """
+        SELECT *
+        FROM approvals
+        WHERE run_id = ?
+    """
+    params: list[Any] = [run["id"]]
+    if kind:
+        sql += " AND kind = ?"
+        params.append(kind)
+    sql += " ORDER BY decided_at DESC, id DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return [row_to_dict(row) for row in conn.execute(sql, tuple(params))]
+
+
 def next_stable_id(conn: sqlite3.Connection, kind: str, prefix: str) -> str:
     rows = conn.execute(
         "SELECT stable_id FROM items WHERE kind = ? AND stable_id LIKE ?",
@@ -522,6 +639,9 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
     return {
         "schema": get_meta(conn),
         "active_run": row_to_dict(run) if run else None,
+        "approvals": {
+            DEFAULT_APPROVAL_KIND: approval_status(conn, kind=DEFAULT_APPROVAL_KIND, run_id=run_id),
+        },
         "task_counts": task_counts,
         "incomplete_tasks": incomplete,
         "plans": plans,

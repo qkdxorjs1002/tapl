@@ -149,6 +149,55 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(cfg.plan_task_execute.level_subagent_aggressiveness, "auto")
             self.assertEqual(cfg.plan_task_execute.plan_detail, "detailed")
             self.assertEqual(cfg.plan_task_execute.task_granularity, "granular")
+            self.assertFalse(cfg.plan_task_execute.require_execution_approval)
+
+    def test_approval_cli_records_status_and_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Approve execution"}',
+            )
+
+            missing = self.run_cli(db_path, "approval", "status", "--json")
+            self.assertEqual(missing.returncode, 0, missing.stderr)
+            missing_payload = json.loads(missing.stdout)
+            self.assertEqual(missing_payload["approval"]["state"], "missing")
+            self.assertFalse(missing_payload["approval"]["approved"])
+
+            recorded = self.run_cli(
+                db_path,
+                "approval",
+                "record",
+                "--decision",
+                "approved",
+                "--prompt",
+                "Execute prepared TASK-001",
+                "--json",
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            recorded_payload = json.loads(recorded.stdout)
+            self.assertEqual(recorded_payload["approval"]["decision"], "approved")
+
+            status = self.run_cli(db_path, "approval", "status", "--json")
+            status_payload = json.loads(status.stdout)
+            self.assertEqual(status_payload["approval"]["state"], "approved")
+            self.assertTrue(status_payload["approval"]["approved"])
+
+            workflow_status = self.run_cli(db_path, "status", "--json")
+            workflow_payload = json.loads(workflow_status.stdout)
+            self.assertEqual(workflow_payload["approvals"]["execution"]["state"], "approved")
+
+            listed = self.run_cli(db_path, "approval", "list", "--json")
+            listed_payload = json.loads(listed.stdout)
+            self.assertEqual(len(listed_payload["approvals"]), 1)
+            self.assertEqual(listed_payload["approvals"][0]["prompt"], "Execute prepared TASK-001")
 
     def test_config_loads_user_global_when_repo_config_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -235,6 +284,73 @@ task-granularity = "less-granular"
             search_payload = json.loads(search.stdout)
             self.assertEqual(search_payload["mode"], "word")
             self.assertEqual(search_payload["results"][0]["search_source"], "word")
+
+    def test_config_can_require_execution_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            config_path = Path(tmp) / "tapl.toml"
+            config_path.write_text(
+                """
+[plan-task-execute]
+require_execution_approval = true
+""",
+                encoding="utf-8",
+            )
+            self.run_cli(
+                db_path,
+                "plan",
+                "upsert",
+                "--id",
+                "SPEC-001",
+                "--title",
+                "Needs execution approval",
+                "--summary",
+                "REQ-001: Validate execution approval before durable edits. Validation: taplctl validate.",
+            )
+            self.run_cli(
+                db_path,
+                "task",
+                "upsert",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Executable task",
+                "--status",
+                "In Progress",
+                "--spec-id",
+                "SPEC-001",
+                "--goal",
+                "Execute approved work",
+                "--action",
+                "Edit files after approval",
+                "--required-subagent",
+                "@senior-worker",
+                "--verification",
+                "taplctl validate",
+            )
+
+            missing = self.run_cli(db_path, "--config", str(config_path), "validate", "--json")
+            self.assertEqual(missing.returncode, 1)
+            missing_payload = json.loads(missing.stdout)
+            self.assertEqual(
+                missing_payload["plan_task_execute"]["errors"][0]["code"],
+                "execution_approval_missing",
+            )
+
+            approved = self.run_cli(
+                db_path,
+                "approval",
+                "record",
+                "--decision",
+                "approved",
+                "--prompt",
+                "Execute TASK-001",
+                "--json",
+            )
+            self.assertEqual(approved.returncode, 0, approved.stderr)
+
+            validated = self.run_cli(db_path, "--config", str(config_path), "validate", "--json")
+            self.assertEqual(validated.returncode, 0, validated.stdout)
 
     def test_config_rejects_unknown_search_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -331,6 +447,50 @@ level_subagent_aggressiveness = "force"
             self.assertEqual(payload["plan_task_execute"]["errors"][0]["code"], "missing_required_subagent")
             self.assertIn("@senior-worker", payload["plan_task_execute"]["guidance"]["allowed_level_subagents"])
 
+    def test_validate_warns_for_sparse_plan_and_task_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            self.run_cli(
+                db_path,
+                "plan",
+                "upsert",
+                "--id",
+                "SPEC-001",
+                "--title",
+                "Sparse plan",
+                "--summary",
+                "Implement the requested behavior by updating the relevant files and checking the result carefully.",
+            )
+            self.run_cli(
+                db_path,
+                "task",
+                "upsert",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Sparse task",
+                "--status",
+                "In Progress",
+            )
+            self.run_cli(
+                db_path,
+                "approval",
+                "record",
+                "--decision",
+                "approved",
+                "--prompt",
+                "Execute sparse task validation test",
+            )
+
+            validated = self.run_cli(db_path, "validate", "--json")
+            self.assertEqual(validated.returncode, 0, validated.stderr)
+            payload = json.loads(validated.stdout)
+            codes = {item["code"] for item in payload["plan_task_execute"]["warnings"]}
+            self.assertIn("plan_content_missing_guidance", codes)
+            self.assertIn("task_content_missing_fields", codes)
+            self.assertIn("plan_format", payload["plan_task_execute"]["guidance"])
+            self.assertIn("task_format", payload["plan_task_execute"]["guidance"])
+
     def test_context_command_reports_lifecycle_packet(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
@@ -379,6 +539,8 @@ level_subagent_aggressiveness = "force"
             active_prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             active_prompt_payload = json.loads(active_prompt_context.stdout)
             self.assertIn("Create or update plan state", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("request_user_input", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("combine it with the new request", "\n".join(active_prompt_payload["next_actions"]))
 
             text = self.run_cli(db_path, "context", "--event", "SessionStart")
             self.assertEqual(text.returncode, 0, text.stderr)
@@ -388,6 +550,11 @@ level_subagent_aggressiveness = "force"
             self.assertIn("never `$taplctl`", text.stdout)
             self.assertIn("configure hooks with `taplctl install user`", text.stdout)
             self.assertIn("keep workflow DB/config in the current repo workspace", text.stdout)
+
+            stop_context = self.run_cli(db_path, "context", "--event", "Stop", "--json")
+            stop_payload = json.loads(stop_context.stdout)
+            self.assertIn("Completion reports should", "\n".join(stop_payload["instructions"]))
+            self.assertIn("Archive summaries should", "\n".join(stop_payload["instructions"]))
 
             prompt_text = self.run_cli(db_path, "context", "--event", "UserPromptSubmit")
             self.assertEqual(prompt_text.returncode, 0, prompt_text.stderr)
@@ -623,6 +790,32 @@ experimental = true
                 "--status",
                 "In Progress",
             )
+            approval_blocked = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "PreToolUse",
+                "--mode",
+                "enforce",
+                "--tool",
+                "apply_patch",
+                input_text="{}",
+            )
+            self.assertEqual(approval_blocked.returncode, 2)
+            self.assertIn("execution_approval_missing", approval_blocked.stderr)
+
+            approved = self.run_cli(
+                db_path,
+                "approval",
+                "record",
+                "--decision",
+                "approved",
+                "--prompt",
+                "Execute approved edit",
+                "--json",
+            )
+            self.assertEqual(approved.returncode, 0, approved.stderr)
+
             allowed = self.run_cli(
                 db_path,
                 "hook-event",
@@ -928,6 +1121,11 @@ task_granularity = "very_granular"
             archives_payload = json.loads(archives.stdout)
             self.assertEqual(len(archives_payload["archives"]), 1)
             self.assertEqual(archives_payload["archives"][0]["slug"], "ship-auto-archive")
+            self.assertIn("Original request: Ship auto archive", archives_payload["archives"][0]["summary"])
+            self.assertIn("Selected plan: SPEC-001 Auto archive completed run", archives_payload["archives"][0]["summary"])
+            self.assertIn("Completed tasks: TASK-001 Complete implementation", archives_payload["archives"][0]["summary"])
+            self.assertIn("Verification: Stop hook archives the run.", archives_payload["archives"][0]["summary"])
+            self.assertIn("Remaining work: None", archives_payload["archives"][0]["summary"])
 
             detail = self.run_cli(db_path, "archive", "show", "--id", "ship-auto-archive", "--json")
             self.assertEqual(detail.returncode, 0, detail.stderr)

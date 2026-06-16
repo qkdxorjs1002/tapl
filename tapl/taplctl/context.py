@@ -42,6 +42,7 @@ def build_context(
 ) -> dict[str, Any]:
     state = db.status_payload(conn)
     plan_task = validation.validate_plan_task_execute(conn, settings.plan_task_execute)
+    prompt = prompt_summary(payload or {})
     return {
         "ok": True,
         "event": event,
@@ -54,8 +55,8 @@ def build_context(
         "config": settings.as_dict(),
         "plan_task_execute": plan_task,
         "instructions": instructions(settings.plan_task_execute, event=event),
-        "next_actions": next_actions(state, plan_task, event),
-        "prompt_summary": prompt_summary(payload or {}),
+        "next_actions": next_actions(state, plan_task, event, prompt),
+        "prompt_summary": prompt,
     }
 
 
@@ -112,8 +113,19 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> 
             taplctl_argument_guidance(),
             f"Required subagents must be one of: {allowed_subagents}. Do not use level names such as `level2`.",
             "Keep task status current and write tapl records in the user's language unless asked otherwise.",
+            validation.plan_format_guidance(),
+            validation.task_format_guidance(settings),
+            validation.execution_approval_guidance(settings),
             f"Plan detail: {validation.plan_detail_guidance(settings.plan_detail)}",
             f"Task splitting: {validation.task_granularity_guidance(settings.task_granularity)}",
+        ]
+
+    if event == "Stop":
+        return [
+            *base,
+            completion_report_guidance(),
+            archive_summary_guidance(),
+            "Complete, block, or skip executable tasks before stopping so archive state is accurate.",
         ]
 
     return [
@@ -123,13 +135,18 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> 
         taplctl_argument_guidance(),
         "For non-trivial work, inspect state/search, record plan state, record executable tasks, then keep task status current.",
         "Write plan, task, finding, and archive text in the user's language unless asked otherwise.",
+        validation.plan_format_guidance(),
+        validation.task_format_guidance(settings),
+        validation.execution_approval_guidance(settings),
+        completion_report_guidance(),
+        archive_summary_guidance(),
         f"Plan detail: {validation.plan_detail_guidance(settings.plan_detail)}",
         f"Task splitting: {validation.task_granularity_guidance(settings.task_granularity)}",
         f"Level subagent routing: {validation.level_subagent_guidance(settings)}",
     ]
 
 
-def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str) -> list[str]:
+def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, prompt: str = "") -> list[str]:
     actions: list[str] = []
     covered_issue_codes: set[str] = set()
     if event == "SessionStart":
@@ -141,6 +158,10 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str) -
         actions.append("Create an active workflow run before durable work.")
         return actions
 
+    if event == "UserPromptSubmit" and state.get("incomplete_tasks", 0):
+        actions.append(
+            "If this prompt is a new request rather than continuing the active run, use request_user_input before durable work to ask whether to do the remaining work first, combine it with the new request, defer/archive it, or discard the active run and start fresh."
+        )
     if not state.get("plans"):
         actions.append("Create or update plan state with `taplctl plan upsert`.")
         covered_issue_codes.add("missing_plan")
@@ -162,3 +183,17 @@ def prompt_summary(payload: dict[str, Any]) -> str:
         if isinstance(value, str):
             return value.strip()[:240]
     return ""
+
+
+def completion_report_guidance() -> str:
+    return (
+        "Completion reports should briefly cover changed files and behavior, verification commands and results, "
+        "remaining risks or blocked work, and whether the workflow was archived."
+    )
+
+
+def archive_summary_guidance() -> str:
+    return (
+        "Archive summaries should compactly capture original request, selected plan, completed tasks/results, "
+        "verification, and remaining work."
+    )
