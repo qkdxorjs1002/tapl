@@ -222,7 +222,8 @@ jobs:
           if sha_index
             lines[sha_index] = replacement_line(lines[sha_index], sha_line)
           else
-            lines.insert(url_index + 1, "#{sha_line}\n")
+            sha_insert_index = version_index > url_index ? version_index + 1 : url_index + 1
+            lines.insert(sha_insert_index, "#{sha_line}\n")
           end
 
           install_start = lines.index { |line| line.match?(/^(\s*)def install\s*$/) }
@@ -239,9 +240,16 @@ jobs:
             "#{install_indent}  wheel = Pathname.glob(\"*.whl\").first\n",
             "#{install_indent}  raise \"Could not find taplctl wheel\" unless wheel\n",
             "\n",
-            "#{install_indent}  venv = virtualenv_create(libexec, \"python3.12\")\n",
-            "#{install_indent}  venv.pip_install resources\n",
-            "#{install_indent}  venv.pip_install_and_link wheel\n",
+            "#{install_indent}  wheelhouse = buildpath/\"wheelhouse\"\n",
+            "#{install_indent}  wheelhouse.mkpath\n",
+            "#{install_indent}  resources.each do |resource|\n",
+            "#{install_indent}    resource.stage { wheelhouse.install Dir[\"*.whl\"] }\n",
+            "#{install_indent}  end\n",
+            "\n",
+            "#{install_indent}  virtualenv_create(libexec, \"python3.12\", system_site_packages: false)\n",
+            "#{install_indent}  system \"python3.12\", \"-m\", \"pip\", \"--python=\#{libexec}/bin/python\", \"install\",\n",
+            "#{install_indent}         \"--no-index\", \"--find-links=\#{wheelhouse}\", \"--no-compile\", wheel\n",
+            "#{install_indent}  bin.install_symlink libexec/\"bin/taplctl\"\n",
             "#{install_indent}end\n",
           ]
 
