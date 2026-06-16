@@ -46,8 +46,7 @@ def handle_event(
     archive: sqlite3.Row | None = None
 
     if event == "UserPromptSubmit":
-        request_summary = prompt_summary(payload)
-        db.ensure_active_run(conn, request_summary=request_summary)
+        db.ensure_active_run(conn, request_summary=db.DEFAULT_REQUEST_SUMMARY)
 
     if event in {"SessionStart", "UserPromptSubmit"}:
         resolved_settings = tapl_settings or tapl_config.TaplConfig(
@@ -97,11 +96,11 @@ def handle_event(
             message = combine_messages(message, issue_message)
         if check["errors"] and mode == "enforce":
             block = True
-        if should_auto_archive_on_stop(state, check, block):
+        if should_auto_archive_on_stop(state, check, block, payload):
             archive = db.archive_active_run(
                 conn,
                 slug=auto_archive_slug(active),
-                summary=auto_archive_summary(state),
+                summary=auto_archive_summary(state, final_result=stop_result_summary(payload)),
             )
             message = combine_messages(
                 message,
@@ -143,14 +142,22 @@ def has_execution_approval_issue(check: dict[str, Any]) -> bool:
     )
 
 
-def should_auto_archive_on_stop(state: dict[str, Any], check: dict[str, Any], block: bool) -> bool:
+def should_auto_archive_on_stop(
+    state: dict[str, Any],
+    check: dict[str, Any],
+    block: bool,
+    payload: dict[str, Any] | None = None,
+) -> bool:
+    run = state.get("active_run")
+    result = run.get("result_summary") if isinstance(run, dict) else ""
+    has_items = bool(state.get("plans") or state.get("tasks") or state.get("findings"))
+    has_simple_result = bool(str(result or "").strip() or stop_result_summary(payload or {}))
     return bool(
-        state.get("active_run")
-        and state.get("plans")
-        and state.get("tasks")
+        run
         and not state.get("incomplete_tasks", 0)
         and not check.get("errors")
         and not block
+        and (has_items or has_simple_result)
     )
 
 
@@ -162,9 +169,11 @@ def auto_archive_slug(active_run: dict[str, Any] | None) -> str:
     return slug[:80].strip("-") or "completed-run"
 
 
-def auto_archive_summary(state: dict[str, Any]) -> str:
+def auto_archive_summary(state: dict[str, Any], *, final_result: str = "") -> str:
     active_run = state.get("active_run") if isinstance(state.get("active_run"), dict) else None
     request = str(active_run.get("request_summary") or "").strip() if active_run else ""
+    run_result = str(active_run.get("result_summary") or "").strip() if active_run else ""
+    result = final_result.strip() or run_result
     plans = state.get("plans") if isinstance(state.get("plans"), list) else []
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
     completed_tasks = [task for task in tasks if task.get("status") == "Completed"]
@@ -172,12 +181,13 @@ def auto_archive_summary(state: dict[str, Any]) -> str:
 
     parts = [
         f"Original request: {request or 'archived workflow'}",
+        f"Result: {result}" if result else "",
         f"Selected plan: {summarize_items(plans, fallback='None')}",
         f"Completed tasks: {summarize_items(completed_tasks, fallback='None', include_result=True)}",
         f"Verification: {summarize_verification(completed_tasks)}",
         f"Remaining work: {'None' if remaining == 0 else str(remaining)}",
     ]
-    return compact_text("; ".join(parts), limit=1000)
+    return compact_text("; ".join(part for part in parts if part), limit=1000)
 
 
 def summarize_items(items: list[dict[str, Any]], *, fallback: str, include_result: bool = False) -> str:
@@ -200,6 +210,40 @@ def summarize_verification(tasks: list[dict[str, Any]]) -> str:
         if verification and verification not in values:
             values.append(verification)
     return ", ".join(values[:4]) if values else "Not recorded"
+
+
+def stop_result_summary(payload: dict[str, Any]) -> str:
+    for key in (
+        "result",
+        "final_result",
+        "final_message",
+        "assistant_response",
+        "response",
+        "output",
+        "summary",
+    ):
+        if key in payload:
+            text = payload_text(payload.get(key))
+            if text:
+                return compact_text(text, limit=500)
+    return ""
+
+
+def payload_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        for item in reversed(value):
+            text = payload_text(item)
+            if text:
+                return text
+    if isinstance(value, dict):
+        for key in ("content", "text", "message", "result", "summary", "output"):
+            if key in value:
+                text = payload_text(value.get(key))
+                if text:
+                    return text
+    return ""
 
 
 def compact_text(text: str, *, limit: int) -> str:

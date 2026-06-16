@@ -82,10 +82,11 @@ def format_context(packet: dict[str, Any]) -> str:
 def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
     run = state.get("active_run")
     if not run:
-        return {"present": False, "request_summary": "", "created_at": ""}
+        return {"present": False, "request_summary": "", "result_summary": "", "created_at": ""}
     return {
         "present": True,
         "request_summary": run.get("request_summary") or "",
+        "result_summary": run.get("result_summary") or "",
         "created_at": run.get("created_at") or "",
     }
 
@@ -111,6 +112,7 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> 
             *base,
             "For non-trivial work, inspect state/search first, then upsert a plan and executable tasks before durable edits.",
             taplctl_argument_guidance(),
+            "If the active run summary is `New request`, summarize the user's request and update it with `taplctl run summary --summary '<request summary>' --json`.",
             f"Required subagents must be one of: {allowed_subagents}. Do not use level names such as `level2`.",
             "Keep task status current and write tapl records in the user's language unless asked otherwise.",
             validation.plan_format_guidance(),
@@ -125,6 +127,7 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> 
             *base,
             completion_report_guidance(),
             archive_summary_guidance(),
+            "For simple requests without task records, record the final result with `taplctl run result --result '<result>' --json` before stopping so the archive can include it.",
             "Complete, block, or skip executable tasks before stopping so archive state is accurate.",
         ]
 
@@ -140,6 +143,7 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> 
         validation.execution_approval_guidance(settings),
         completion_report_guidance(),
         archive_summary_guidance(),
+        "For simple requests without task records, record the final result with `taplctl run result --result '<result>' --json` before stopping so the archive can include it.",
         f"Plan detail: {validation.plan_detail_guidance(settings.plan_detail)}",
         f"Task splitting: {validation.task_granularity_guidance(settings.task_granularity)}",
         f"Level subagent routing: {validation.level_subagent_guidance(settings)}",
@@ -158,6 +162,11 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
         actions.append("Create an active workflow run before durable work.")
         return actions
 
+    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
+    if run.get("request_summary") == db.DEFAULT_REQUEST_SUMMARY:
+        actions.append(
+            "Summarize the user's request and update the active run with `taplctl run summary --summary '<request summary>' --json`."
+        )
     if event == "UserPromptSubmit" and state.get("incomplete_tasks", 0):
         actions.append(
             "If this prompt is a new request rather than continuing the active run, use request_user_input before durable work to ask whether to do the remaining work first, combine it with the new request, defer/archive it, or discard the active run and start fresh."

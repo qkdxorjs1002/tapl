@@ -73,6 +73,17 @@ def build_parser() -> argparse.ArgumentParser:
     context_cmd.add_argument("--json", action="store_true")
     context_cmd.set_defaults(handler=cmd_context)
 
+    run = sub.add_parser("run", help="Manage the active workflow run.")
+    run_sub = run.add_subparsers(dest="run_command")
+    run_summary = run_sub.add_parser("summary", help="Update the active run request summary.")
+    run_summary.add_argument("--summary", required=True)
+    run_summary.add_argument("--json", action="store_true")
+    run_summary.set_defaults(handler=cmd_run_summary)
+    run_result = run_sub.add_parser("result", help="Update the active run result summary.")
+    run_result.add_argument("--result", required=True)
+    run_result.add_argument("--json", action="store_true")
+    run_result.set_defaults(handler=cmd_run_result)
+
     install = sub.add_parser("install", help="Install tapl workflow hooks and repo-local state.")
     install_sub = install.add_subparsers(dest="install_command")
     install_user = install_sub.add_parser("user", help="Install user-global Codex hooks.")
@@ -362,6 +373,20 @@ def cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run_summary(args: argparse.Namespace) -> int:
+    conn = open_conn(args)
+    run = db.update_active_run_summary(conn, request_summary=args.summary)
+    emit({"ok": True, "active_run": db.row_to_dict(run)}, args.json)
+    return 0
+
+
+def cmd_run_result(args: argparse.Namespace) -> int:
+    conn = open_conn(args)
+    run = db.update_active_run_summary(conn, result_summary=args.result)
+    emit({"ok": True, "active_run": db.row_to_dict(run)}, args.json)
+    return 0
+
+
 def cmd_install_user(args: argparse.Namespace) -> int:
     payload = tapl_install.install_user(
         codex_home=args.codex_home,
@@ -643,6 +668,11 @@ def humanize(payload: dict[str, Any]) -> str:
         return "\n".join(f"{item['created_at']} {item['slug']}: {item['summary']}" for item in payload["archives"]) or "no archives"
     if "results" in payload:
         return "\n".join(f"{item['stable_id']} {item['title']}" for item in payload["results"]) or "no results"
+    if "active_run" in payload:
+        run = payload["active_run"] or {}
+        request = run.get("request_summary") or "active"
+        result = run.get("result_summary") or ""
+        return f"active run: {request}" + (f"\nresult: {result}" if result else "")
     return "ok" if payload.get("ok") else str(payload)
 
 

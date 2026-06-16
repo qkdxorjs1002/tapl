@@ -202,7 +202,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(cfg.plan_task_execute.level_subagent_aggressiveness, "auto")
             self.assertEqual(cfg.plan_task_execute.plan_detail, "detailed")
             self.assertEqual(cfg.plan_task_execute.task_granularity, "granular")
-            self.assertFalse(cfg.plan_task_execute.require_execution_approval)
+            self.assertTrue(cfg.plan_task_execute.require_execution_approval)
 
     def test_approval_cli_records_status_and_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1048,6 +1048,25 @@ task_granularity = "very_granular"
             self.assertTrue(prompt_payload["context"]["active_run"]["present"])
             self.assertEqual(
                 prompt_payload["context"]["active_run"]["request_summary"],
+                "New request",
+            )
+            self.assertIn(
+                "taplctl run summary",
+                "\n".join(prompt_payload["context"]["next_actions"]),
+            )
+
+            summary = self.run_cli(
+                db_path,
+                "run",
+                "summary",
+                "--summary",
+                "Start real work",
+                "--json",
+            )
+            self.assertEqual(summary.returncode, 0, summary.stderr)
+            summary_payload = json.loads(summary.stdout)
+            self.assertEqual(
+                summary_payload["active_run"]["request_summary"],
                 "Start real work",
             )
 
@@ -1107,6 +1126,16 @@ task_granularity = "very_granular"
                 input_text='{"prompt": "Ship auto archive"}',
             )
             self.assertEqual(prompt.returncode, 0, prompt.stderr)
+
+            summary = self.run_cli(
+                db_path,
+                "run",
+                "summary",
+                "--summary",
+                "Ship auto archive",
+                "--json",
+            )
+            self.assertEqual(summary.returncode, 0, summary.stderr)
 
             plan = self.run_cli(
                 db_path,
@@ -1190,6 +1219,84 @@ task_granularity = "very_granular"
             )
             self.assertEqual(detail_payload["events"][-1]["event_type"], "Stop")
 
+    def test_stop_hook_auto_archives_simple_result_run_without_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            prompt = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Answer a simple question"}',
+            )
+            self.assertEqual(prompt.returncode, 0, prompt.stderr)
+
+            summary = self.run_cli(
+                db_path,
+                "run",
+                "summary",
+                "--summary",
+                "Answer a simple question",
+                "--json",
+            )
+            self.assertEqual(summary.returncode, 0, summary.stderr)
+
+            result = self.run_cli(
+                db_path,
+                "run",
+                "result",
+                "--result",
+                "Answered directly without creating plan or task records.",
+                "--json",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result_payload = json.loads(result.stdout)
+            self.assertEqual(
+                result_payload["active_run"]["result_summary"],
+                "Answered directly without creating plan or task records.",
+            )
+
+            stopped = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "Stop",
+                "--mode",
+                "observe",
+                "--json",
+                input_text="{}",
+            )
+            self.assertEqual(stopped.returncode, 0, stopped.stderr)
+            payload = json.loads(stopped.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["archive"]["slug"], "answer-a-simple-question")
+            self.assertIn("archived completed run", payload["message"])
+
+            archives = self.run_cli(db_path, "archive", "list", "--json")
+            self.assertEqual(archives.returncode, 0, archives.stderr)
+            archives_payload = json.loads(archives.stdout)
+            self.assertEqual(len(archives_payload["archives"]), 1)
+            self.assertIn("Original request: Answer a simple question", archives_payload["archives"][0]["summary"])
+            self.assertIn(
+                "Result: Answered directly without creating plan or task records.",
+                archives_payload["archives"][0]["summary"],
+            )
+            self.assertIn("Selected plan: None", archives_payload["archives"][0]["summary"])
+            self.assertIn("Completed tasks: None", archives_payload["archives"][0]["summary"])
+
+            detail = self.run_cli(db_path, "archive", "show", "--id", "answer-a-simple-question", "--json")
+            self.assertEqual(detail.returncode, 0, detail.stderr)
+            detail_payload = json.loads(detail.stdout)
+            self.assertEqual(detail_payload["items"], [])
+            self.assertEqual(detail_payload["archive"]["request_summary"], "Answer a simple question")
+            self.assertEqual(
+                detail_payload["archive"]["result_summary"],
+                "Answered directly without creating plan or task records.",
+            )
+
     def test_hook_event_uses_payload_cwd_for_repo_db(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -1214,7 +1321,7 @@ task_granularity = "very_granular"
             self.assertEqual(payload["context"]["prompt_summary"], "Global install workspace")
             self.assertEqual(
                 payload["context"]["active_run"]["request_summary"],
-                "Global install workspace",
+                "New request",
             )
             self.assertTrue((workspace / ".tapl" / "tapl.db").exists())
             self.assertFalse((outside / ".tapl").exists())

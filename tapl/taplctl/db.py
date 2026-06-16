@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
 TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
 DEFAULT_APPROVAL_KIND = "execution"
 APPROVAL_DECISIONS = ("approved", "rejected")
+DEFAULT_REQUEST_SUMMARY = "New request"
 
 
 def utc_now() -> str:
@@ -70,6 +71,7 @@ def migrate(conn: sqlite3.Connection) -> None:
           slug TEXT NOT NULL,
           status TEXT NOT NULL,
           request_summary TEXT NOT NULL DEFAULT '',
+          result_summary TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           archived_at TEXT
@@ -155,6 +157,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         """
     )
 
+    ensure_column(conn, "workflow_runs", "result_summary", "TEXT NOT NULL DEFAULT ''")
     dedupe_active_runs(conn)
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_single_active_run ON workflow_runs(status) WHERE status = 'active'"
@@ -163,6 +166,12 @@ def migrate(conn: sqlite3.Connection) -> None:
     set_meta(conn, "embedding_model", DEFAULT_EMBEDDING_MODEL)
     set_meta(conn, "embedding_dimension", str(DEFAULT_EMBEDDING_DIMENSION))
     conn.commit()
+
+
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
@@ -215,7 +224,7 @@ def ensure_active_run(
     conn: sqlite3.Connection,
     *,
     slug: str = "active",
-    request_summary: str = "",
+    request_summary: str = DEFAULT_REQUEST_SUMMARY,
 ) -> sqlite3.Row:
     existing = active_run(conn)
     if existing:
@@ -243,6 +252,38 @@ def ensure_active_run(
         if existing:
             return existing
         raise
+    conn.commit()
+    return active_run(conn)  # type: ignore[return-value]
+
+
+def update_active_run_summary(
+    conn: sqlite3.Connection,
+    *,
+    request_summary: str | None = None,
+    result_summary: str | None = None,
+) -> sqlite3.Row:
+    run = active_run(conn)
+    if not run:
+        raise ValueError("no active workflow run to update")
+
+    updates: list[str] = []
+    params: list[Any] = []
+    if request_summary is not None:
+        updates.append("request_summary = ?")
+        params.append(request_summary.strip())
+    if result_summary is not None:
+        updates.append("result_summary = ?")
+        params.append(result_summary.strip())
+    if not updates:
+        return run
+
+    updates.append("updated_at = ?")
+    params.append(utc_now())
+    params.append(run["id"])
+    conn.execute(
+        f"UPDATE workflow_runs SET {', '.join(updates)} WHERE id = ?",
+        tuple(params),
+    )
     conn.commit()
     return active_run(conn)  # type: ignore[return-value]
 
@@ -655,7 +696,7 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
 
 def list_archives(conn: sqlite3.Connection, limit: int | None = None) -> list[dict[str, Any]]:
     sql = """
-        SELECT a.*, r.request_summary
+        SELECT a.*, r.request_summary, r.result_summary
         FROM archives a
         JOIN workflow_runs r ON r.id = a.run_id
         ORDER BY a.created_at DESC
@@ -677,6 +718,7 @@ def archive_detail(conn: sqlite3.Connection, archive_id_or_slug: str) -> dict[st
           a.summary,
           a.created_at,
           r.request_summary,
+          r.result_summary,
           r.slug AS run_slug,
           r.created_at AS run_created_at,
           r.updated_at AS run_updated_at,
