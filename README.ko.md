@@ -29,8 +29,8 @@ agent에게 제공합니다.
 - `taplctl`: agent, hook, 사람, VS Code viewer가 함께 사용하는 CLI.
 - `.tapl/tapl.db`: active run, plan, task, finding, approval, event, archive,
   embedding을 저장하는 repo-local SQLite DB.
-- Codex hooks: `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
-  `PermissionRequest`, `PostToolUse`, `Stop` lifecycle wiring.
+- Codex hooks: `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`,
+  `PostToolUse`, `Stop` lifecycle wiring.
 - Lifecycle context: 현재 repo DB와 config에서 생성되는 짧은 상태 기반 안내.
 - Search/archive 도구: 현재 작업과 완료된 작업을 FTS 및 semantic search로 찾는 기능.
 
@@ -80,7 +80,9 @@ Codex 작업을 감사 가능하고 복구 가능하게 만들어야 할 때 `ta
 
 설치에 사용되는 source template은 `tapl/.codex`와 `tapl/.tapl/config.toml`에
 있습니다. `taplctl install user`와 `taplctl install repo`는 이 template을 사용자
-Codex home 또는 대상 저장소에 필요한 형태로 복사합니다.
+Codex home, 사용자 tapl config 디렉터리, 또는 대상 저장소에 필요한 형태로
+복사합니다. Runtime config는 repo `.tapl/config.toml`을 먼저 읽고, 없으면
+`~/.tapl/config.toml`을 읽습니다.
 
 ## 설치방법
 
@@ -114,9 +116,9 @@ taplctl install repo
 taplctl doctor --json
 ```
 
-`install user`는 사용자 레벨 Codex hook과 agent template을 기록합니다.
-`install repo`는 repo-local hook/config 파일을 만들고 `.tapl/tapl.db`를
-초기화합니다.
+`install user`는 사용자 레벨 Codex hook과 agent template 및
+`~/.tapl/config.toml`을 기록합니다. `install repo`는 repo-local hook/config
+파일을 만들고 `.tapl/tapl.db`를 초기화합니다.
 
 Codex 설치 병합 정책:
 

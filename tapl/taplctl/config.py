@@ -78,8 +78,40 @@ def default_config_path(start: Path | None = None) -> Path:
     return db.find_repo_root(start) / CONFIG_RELATIVE
 
 
-def load(path: Path | str | None = None, *, start: Path | None = None) -> TaplConfig:
-    config_path = Path(path) if path else default_config_path(start)
+def user_config_path(home: Path | None = None) -> Path:
+    return (home or Path.home()).expanduser() / CONFIG_RELATIVE
+
+
+def default_config_paths(start: Path | None = None, *, home: Path | None = None) -> tuple[Path, Path]:
+    return (
+        default_config_path(start),
+        user_config_path(home),
+    )
+
+
+def resolve_config_path(
+    path: Path | str | None = None,
+    *,
+    start: Path | None = None,
+    home: Path | None = None,
+) -> Path:
+    if path:
+        return Path(path).expanduser()
+
+    candidates = default_config_paths(start, home=home)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def load(
+    path: Path | str | None = None,
+    *,
+    start: Path | None = None,
+    home: Path | None = None,
+) -> TaplConfig:
+    config_path = resolve_config_path(path, start=start, home=home)
     data: dict[str, Any] = {}
     exists = config_path.exists()
 

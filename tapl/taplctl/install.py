@@ -18,7 +18,6 @@ from . import config, db
 
 DEFAULT_HOOK_MODE = "observe"
 HOOK_EVENTS: tuple[dict[str, str | None], ...] = (
-    {"event": "SessionStart", "matcher": "startup|resume|clear|compact"},
     {"event": "UserPromptSubmit", "matcher": None},
     {"event": "PreToolUse", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit"},
     {"event": "PermissionRequest", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit"},
@@ -42,16 +41,19 @@ def install_user(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     target = (codex_home or Path.home() / ".codex").expanduser()
+    tapl_config_path = config.user_config_path(target.parent)
     command = resolved_taplctl_command(taplctl_command)
     hooks_path = target / "hooks.json"
     files = [
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
         *install_static_codex_templates(target, force=force, dry_run=dry_run),
+        write_text_if_needed(tapl_config_path, default_config_text(), force=force, dry_run=dry_run),
     ]
     return {
         "ok": True,
         "install": "user",
         "codex_home": str(target),
+        "tapl_config": str(tapl_config_path),
         "taplctl_command": command,
         "mode": mode,
         "force": force,
@@ -181,31 +183,54 @@ def merge_hooks(existing: dict[str, Any], managed: dict[str, Any]) -> dict[str, 
     if not isinstance(existing_hooks, dict):
         existing_hooks = {}
 
-    hooks = dict(existing_hooks)
+    hooks: dict[str, Any] = {}
+    for event, current_entries in existing_hooks.items():
+        if not isinstance(current_entries, list):
+            hooks[event] = current_entries
+            continue
+        preserved = [
+            stripped
+            for entry in current_entries
+            if (stripped := strip_tapl_hooks_from_entry(entry)) is not None
+        ]
+        if preserved:
+            hooks[event] = preserved
+
     for event, managed_entries in managed["hooks"].items():
         current_entries = hooks.get(event, [])
         if not isinstance(current_entries, list):
             current_entries = []
-        preserved = [entry for entry in current_entries if not is_tapl_hook_entry(entry)]
-        hooks[event] = [*preserved, *managed_entries]
+        hooks[event] = [*current_entries, *managed_entries]
 
     merged["hooks"] = hooks
     return merged
 
 
-def is_tapl_hook_entry(entry: Any) -> bool:
+def strip_tapl_hooks_from_entry(entry: Any) -> Any | None:
     if not isinstance(entry, dict):
-        return False
+        return entry
     hooks = entry.get("hooks")
     if not isinstance(hooks, list):
+        return entry
+
+    preserved_hooks = [hook for hook in hooks if not is_tapl_hook_command_entry(hook)]
+    if len(preserved_hooks) == len(hooks):
+        return entry
+    if not preserved_hooks:
+        return None
+
+    updated = dict(entry)
+    updated["hooks"] = preserved_hooks
+    return updated
+
+
+def is_tapl_hook_command_entry(hook: Any) -> bool:
+    if not isinstance(hook, dict):
         return False
-    for hook in hooks:
-        if not isinstance(hook, dict):
-            continue
-        command = hook.get("command")
-        if isinstance(command, str) and ("tapl_hook.py" in command or ("taplctl" in command and "hook-event" in command)):
-            return True
-    return False
+    command = hook.get("command")
+    return isinstance(command, str) and (
+        "tapl_hook.py" in command or ("taplctl" in command and "hook-event" in command)
+    )
 
 
 def read_json(path: Path) -> dict[str, Any]:

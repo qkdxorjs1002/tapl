@@ -150,6 +150,48 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(cfg.plan_task_execute.plan_detail, "detailed")
             self.assertEqual(cfg.plan_task_execute.task_granularity, "granular")
 
+    def test_config_loads_user_global_when_repo_config_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            home = base / "home"
+            repo.mkdir()
+            user_config = home / ".tapl" / "config.toml"
+            user_config.parent.mkdir(parents=True)
+            user_config.write_text(
+                """
+[search]
+mode = "bm25"
+
+[plan-task-execute]
+plan-detail = "minimal"
+""",
+                encoding="utf-8",
+            )
+
+            cfg = tapl_config.load(start=repo, home=home)
+            self.assertTrue(cfg.exists)
+            self.assertEqual(cfg.path, str(user_config))
+            self.assertEqual(cfg.search.mode, "bm25")
+            self.assertEqual(cfg.plan_task_execute.plan_detail, "minimal")
+
+    def test_config_prefers_repo_config_over_user_global(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            home = base / "home"
+            repo_config = repo / ".tapl" / "config.toml"
+            user_config = home / ".tapl" / "config.toml"
+            repo_config.parent.mkdir(parents=True)
+            user_config.parent.mkdir(parents=True)
+            repo_config.write_text('[search]\nmode = "word"\n', encoding="utf-8")
+            user_config.write_text('[search]\nmode = "bm25"\n', encoding="utf-8")
+
+            cfg = tapl_config.load(start=repo, home=home)
+            self.assertTrue(cfg.exists)
+            self.assertEqual(cfg.path, str(repo_config.resolve()))
+            self.assertEqual(cfg.search.mode, "word")
+
     def test_config_search_mode_is_applied(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
@@ -377,8 +419,14 @@ level_subagent_aggressiveness = "force"
             hooks = json.loads((codex_home / "hooks.json").read_text(encoding="utf-8"))
             prompt_hook = hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
             self.assertEqual(prompt_hook, "taplctl hook-event --event UserPromptSubmit --mode observe")
+            self.assertNotIn("SessionStart", hooks["hooks"])
             self.assertNotIn("tapl_hook.py", json.dumps(hooks))
             self.assertTrue((codex_home / "config.toml").exists())
+            self.assertEqual(payload["tapl_config"], str(base / "home" / ".tapl" / "config.toml"))
+            self.assertIn(
+                "task_granularity",
+                (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8"),
+            )
             self.assertTrue((codex_home / "agents" / "senior-worker.toml").exists())
 
     def test_install_user_merges_existing_codex_config_without_overwriting_user_values(self) -> None:
@@ -478,6 +526,21 @@ experimental = true
                 json.dumps(
                     {
                         "hooks": {
+                            "SessionStart": [
+                                {
+                                    "matcher": "startup|resume|clear|compact",
+                                    "hooks": [
+                                        {
+                                            "type": "command",
+                                            "command": "echo keep session",
+                                        },
+                                        {
+                                            "type": "command",
+                                            "command": "taplctl hook-event --event SessionStart --mode observe",
+                                        },
+                                    ],
+                                }
+                            ],
                             "PreToolUse": [
                                 {
                                     "hooks": [
@@ -511,6 +574,12 @@ experimental = true
             self.assertEqual(payload["install"], "repo")
 
             hooks = json.loads((repo / ".codex" / "hooks.json").read_text(encoding="utf-8"))
+            session_commands = [
+                hook["command"]
+                for entry in hooks["hooks"]["SessionStart"]
+                for hook in entry["hooks"]
+            ]
+            self.assertEqual(session_commands, ["echo keep session"])
             pre_tool_commands = [hook["command"] for entry in hooks["hooks"]["PreToolUse"] for hook in entry["hooks"]]
             self.assertIn("echo keep", pre_tool_commands)
             self.assertIn(

@@ -28,8 +28,8 @@ resumes, and long-running repository work.
 - `taplctl`: the CLI used by agents, hooks, humans, and the VS Code viewer.
 - `.tapl/tapl.db`: a repo-local SQLite database for active runs, plans, tasks,
   findings, approvals, events, archives, and embeddings.
-- Codex hooks: lifecycle wiring for `SessionStart`, `UserPromptSubmit`,
-  `PreToolUse`, `PermissionRequest`, `PostToolUse`, and `Stop`.
+- Codex hooks: lifecycle wiring for `UserPromptSubmit`, `PreToolUse`,
+  `PermissionRequest`, `PostToolUse`, and `Stop`.
 - Lifecycle context: short state-aware instructions generated from the current
   repo DB and config.
 - Search and archive tools: FTS and semantic search over current and completed
@@ -84,7 +84,9 @@ state that tools can inspect.
 
 The source templates used by installation live in `tapl/.codex` and
 `tapl/.tapl/config.toml`. `taplctl install user` and `taplctl install repo`
-copy those templates into the user Codex home or target repository as needed.
+copy those templates into the user Codex home, user tapl config directory, or
+target repository as needed. Runtime config is resolved from the repo
+`.tapl/config.toml` first, then `~/.tapl/config.toml`.
 
 ## Installation
 
@@ -118,8 +120,9 @@ taplctl install repo
 taplctl doctor --json
 ```
 
-`install user` writes user-level Codex hook and agent templates. `install repo`
-writes repo-local hook/config files and initializes `.tapl/tapl.db`.
+`install user` writes user-level Codex hook and agent templates plus
+`~/.tapl/config.toml`. `install repo` writes repo-local hook/config files and
+initializes `.tapl/tapl.db`.
 
 Codex install merge policy:
 
