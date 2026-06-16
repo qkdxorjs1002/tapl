@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from taplctl import config as tapl_config
+from taplctl import __version__, config as tapl_config
 
 
 class TaplCliTests(unittest.TestCase):
@@ -49,6 +49,17 @@ class TaplCliTests(unittest.TestCase):
             env=self.tapl_env(),
             cwd=str(cwd) if cwd else None,
         )
+
+    def test_version_comes_from_pyproject(self) -> None:
+        with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+            pyproject = tomllib.load(pyproject_file)
+        expected_version = pyproject["project"]["version"]
+
+        self.assertEqual(__version__, expected_version)
+
+        version = self.run_taplctl("--version")
+        self.assertEqual(version.returncode, 0, version.stderr)
+        self.assertEqual(version.stdout.strip(), f"taplctl {expected_version}")
 
     def test_init_task_status_and_search(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
