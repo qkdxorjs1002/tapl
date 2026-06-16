@@ -147,9 +147,7 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str) -
     if not state.get("tasks"):
         actions.append("Create executable task state with `taplctl task upsert` before durable edits.")
     if state.get("incomplete_tasks", 0):
-        actions.append("Complete, block, or skip remaining tasks before archiving.")
-    if state.get("tasks") and not state.get("incomplete_tasks", 0) and event == "Stop":
-        actions.append("Archive completed work with `taplctl archive create`.")
+        actions.append("Complete, block, or skip remaining tasks before Stop can auto-archive.")
 
     for issue in (plan_task.get("issues") or [])[:3]:
         if issue.get("code") in covered_issue_codes:

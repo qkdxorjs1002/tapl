@@ -703,6 +703,92 @@ task_granularity = "very_granular"
             self.assertTrue(payload["ok"])
             self.assertIn("missing_plan", payload["message"])
 
+    def test_stop_hook_auto_archives_completed_plan_task_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            prompt = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Ship auto archive"}',
+            )
+            self.assertEqual(prompt.returncode, 0, prompt.stderr)
+
+            plan = self.run_cli(
+                db_path,
+                "plan",
+                "upsert",
+                "--id",
+                "SPEC-001",
+                "--title",
+                "Auto archive completed run",
+                "--summary",
+                "Plan a completed request from planning to task execution and archive it automatically.",
+                "--body",
+                "Requirements trace, execution order, risks, and validation are documented so the completed run is eligible for Stop hook archive.",
+                "--json",
+            )
+            self.assertEqual(plan.returncode, 0, plan.stderr)
+
+            task = self.run_cli(
+                db_path,
+                "task",
+                "upsert",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Complete implementation",
+                "--status",
+                "Completed",
+                "--spec-id",
+                "SPEC-001",
+                "--goal",
+                "Finish the requested implementation.",
+                "--verification",
+                "Stop hook archives the run.",
+                "--result",
+                "Implementation and verification are complete.",
+                "--json",
+            )
+            self.assertEqual(task.returncode, 0, task.stderr)
+
+            stopped = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "Stop",
+                "--mode",
+                "observe",
+                "--json",
+                input_text="{}",
+            )
+            self.assertEqual(stopped.returncode, 0, stopped.stderr)
+            payload = json.loads(stopped.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["archive"]["slug"], "ship-auto-archive")
+            self.assertIn("archived completed run", payload["message"])
+
+            status = self.run_cli(db_path, "status", "--json")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            status_payload = json.loads(status.stdout)
+            self.assertIsNone(status_payload["active_run"])
+            self.assertEqual(len(status_payload["archives"]), 1)
+            self.assertEqual(status_payload["archives"][0]["slug"], "ship-auto-archive")
+
+            detail = self.run_cli(db_path, "archive", "show", "--id", "ship-auto-archive", "--json")
+            self.assertEqual(detail.returncode, 0, detail.stderr)
+            detail_payload = json.loads(detail.stdout)
+            self.assertEqual(detail_payload["archive"]["request_summary"], "Ship auto archive")
+            self.assertEqual(
+                [(item["kind"], item["stable_id"], item["archived"]) for item in detail_payload["items"]],
+                [("plan", "SPEC-001", 1), ("task", "TASK-001", 1)],
+            )
+            self.assertEqual(detail_payload["events"][-1]["event_type"], "Stop")
+
     def test_hook_event_uses_payload_cwd_for_repo_db(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

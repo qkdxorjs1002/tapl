@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any
 
@@ -41,6 +42,8 @@ def handle_event(
     message = ""
     block = False
     context_packet: dict[str, Any] | None = None
+    record_run_id: str | None = None
+    archive: sqlite3.Row | None = None
 
     if event in {"SessionStart", "UserPromptSubmit"}:
         request_summary = prompt_summary(payload) if event == "UserPromptSubmit" else ""
@@ -78,7 +81,11 @@ def handle_event(
                 block = True
 
     if event == "Stop":
-        remaining = db.incomplete_task_count(conn)
+        state = db.status_payload(conn)
+        active = state.get("active_run")
+        if active:
+            record_run_id = active["id"]
+        remaining = state.get("incomplete_tasks", 0)
         if remaining:
             message = f"tapl: {remaining} task(s) remain incomplete; update task state or archive before stopping."
             block = mode == "enforce"
@@ -88,6 +95,16 @@ def handle_event(
             message = combine_messages(message, issue_message)
         if check["errors"] and mode == "enforce":
             block = True
+        if should_auto_archive_on_stop(state, check, block):
+            archive = db.archive_active_run(
+                conn,
+                slug=auto_archive_slug(active),
+                summary=auto_archive_summary(active),
+            )
+            message = combine_messages(
+                message,
+                f"tapl: archived completed run as {archive['slug']}.",
+            )
 
     db.record_event(
         conn,
@@ -96,6 +113,7 @@ def handle_event(
         mode=mode,
         payload=payload,
         message=message,
+        run_id=record_run_id,
     )
     outcome = {
         "ok": not block,
@@ -107,11 +125,38 @@ def handle_event(
     }
     if context_packet is not None:
         outcome["context"] = context_packet
+    if archive is not None:
+        outcome["archive"] = db.row_to_dict(archive)
     return outcome
 
 
 def combine_messages(*messages: str) -> str:
     return "\n".join(message for message in messages if message)
+
+
+def should_auto_archive_on_stop(state: dict[str, Any], check: dict[str, Any], block: bool) -> bool:
+    return bool(
+        state.get("active_run")
+        and state.get("plans")
+        and state.get("tasks")
+        and not state.get("incomplete_tasks", 0)
+        and not check.get("errors")
+        and not block
+    )
+
+
+def auto_archive_slug(active_run: dict[str, Any] | None) -> str:
+    source = ""
+    if active_run:
+        source = str(active_run.get("request_summary") or active_run.get("slug") or "")
+    slug = re.sub(r"[^a-zA-Z0-9가-힣_-]+", "-", source.strip()).strip("-").lower()
+    return slug[:80].strip("-") or "completed-run"
+
+
+def auto_archive_summary(active_run: dict[str, Any] | None) -> str:
+    if active_run and active_run.get("request_summary"):
+        return f"Auto-archived completed workflow: {active_run['request_summary']}"
+    return "Auto-archived completed workflow."
 
 
 def infer_tool_name(payload: dict[str, Any]) -> str | None:
