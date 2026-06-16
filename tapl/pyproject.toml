@@ -1,6 +1,6 @@
 [project]
 name = "taplctl"
-version = "0.2.0"
+version = "0.2.1"
 description = "Codex workflow harness backed by repo-local SQLite state."
 requires-python = ">=3.11"
 dependencies = [
