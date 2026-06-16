@@ -225,6 +225,26 @@ jobs:
             lines.insert(url_index + 1, "#{sha_line}\n")
           end
 
+          install_start = lines.index { |line| line.match?(/^(\s*)def install\s*$/) }
+          raise "Could not find install block in #{file}" unless install_start
+
+          install_indent = lines[install_start].match(/^(\s*)/)[1]
+          install_end = ((install_start + 1)...lines.length).find do |index|
+            lines[index].match?(/^#{Regexp.escape(install_indent)}end\s*$/)
+          end
+          raise "Could not find end of install block in #{file}" unless install_end
+
+          lines[install_start..install_end] = [
+            "#{install_indent}def install\n",
+            "#{install_indent}  wheel = Pathname.glob(\"*.whl\").first\n",
+            "#{install_indent}  raise \"Could not find taplctl wheel\" unless wheel\n",
+            "\n",
+            "#{install_indent}  venv = virtualenv_create(libexec, \"python3.12\")\n",
+            "#{install_indent}  venv.pip_install resources\n",
+            "#{install_indent}  venv.pip_install_and_link wheel\n",
+            "#{install_indent}end\n",
+          ]
+
           File.write(file, lines.join)
           RUBY
 
