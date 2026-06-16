@@ -174,7 +174,11 @@ def build_parser() -> argparse.ArgumentParser:
 def add_install_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--taplctl-command", default=None, help="Command used by generated Codex hooks.")
     parser.add_argument("--mode", choices=("observe", "enforce"), default=tapl_install.DEFAULT_HOOK_MODE)
-    parser.add_argument("--force", action="store_true", help="Overwrite existing tapl config files.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite static templates and make managed Codex config keys use tapl defaults.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
 

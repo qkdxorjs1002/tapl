@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -311,6 +312,92 @@ level_subagent_aggressiveness = "force"
             self.assertNotIn("tapl_hook.py", json.dumps(hooks))
             self.assertTrue((codex_home / "config.toml").exists())
             self.assertTrue((codex_home / "agents" / "senior-worker.toml").exists())
+
+    def test_install_user_merges_existing_codex_config_without_overwriting_user_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            codex_home = base / "home" / ".codex"
+            codex_home.mkdir(parents=True)
+            (codex_home / "config.toml").write_text(
+                """
+# user codex preferences
+model = "gpt-5"
+approval_policy = "on-request"
+
+[features]
+multi_agent = false
+""".lstrip(),
+                encoding="utf-8",
+            )
+            db_path = base / "tapl.db"
+
+            installed = self.run_cli(
+                db_path,
+                "install",
+                "user",
+                "--codex-home",
+                str(codex_home),
+                "--taplctl-command",
+                "taplctl",
+                "--json",
+            )
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            payload = json.loads(installed.stdout)
+            config_result = next(file for file in payload["files"] if file["path"].endswith("config.toml"))
+            self.assertEqual(config_result["action"], "merged")
+
+            config_text = (codex_home / "config.toml").read_text(encoding="utf-8")
+            self.assertIn("# user codex preferences", config_text)
+            parsed = tomllib.loads(config_text)
+            self.assertEqual(parsed["model"], "gpt-5")
+            self.assertEqual(parsed["approval_policy"], "on-request")
+            self.assertEqual(parsed["model_reasoning_effort"], "xhigh")
+            self.assertEqual(parsed["personality"], "pragmatic")
+            self.assertFalse(parsed["features"]["multi_agent"])
+            self.assertTrue(parsed["features"]["default_mode_request_user_input"])
+
+    def test_install_user_force_applies_managed_codex_config_values_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            codex_home = base / "home" / ".codex"
+            codex_home.mkdir(parents=True)
+            (codex_home / "config.toml").write_text(
+                """
+model = "gpt-5"
+approval_policy = "on-request"
+
+[features]
+multi_agent = false
+experimental = true
+""".lstrip(),
+                encoding="utf-8",
+            )
+            db_path = base / "tapl.db"
+
+            installed = self.run_cli(
+                db_path,
+                "install",
+                "user",
+                "--codex-home",
+                str(codex_home),
+                "--taplctl-command",
+                "taplctl",
+                "--force",
+                "--json",
+            )
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            payload = json.loads(installed.stdout)
+            config_result = next(file for file in payload["files"] if file["path"].endswith("config.toml"))
+            self.assertEqual(config_result["action"], "updated")
+
+            parsed = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
+            self.assertEqual(parsed["model"], "gpt-5.5")
+            self.assertEqual(parsed["approval_policy"], "on-request")
+            self.assertEqual(parsed["model_reasoning_effort"], "xhigh")
+            self.assertEqual(parsed["personality"], "pragmatic")
+            self.assertTrue(parsed["features"]["multi_agent"])
+            self.assertTrue(parsed["features"]["experimental"])
+            self.assertTrue(parsed["features"]["default_mode_request_user_input"])
 
     def test_install_repo_writes_hooks_config_and_db(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

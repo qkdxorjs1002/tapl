@@ -118,6 +118,19 @@ taplctl doctor --json
 `install repo`는 repo-local hook/config 파일을 만들고 `.tapl/tapl.db`를
 초기화합니다.
 
+Codex 설치 병합 정책:
+
+- `hooks.json`은 managed merge를 합니다. 기존 non-tapl hook은 보존하고,
+  tapl이 관리하는 hook만 교체합니다.
+- `config.toml`은 TOML 병합을 합니다. 파일이 없으면 tapl template으로
+  만들고, 파일이 있으면 기존 사용자 값이 우선하며 tapl template에만 있는
+  누락 key만 추가합니다. `[features]` 같은 nested table은 재귀 병합합니다.
+- `--force`는 managed `config.toml` key에 대해 tapl template 값을 우선하게
+  하되, 관련 없는 사용자 key는 보존합니다. 기존 TOML을 파싱할 수 없으면
+  `--force`가 template으로 교체합니다.
+- Agent template은 기본적으로 create-or-skip이며, `--force`를 주면
+  덮어씁니다.
+
 Source 개발:
 
 ```sh

@@ -121,6 +121,19 @@ taplctl doctor --json
 `install user` writes user-level Codex hook and agent templates. `install repo`
 writes repo-local hook/config files and initializes `.tapl/tapl.db`.
 
+Codex install merge policy:
+
+- `hooks.json` is managed-merged: existing non-tapl hooks are preserved, and
+  tapl-managed hooks are replaced.
+- `config.toml` is TOML-merged: if missing, it is created from the tapl
+  template; if present, existing user values win and only missing tapl template
+  keys are added. Nested tables such as `[features]` are merged recursively.
+- `--force` makes tapl template values win for managed `config.toml` keys while
+  preserving unrelated user keys. If the existing TOML cannot be parsed,
+  `--force` replaces it with the template.
+- Agent templates are create-or-skip by default and are overwritten with
+  `--force`.
+
 For source development:
 
 ```sh
