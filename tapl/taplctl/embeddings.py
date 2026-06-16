@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import os
 import sqlite3
+import sys
+from collections.abc import Iterator
 from typing import Any
 
 from . import config as tapl_config, db
+
+_MODEL_LOAD_PROGRESS_MARKERS = ("Loading weights:",)
 
 
 def dependency_status() -> dict[str, Any]:
@@ -267,7 +273,63 @@ def load_model(*, prefer_local: bool):
 
     if prefer_local:
         try:
-            return SentenceTransformer(db.DEFAULT_EMBEDDING_MODEL, local_files_only=True)
+            with suppress_model_load_progress():
+                return SentenceTransformer(db.DEFAULT_EMBEDDING_MODEL, local_files_only=True)
         except Exception:
             pass
-    return SentenceTransformer(db.DEFAULT_EMBEDDING_MODEL)
+    with suppress_model_load_progress():
+        return SentenceTransformer(db.DEFAULT_EMBEDDING_MODEL)
+
+
+@contextlib.contextmanager
+def suppress_model_load_progress() -> Iterator[None]:
+    stdout = sys.stdout
+    stderr = sys.stderr
+    stdout_filter = _ModelLoadProgressFilter(stdout)
+    stderr_filter = _ModelLoadProgressFilter(stderr)
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(_suppress_stream_fd(stdout))
+        stack.enter_context(_suppress_stream_fd(stderr))
+        stack.enter_context(contextlib.redirect_stdout(stdout_filter))
+        stack.enter_context(contextlib.redirect_stderr(stderr_filter))
+        yield
+
+
+@contextlib.contextmanager
+def _suppress_stream_fd(stream: Any) -> Iterator[None]:
+    try:
+        fd = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        yield
+        return
+
+    stream.flush()
+    saved_fd = os.dup(fd)
+    try:
+        with open(os.devnull, "w", encoding="utf-8") as devnull:
+            os.dup2(devnull.fileno(), fd)
+            yield
+    finally:
+        stream.flush()
+        os.dup2(saved_fd, fd)
+        os.close(saved_fd)
+
+
+class _ModelLoadProgressFilter:
+    def __init__(self, stream: Any) -> None:
+        self.stream = stream
+        self._suppress_until_newline = False
+
+    def write(self, text: str) -> int:
+        should_suppress = self._suppress_until_newline or any(
+            marker in text for marker in _MODEL_LOAD_PROGRESS_MARKERS
+        )
+        if should_suppress:
+            self._suppress_until_newline = "\n" not in text
+            return len(text)
+
+        self.stream.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        self.stream.flush()

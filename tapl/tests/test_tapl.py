@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sqlite3
@@ -7,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import types
 import unittest
 from pathlib import Path
 
@@ -137,6 +140,56 @@ class TaplCliTests(unittest.TestCase):
             item = json.loads(detail.stdout)["item"]
             self.assertEqual(item["stable_id"], "TASK-001")
             self.assertEqual(item["goal"], "Create DB-backed workflow state")
+
+    def test_load_model_suppresses_loading_weights_progress(self) -> None:
+        from taplctl import embeddings
+
+        class FakeSentenceTransformer:
+            def __init__(self, model_name: str, **kwargs: object) -> None:
+                self.model_name = model_name
+                self.kwargs = kwargs
+                sys.stderr.write("\rLoading weights: 100%|fake|\n")
+                sys.stderr.write("model loaded\n")
+
+        fake_module = types.ModuleType("sentence_transformers")
+        fake_module.SentenceTransformer = FakeSentenceTransformer
+        original_module = sys.modules.get("sentence_transformers")
+        sys.modules["sentence_transformers"] = fake_module
+        stderr = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(stderr):
+                model = embeddings.load_model(prefer_local=True)
+        finally:
+            if original_module is None:
+                sys.modules.pop("sentence_transformers", None)
+            else:
+                sys.modules["sentence_transformers"] = original_module
+
+        self.assertIsInstance(model, FakeSentenceTransformer)
+        self.assertEqual(model.kwargs["local_files_only"], True)
+        self.assertNotIn("Loading weights", stderr.getvalue())
+        self.assertIn("model loaded", stderr.getvalue())
+
+        fd_progress = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import os\n"
+                    "from taplctl.embeddings import suppress_model_load_progress\n"
+                    "with suppress_model_load_progress():\n"
+                    "    os.write(2, b'\\rLoading weights: 100%|fake|\\n')\n"
+                    "print('done')\n"
+                ),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=self.tapl_env(),
+        )
+        self.assertEqual(fd_progress.returncode, 0, fd_progress.stderr)
+        self.assertNotIn("Loading weights", fd_progress.stderr)
+        self.assertEqual(fd_progress.stdout.strip(), "done")
 
     def test_config_defaults_when_file_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
