@@ -106,6 +106,8 @@ For Homebrew:
 brew tap qkdxorjs1002/tap
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
+# with semantic search dependency
+brew install taplctl-semantic
 ```
 
 Then install Codex workflow wiring:

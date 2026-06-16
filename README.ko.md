@@ -102,6 +102,8 @@ Homebrew 사용시:
 brew tap qkdxorjs1002/tap
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
+# 또는 의미 검색 사용시
+brew install taplctl-semantic
 ```
 
 그 다음 Codex workflow wiring을 설치합니다.
