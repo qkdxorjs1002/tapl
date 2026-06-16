@@ -169,98 +169,117 @@ jobs:
         run: |
           set -euo pipefail
 
-          brew_file=""
-          for candidate in \
-            "homebrew-tap/Formula/taplctl.rb" \
-            "homebrew-tap/Casks/taplctl.rb"
-          do
-            if [[ -f "${candidate}" ]]; then
-              brew_file="${candidate}"
-              break
-            fi
-          done
+          brew_files=()
+          if [[ -f "homebrew-tap/Formula/taplctl.rb" ]]; then
+            brew_files+=("homebrew-tap/Formula/taplctl.rb")
+          elif [[ -f "homebrew-tap/Casks/taplctl.rb" ]]; then
+            brew_files+=("homebrew-tap/Casks/taplctl.rb")
+          fi
+          if [[ -f "homebrew-tap/Formula/taplctl-semantic.rb" ]]; then
+            brew_files+=("homebrew-tap/Formula/taplctl-semantic.rb")
+          fi
 
-          if [[ -z "${brew_file}" ]]; then
+          if [[ "${#brew_files[@]}" -eq 0 ]]; then
             echo "Could not find Formula/taplctl.rb or Casks/taplctl.rb in qkdxorjs1002/homebrew-tap." >&2
             exit 1
           fi
 
-          BREW_FILE="${brew_file}" ruby <<'RUBY'
-          file = ENV.fetch("BREW_FILE")
+          ruby "${brew_files[@]}" <<'RUBY'
+          files = ARGV
           version = ENV.fetch("RELEASE_VERSION")
           wheel_url = ENV.fetch("WHEEL_URL")
           wheel_sha256 = ENV.fetch("WHEEL_SHA256")
-
-          text = File.read(file)
-          lines = text.lines
 
           def replacement_line(line, content)
             line.end_with?("\n") ? "#{content}\n" : content
           end
 
-          version_index = lines.index { |line| line.match?(/^(\s*)version\s+["'][^"']+["'](.*)$/) }
-          raise "Could not update version in #{file}" unless version_index
+          def update_formula(file, version, wheel_url, wheel_sha256)
+            semantic = File.basename(file) == "taplctl-semantic.rb"
+            text = File.read(file)
+            lines = text.lines
 
-          version_match = lines[version_index].match(/^(\s*)version\s+["'][^"']+["'](.*)$/)
-          lines[version_index] = replacement_line(
-            lines[version_index],
-            "#{version_match[1]}version \"#{version}\"#{version_match[2]}",
-          )
+            version_index = lines.index { |line| line.match?(/^(\s*)version\s+["'][^"']+["'](.*)$/) }
+            raise "Could not update version in #{file}" unless version_index
 
-          url_index = lines.index { |line| line.match?(/^(\s*)url\s+["'][^"']+["'](.*)$/) }
-          raise "Could not update url in #{file}" unless url_index
+            version_match = lines[version_index].match(/^(\s*)version\s+["'][^"']+["'](.*)$/)
+            lines[version_index] = replacement_line(
+              lines[version_index],
+              "#{version_match[1]}version \"#{version}\"#{version_match[2]}",
+            )
 
-          url_match = lines[url_index].match(/^(\s*)url\s+["'][^"']+["'](.*)$/)
-          url_indent = url_match[1]
-          lines[url_index] = replacement_line(
-            lines[url_index],
-            "#{url_indent}url \"#{wheel_url}\"",
-          )
+            url_index = lines.index { |line| line.match?(/^(\s*)url\s+["'][^"']+["'](.*)$/) }
+            raise "Could not update url in #{file}" unless url_index
 
-          sha_index = lines.index { |line| line.match?(/^#{Regexp.escape(url_indent)}sha256\b/) }
-          sha_line = "#{url_indent}sha256 \"#{wheel_sha256}\""
-          if sha_index
-            lines[sha_index] = replacement_line(lines[sha_index], sha_line)
-          else
-            sha_insert_index = version_index > url_index ? version_index + 1 : url_index + 1
-            lines.insert(sha_insert_index, "#{sha_line}\n")
+            url_match = lines[url_index].match(/^(\s*)url\s+["'][^"']+["'](.*)$/)
+            url_indent = url_match[1]
+            lines[url_index] = replacement_line(
+              lines[url_index],
+              "#{url_indent}url \"#{wheel_url}\"",
+            )
+
+            sha_index = lines.index { |line| line.match?(/^#{Regexp.escape(url_indent)}sha256\b/) }
+            sha_line = "#{url_indent}sha256 \"#{wheel_sha256}\""
+            if sha_index
+              lines[sha_index] = replacement_line(lines[sha_index], sha_line)
+            else
+              sha_insert_index = version_index > url_index ? version_index + 1 : url_index + 1
+              lines.insert(sha_insert_index, "#{sha_line}\n")
+            end
+
+            install_start = lines.index { |line| line.match?(/^(\s*)def install\s*$/) }
+            raise "Could not find install block in #{file}" unless install_start
+
+            install_indent = lines[install_start].match(/^(\s*)/)[1]
+            install_end = ((install_start + 1)...lines.length).find do |index|
+              lines[index].match?(/^#{Regexp.escape(install_indent)}end\s*$/)
+            end
+            raise "Could not find end of install block in #{file}" unless install_end
+
+            if semantic
+              lines[install_start..install_end] = [
+                "#{install_indent}def install\n",
+                "#{install_indent}  wheel = Pathname.glob(\"*.whl\").first\n",
+                "#{install_indent}  raise \"Could not find taplctl wheel\" unless wheel\n",
+                "\n",
+                "#{install_indent}  wheelhouse = buildpath/\"wheelhouse\"\n",
+                "#{install_indent}  wheelhouse.mkpath\n",
+                "#{install_indent}  resources.each do |resource|\n",
+                "#{install_indent}    resource.stage { wheelhouse.install Dir[\"*.whl\"] }\n",
+                "#{install_indent}  end\n",
+                "\n",
+                "#{install_indent}  virtualenv_create(libexec, \"python3.12\", system_site_packages: false)\n",
+                "#{install_indent}  system \"python3.12\", \"-m\", \"pip\", \"--python=\#{libexec}/bin/python\", \"install\",\n",
+                "#{install_indent}         \"--no-index\", \"--find-links=\#{wheelhouse}\", \"--no-compile\", wheel\n",
+                "#{install_indent}  bin.install_symlink libexec/\"bin/taplctl\"\n",
+                "#{install_indent}end\n",
+              ]
+            else
+              lines[install_start..install_end] = [
+                "#{install_indent}def install\n",
+                "#{install_indent}  wheel = Pathname.glob(\"*.whl\").first\n",
+                "#{install_indent}  raise \"Could not find taplctl wheel\" unless wheel\n",
+                "\n",
+                "#{install_indent}  venv = virtualenv_create(libexec, \"python3.12\", system_site_packages: false)\n",
+                "#{install_indent}  venv.pip_install_and_link wheel\n",
+                "#{install_indent}end\n",
+              ]
+            end
+
+            File.write(file, lines.join)
           end
 
-          install_start = lines.index { |line| line.match?(/^(\s*)def install\s*$/) }
-          raise "Could not find install block in #{file}" unless install_start
-
-          install_indent = lines[install_start].match(/^(\s*)/)[1]
-          install_end = ((install_start + 1)...lines.length).find do |index|
-            lines[index].match?(/^#{Regexp.escape(install_indent)}end\s*$/)
-          end
-          raise "Could not find end of install block in #{file}" unless install_end
-
-          lines[install_start..install_end] = [
-            "#{install_indent}def install\n",
-            "#{install_indent}  wheel = Pathname.glob(\"*.whl\").first\n",
-            "#{install_indent}  raise \"Could not find taplctl wheel\" unless wheel\n",
-            "\n",
-            "#{install_indent}  wheelhouse = buildpath/\"wheelhouse\"\n",
-            "#{install_indent}  wheelhouse.mkpath\n",
-            "#{install_indent}  resources.each do |resource|\n",
-            "#{install_indent}    resource.stage { wheelhouse.install Dir[\"*.whl\"] }\n",
-            "#{install_indent}  end\n",
-            "\n",
-            "#{install_indent}  virtualenv_create(libexec, \"python3.12\", system_site_packages: false)\n",
-            "#{install_indent}  system \"python3.12\", \"-m\", \"pip\", \"--python=\#{libexec}/bin/python\", \"install\",\n",
-            "#{install_indent}         \"--no-index\", \"--find-links=\#{wheelhouse}\", \"--no-compile\", wheel\n",
-            "#{install_indent}  bin.install_symlink libexec/\"bin/taplctl\"\n",
-            "#{install_indent}end\n",
-          ]
-
-          File.write(file, lines.join)
+          files.each { |file| update_formula(file, version, wheel_url, wheel_sha256) }
           RUBY
 
-          tap_path="${brew_file#homebrew-tap/}"
+          tap_paths=()
+          for brew_file in "${brew_files[@]}"; do
+            tap_paths+=("${brew_file#homebrew-tap/}")
+          done
 
           git -C homebrew-tap config user.name "github-actions[bot]"
           git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C homebrew-tap add "${tap_path}"
+          git -C homebrew-tap add "${tap_paths[@]}"
 
           if git -C homebrew-tap diff --cached --quiet; then
             echo "Homebrew tap is already up to date."
