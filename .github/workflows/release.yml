@@ -1,0 +1,219 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must use x.y.z format. Got: ${version}" >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Require Homebrew tap token
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
+            echo "Set the HOMEBREW_TAP_TOKEN secret with write access to qkdxorjs1002/homebrew-tap." >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Sync package versions
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+
+          pyproject = Path("tapl/pyproject.toml")
+          pyproject_text = pyproject.read_text()
+          pyproject_text, pyproject_count = re.subn(
+              r'(?m)^version = "[^"]+"$',
+              f'version = "{version}"',
+              pyproject_text,
+              count=1,
+          )
+          if pyproject_count != 1:
+              raise SystemExit("Could not update tapl/pyproject.toml version")
+          pyproject.write_text(pyproject_text)
+
+          package_json = Path("vscode-extension/package.json")
+          package_data = json.loads(package_json.read_text())
+          package_data["version"] = version
+          package_json.write_text(json.dumps(package_data, indent=2) + "\n")
+          PY
+
+      - name: Build Python wheel
+        working-directory: tapl
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir ../release-dist
+
+      - name: Build VS Code extension package
+        working-directory: vscode-extension
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm install --no-save --package-lock=false typescript @types/node @vscode/vsce
+          npm run compile
+          npx --yes @vscode/vsce package \
+            --allow-missing-repository \
+            --out "../release-dist/tapl-workflow-viewer-${RELEASE_VERSION}.vsix"
+
+      - name: Prepare release assets
+        id: assets
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          wheel_path="release-dist/taplctl-${RELEASE_VERSION}-py3-none-any.whl"
+          vsix_path="release-dist/tapl-workflow-viewer-${RELEASE_VERSION}.vsix"
+
+          test -f "${wheel_path}"
+          test -f "${vsix_path}"
+
+          wheel_name="$(basename "${wheel_path}")"
+          wheel_sha256="$(sha256sum "${wheel_path}" | awk '{print $1}')"
+          wheel_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${wheel_name}"
+
+          echo "wheel_name=${wheel_name}" >> "${GITHUB_OUTPUT}"
+          echo "wheel_sha256=${wheel_sha256}" >> "${GITHUB_OUTPUT}"
+          echo "wheel_url=${wheel_url}" >> "${GITHUB_OUTPUT}"
+
+          ls -lh release-dist
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" release-dist/* --clobber
+          else
+            gh release create "${RELEASE_TAG}" release-dist/* \
+              --title "taplctl ${RELEASE_TAG}" \
+              --generate-notes
+          fi
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: qkdxorjs1002/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update taplctl Homebrew package
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
+          WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          brew_file=""
+          for candidate in \
+            "homebrew-tap/Formula/taplctl.rb" \
+            "homebrew-tap/Casks/taplctl.rb"
+          do
+            if [[ -f "${candidate}" ]]; then
+              brew_file="${candidate}"
+              break
+            fi
+          done
+
+          if [[ -z "${brew_file}" ]]; then
+            echo "Could not find Formula/taplctl.rb or Casks/taplctl.rb in qkdxorjs1002/homebrew-tap." >&2
+            exit 1
+          fi
+
+          BREW_FILE="${brew_file}" ruby <<'RUBY'
+          file = ENV.fetch("BREW_FILE")
+          version = ENV.fetch("RELEASE_VERSION")
+          wheel_url = ENV.fetch("WHEEL_URL")
+          wheel_sha256 = ENV.fetch("WHEEL_SHA256")
+
+          text = File.read(file)
+
+          updated_version = text.sub!(/^(\s*)version\s+["'][^"']+["'](.*)$/, "\\1version \"#{version}\"\\2")
+          updated_url = text.sub!(/^(\s*)url\s+["'][^"']+["'](.*)$/, "\\1url \"#{wheel_url}\"\\2")
+          updated_sha = text.sub!(/^(\s*)sha256\s+(?::no_check|["'][^"']+["'])(.*)$/, "\\1sha256 \"#{wheel_sha256}\"\\2")
+
+          raise "Could not update version in #{file}" unless updated_version
+          raise "Could not update url in #{file}" unless updated_url
+          raise "Could not update sha256 in #{file}" unless updated_sha
+
+          File.write(file, text)
+          RUBY
+
+          tap_path="${brew_file#homebrew-tap/}"
+
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap add "${tap_path}"
+
+          if git -C homebrew-tap diff --cached --quiet; then
+            echo "Homebrew tap is already up to date."
+            exit 0
+          fi
+
+          git -C homebrew-tap commit -m "taplctl ${RELEASE_VERSION}"
+          git -C homebrew-tap push
