@@ -33,6 +33,13 @@ def taplctl_command_guidance() -> str:
     )
 
 
+def taplctl_status_guidance() -> str:
+    return (
+        "Follow the `plan_task_execute.guidance` object from `taplctl status --json` "
+        "for effective config-specific plan/task rules."
+    )
+
+
 def taplctl_help_guidance() -> str:
     return (
         "For command syntax, field-writing rules, statuses, subagents, and examples, "
@@ -102,6 +109,7 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> 
     base = [
         "Use SQLite state, hook feedback, and the global taplctl command as the workflow source of truth.",
         taplctl_command_guidance(),
+        taplctl_status_guidance(),
         taplctl_help_guidance(),
     ]
 
@@ -181,4 +189,3 @@ def prompt_summary(payload: dict[str, Any]) -> str:
         if isinstance(value, str):
             return value.strip()[:240]
     return ""
-

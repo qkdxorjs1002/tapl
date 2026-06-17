@@ -636,12 +636,21 @@ level_subagent_aggressiveness = "force"
             self.assertIn("keep workflow DB/config in the current repo workspace", "\n".join(payload["instructions"]))
             self.assertIn("taplctl status --json", "\n".join(payload["instructions"]))
             self.assertIn("taplctl search '<query>' --json", "\n".join(payload["instructions"]))
+            self.assertIn("plan_task_execute.guidance", "\n".join(payload["instructions"]))
             self.assertIn("taplctl <command> <subcommand> --help", "\n".join(payload["instructions"]))
             self.assertEqual(payload["next_actions"], [])
+
+            status = self.run_cli(db_path, "status", "--json")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            status_payload = json.loads(status.stdout)
+            guidance = status_payload["plan_task_execute"]["guidance"]
+            self.assertIn("requirements trace", guidance["plan_detail"])
+            self.assertIn("meaningful implementation", guidance["task_granularity"])
 
             prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             prompt_payload = json.loads(prompt_context.stdout)
             prompt_instructions = "\n".join(prompt_payload["instructions"])
+            self.assertIn("plan_task_execute.guidance", prompt_instructions)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_instructions)
             self.assertIn("record execution approval", prompt_instructions)
             self.assertNotIn("quote every argument", prompt_instructions)
@@ -684,6 +693,7 @@ level_subagent_aggressiveness = "force"
             stop_context = self.run_cli(db_path, "context", "--event", "Stop", "--json")
             stop_payload = json.loads(stop_context.stdout)
             stop_instructions = "\n".join(stop_payload["instructions"])
+            self.assertIn("plan_task_execute.guidance", stop_instructions)
             self.assertIn("taplctl <command> <subcommand> --help", stop_instructions)
             self.assertNotIn("Completion reports should", stop_instructions)
             self.assertNotIn("Archive summaries should", stop_instructions)
@@ -691,6 +701,7 @@ level_subagent_aggressiveness = "force"
             prompt_text = self.run_cli(db_path, "context", "--event", "UserPromptSubmit")
             self.assertEqual(prompt_text.returncode, 0, prompt_text.stderr)
             self.assertIn("tapl context:", prompt_text.stdout)
+            self.assertIn("plan_task_execute.guidance", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
             self.assertNotIn("quote every argument", prompt_text.stdout)
 
