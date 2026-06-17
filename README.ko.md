@@ -14,11 +14,20 @@ context가 사라진 뒤의 재개를 가능하게 합니다.
 
 ```sh
 brew tap qkdxorjs1002/tap
-brew trust --formula qkdxorjs1002/tap/taplctl
+brew trust qkdxorjs1002/tap
+
+# 의미 검색 없이 설치
 brew install taplctl
 
+# 의미 검색 포함 설치
+brew install taplctl-semantic
+
+# 사용자 전역에 설치
 taplctl install user
+
+# 레포지터리에 설치
 taplctl install repo
+
 taplctl doctor --json
 ```
 
