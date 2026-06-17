@@ -14,11 +14,20 @@ while it is happening and resumable after the chat context is gone.
 
 ```sh
 brew tap qkdxorjs1002/tap
-brew trust --formula qkdxorjs1002/tap/taplctl
+brew trust qkdxorjs1002/tap
+
+# Without semantic search
 brew install taplctl
 
+# With semantic search
+brew install taplctl-semantic
+
+# User account scope
 taplctl install user
+
+# Repo scope
 taplctl install repo
+
 taplctl doctor --json
 ```
 
