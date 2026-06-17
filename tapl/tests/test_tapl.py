@@ -573,7 +573,7 @@ level_subagent_aggressiveness = "force"
             payload = json.loads(validated.stdout)
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["plan_task_execute"]["errors"][0]["code"], "missing_required_subagent")
-            self.assertIn("@senior-worker", payload["plan_task_execute"]["guidance"]["allowed_level_subagents"])
+            self.assertNotIn("guidance", payload["plan_task_execute"])
 
     def test_validate_warns_for_sparse_plan_and_task_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -616,8 +616,7 @@ level_subagent_aggressiveness = "force"
             codes = {item["code"] for item in payload["plan_task_execute"]["warnings"]}
             self.assertIn("plan_content_missing_guidance", codes)
             self.assertIn("task_content_missing_fields", codes)
-            self.assertIn("plan_format", payload["plan_task_execute"]["guidance"])
-            self.assertIn("task_format", payload["plan_task_execute"]["guidance"])
+            self.assertNotIn("guidance", payload["plan_task_execute"])
 
     def test_context_command_reports_lifecycle_packet(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -629,32 +628,31 @@ level_subagent_aggressiveness = "force"
             payload = json.loads(context.stdout)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["event"], "SessionStart")
-            self.assertIn("SessionStart is bootstrap context", "\n".join(payload["instructions"]))
-            self.assertIn("Assume `taplctl` is installed as a user-global command", "\n".join(payload["instructions"]))
-            self.assertIn("never `$taplctl`", "\n".join(payload["instructions"]))
-            self.assertIn("configure hooks with `taplctl install user`", "\n".join(payload["instructions"]))
-            self.assertIn("keep workflow DB/config in the current repo workspace", "\n".join(payload["instructions"]))
+            self.assertIn("SessionStart is bootstrap only", "\n".join(payload["instructions"]))
+            self.assertIn("literal global `taplctl`", "\n".join(payload["instructions"]))
+            self.assertIn("workflow DB/config repo-local", "\n".join(payload["instructions"]))
             self.assertIn("taplctl status --json", "\n".join(payload["instructions"]))
             self.assertIn("taplctl search '<query>' --json", "\n".join(payload["instructions"]))
-            self.assertIn("plan_task_execute.guidance", "\n".join(payload["instructions"]))
-            self.assertIn("taplctl <command> <subcommand> --help", "\n".join(payload["instructions"]))
+            self.assertIn("search relevant prior work", "\n".join(payload["workflow_guidance"]))
             self.assertEqual(payload["next_actions"], [])
 
             status = self.run_cli(db_path, "status", "--json")
             self.assertEqual(status.returncode, 0, status.stderr)
             status_payload = json.loads(status.stdout)
-            guidance = status_payload["plan_task_execute"]["guidance"]
-            self.assertIn("requirements trace", guidance["plan_detail"])
-            self.assertIn("meaningful implementation", guidance["task_granularity"])
+            self.assertNotIn("guidance", status_payload["plan_task_execute"])
 
             prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             prompt_payload = json.loads(prompt_context.stdout)
             prompt_instructions = "\n".join(prompt_payload["instructions"])
-            self.assertIn("plan_task_execute.guidance", prompt_instructions)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_instructions)
-            self.assertIn("record execution approval", prompt_instructions)
+            prompt_guidance = "\n".join(prompt_payload["workflow_guidance"])
+            self.assertIn("requirements trace", prompt_guidance)
+            self.assertIn("meaningful implementation", prompt_guidance)
+            self.assertIn("@senior-worker", prompt_guidance)
+            self.assertIn("record execution approval", prompt_guidance)
+            self.assertIn("taplctl finding add", prompt_guidance)
             self.assertNotIn("quote every argument", prompt_instructions)
-            self.assertNotIn("Do not use level names such as `level2`", prompt_instructions)
+            self.assertNotIn("Do not use level names such as `level2`", prompt_guidance)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
 
             self.run_cli(
@@ -678,30 +676,29 @@ level_subagent_aggressiveness = "force"
             active_prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             active_prompt_payload = json.loads(active_prompt_context.stdout)
             self.assertIn("Create or update plan state", "\n".join(active_prompt_payload["next_actions"]))
-            self.assertIn("request_user_input", "\n".join(active_prompt_payload["next_actions"]))
-            self.assertIn("combine it with the new request", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("ask whether to finish", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("finish, combine, defer/archive, or discard", "\n".join(active_prompt_payload["next_actions"]))
 
             text = self.run_cli(db_path, "context", "--event", "SessionStart")
             self.assertEqual(text.returncode, 0, text.stderr)
             self.assertIn("tapl context:", text.stdout)
-            self.assertIn("SessionStart is bootstrap context", text.stdout)
-            self.assertIn("Assume `taplctl` is installed as a user-global command", text.stdout)
-            self.assertIn("never `$taplctl`", text.stdout)
-            self.assertIn("configure hooks with `taplctl install user`", text.stdout)
-            self.assertIn("keep workflow DB/config in the current repo workspace", text.stdout)
+            self.assertIn("SessionStart is bootstrap only", text.stdout)
+            self.assertIn("literal global `taplctl`", text.stdout)
+            self.assertIn("workflow DB/config repo-local", text.stdout)
 
             stop_context = self.run_cli(db_path, "context", "--event", "Stop", "--json")
             stop_payload = json.loads(stop_context.stdout)
             stop_instructions = "\n".join(stop_payload["instructions"])
-            self.assertIn("plan_task_execute.guidance", stop_instructions)
-            self.assertIn("taplctl <command> <subcommand> --help", stop_instructions)
+            self.assertIn("taplctl status --json", stop_instructions)
+            self.assertIn("record result", "\n".join(stop_payload["workflow_guidance"]))
             self.assertNotIn("Completion reports should", stop_instructions)
             self.assertNotIn("Archive summaries should", stop_instructions)
 
             prompt_text = self.run_cli(db_path, "context", "--event", "UserPromptSubmit")
             self.assertEqual(prompt_text.returncode, 0, prompt_text.stderr)
             self.assertIn("tapl context:", prompt_text.stdout)
-            self.assertIn("plan_task_execute.guidance", prompt_text.stdout)
+            self.assertIn("Flow: search relevant prior work", prompt_text.stdout)
+            self.assertIn("taplctl finding add", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
             self.assertNotIn("quote every argument", prompt_text.stdout)
 
@@ -973,8 +970,8 @@ experimental = true
             )
             self.assertEqual(blocked.returncode, 2)
             self.assertIn("durable edit requires", blocked.stderr)
-            self.assertIn("Assume `taplctl` is installed as a user-global command", blocked.stderr)
-            self.assertIn("keep workflow DB/config in the current repo workspace", blocked.stderr)
+            self.assertIn("literal global `taplctl`", blocked.stderr)
+            self.assertIn("workflow DB/config repo-local", blocked.stderr)
 
             self.run_cli(
                 db_path,
@@ -1138,6 +1135,10 @@ task_granularity = "very_granular"
             self.assertIn("taplctl search '<query>' --json", event.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", event.stdout)
             self.assertNotIn("Do not use level names such as `level2`", event.stdout)
+            self.assertIn("Flow: search relevant prior work", event.stdout)
+            self.assertIn("Search: before planning non-trivial work", event.stdout)
+            self.assertIn("Plan:", event.stdout)
+            self.assertIn("taplctl finding add", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
 
             event_json = self.run_cli(
@@ -1154,6 +1155,25 @@ task_granularity = "very_granular"
             payload = json.loads(event_json.stdout)
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["context"]["prompt_summary"], "Implement lifecycle context")
+            self.assertIn("workflow_guidance", payload["context"])
+
+    def test_post_tool_use_external_search_outputs_finding_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            event = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "PostToolUse",
+                "--mode",
+                "observe",
+                "--tool",
+                "web.run",
+                input_text='{"search_query": [{"q": "tapl workflow"}]}',
+            )
+            self.assertEqual(event.returncode, 0, event.stderr)
+            self.assertIn("taplctl finding add", event.stdout)
+            self.assertIn("decision-relevant", event.stdout)
 
     def test_session_start_hook_does_not_create_active_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

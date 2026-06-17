@@ -75,9 +75,9 @@ state that tools can inspect.
 
 1. Codex starts or receives a prompt.
 2. Hooks call `taplctl hook-event` and load the current repo state.
-3. The agent inspects `taplctl status --json`, follows the
-   `plan_task_execute.guidance` object for config-specific plan/task rules, and
-   searches prior work when the task is non-trivial.
+3. The agent inspects `taplctl status --json`, uses concise lifecycle context
+   for config-specific workflow guidance, and searches prior work when the task
+   is non-trivial.
 4. The agent records a plan and executable tasks before durable edits.
 5. `PreToolUse` and `PostToolUse` hooks observe or enforce the workflow
    boundary.
@@ -160,13 +160,15 @@ taplctl context --event UserPromptSubmit --json
 ```
 
 `taplctl status --json` is the workflow source of truth for the active run,
-counts, approvals, config, and config-specific guidance. The effective
-plan/task rules are under `plan_task_execute.guidance`; `taplctl validate
---json` reports the same contract as warnings or errors.
+counts, approvals, config, and validation issues. `taplctl validate --json`
+reports the same contract as warnings or errors.
 
-Lifecycle context stays focused on state, workflow order, and where to look
-next. Command syntax, static field-writing rules, statuses, subagent values, and
-examples live in command help:
+Lifecycle context stays concise but preserves the workflow order: search prior
+work, summarize the request, plan, create tasks, record approval, execute while
+updating task state, capture decision-relevant findings, and record the result
+or archive. Config-specific plan/task/subagent/approval guidance is injected
+there. Command syntax, static field-writing rules, statuses, subagent values,
+and examples live in command help:
 
 ```sh
 taplctl --help
@@ -237,7 +239,7 @@ in `.tapl/config.toml` or `~/.tapl/config.toml` to change the default, and use
 Plan/task validation is controlled by `[plan-task-execute]` in the same config
 files. Settings such as `plan_detail`, `task_granularity`,
 `level_subagent_aggressiveness`, and `require_execution_approval` are reflected
-in `taplctl status --json` and `taplctl validate --json`.
+in lifecycle context and validation issues.
 
 Archive completed work:
 

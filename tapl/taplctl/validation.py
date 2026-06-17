@@ -16,16 +16,20 @@ EXECUTABLE_STATUSES = ("Pending", "In Progress", "Blocked")
 def validate_plan_task_execute(
     conn: sqlite3.Connection,
     settings: tapl_config.PlanTaskExecuteConfig,
+    *,
+    include_guidance: bool = False,
 ) -> dict[str, Any]:
     state = db.status_payload(conn)
     if not state.get("active_run"):
-        return {
+        result: dict[str, Any] = {
             "ok": True,
             "errors": [],
             "warnings": [],
             "issues": [],
-            "guidance": guidance(settings),
         }
+        if include_guidance:
+            result["guidance"] = guidance(settings)
+        return result
 
     plans = state.get("plans", [])
     tasks = state.get("tasks", [])
@@ -38,13 +42,15 @@ def validate_plan_task_execute(
     issues.extend(validate_execution_approval(state, tasks, settings))
     errors = [item for item in issues if item["severity"] == "error"]
     warnings = [item for item in issues if item["severity"] == "warning"]
-    return {
+    result = {
         "ok": not errors,
         "errors": errors,
         "warnings": warnings,
         "issues": issues,
-        "guidance": guidance(settings),
     }
+    if include_guidance:
+        result["guidance"] = guidance(settings)
+    return result
 
 
 def validate_task_input(

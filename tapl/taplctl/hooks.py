@@ -23,6 +23,20 @@ DURABLE_BASH_HINTS = (
     "mv ",
     "cp ",
 )
+EXTERNAL_RESEARCH_HINTS = (
+    "web.run",
+    "search_query",
+    "image_query",
+    "websearch",
+    "webfetch",
+    "browser",
+    "docs",
+    "documentation",
+)
+EXTERNAL_BASH_HINTS = (
+    "curl ",
+    "wget ",
+)
 
 
 def handle_event(
@@ -80,6 +94,9 @@ def handle_event(
                 message = combine_messages(message, issue_message)
             if mode == "enforce" and (check["errors"] or has_execution_approval_issue(check)):
                 block = True
+
+    if event == "PostToolUse" and is_external_research_tool(tool_name, payload):
+        message = combine_messages(message, tapl_context.external_findings_guidance())
 
     if event == "Stop":
         state = db.status_payload(conn)
@@ -274,6 +291,17 @@ def is_durable_tool(tool_name: str | None, payload: dict[str, Any]) -> bool:
     return False
 
 
+def is_external_research_tool(tool_name: str | None, payload: dict[str, Any]) -> bool:
+    name = (tool_name or "").lower()
+    if any(hint in name for hint in EXTERNAL_RESEARCH_HINTS):
+        return True
+    if name == "bash":
+        command = payload_command(payload).lower()
+        return any(hint in command for hint in EXTERNAL_BASH_HINTS)
+    blob = str(payload).lower()
+    return any(hint in blob for hint in EXTERNAL_RESEARCH_HINTS)
+
+
 def payload_command(payload: dict[str, Any]) -> str:
     for key in ("command", "cmd"):
         value = payload.get(key)
@@ -283,6 +311,12 @@ def payload_command(payload: dict[str, Any]) -> str:
     if isinstance(params, dict):
         for key in ("command", "cmd"):
             value = params.get(key)
+            if isinstance(value, str):
+                return value
+    tool_input = payload.get("tool_input")
+    if isinstance(tool_input, dict):
+        for key in ("command", "cmd"):
+            value = tool_input.get(key)
             if isinstance(value, str):
                 return value
     return ""

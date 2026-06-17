@@ -34,7 +34,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|apply_patch|Edit|Write|MultiEdit",
+        "matcher": "Bash|apply_patch|Edit|Write|MultiEdit|web\\.run|WebSearch|WebFetch|Browser",
         "hooks": [
           {
             "type": "command",

@@ -21,7 +21,7 @@ HOOK_EVENTS: tuple[dict[str, str | None], ...] = (
     {"event": "UserPromptSubmit", "matcher": None},
     {"event": "PreToolUse", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit"},
     {"event": "PermissionRequest", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit"},
-    {"event": "PostToolUse", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit"},
+    {"event": "PostToolUse", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit|web\\.run|WebSearch|WebFetch|Browser"},
     {"event": "Stop", "matcher": None},
 )
 CODEX_STATIC_TEMPLATE_FILES: tuple[Path, ...] = (

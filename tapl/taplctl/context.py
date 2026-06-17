@@ -10,11 +10,7 @@ from . import config as tapl_config, db, validation
 
 def taplctl_execution_guidance() -> str:
     return (
-        "Assume `taplctl` is installed as a user-global command; type the literal "
-        "`taplctl` for workflow CLI calls, never `$taplctl`, repo-local paths, "
-        "`.venv/bin/taplctl`, or `tapl_hook.py`; configure hooks with "
-        "`taplctl install user` or `taplctl install repo`, and keep workflow "
-        "DB/config in the current repo workspace."
+        "Use the literal global `taplctl` command; keep workflow DB/config repo-local."
     )
 
 
@@ -28,22 +24,21 @@ def taplctl_argument_guidance() -> str:
 
 def taplctl_command_guidance() -> str:
     return (
-        "Use `taplctl status --json` for state. Search takes one query argument: "
-        "`taplctl search '<query>' --json`, not separate unquoted words."
-    )
-
-
-def taplctl_status_guidance() -> str:
-    return (
-        "Follow the `plan_task_execute.guidance` object from `taplctl status --json` "
-        "for effective config-specific plan/task rules."
+        "Inspect state with `taplctl status --json`; search with one quoted query: "
+        "`taplctl search '<query>' --json`."
     )
 
 
 def taplctl_help_guidance() -> str:
     return (
-        "For command syntax, field-writing rules, statuses, subagents, and examples, "
-        "run `taplctl <command> <subcommand> --help`."
+        "For command syntax, run `taplctl <command> <subcommand> --help`."
+    )
+
+
+def external_findings_guidance() -> str:
+    return (
+        "Findings: if external search/docs changed requirements, plan, tasks, or verification, "
+        "record only decision-relevant facts with `taplctl finding add`."
     )
 
 
@@ -69,6 +64,12 @@ def build_context(
         "config": settings.as_dict(),
         "plan_task_execute": plan_task,
         "instructions": instructions(settings.plan_task_execute, event=event),
+        "workflow_guidance": workflow_guidance(
+            settings.plan_task_execute,
+            event=event,
+            state=state,
+            prompt=prompt,
+        ),
         "next_actions": next_actions(state, plan_task, event, prompt),
         "prompt_summary": prompt,
     }
@@ -86,7 +87,9 @@ def format_context(packet: dict[str, Any]) -> str:
     else:
         lines.append("- State: no active run.")
 
-    for item in packet["instructions"]:
+    for item in packet.get("instructions", []):
+        lines.append(f"- {item}")
+    for item in packet.get("workflow_guidance", []):
         lines.append(f"- {item}")
     for item in packet["next_actions"]:
         lines.append(f"- Next: {item}")
@@ -107,44 +110,95 @@ def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
 
 def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> list[str]:
     base = [
-        "Use SQLite state, hook feedback, and the global taplctl command as the workflow source of truth.",
+        "Use repo-local tapl DB state; write tapl records in the user's language.",
         taplctl_command_guidance(),
-        taplctl_status_guidance(),
-        taplctl_help_guidance(),
     ]
 
     if event == "SessionStart":
         return [
             *base,
-            "SessionStart is bootstrap context; wait for the user's concrete request before creating new plan/task records.",
+            "SessionStart is bootstrap only; wait for a concrete user request before creating plan/task records.",
             taplctl_execution_guidance(),
         ]
 
     if event == "UserPromptSubmit":
         return [
             *base,
-            "For non-trivial work, inspect state/search first, then upsert a plan and executable tasks before durable edits.",
-            "If the active run summary is `New request`, summarize the user's request and update it with `taplctl run summary --summary '<request summary>' --json`.",
-            "Keep task status current and write tapl records in the user's language unless asked otherwise.",
-            "Before durable edits, record execution approval when required; see `taplctl approval record --help`.",
+            taplctl_help_guidance(),
         ]
 
     if event == "Stop":
         return [
             *base,
-            "For simple requests without task records, record the final result with `taplctl run result --result '<result>' --json` before stopping so the archive can include it.",
-            "Complete, block, or skip executable tasks before stopping so archive state is accurate.",
+            "Before stopping, record the result and finish, block, or skip tasks so archive state is accurate.",
         ]
 
     return [
         *base,
-        "No separate agent guide is required; lifecycle hooks provide tapl operating context.",
         taplctl_execution_guidance(),
-        "For non-trivial work, inspect state/search, record plan state, record executable tasks, then keep task status current.",
-        "Write plan, task, finding, and archive text in the user's language unless asked otherwise.",
-        "For simple requests without task records, record the final result with `taplctl run result --result '<result>' --json` before stopping so the archive can include it.",
-        "Before durable edits, record execution approval when required; see `taplctl approval record --help`.",
     ]
+
+
+def workflow_guidance(
+    settings: tapl_config.PlanTaskExecuteConfig,
+    *,
+    event: str,
+    state: dict[str, Any],
+    prompt: str = "",
+) -> list[str]:
+    lines = [
+        "Flow: search relevant prior work -> summarize request -> plan -> tasks -> approval -> execute/update -> result/archive.",
+    ]
+
+    if event == "SessionStart":
+        return lines
+
+    if event == "Stop":
+        lines.append("Stop: record result, leave no actionable task unmarked, then archive completed work.")
+        return lines
+
+    if event == "UserPromptSubmit":
+        if should_suggest_prior_search(state, prompt):
+            lines.append(
+                "Search: before planning non-trivial work, run `taplctl search '<compact prompt query>' --json` and use only relevant results."
+            )
+        lines.extend(plan_task_context_guidance(settings))
+        lines.append(external_findings_guidance())
+        return lines
+
+    lines.extend(plan_task_context_guidance(settings))
+    return lines
+
+
+def should_suggest_prior_search(state: dict[str, Any], prompt: str) -> bool:
+    if not prompt.strip():
+        return False
+    if state.get("plans") or state.get("tasks"):
+        return False
+    return True
+
+
+def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
+    guidance = [
+        f"Plan: {validation.plan_detail_guidance(settings.plan_detail)} Ask the user to choose when scope, risk, API, UX, data, or compatibility decisions matter.",
+        f"Tasks: {validation.task_granularity_guidance(settings.task_granularity)} {validation.task_format_guidance(settings)}",
+    ]
+    if settings.use_level_subagent:
+        guidance.append(f"Subagents: {subagent_context_guidance(settings)}")
+    if settings.require_execution_approval:
+        guidance.append("Approval: before durable edits, record execution approval with `taplctl approval record --decision approved --prompt '<approved scope>' --json`.")
+    else:
+        guidance.append("Approval: record execution approval when risk or scope warrants it; missing approval is reported as a warning.")
+    return guidance
+
+
+def subagent_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    allowed = ", ".join(validation.LEVEL_SUBAGENTS)
+    if settings.level_subagent_aggressiveness == "minimal":
+        return f"Set required_subagent only for clear risk or explicit routing. Allowed: {allowed}."
+    if settings.level_subagent_aggressiveness == "force":
+        return f"Every executable task needs required_subagent. Allowed: {allowed}."
+    return f"Choose required_subagent by task risk. Allowed: {allowed}."
 
 
 def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, prompt: str = "") -> list[str]:
@@ -166,7 +220,7 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
         )
     if event == "UserPromptSubmit" and state.get("incomplete_tasks", 0):
         actions.append(
-            "If this prompt is a new request rather than continuing the active run, use request_user_input before durable work to ask whether to do the remaining work first, combine it with the new request, defer/archive it, or discard the active run and start fresh."
+            "If this is a new request, ask whether to finish, combine, defer/archive, or discard remaining work before durable edits."
         )
     if not state.get("plans"):
         actions.append("Create or update plan state with `taplctl plan upsert`.")

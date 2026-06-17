@@ -75,7 +75,7 @@ Codex 작업을 감사 가능하고 복구 가능하게 만들어야 할 때 `ta
 1. Codex가 시작되거나 사용자의 prompt를 받습니다.
 2. Hook이 `taplctl hook-event`를 호출하고 현재 repo state를 읽습니다.
 3. 작업이 non-trivial이면 agent가 `taplctl status --json`을 확인하고,
-   config가 반영된 plan/task 규칙은 `plan_task_execute.guidance`를 따르며,
+   config가 반영된 workflow 지침은 간결한 lifecycle context에서 읽으며,
    과거 작업을 검색합니다.
 4. Durable edit 전에 plan과 실행 가능한 task를 기록합니다.
 5. `PreToolUse`와 `PostToolUse` hook이 workflow boundary를 observe 또는 enforce합니다.
@@ -157,14 +157,15 @@ taplctl validate --json
 taplctl context --event UserPromptSubmit --json
 ```
 
-`taplctl status --json`은 active run, count, approval, config, 현재 적용되는
-guidance를 확인하는 workflow source of truth입니다. 현재 적용되는 plan/task
-규칙은 `plan_task_execute.guidance` 아래에 있고, `taplctl validate --json`은
+`taplctl status --json`은 active run, count, approval, config, validation
+issue를 확인하는 workflow source of truth입니다. `taplctl validate --json`은
 같은 계약을 warning 또는 error로 보고합니다.
 
-Lifecycle context는 상태, workflow 순서, 다음에 어디를 볼지에 집중합니다. 명령
-문법, 정적인 필드 작성 규칙, status/subagent 값, 예시는 하위 명령 help에서
-확인합니다.
+Lifecycle context는 짧게 유지하되 workflow 순서를 놓치지 않게 합니다. 과거 작업
+검색, 요청 요약, 계획, task 생성, 승인 기록, 실행 중 task 상태 갱신, 결정에
+영향 있는 finding 기록, 결과/아카이브 순서를 직접 주입합니다. Config가 반영된
+plan/task/subagent/approval 지침도 context에 들어갑니다. 명령 문법, 정적인 필드
+작성 규칙, status/subagent 값, 예시는 하위 명령 help에서 확인합니다.
 
 ```sh
 taplctl --help
@@ -233,8 +234,8 @@ taplctl search "workflow dashboard" --limit 5 --json
 
 Plan/task validation은 같은 config 파일의 `[plan-task-execute]`로 제어합니다.
 `plan_detail`, `task_granularity`, `level_subagent_aggressiveness`,
-`require_execution_approval` 같은 설정은 `taplctl status --json`과
-`taplctl validate --json`에 반영됩니다.
+`require_execution_approval` 같은 설정은 lifecycle context와 validation issue에
+반영됩니다.
 
 완료된 작업 archive:
 
