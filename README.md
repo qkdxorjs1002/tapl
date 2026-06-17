@@ -16,16 +16,20 @@ while it is happening and resumable after the chat context is gone.
 brew tap qkdxorjs1002/tap
 brew trust qkdxorjs1002/tap
 
-# Without semantic search
+### Install taplctl
+
+# Option 1. Without semantic search
 brew install taplctl
 
-# With semantic search
+# Option 2. With semantic search
 brew install taplctl-semantic
 
-# User account scope
+### Install codex hooks and configs
+
+# Option 1. User account scope
 taplctl install user
 
-# Repo scope
+# Option 2. Repo scope
 taplctl install repo
 
 taplctl doctor --json
