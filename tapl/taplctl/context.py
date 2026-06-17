@@ -33,6 +33,13 @@ def taplctl_command_guidance() -> str:
     )
 
 
+def taplctl_help_guidance() -> str:
+    return (
+        "For command syntax, field-writing rules, statuses, subagents, and examples, "
+        "run `taplctl <command> <subcommand> --help`."
+    )
+
+
 def build_context(
     conn: sqlite3.Connection,
     *,
@@ -92,11 +99,10 @@ def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> list[str]:
-    allowed_subagents = ", ".join(validation.LEVEL_SUBAGENTS)
-    task_statuses = "Pending, In Progress, Completed, Blocked, Skipped"
     base = [
         "Use SQLite state, hook feedback, and the global taplctl command as the workflow source of truth.",
         taplctl_command_guidance(),
+        taplctl_help_guidance(),
     ]
 
     if event == "SessionStart":
@@ -104,29 +110,20 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> 
             *base,
             "SessionStart is bootstrap context; wait for the user's concrete request before creating new plan/task records.",
             taplctl_execution_guidance(),
-            f"Task statuses: {task_statuses}. Required subagents: {allowed_subagents}.",
         ]
 
     if event == "UserPromptSubmit":
         return [
             *base,
             "For non-trivial work, inspect state/search first, then upsert a plan and executable tasks before durable edits.",
-            taplctl_argument_guidance(),
             "If the active run summary is `New request`, summarize the user's request and update it with `taplctl run summary --summary '<request summary>' --json`.",
-            f"Required subagents must be one of: {allowed_subagents}. Do not use level names such as `level2`.",
             "Keep task status current and write tapl records in the user's language unless asked otherwise.",
-            validation.plan_format_guidance(),
-            validation.task_format_guidance(settings),
-            validation.execution_approval_guidance(settings),
-            f"Plan detail: {validation.plan_detail_guidance(settings.plan_detail)}",
-            f"Task splitting: {validation.task_granularity_guidance(settings.task_granularity)}",
+            "Before durable edits, record execution approval when required; see `taplctl approval record --help`.",
         ]
 
     if event == "Stop":
         return [
             *base,
-            completion_report_guidance(),
-            archive_summary_guidance(),
             "For simple requests without task records, record the final result with `taplctl run result --result '<result>' --json` before stopping so the archive can include it.",
             "Complete, block, or skip executable tasks before stopping so archive state is accurate.",
         ]
@@ -135,18 +132,10 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> 
         *base,
         "No separate agent guide is required; lifecycle hooks provide tapl operating context.",
         taplctl_execution_guidance(),
-        taplctl_argument_guidance(),
         "For non-trivial work, inspect state/search, record plan state, record executable tasks, then keep task status current.",
         "Write plan, task, finding, and archive text in the user's language unless asked otherwise.",
-        validation.plan_format_guidance(),
-        validation.task_format_guidance(settings),
-        validation.execution_approval_guidance(settings),
-        completion_report_guidance(),
-        archive_summary_guidance(),
         "For simple requests without task records, record the final result with `taplctl run result --result '<result>' --json` before stopping so the archive can include it.",
-        f"Plan detail: {validation.plan_detail_guidance(settings.plan_detail)}",
-        f"Task splitting: {validation.task_granularity_guidance(settings.task_granularity)}",
-        f"Level subagent routing: {validation.level_subagent_guidance(settings)}",
+        "Before durable edits, record execution approval when required; see `taplctl approval record --help`.",
     ]
 
 
@@ -193,16 +182,3 @@ def prompt_summary(payload: dict[str, Any]) -> str:
             return value.strip()[:240]
     return ""
 
-
-def completion_report_guidance() -> str:
-    return (
-        "Completion reports should briefly cover changed files and behavior, verification commands and results, "
-        "remaining risks or blocked work, and whether the workflow was archived."
-    )
-
-
-def archive_summary_guidance() -> str:
-    return (
-        "Archive summaries should compactly capture original request, selected plan, completed tasks/results, "
-        "verification, and remaining work."
-    )

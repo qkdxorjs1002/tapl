@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import argparse
 import json
 import os
 import sqlite3
@@ -18,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from taplctl import __version__, config as tapl_config
+from taplctl import __version__, cli as tapl_cli, config as tapl_config
 
 
 class TaplCliTests(unittest.TestCase):
@@ -635,14 +636,16 @@ level_subagent_aggressiveness = "force"
             self.assertIn("keep workflow DB/config in the current repo workspace", "\n".join(payload["instructions"]))
             self.assertIn("taplctl status --json", "\n".join(payload["instructions"]))
             self.assertIn("taplctl search '<query>' --json", "\n".join(payload["instructions"]))
-            self.assertIn("@senior-worker", "\n".join(payload["instructions"]))
+            self.assertIn("taplctl <command> <subcommand> --help", "\n".join(payload["instructions"]))
             self.assertEqual(payload["next_actions"], [])
 
             prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             prompt_payload = json.loads(prompt_context.stdout)
-            self.assertIn("quote every argument", "\n".join(prompt_payload["instructions"]))
-            self.assertIn("never `--status In Progress`", "\n".join(prompt_payload["instructions"]))
-            self.assertIn("Do not use level names such as `level2`", "\n".join(prompt_payload["instructions"]))
+            prompt_instructions = "\n".join(prompt_payload["instructions"])
+            self.assertIn("taplctl <command> <subcommand> --help", prompt_instructions)
+            self.assertIn("record execution approval", prompt_instructions)
+            self.assertNotIn("quote every argument", prompt_instructions)
+            self.assertNotIn("Do not use level names such as `level2`", prompt_instructions)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
 
             self.run_cli(
@@ -680,14 +683,70 @@ level_subagent_aggressiveness = "force"
 
             stop_context = self.run_cli(db_path, "context", "--event", "Stop", "--json")
             stop_payload = json.loads(stop_context.stdout)
-            self.assertIn("Completion reports should", "\n".join(stop_payload["instructions"]))
-            self.assertIn("Archive summaries should", "\n".join(stop_payload["instructions"]))
+            stop_instructions = "\n".join(stop_payload["instructions"])
+            self.assertIn("taplctl <command> <subcommand> --help", stop_instructions)
+            self.assertNotIn("Completion reports should", stop_instructions)
+            self.assertNotIn("Archive summaries should", stop_instructions)
 
             prompt_text = self.run_cli(db_path, "context", "--event", "UserPromptSubmit")
             self.assertEqual(prompt_text.returncode, 0, prompt_text.stderr)
             self.assertIn("tapl context:", prompt_text.stdout)
-            self.assertIn("quote every argument", prompt_text.stdout)
-            self.assertIn("never `--status In Progress`", prompt_text.stdout)
+            self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
+            self.assertNotIn("quote every argument", prompt_text.stdout)
+
+    def test_command_help_exposes_field_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+
+            root_help = self.run_cli(db_path, "--help")
+            self.assertEqual(root_help.returncode, 0, root_help.stderr)
+            self.assertIn("taplctl <command> <subcommand> --help", root_help.stdout)
+            self.assertIn("taplctl validate --json", root_help.stdout)
+
+            plan_help = self.run_cli(db_path, "plan", "upsert", "--help")
+            self.assertEqual(plan_help.returncode, 0, plan_help.stderr)
+            self.assertIn("Plan writing rules", plan_help.stdout)
+            self.assertIn("Plan records should include objective", plan_help.stdout)
+            self.assertIn("--body", plan_help.stdout)
+
+            task_help = self.run_cli(db_path, "task", "upsert", "--help")
+            self.assertEqual(task_help.returncode, 0, task_help.stderr)
+            self.assertIn("Task writing rules", task_help.stdout)
+            self.assertIn("--status 'In Progress'", task_help.stdout)
+            self.assertIn("@senior-worker", task_help.stdout)
+            self.assertIn("--blocker/--next-action", task_help.stdout)
+
+            finding_help = self.run_cli(db_path, "finding", "add", "--help")
+            self.assertEqual(finding_help.returncode, 0, finding_help.stderr)
+            self.assertIn("Record a finding", finding_help.stdout)
+            self.assertIn("Why the finding matters", finding_help.stdout)
+
+            hook_help = self.run_cli(db_path, "hook-event", "--help")
+            self.assertEqual(hook_help.returncode, 0, hook_help.stderr)
+            self.assertIn("Hook handling mode", hook_help.stdout)
+            self.assertIn("Print JSON output", hook_help.stdout)
+
+    def test_parser_actions_have_help_text(self) -> None:
+        parser = tapl_cli.build_parser()
+        missing: list[str] = []
+
+        def visit(current: argparse.ArgumentParser) -> None:
+            for action in current._actions:
+                if isinstance(action, (argparse._HelpAction, argparse._VersionAction)):
+                    continue
+                if isinstance(action, argparse._SubParsersAction):
+                    for choice_action in action._choices_actions:
+                        if not choice_action.help:
+                            missing.append(f"{current.prog} {choice_action.dest}")
+                    for subparser in action.choices.values():
+                        visit(subparser)
+                    continue
+                if not action.help:
+                    name = ", ".join(action.option_strings) or action.dest
+                    missing.append(f"{current.prog}: {name}")
+
+        visit(parser)
+        self.assertEqual(missing, [])
 
     def test_install_user_writes_taplctl_hooks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1066,7 +1125,8 @@ task_granularity = "very_granular"
             self.assertIn("tapl context:", event.stdout)
             self.assertIn("taplctl status --json", event.stdout)
             self.assertIn("taplctl search '<query>' --json", event.stdout)
-            self.assertIn("Do not use level names such as `level2`", event.stdout)
+            self.assertIn("taplctl <command> <subcommand> --help", event.stdout)
+            self.assertNotIn("Do not use level names such as `level2`", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
 
             event_json = self.run_cli(

@@ -22,6 +22,84 @@ from . import (
 )
 
 
+HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
+JSON_HELP = "Print JSON output."
+DRY_RUN_HELP = "Preview changes without writing files."
+
+
+def command_help_epilog() -> str:
+    return (
+        "Workflow guidance:\n"
+        "  Use `taplctl status --json` to inspect state before non-trivial work.\n"
+        "  Use `taplctl <command> <subcommand> --help` for field-writing rules.\n"
+        "  Use `taplctl validate --json` after updates to catch missing plan/task details."
+    )
+
+
+def plan_upsert_epilog() -> str:
+    return (
+        "Plan writing rules:\n"
+        f"  {validation.plan_format_guidance()}\n"
+        "  Summary should be a compact trace such as `REQ-001: approach, files, risks, validation`.\n"
+        "  Body is for the durable plan: objective, requirements trace, selected approach,\n"
+        "  affected files/interfaces, execution order, risks, validation, and approval needs.\n"
+        "  Status is free-form; common values are Draft, Finalized, Imported, and Superseded.\n"
+        "\n"
+        "Example:\n"
+        "  taplctl plan upsert --id SPEC-001 --title 'Plan title' \\\n"
+        "    --summary 'REQ-001: approach, affected files, risks, validation' \\\n"
+        "    --body 'Objective: ...\\nValidation: ...' --status Finalized --json"
+    )
+
+
+def task_upsert_epilog() -> str:
+    statuses = ", ".join(db.TASK_STATUSES)
+    subagents = ", ".join(validation.LEVEL_SUBAGENTS)
+    return (
+        "Task writing rules:\n"
+        "  Executable tasks should include source spec_id, goal, action, required_subagent,\n"
+        "  verification, and result when completed; blocked tasks should include blocker and next_action.\n"
+        "  Split tasks by meaningful implementation or verification step.\n"
+        f"  Status values: {statuses}. Quote multi-word statuses, e.g. --status 'In Progress'.\n"
+        f"  Required subagents: {subagents}. Do not use level names such as `level2`.\n"
+        "  Keep task text in the user's language unless asked otherwise.\n"
+        "\n"
+        "Field guidance:\n"
+        "  --spec-id: stable id of the source plan/spec, e.g. SPEC-001.\n"
+        "  --goal: outcome the task must achieve.\n"
+        "  --action: concrete work to perform.\n"
+        "  --verification: command, check, or review that proves the task is done.\n"
+        "  --result: concise completion note; use with Completed tasks.\n"
+        "  --blocker/--next-action: why a Blocked task cannot proceed and what unblocks it.\n"
+        "\n"
+        "Example:\n"
+        "  taplctl task upsert --id TASK-001 --title 'Implement change' \\\n"
+        "    --status 'In Progress' --spec-id SPEC-001 --goal 'Make requested behavior work' \\\n"
+        "    --action 'Edit the relevant files' --required-subagent '@senior-worker' \\\n"
+        "    --verification 'Run focused tests' --json"
+    )
+
+
+def approval_record_epilog() -> str:
+    return (
+        "Approval writing rules:\n"
+        "  Record explicit execution approval before durable edits when plan-task-execute\n"
+        "  requires it. The prompt should describe the approved scope, not just `yes`.\n"
+        "\n"
+        "Example:\n"
+        "  taplctl approval record --decision approved \\\n"
+        "    --prompt 'Execute TASK-001 from SPEC-001' --json"
+    )
+
+
+def add_json_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action="store_true", help=JSON_HELP)
+
+
+def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--dry-run", action="store_true", help=DRY_RUN_HELP)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -39,22 +117,27 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="taplctl")
+    parser = argparse.ArgumentParser(
+        prog="taplctl",
+        description="Manage tapl workflow state for agent planning, execution, and validation.",
+        epilog=command_help_epilog(),
+        formatter_class=HELP_FORMATTER,
+    )
     parser.add_argument("--db", type=Path, default=None, help="Path to tapl SQLite DB.")
     parser.add_argument("--config", type=Path, default=None, help="Path to tapl TOML config.")
-    parser.add_argument("--version", action="version", version=f"taplctl {__version__}")
+    parser.add_argument("--version", action="version", version=f"taplctl {__version__}", help="Show version and exit.")
     sub = parser.add_subparsers(dest="command")
 
     init = sub.add_parser("init", help="Initialize the tapl database.")
-    init.add_argument("--json", action="store_true")
+    add_json_arg(init)
     init.set_defaults(handler=cmd_init)
 
     doctor = sub.add_parser("doctor", help="Check tapl runtime dependencies.")
-    doctor.add_argument("--json", action="store_true")
+    add_json_arg(doctor)
     doctor.set_defaults(handler=cmd_doctor)
 
     status = sub.add_parser("status", help="Show active workflow state.")
-    status.add_argument("--json", action="store_true")
+    add_json_arg(status)
     status.add_argument("--full", action="store_true", help="Include full plan/task/finding item details.")
     status.add_argument(
         "--include-events",
@@ -65,148 +148,186 @@ def build_parser() -> argparse.ArgumentParser:
     status.set_defaults(handler=cmd_status)
 
     validate = sub.add_parser("validate", help="Validate tapl database state.")
-    validate.add_argument("--json", action="store_true")
+    add_json_arg(validate)
     validate.set_defaults(handler=cmd_validate)
 
     context_cmd = sub.add_parser("context", help="Show lifecycle context for Codex.")
-    context_cmd.add_argument("--event", default="Manual")
-    context_cmd.add_argument("--json", action="store_true")
+    context_cmd.add_argument("--event", default="Manual", help="Lifecycle event name to format context for.")
+    add_json_arg(context_cmd)
     context_cmd.set_defaults(handler=cmd_context)
 
     run = sub.add_parser("run", help="Manage the active workflow run.")
     run_sub = run.add_subparsers(dest="run_command")
-    run_summary = run_sub.add_parser("summary", help="Update the active run request summary.")
-    run_summary.add_argument("--summary", required=True)
-    run_summary.add_argument("--json", action="store_true")
+    run_summary = run_sub.add_parser(
+        "summary",
+        help="Update the active run request summary.",
+        description="Update the active run request summary.",
+    )
+    run_summary.add_argument("--summary", required=True, help="Short description of the current request.")
+    add_json_arg(run_summary)
     run_summary.set_defaults(handler=cmd_run_summary)
-    run_result = run_sub.add_parser("result", help="Update the active run result summary.")
-    run_result.add_argument("--result", required=True)
-    run_result.add_argument("--json", action="store_true")
+    run_result = run_sub.add_parser(
+        "result",
+        help="Update the active run result summary.",
+        description="Update the active run result summary.",
+    )
+    run_result.add_argument("--result", required=True, help="Short description of the completed result.")
+    add_json_arg(run_result)
     run_result.set_defaults(handler=cmd_run_result)
 
     install = sub.add_parser("install", help="Install tapl workflow hooks and repo-local state.")
     install_sub = install.add_subparsers(dest="install_command")
-    install_user = install_sub.add_parser("user", help="Install user-global Codex hooks.")
-    install_user.add_argument("--codex-home", type=Path, default=None)
+    install_user = install_sub.add_parser(
+        "user",
+        help="Install user-global Codex hooks.",
+        description="Install user-global Codex hooks.",
+    )
+    install_user.add_argument("--codex-home", type=Path, default=None, help="Codex home directory to update.")
     add_install_common_args(install_user)
     install_user.set_defaults(handler=cmd_install_user)
-    install_repo = install_sub.add_parser("repo", help="Install repo-local Codex hooks, config, and DB.")
-    install_repo.add_argument("--repo", type=Path, default=None)
+    install_repo = install_sub.add_parser(
+        "repo",
+        help="Install repo-local Codex hooks, config, and DB.",
+        description="Install repo-local Codex hooks, config, and DB.",
+    )
+    install_repo.add_argument("--repo", type=Path, default=None, help="Repository root to install into.")
     add_install_common_args(install_repo)
     install_repo.set_defaults(handler=cmd_install_repo)
 
-    plan = sub.add_parser("plan", help="Manage plan items.")
+    plan = sub.add_parser("plan", help="Manage plan items.", formatter_class=HELP_FORMATTER)
     plan_sub = plan.add_subparsers(dest="plan_command")
-    plan_upsert = plan_sub.add_parser("upsert")
-    plan_upsert.add_argument("--id", default="PLAN-001")
-    plan_upsert.add_argument("--title", default="Plan")
-    plan_upsert.add_argument("--summary", default="")
-    plan_upsert.add_argument("--body", default="")
-    plan_upsert.add_argument("--status", default="Draft")
-    plan_upsert.add_argument("--json", action="store_true")
+    plan_upsert = plan_sub.add_parser(
+        "upsert",
+        help="Create or update a plan.",
+        description="Create or update a durable plan record.",
+        epilog=plan_upsert_epilog(),
+        formatter_class=HELP_FORMATTER,
+    )
+    plan_upsert.add_argument("--id", default="PLAN-001", help="Stable plan id, commonly SPEC-* or PLAN-*.")
+    plan_upsert.add_argument("--title", default="Plan", help="Short human-readable plan title.")
+    plan_upsert.add_argument("--summary", default="", help="Compact requirements trace and approach summary.")
+    plan_upsert.add_argument("--body", default="", help="Detailed plan body; use newlines for sections.")
+    plan_upsert.add_argument("--status", default="Draft", help="Plan lifecycle label, e.g. Draft or Finalized.")
+    add_json_arg(plan_upsert)
     plan_upsert.set_defaults(handler=cmd_plan_upsert)
 
-    task = sub.add_parser("task", help="Manage tasks.")
+    task = sub.add_parser("task", help="Manage tasks.", formatter_class=HELP_FORMATTER)
     task_sub = task.add_subparsers(dest="task_command")
-    task_upsert = task_sub.add_parser("upsert")
-    task_upsert.add_argument("--id", required=True)
-    task_upsert.add_argument("--title", required=True)
-    task_upsert.add_argument("--status", required=True, choices=db.TASK_STATUSES)
-    task_upsert.add_argument("--spec-id", default="")
-    task_upsert.add_argument("--goal", default="")
-    task_upsert.add_argument("--action", default="")
-    task_upsert.add_argument("--required-subagent", default="")
-    task_upsert.add_argument("--verification", default="")
-    task_upsert.add_argument("--result", default="")
-    task_upsert.add_argument("--blocker", default="")
-    task_upsert.add_argument("--next-action", default="")
-    task_upsert.add_argument("--json", action="store_true")
+    task_upsert = task_sub.add_parser(
+        "upsert",
+        help="Create or update a task.",
+        description="Create or update an executable task record.",
+        epilog=task_upsert_epilog(),
+        formatter_class=HELP_FORMATTER,
+    )
+    task_upsert.add_argument("--id", required=True, help="Stable task id, commonly TASK-*.")
+    task_upsert.add_argument("--title", required=True, help="Short human-readable task title.")
+    task_upsert.add_argument("--status", required=True, choices=db.TASK_STATUSES, help="Task lifecycle status.")
+    task_upsert.add_argument("--spec-id", default="", help="Source plan/spec stable id.")
+    task_upsert.add_argument("--goal", default="", help="Outcome this task must achieve.")
+    task_upsert.add_argument("--action", default="", help="Concrete work to perform.")
+    task_upsert.add_argument("--required-subagent", default="", help="One of the configured @*-worker values.")
+    task_upsert.add_argument("--verification", default="", help="Command, check, or review proving completion.")
+    task_upsert.add_argument("--result", default="", help="Completion note for Completed tasks.")
+    task_upsert.add_argument("--blocker", default="", help="Reason a Blocked task cannot proceed.")
+    task_upsert.add_argument("--next-action", default="", help="Specific action that would unblock a Blocked task.")
+    add_json_arg(task_upsert)
     task_upsert.set_defaults(handler=cmd_task_upsert)
 
     finding = sub.add_parser("finding", help="Manage findings.")
     finding_sub = finding.add_subparsers(dest="finding_command")
-    finding_add = finding_sub.add_parser("add")
-    finding_add.add_argument("--title", required=True)
-    finding_add.add_argument("--source", default="")
-    finding_add.add_argument("--finding", default="")
-    finding_add.add_argument("--impact", default="")
-    finding_add.add_argument("--related-ids", default="")
-    finding_add.add_argument("--json", action="store_true")
+    finding_add = finding_sub.add_parser("add", help="Record a finding.", description="Record a finding.")
+    finding_add.add_argument("--title", required=True, help="Short finding title.")
+    finding_add.add_argument("--source", default="", help="Where the finding came from.")
+    finding_add.add_argument("--finding", default="", help="Finding details.")
+    finding_add.add_argument("--impact", default="", help="Why the finding matters.")
+    finding_add.add_argument("--related-ids", default="", help="Related plan, task, or item ids.")
+    add_json_arg(finding_add)
     finding_add.set_defaults(handler=cmd_finding_add)
 
-    approval = sub.add_parser("approval", help="Manage explicit workflow approvals.")
+    approval = sub.add_parser("approval", help="Manage explicit workflow approvals.", formatter_class=HELP_FORMATTER)
     approval_sub = approval.add_subparsers(dest="approval_command")
-    approval_record = approval_sub.add_parser("record")
-    approval_record.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND)
-    approval_record.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS)
-    approval_record.add_argument("--prompt", default="")
-    approval_record.add_argument("--json", action="store_true")
+    approval_record = approval_sub.add_parser(
+        "record",
+        help="Record an approval decision.",
+        description="Record a user decision for workflow execution.",
+        epilog=approval_record_epilog(),
+        formatter_class=HELP_FORMATTER,
+    )
+    approval_record.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help="Approval kind.")
+    approval_record.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS, help="Approval decision.")
+    approval_record.add_argument("--prompt", default="", help="Approved or rejected execution scope.")
+    add_json_arg(approval_record)
     approval_record.set_defaults(handler=cmd_approval_record)
-    approval_status = approval_sub.add_parser("status")
-    approval_status.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND)
-    approval_status.add_argument("--json", action="store_true")
+    approval_status = approval_sub.add_parser(
+        "status",
+        help="Show current approval state.",
+        description="Show current approval state.",
+    )
+    approval_status.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help="Approval kind to inspect.")
+    add_json_arg(approval_status)
     approval_status.set_defaults(handler=cmd_approval_status)
-    approval_list = approval_sub.add_parser("list")
-    approval_list.add_argument("--kind", default="")
-    approval_list.add_argument("--limit", type=int, default=10)
-    approval_list.add_argument("--json", action="store_true")
+    approval_list = approval_sub.add_parser("list", help="List recent approvals.", description="List recent approvals.")
+    approval_list.add_argument("--kind", default="", help="Filter by approval kind.")
+    approval_list.add_argument("--limit", type=int, default=10, help="Maximum approvals to return.")
+    add_json_arg(approval_list)
     approval_list.set_defaults(handler=cmd_approval_list)
 
     item = sub.add_parser("item", help="Inspect workflow items.")
     item_sub = item.add_subparsers(dest="item_command")
-    item_show = item_sub.add_parser("show")
-    item_show.add_argument("--id", type=int, required=True)
-    item_show.add_argument("--json", action="store_true")
+    item_show = item_sub.add_parser("show", help="Show one item by numeric id.", description="Show one item by numeric id.")
+    item_show.add_argument("--id", type=int, required=True, help="Numeric item id.")
+    add_json_arg(item_show)
     item_show.set_defaults(handler=cmd_item_show)
 
     archive = sub.add_parser("archive", help="Manage archives.")
     archive_sub = archive.add_subparsers(dest="archive_command")
-    archive_create = archive_sub.add_parser("create")
-    archive_create.add_argument("--slug", required=True)
-    archive_create.add_argument("--summary", default="")
-    archive_create.add_argument("--json", action="store_true")
+    archive_create = archive_sub.add_parser("create", help="Archive the active run.", description="Archive the active run.")
+    archive_create.add_argument("--slug", required=True, help="Stable archive slug.")
+    archive_create.add_argument("--summary", default="", help="Archive summary text.")
+    add_json_arg(archive_create)
     archive_create.set_defaults(handler=cmd_archive_create)
-    archive_list = archive_sub.add_parser("list")
-    archive_list.add_argument("--limit", type=int, default=None)
-    archive_list.add_argument("--json", action="store_true")
+    archive_list = archive_sub.add_parser("list", help="List archives.", description="List archives.")
+    archive_list.add_argument("--limit", type=int, default=None, help="Maximum archives to return.")
+    add_json_arg(archive_list)
     archive_list.set_defaults(handler=cmd_archive_list)
-    archive_show = archive_sub.add_parser("show")
-    archive_show.add_argument("--id", required=True)
-    archive_show.add_argument("--json", action="store_true")
+    archive_show = archive_sub.add_parser("show", help="Show archive details.", description="Show archive details.")
+    archive_show.add_argument("--id", required=True, help="Archive id or slug.")
+    add_json_arg(archive_show)
     archive_show.set_defaults(handler=cmd_archive_show)
 
     search = sub.add_parser("search", help="Search workflow state and archive history.")
-    search.add_argument("query")
+    search.add_argument("query", help="Search query string.")
     search.add_argument(
         "--limit",
         type=positive_int_arg,
         default=None,
         help="Maximum results to return. Defaults to search.max_results config.",
     )
-    search.add_argument("--json", action="store_true")
+    add_json_arg(search)
     search.set_defaults(handler=cmd_search)
 
     reindex = sub.add_parser("reindex", help="Build semantic index when optional deps are installed.")
-    reindex.add_argument("--dry-run", action="store_true")
-    reindex.add_argument("--json", action="store_true")
+    add_dry_run_arg(reindex)
+    add_json_arg(reindex)
     reindex.set_defaults(handler=cmd_reindex)
 
     import_md = sub.add_parser("import-md", help="Import legacy .agent-workflow markdown.")
-    import_md.add_argument("--path", type=Path, default=Path(".agent-workflow"))
-    import_md.add_argument("--dry-run", action="store_true")
+    import_md.add_argument("--path", type=Path, default=Path(".agent-workflow"), help="Legacy workflow directory.")
+    add_dry_run_arg(import_md)
     import_md.add_argument(
         "--migrate-existing",
         action="store_true",
         help="Convert older raw MD-* legacy import runs already stored in the DB.",
     )
-    import_md.add_argument("--json", action="store_true")
+    add_json_arg(import_md)
     import_md.set_defaults(handler=cmd_import_md)
 
     hook = sub.add_parser("hook-event", help="Handle a Codex hook event.")
-    hook.add_argument("--event", required=True)
-    hook.add_argument("--mode", choices=("observe", "enforce"), default="observe")
-    hook.add_argument("--tool", default=None)
-    hook.add_argument("--json", action="store_true")
+    hook.add_argument("--event", required=True, help="Codex hook event name.")
+    hook.add_argument("--mode", choices=("observe", "enforce"), default="observe", help="Hook handling mode.")
+    hook.add_argument("--tool", default=None, help="Tool name for tool hook events.")
+    add_json_arg(hook)
     hook.set_defaults(handler=cmd_hook_event)
 
     return parser
@@ -214,14 +335,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def add_install_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--taplctl-command", default=None, help="Command used by generated Codex hooks.")
-    parser.add_argument("--mode", choices=("observe", "enforce"), default=tapl_install.DEFAULT_HOOK_MODE)
+    parser.add_argument("--mode", choices=("observe", "enforce"), default=tapl_install.DEFAULT_HOOK_MODE, help="Hook handling mode.")
     parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite static templates and make managed Codex config keys use tapl defaults.",
     )
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--json", action="store_true")
+    add_dry_run_arg(parser)
+    add_json_arg(parser)
 
 
 def positive_int_arg(value: str) -> int:

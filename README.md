@@ -158,6 +158,17 @@ taplctl validate --json
 taplctl context --event UserPromptSubmit --json
 ```
 
+Lifecycle context stays focused on state, workflow order, and next actions.
+Command syntax, field-writing rules, statuses, subagent values, and examples live
+in command help:
+
+```sh
+taplctl --help
+taplctl plan upsert --help
+taplctl task upsert --help
+taplctl approval record --help
+```
+
 Record a plan:
 
 ```sh

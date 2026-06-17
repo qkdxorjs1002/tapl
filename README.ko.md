@@ -154,6 +154,17 @@ taplctl validate --json
 taplctl context --event UserPromptSubmit --json
 ```
 
+Lifecycle context는 상태, workflow 순서, 다음 행동에 집중합니다. 명령
+문법, 필드 작성 규칙, status/subagent 값, 예시는 하위 명령 help에서
+확인합니다.
+
+```sh
+taplctl --help
+taplctl plan upsert --help
+taplctl task upsert --help
+taplctl approval record --help
+```
+
 Plan 기록:
 
 ```sh
