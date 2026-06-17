@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="Terminal capture showing Codex CLI using tapl workflow state">
+  <defs>
+    <linearGradient id="window" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17202a"/>
+      <stop offset="1" stop-color="#0b1118"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="1440" height="900" fill="#f3efe7"/>
+  <rect x="86" y="64" width="1268" height="772" rx="18" fill="url(#window)" filter="url(#shadow)"/>
+  <rect x="86" y="64" width="1268" height="48" rx="18" fill="#202833"/>
+  <rect x="86" y="94" width="1268" height="18" fill="#202833"/>
+  <circle cx="118" cy="88" r="8" fill="#ff5f57"/>
+  <circle cx="144" cy="88" r="8" fill="#ffbd2e"/>
+  <circle cx="170" cy="88" r="8" fill="#28c840"/>
+  <text x="720" y="94" text-anchor="middle" fill="#aab6c4" font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="15">iTerm2 - Codex CLI with tapl</text>
+
+  <g font-family="SFMono-Regular, Menlo, Consolas, monospace" font-size="21" xml:space="preserve">
+    <text x="120" y="154" fill="#7dd3fc">paragon@iterm</text>
+    <text x="296" y="154" fill="#a7f3d0"> tapl % </text>
+    <text x="392" y="154" fill="#e6edf3">codex "README.*를 self PR스럽게 바꿔줘"</text>
+
+    <text x="120" y="202" fill="#fbbf24">tapl hook</text>
+    <text x="258" y="202" fill="#94a3b8">UserPromptSubmit</text>
+    <text x="120" y="237" fill="#e6edf3">active_run.request_summary</text>
+    <text x="470" y="237" fill="#94a3b8">README.* -> self-PR docs + CLI capture</text>
+    <text x="120" y="272" fill="#e6edf3">workflow_guidance</text>
+    <text x="365" y="272" fill="#94a3b8">search -> summarize -> plan -> tasks -> approval -> execute/update</text>
+    <text x="120" y="307" fill="#e6edf3">config</text>
+    <text x="204" y="307" fill="#94a3b8">detailed plans, granular tasks, execution approval required</text>
+
+    <text x="120" y="372" fill="#c084fc">codex</text>
+    <text x="204" y="372" fill="#94a3b8">uses the same CLI state before editing</text>
+
+    <text x="152" y="420" fill="#38bdf8">1.</text>
+    <text x="194" y="420" fill="#e6edf3">taplctl status --json</text>
+    <text x="518" y="420" fill="#94a3b8"># active run, counts, approvals, validation</text>
+
+    <text x="152" y="455" fill="#38bdf8">2.</text>
+    <text x="194" y="455" fill="#e6edf3">taplctl search 'README self PR codex cli screenshot' --json</text>
+    <text x="990" y="455" fill="#94a3b8"># prior work</text>
+
+    <text x="152" y="490" fill="#38bdf8">3.</text>
+    <text x="194" y="490" fill="#e6edf3">taplctl plan upsert SPEC-README-SELF-PR</text>
+    <text x="790" y="490" fill="#94a3b8"># requirements, order, risks</text>
+
+    <text x="152" y="525" fill="#38bdf8">4.</text>
+    <text x="194" y="525" fill="#e6edf3">taplctl task upsert TASK-README-001..004</text>
+    <text x="810" y="525" fill="#94a3b8"># executable work items</text>
+
+    <text x="152" y="560" fill="#38bdf8">5.</text>
+    <text x="194" y="560" fill="#e6edf3">taplctl approval record --decision approved</text>
+    <text x="818" y="560" fill="#94a3b8"># durable edit boundary</text>
+
+    <text x="152" y="595" fill="#38bdf8">6.</text>
+    <text x="194" y="595" fill="#e6edf3">edit README.md README.ko.md assets/tapl-codex-iterm-demo.png</text>
+
+    <text x="120" y="660" fill="#fbbf24">taplctl status</text>
+    <text x="120" y="704" fill="#a7f3d0">approval</text>
+    <text x="236" y="704" fill="#e6edf3">approved</text>
+    <text x="388" y="704" fill="#a7f3d0">plans</text>
+    <text x="478" y="704" fill="#e6edf3">1</text>
+    <text x="548" y="704" fill="#a7f3d0">tasks</text>
+    <text x="638" y="704" fill="#e6edf3">4</text>
+    <text x="708" y="704" fill="#a7f3d0">state</text>
+    <text x="790" y="704" fill="#e6edf3">.tapl/tapl.db</text>
+
+    <text x="120" y="764" fill="#94a3b8">Result: Codex still writes code and docs.</text>
+    <text x="120" y="799" fill="#94a3b8">tapl makes the workflow inspectable, resumable, and reviewable.</text>
+  </g>
+</svg>
