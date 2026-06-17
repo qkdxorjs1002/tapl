@@ -135,6 +135,31 @@ const DEFAULT_STATUS: TaplStatus = {
   recent_events: [],
   schema: {}
 };
+const READABLE_BLOCK_KEY_LABELS = new Set([
+  'action',
+  'affected files',
+  'affected files/interfaces',
+  'affected interfaces',
+  'approval needs',
+  'blocker',
+  'execution order',
+  'goal',
+  'impact',
+  'next action',
+  'objective',
+  'related ids',
+  'request',
+  'required subagent',
+  'requirements',
+  'requirements trace',
+  'result',
+  'risks',
+  'selected approach',
+  'spec',
+  'summary',
+  'validation',
+  'verification'
+]);
 
 export function activate(context: vscode.ExtensionContext): void {
   const activeProvider = new ActiveProvider();
@@ -582,7 +607,7 @@ function renderOverview(status: TaplStatus, archives: TaplArchive[], searchQuery
       <div class="top-actions">
         <button data-command="refresh">Refresh</button>
         <form id="search-form" class="top-search">
-          <input id="search-query" value="${escapeAttribute(searchQuery)}" placeholder="Search workflow history" />
+          <input id="search-query" value="${escapeAttribute(searchQuery)}" placeholder="Search workflow history" aria-label="Search workflow history" />
           <button type="submit">Search</button>
         </form>
       </div>
@@ -776,11 +801,11 @@ function renderItem(item: TaplItem): string {
   return `
     <article class="item">
       <div class="item-head">
-        <strong>${escapeHtml(item.stable_id)}</strong>
+        <span class="item-id">${escapeHtml(item.stable_id)}</span>
         ${item.status ? `<span class="badge ${statusClass(item.status)}">${escapeHtml(item.status)}</span>` : ''}
       </div>
-      <h3>${escapeHtml(item.title)}</h3>
-      ${item.body ? `<pre>${escapeHtml(item.body)}</pre>` : ''}
+      <h3 class="item-title">${escapeHtml(item.title)}</h3>
+      ${item.body ? renderReadableBlock(item.body, 'item-body') : ''}
     </article>
   `;
 }
@@ -825,7 +850,7 @@ function renderSearchView(payload: TaplSearchPayload): string {
       <div class="top-actions">
         <button data-command="back">Back</button>
         <form id="search-form" class="top-search">
-          <input id="search-query" value="${escapeAttribute(payload.query)}" placeholder="Search workflow history" />
+          <input id="search-query" value="${escapeAttribute(payload.query)}" placeholder="Search workflow history" aria-label="Search workflow history" />
           <button type="submit">Search</button>
         </form>
       </div>
@@ -842,11 +867,11 @@ function renderSearchView(payload: TaplSearchPayload): string {
 function renderSearchResult(result: TaplSearchResult): string {
   const body = `
     <span class="item-head">
-      <strong>${escapeHtml(result.stable_id)} ${escapeHtml(result.title)}</strong>
+      <strong class="search-title"><span class="item-id">${escapeHtml(result.stable_id)}</span> ${escapeHtml(result.title)}</strong>
       <span class="badge">${escapeHtml(result.kind)}</span>
     </span>
     ${result.status ? `<span class="muted">${escapeHtml(result.status)}</span>` : ''}
-    ${result.snippet ? `<span class="archive-summary">${escapeHtml(result.snippet)}</span>` : ''}
+    ${result.snippet ? `<span class="snippet">${escapeHtml(result.snippet)}</span>` : ''}
     <span class="muted">${escapeHtml(result.search_source)}${result.source ? ` - ${escapeHtml(result.source)}` : ''}</span>
   `;
 
@@ -890,7 +915,7 @@ function renderSearchItemView(result: TaplSearchResult, detail?: TaplItemDetail)
       ${content ? `
         <section class="panel">
           <h2>Content</h2>
-          <pre>${escapeHtml(content)}</pre>
+          ${renderReadableBlock(content, 'content-body')}
         </section>
       ` : ''}
       ${detail ? renderItemMetadata(detail) : ''}
@@ -899,7 +924,7 @@ function renderSearchItemView(result: TaplSearchResult, detail?: TaplItemDetail)
 }
 
 function renderItemMetadata(item: TaplItemDetail): string {
-  const fields: [string, unknown][] = [
+  const executionFields: [string, unknown][] = [
     ['Spec', item.spec_id],
     ['Goal', item.goal],
     ['Action', item.action],
@@ -907,23 +932,38 @@ function renderItemMetadata(item: TaplItemDetail): string {
     ['Verification', item.verification],
     ['Result', item.result],
     ['Blocker', item.blocker],
-    ['Next Action', item.next_action],
+    ['Next Action', item.next_action]
+  ];
+  const auditFields: [string, unknown][] = [
     ['Related IDs', item.related_ids],
     ['Impact', item.impact],
     ['Request', item.request_summary],
     ['Updated', formatTimestamp(item.updated_at)],
     ['Archived at', formatTimestamp(item.archive_created_at)]
   ];
-  const rows = fields.map(([label, value]) => renderDetailField(label, value)).join('');
-  if (!rows) {
+  const executionRows = renderDetailRows(executionFields);
+  const auditRows = renderDetailRows(auditFields);
+  if (!executionRows && !auditRows) {
     return '';
   }
-  return `
+  return [
+    executionRows ? `
     <section class="panel">
-      <h2>Metadata</h2>
-      <div class="detail-list">${rows}</div>
+      <h2>Execution</h2>
+      <div class="detail-list">${executionRows}</div>
     </section>
-  `;
+    ` : '',
+    auditRows ? `
+    <section class="panel">
+      <h2>Audit</h2>
+      <div class="detail-list">${auditRows}</div>
+    </section>
+    ` : ''
+  ].join('');
+}
+
+function renderDetailRows(fields: [string, unknown][]): string {
+  return fields.map(([label, value]) => renderDetailField(label, value)).join('');
 }
 
 function renderDetailField(label: string, value: unknown): string {
@@ -932,10 +972,44 @@ function renderDetailField(label: string, value: unknown): string {
   }
   return `
     <div class="detail-row">
-      <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(value)}</strong>
+      <span class="detail-label">${escapeHtml(label)}</span>
+      <div class="detail-value">${escapeHtml(value)}</div>
     </div>
   `;
+}
+
+function renderReadableBlock(content: unknown, extraClass = ''): string {
+  const classes = ['reading-body', extraClass].filter(Boolean).join(' ');
+  return `<div class="${classes}"><pre>${renderReadableContent(content)}</pre></div>`;
+}
+
+function renderReadableContent(content: unknown): string {
+  return String(content)
+    .split(/(\r\n|\n|\r)/)
+    .map((part) => part === '\r\n' || part === '\n' || part === '\r' ? part : renderReadableLine(part))
+    .join('');
+}
+
+function renderReadableLine(line: string): string {
+  const match = line.match(/^(\s*(?:[-*]\s+)?)([A-Za-z][A-Za-z0-9 /_-]*|REQ-\d+)(:\s*)/i);
+  if (!match) {
+    return escapeHtml(line);
+  }
+
+  const [, prefix, label, suffix] = match;
+  if (!isReadableBlockKey(label)) {
+    return escapeHtml(line);
+  }
+
+  const rest = line.slice(match[0].length);
+  return `${escapeHtml(prefix)}<span class="body-key">${escapeHtml(label)}${escapeHtml(suffix)}</span>${escapeHtml(rest)}`;
+}
+
+function isReadableBlockKey(label: string): boolean {
+  if (/^REQ-\d+$/i.test(label)) {
+    return true;
+  }
+  return READABLE_BLOCK_KEY_LABELS.has(label.trim().toLowerCase().replace(/\s+/g, ' '));
 }
 
 function renderError(message: string): string {
@@ -1250,6 +1324,8 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
       --muted: var(--vscode-descriptionForeground);
       --border: var(--vscode-panel-border);
       --panel: var(--vscode-sideBar-background);
+      --surface: var(--vscode-editorWidget-background, var(--panel));
+      --surface-muted: var(--vscode-input-background, var(--surface));
       --accent: var(--vscode-focusBorder);
       --error: var(--vscode-errorForeground);
     }
@@ -1260,6 +1336,7 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
       font-family: var(--vscode-font-family);
       color: var(--fg);
       background: var(--bg);
+      line-height: 1.5;
     }
     button, input {
       font: inherit;
@@ -1275,11 +1352,27 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
       color: var(--vscode-button-foreground);
       border-color: transparent;
     }
+    button:focus-visible, input:focus-visible, .workflow-tab:focus-visible, .item-button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
     h1, h2, h3, p { margin-top: 0; }
-    h1 { font-size: 28px; margin-bottom: 0; }
-    h2 { font-size: 15px; }
-    h3 { font-size: 13px; margin-bottom: 8px; }
-    h1, h2, h3, p, small, pre, .archive-summary, .archive-time, .item-head strong {
+    h1 {
+      font-size: 26px;
+      line-height: 1.2;
+      margin-bottom: 0;
+    }
+    h2 {
+      font-size: 14px;
+      line-height: 1.35;
+      margin-bottom: 12px;
+    }
+    h3 {
+      font-size: 14px;
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+    h1, h2, h3, p, small, pre, .archive-summary, .archive-time, .item-head strong, .item-id, .snippet, .detail-value, .body-key {
       min-width: 0;
       max-width: 100%;
       overflow-wrap: anywhere;
@@ -1287,10 +1380,12 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     }
     pre {
       white-space: pre-wrap;
-      margin: 8px 0 0;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
+      margin: 0;
+      color: var(--fg);
+      font-family: var(--vscode-font-family);
+      font-size: 13px;
+      line-height: 1.65;
+      tab-size: 2;
     }
     .topbar {
       display: flex;
@@ -1315,10 +1410,10 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
       gap: 8px;
       margin-bottom: 12px;
     }
-    .metric, .panel, .item {
+    .metric, .panel {
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: var(--panel);
+      background: var(--surface);
       min-width: 0;
     }
     .metric {
@@ -1390,29 +1485,42 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     }
     .single { max-width: 900px; }
     .panel {
-      padding: 14px;
+      padding: 16px;
       min-width: 0;
     }
     .item {
-      padding: 10px;
-      margin-top: 8px;
+      padding: 14px 0 0;
+      margin-top: 14px;
+      border-top: 1px solid var(--border);
+      background: transparent;
+      min-width: 0;
+    }
+    .panel > h2 + .item {
+      padding-top: 0;
+      margin-top: 0;
+      border-top: 0;
     }
     .item-button {
       display: block;
       width: 100%;
       text-align: left;
-      background: var(--panel);
+      background: transparent;
       color: var(--fg);
-      border-color: var(--border);
+      border: 1px solid transparent;
+      border-top-color: var(--border);
+      border-radius: 4px;
       cursor: pointer;
+      padding: 12px 10px;
     }
-    .item-button:hover {
+    .item-button:hover, .item-button:focus-visible {
       border-color: var(--accent);
+      background: var(--vscode-list-hoverBackground, transparent);
     }
     .archive-summary {
       display: block;
       margin-top: 4px;
       min-width: 0;
+      line-height: 1.5;
     }
     .archive-time {
       display: block;
@@ -1425,9 +1533,48 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
       display: flex;
       justify-content: space-between;
       gap: 8px;
-      align-items: center;
-      margin-bottom: 6px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
       min-width: 0;
+    }
+    .item-id {
+      color: var(--muted);
+      font-family: var(--vscode-editor-font-family, var(--vscode-font-family));
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+    .item-title {
+      color: var(--fg);
+      font-weight: 600;
+    }
+    .search-title {
+      line-height: 1.4;
+      font-weight: 600;
+    }
+    .snippet {
+      display: block;
+      margin-top: 6px;
+      max-width: 78ch;
+      color: var(--fg);
+      line-height: 1.55;
+    }
+    .reading-body {
+      max-width: 78ch;
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-left: 2px solid var(--accent);
+      border-radius: 4px;
+      background: var(--surface-muted);
+    }
+    .content-body {
+      max-width: 82ch;
+      margin-top: 0;
+    }
+    .body-key {
+      color: var(--vscode-symbolIcon-keywordForeground, var(--accent));
+      font-weight: 700;
     }
     form {
       display: flex;
@@ -1449,19 +1596,22 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     }
     .detail-row {
       display: grid;
-      grid-template-columns: 130px minmax(0, 1fr);
+      grid-template-columns: minmax(110px, 140px) minmax(0, 1fr);
       gap: 10px;
       align-items: start;
     }
-    .detail-row span {
-      color: var(--muted);
+    .detail-label {
+      color: var(--vscode-symbolIcon-keywordForeground, var(--accent));
       font-size: 12px;
+      font-weight: 700;
     }
-    .detail-row strong {
+    .detail-value {
       overflow-wrap: anywhere;
       min-width: 0;
       word-break: break-word;
-      font-weight: 600;
+      white-space: pre-wrap;
+      line-height: 1.55;
+      font-weight: 400;
     }
     .debug-footer {
       display: flex;
