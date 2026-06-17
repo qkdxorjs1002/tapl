@@ -1,6 +1,7 @@
 model = "gpt-5.5"
 model_reasoning_effort = "xhigh"
 personality = "pragmatic"
+suppress_unstable_features_warning = true
 
 [features]
 multi_agent = true
