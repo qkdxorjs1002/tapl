@@ -14,6 +14,7 @@ CONFIG_RELATIVE = Path(".tapl") / "config.toml"
 
 DEFAULT_SEARCH_MODE = "hybrid"
 DEFAULT_HYBRID_SEMANTIC_RATIO = 0.65
+DEFAULT_SEARCH_MAX_RESULTS = 7
 DEFAULT_USE_LEVEL_SUBAGENT = True
 DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS = "auto"
 DEFAULT_PLAN_DETAIL = "detailed"
@@ -30,6 +31,7 @@ TASK_GRANULARITIES = ("minimal", "less_granular", "granular", "very_granular")
 class SearchConfig:
     mode: str = DEFAULT_SEARCH_MODE
     hybrid_semantic_ratio: float = DEFAULT_HYBRID_SEMANTIC_RATIO
+    max_results: int = DEFAULT_SEARCH_MAX_RESULTS
 
     @property
     def hybrid_bm25_ratio(self) -> float:
@@ -38,6 +40,7 @@ class SearchConfig:
     def as_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
+            "max_results": self.max_results,
             "hybrid_semantic_ratio": self.hybrid_semantic_ratio,
             "hybrid_bm25_ratio": self.hybrid_bm25_ratio,
         }
@@ -144,6 +147,16 @@ def load(
             ),
             "search.hybrid_semantic_ratio",
         ),
+        max_results=positive_int(
+            setting(
+                search_data,
+                "max_results",
+                "max-results",
+                "limit",
+                default=DEFAULT_SEARCH_MAX_RESULTS,
+            ),
+            "search.max_results",
+        ),
     )
     plan_task_execute = PlanTaskExecuteConfig(
         use_level_subagent=boolean(
@@ -228,6 +241,14 @@ def ratio(value: Any, key: str) -> float:
     if parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{key} must be between 0.0 and 1.0")
     return parsed
+
+
+def positive_int(value: Any, key: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key} must be a positive integer")
+    if value < 1:
+        raise ValueError(f"{key} must be a positive integer")
+    return value
 
 
 def boolean(value: Any, key: str) -> bool:

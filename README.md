@@ -210,7 +210,12 @@ taplctl finding add \
   --json
 
 taplctl search "workflow dashboard" --json
+taplctl search "workflow dashboard" --limit 5 --json
 ```
+
+`taplctl search` returns 7 results by default. Set `[search] max_results = 12`
+in `.tapl/config.toml` or `~/.tapl/config.toml` to change the default, and use
+`--limit` for one-off overrides.
 
 Archive completed work:
 

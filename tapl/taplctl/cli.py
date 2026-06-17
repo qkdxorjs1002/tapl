@@ -177,7 +177,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     search = sub.add_parser("search", help="Search workflow state and archive history.")
     search.add_argument("query")
-    search.add_argument("--limit", type=int, default=10)
+    search.add_argument(
+        "--limit",
+        type=positive_int_arg,
+        default=None,
+        help="Maximum results to return. Defaults to search.max_results config.",
+    )
     search.add_argument("--json", action="store_true")
     search.set_defaults(handler=cmd_search)
 
@@ -217,6 +222,16 @@ def add_install_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+
+
+def positive_int_arg(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def open_conn(args: argparse.Namespace, *, start: Path | None = None) -> sqlite3.Connection:
@@ -548,7 +563,8 @@ def cmd_archive_show(args: argparse.Namespace) -> int:
 
 def cmd_search(args: argparse.Namespace) -> int:
     settings = load_config(args)
-    payload = embeddings.search(open_conn(args), args.query, limit=args.limit, search_config=settings.search)
+    limit = args.limit if args.limit is not None else settings.search.max_results
+    payload = embeddings.search(open_conn(args), args.query, limit=limit, search_config=settings.search)
     payload["ok"] = True
     emit(payload, args.json)
     return 0

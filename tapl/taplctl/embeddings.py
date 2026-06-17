@@ -105,12 +105,13 @@ def search(
     conn: sqlite3.Connection,
     query: str,
     *,
-    limit: int = 10,
+    limit: int = tapl_config.DEFAULT_SEARCH_MAX_RESULTS,
     search_config: tapl_config.SearchConfig | None = None,
 ) -> dict[str, Any]:
     settings = search_config or tapl_config.SearchConfig()
     payload: dict[str, Any] = {
         "query": query,
+        "limit": limit,
         "configured_mode": settings.mode,
         "search_config": settings.as_dict(),
     }

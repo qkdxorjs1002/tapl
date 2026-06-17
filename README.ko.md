@@ -205,7 +205,12 @@ taplctl finding add \
   --json
 
 taplctl search "workflow dashboard" --json
+taplctl search "workflow dashboard" --limit 5 --json
 ```
+
+`taplctl search`는 기본 7개 결과를 반환합니다. 기본값은
+`.tapl/config.toml` 또는 `~/.tapl/config.toml`의 `[search] max_results = 12`로
+바꿀 수 있고, 한 번만 바꿀 때는 `--limit`을 사용합니다.
 
 완료된 작업 archive:
 

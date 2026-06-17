@@ -196,6 +196,7 @@ class TaplCliTests(unittest.TestCase):
             cfg = tapl_config.load(Path(tmp) / "missing.toml")
             self.assertFalse(cfg.exists)
             self.assertEqual(cfg.search.mode, "hybrid")
+            self.assertEqual(cfg.search.max_results, 7)
             self.assertEqual(cfg.search.hybrid_semantic_ratio, 0.65)
             self.assertEqual(cfg.search.hybrid_bm25_ratio, 0.35)
             self.assertTrue(cfg.plan_task_execute.use_level_subagent)
@@ -302,6 +303,7 @@ plan-detail = "minimal"
                 """
 [search]
 mode = "word"
+max_results = 2
 hybrid_semantic_ratio = 0.25
 
 [plan-task-execute]
@@ -336,7 +338,79 @@ task-granularity = "less-granular"
             search = self.run_cli(db_path, "--config", str(config_path), "search", "substring", "--json")
             search_payload = json.loads(search.stdout)
             self.assertEqual(search_payload["mode"], "word")
+            self.assertEqual(search_payload["search_config"]["max_results"], 2)
             self.assertEqual(search_payload["results"][0]["search_source"], "word")
+
+    def test_search_limit_uses_default_config_and_cli_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            db_path = base / "tapl.db"
+            config_path = base / "tapl.toml"
+            config_path.write_text(
+                """
+[search]
+mode = "word"
+max_results = 3
+""",
+                encoding="utf-8",
+            )
+
+            self.run_cli(db_path, "init", "--json")
+            for index in range(9):
+                created = self.run_cli(
+                    db_path,
+                    "task",
+                    "upsert",
+                    "--id",
+                    f"TASK-LIMIT-{index:03d}",
+                    "--title",
+                    f"Needle task {index}",
+                    "--status",
+                    "Completed",
+                    "--goal",
+                    "shared needle search target",
+                    "--json",
+                )
+                self.assertEqual(created.returncode, 0, created.stderr)
+
+            default_config = self.run_cli(
+                db_path,
+                "--config",
+                str(base / "missing.toml"),
+                "search",
+                "needle",
+                "--json",
+            )
+            default_payload = json.loads(default_config.stdout)
+            self.assertEqual(default_payload["limit"], 7)
+            self.assertEqual(len(default_payload["results"]), 7)
+
+            configured = self.run_cli(db_path, "--config", str(config_path), "search", "needle", "--json")
+            configured_payload = json.loads(configured.stdout)
+            self.assertEqual(configured_payload["limit"], 3)
+            self.assertEqual(len(configured_payload["results"]), 3)
+
+            overridden = self.run_cli(
+                db_path,
+                "--config",
+                str(config_path),
+                "search",
+                "needle",
+                "--limit",
+                "5",
+                "--json",
+            )
+            overridden_payload = json.loads(overridden.stdout)
+            self.assertEqual(overridden_payload["limit"], 5)
+            self.assertEqual(len(overridden_payload["results"]), 5)
+
+    def test_config_rejects_non_positive_search_max_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "tapl.toml"
+            config_path.write_text("[search]\nmax_results = 0\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                tapl_config.load(config_path)
 
     def test_config_can_require_execution_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

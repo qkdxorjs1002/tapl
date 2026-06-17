@@ -275,6 +275,7 @@ def default_config_text() -> str:
         return template
     return f"""[search]
 mode = "{config.DEFAULT_SEARCH_MODE}"
+max_results = {config.DEFAULT_SEARCH_MAX_RESULTS}
 hybrid_semantic_ratio = {config.DEFAULT_HYBRID_SEMANTIC_RATIO}
 
 [plan-task-execute]
