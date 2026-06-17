@@ -31,7 +31,8 @@ agent에게 제공합니다.
   embedding을 저장하는 repo-local SQLite DB.
 - Codex hooks: `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`,
   `PostToolUse`, `Stop` lifecycle wiring.
-- Lifecycle context: 현재 repo DB와 config에서 생성되는 짧은 상태 기반 안내.
+- Lifecycle context: 현재 repo state, 적용 지침, command help 위치를 알려주는
+  짧은 상태 기반 안내.
 - Search/archive 도구: 현재 작업과 완료된 작업을 FTS 및 semantic search로 찾는 기능.
 
 설치된 command는 전역이고 workflow state는 저장소별 local입니다. 이 분리는
@@ -73,7 +74,9 @@ Codex 작업을 감사 가능하고 복구 가능하게 만들어야 할 때 `ta
 
 1. Codex가 시작되거나 사용자의 prompt를 받습니다.
 2. Hook이 `taplctl hook-event`를 호출하고 현재 repo state를 읽습니다.
-3. 작업이 non-trivial이면 agent가 `taplctl status`를 확인하고 과거 작업을 검색합니다.
+3. 작업이 non-trivial이면 agent가 `taplctl status --json`을 확인하고,
+   config가 반영된 plan/task 규칙은 `plan_task_execute.guidance`를 따르며,
+   과거 작업을 검색합니다.
 4. Durable edit 전에 plan과 실행 가능한 task를 기록합니다.
 5. `PreToolUse`와 `PostToolUse` hook이 workflow boundary를 observe 또는 enforce합니다.
 6. 완료된 작업은 archive로 남기고 이후 `taplctl search`로 찾습니다.
@@ -154,8 +157,13 @@ taplctl validate --json
 taplctl context --event UserPromptSubmit --json
 ```
 
-Lifecycle context는 상태, workflow 순서, 다음 행동에 집중합니다. 명령
-문법, 필드 작성 규칙, status/subagent 값, 예시는 하위 명령 help에서
+`taplctl status --json`은 active run, count, approval, config, 현재 적용되는
+guidance를 확인하는 workflow source of truth입니다. 현재 적용되는 plan/task
+규칙은 `plan_task_execute.guidance` 아래에 있고, `taplctl validate --json`은
+같은 계약을 warning 또는 error로 보고합니다.
+
+Lifecycle context는 상태, workflow 순서, 다음에 어디를 볼지에 집중합니다. 명령
+문법, 정적인 필드 작성 규칙, status/subagent 값, 예시는 하위 명령 help에서
 확인합니다.
 
 ```sh
@@ -222,6 +230,11 @@ taplctl search "workflow dashboard" --limit 5 --json
 `taplctl search`는 기본 7개 결과를 반환합니다. 기본값은
 `.tapl/config.toml` 또는 `~/.tapl/config.toml`의 `[search] max_results = 12`로
 바꿀 수 있고, 한 번만 바꿀 때는 `--limit`을 사용합니다.
+
+Plan/task validation은 같은 config 파일의 `[plan-task-execute]`로 제어합니다.
+`plan_detail`, `task_granularity`, `level_subagent_aggressiveness`,
+`require_execution_approval` 같은 설정은 `taplctl status --json`과
+`taplctl validate --json`에 반영됩니다.
 
 완료된 작업 archive:
 
