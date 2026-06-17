@@ -16,16 +16,20 @@ context가 사라진 뒤의 재개를 가능하게 합니다.
 brew tap qkdxorjs1002/tap
 brew trust qkdxorjs1002/tap
 
-# 의미 검색 없이 설치
+### taplctl 설치
+
+# Option 1. 의미 검색 없이 설치
 brew install taplctl
 
-# 의미 검색 포함 설치
+# Option 2. 의미 검색 포함 설치
 brew install taplctl-semantic
 
-# 사용자 전역에 설치
+### Codex hooks, configs 설치
+
+# Option 1. 사용자 전역에 설치
 taplctl install user
 
-# 레포지터리에 설치
+# Option 2. 레포지터리에 설치
 taplctl install repo
 
 taplctl doctor --json
