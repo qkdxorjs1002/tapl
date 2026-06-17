@@ -6,3 +6,4 @@ suppress_unstable_features_warning = true
 [features]
 multi_agent = true
 default_mode_request_user_input = true
+hooks = true
