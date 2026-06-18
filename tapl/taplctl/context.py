@@ -38,7 +38,8 @@ def taplctl_help_guidance() -> str:
 def external_findings_guidance() -> str:
     return (
         "Findings: if external search/docs changed requirements, plan, tasks, or verification, "
-        "record only decision-relevant facts with `taplctl finding add`."
+        "record only decision-relevant facts with `taplctl finding add`. "
+        f"{validation.markdown_record_guidance('finding details and impact')}"
     )
 
 
@@ -180,6 +181,7 @@ def should_suggest_prior_search(state: dict[str, Any], prompt: str) -> bool:
 
 def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
     guidance = [
+        f"Records: {validation.markdown_record_guidance()}",
         f"Plan: {validation.plan_detail_guidance(settings.plan_detail)} Ask the user to choose when scope, risk, API, UX, data, or compatibility decisions matter.",
         f"Tasks: {validation.task_granularity_guidance(settings.task_granularity)} {validation.task_format_guidance(settings)}",
     ]

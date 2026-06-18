@@ -311,6 +311,7 @@ def has_any(text: str, needles: tuple[str, ...]) -> bool:
 def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
     return {
         "allowed_level_subagents": list(LEVEL_SUBAGENTS),
+        "record_format": markdown_record_guidance(),
         "level_subagent": level_subagent_guidance(settings),
         "plan_detail": plan_detail_guidance(settings.plan_detail),
         "plan_format": plan_format_guidance(),
@@ -344,6 +345,13 @@ def plan_format_guidance() -> str:
     return (
         "Plan records should include objective, related REQ-* trace, selected approach, "
         "affected files/interfaces, execution order, risks, validation, and approval needs when applicable."
+    )
+
+
+def markdown_record_guidance(subject: str = "plan, task, and finding content") -> str:
+    return (
+        f"Write {subject} in Markdown form; use headings, bullets, or concise labeled "
+        "sections for multi-line fields."
     )
 
 

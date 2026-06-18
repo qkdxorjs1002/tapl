@@ -773,6 +773,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("@senior-worker", prompt_guidance)
             self.assertIn("record execution approval", prompt_guidance)
             self.assertIn("taplctl finding add", prompt_guidance)
+            self.assertIn("Markdown form", prompt_guidance)
             self.assertNotIn("quote every argument", prompt_instructions)
             self.assertNotIn("Do not use level names such as `level2`", prompt_guidance)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
@@ -822,6 +823,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Flow: search relevant prior work", prompt_text.stdout)
             self.assertIn("taplctl finding add", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
+            self.assertIn("Markdown form", prompt_text.stdout)
             self.assertNotIn("quote every argument", prompt_text.stdout)
 
     def test_command_help_exposes_field_guidance(self) -> None:
@@ -832,11 +834,13 @@ level_subagent_aggressiveness = "force"
             self.assertEqual(root_help.returncode, 0, root_help.stderr)
             self.assertIn("taplctl <command> <subcommand> --help", root_help.stdout)
             self.assertIn("taplctl validate --json", root_help.stdout)
+            self.assertIn("Markdown form", root_help.stdout)
 
             plan_help = self.run_cli(db_path, "plan", "upsert", "--help")
             self.assertEqual(plan_help.returncode, 0, plan_help.stderr)
             self.assertIn("Plan writing rules", plan_help.stdout)
             self.assertIn("Plan records should include objective", plan_help.stdout)
+            self.assertIn("Markdown form", plan_help.stdout)
             self.assertIn("--body", plan_help.stdout)
 
             task_help = self.run_cli(db_path, "task", "upsert", "--help")
@@ -844,12 +848,15 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Task writing rules", task_help.stdout)
             self.assertIn("--status 'In Progress'", task_help.stdout)
             self.assertIn("@senior-worker", task_help.stdout)
+            self.assertIn("Markdown form", task_help.stdout)
             self.assertIn("--blocker/--next-action", task_help.stdout)
 
             finding_help = self.run_cli(db_path, "finding", "add", "--help")
             self.assertEqual(finding_help.returncode, 0, finding_help.stderr)
             self.assertIn("Record a finding", finding_help.stdout)
             self.assertIn("Why the finding matters", finding_help.stdout)
+            self.assertIn("Finding writing rules", finding_help.stdout)
+            self.assertIn("Markdown form", finding_help.stdout)
 
             hook_help = self.run_cli(db_path, "hook-event", "--help")
             self.assertEqual(hook_help.returncode, 0, hook_help.stderr)
@@ -1261,6 +1268,7 @@ task_granularity = "very_granular"
             self.assertIn("Search: before planning non-trivial work", event.stdout)
             self.assertIn("Plan:", event.stdout)
             self.assertIn("taplctl finding add", event.stdout)
+            self.assertIn("Markdown form", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
 
             event_json = self.run_cli(
@@ -1296,6 +1304,7 @@ task_granularity = "very_granular"
             self.assertEqual(event.returncode, 0, event.stderr)
             self.assertIn("taplctl finding add", event.stdout)
             self.assertIn("decision-relevant", event.stdout)
+            self.assertIn("Markdown form", event.stdout)
 
     def test_session_start_hook_does_not_create_active_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

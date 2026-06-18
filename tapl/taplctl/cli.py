@@ -33,6 +33,7 @@ def command_help_epilog() -> str:
         "Workflow guidance:\n"
         "  Use `taplctl status --json` to inspect state before non-trivial work.\n"
         "  Use `taplctl <command> <subcommand> --help` for field-writing rules.\n"
+        f"  {validation.markdown_record_guidance()}\n"
         "  Use `taplctl validate --json` after updates to catch missing plan/task details."
     )
 
@@ -40,6 +41,7 @@ def command_help_epilog() -> str:
 def plan_upsert_epilog() -> str:
     return (
         "Plan writing rules:\n"
+        f"  {validation.markdown_record_guidance()}\n"
         f"  {validation.plan_format_guidance()}\n"
         "  Summary should be a compact trace such as `REQ-001: approach, files, risks, validation`.\n"
         "  Body is for the durable plan: objective, requirements trace, selected approach,\n"
@@ -58,6 +60,7 @@ def task_upsert_epilog() -> str:
     subagents = ", ".join(validation.LEVEL_SUBAGENTS)
     return (
         "Task writing rules:\n"
+        f"  {validation.markdown_record_guidance()}\n"
         "  Executable tasks should include source spec_id, goal, action, required_subagent,\n"
         "  verification, and result when completed; blocked tasks should include blocker and next_action.\n"
         "  Split tasks by meaningful implementation or verification step.\n"
@@ -78,6 +81,19 @@ def task_upsert_epilog() -> str:
         "    --status 'In Progress' --spec-id SPEC-001 --goal 'Make requested behavior work' \\\n"
         "    --action 'Edit the relevant files' --required-subagent '@senior-worker' \\\n"
         "    --verification 'Run focused tests' --json"
+    )
+
+
+def finding_add_epilog() -> str:
+    return (
+        "Finding writing rules:\n"
+        f"  {validation.markdown_record_guidance('finding details and impact')}\n"
+        "  Record only decision-relevant facts; include source and impact when they affect\n"
+        "  requirements, plan, tasks, or verification.\n"
+        "\n"
+        "Example:\n"
+        "  taplctl finding add --title 'Finding title' --source 'Source' \\\n"
+        "    --finding 'What was learned' --impact 'Why it matters' --json"
     )
 
 
@@ -237,7 +253,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     finding = sub.add_parser("finding", help="Manage findings.")
     finding_sub = finding.add_subparsers(dest="finding_command")
-    finding_add = finding_sub.add_parser("add", help="Record a finding.", description="Record a finding.")
+    finding_add = finding_sub.add_parser(
+        "add",
+        help="Record a finding.",
+        description="Record a finding.",
+        epilog=finding_add_epilog(),
+        formatter_class=HELP_FORMATTER,
+    )
     finding_add.add_argument("--title", required=True, help="Short finding title.")
     finding_add.add_argument("--source", default="", help="Where the finding came from.")
     finding_add.add_argument("--finding", default="", help="Finding details.")

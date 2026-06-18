@@ -84,7 +84,18 @@ const READABLE_BLOCK_KEY_LABELS = new Set([
     'spec',
     'summary',
     'validation',
-    'verification'
+    'verification',
+    '검증',
+    '결과',
+    '다음 작업',
+    '목표',
+    '선택한 접근',
+    '승인 필요',
+    '실행 순서',
+    '영향 파일',
+    '요구사항',
+    '위험',
+    '차단 사유'
 ]);
 function activate(context) {
     const activeProvider = new ActiveProvider();
@@ -419,9 +430,17 @@ class WorkflowWebviewManager {
 }
 function renderOverview(status, archives, searchQuery = '') {
     const taskCounts = status.task_counts || DEFAULT_STATUS.task_counts;
+    const pendingTasks = taskCounts.Pending ?? 0;
+    const inProgressTasks = taskCounts['In Progress'] ?? 0;
+    const blockedTasks = taskCounts.Blocked ?? 0;
+    const completedTasks = taskCounts.Completed ?? 0;
+    const totalTasks = status.tasks.length;
+    const completionPercent = totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0;
+    const openTasks = pendingTasks + inProgressTasks + blockedTasks;
     const activeSummary = status.active_run
         ? String(status.active_run.request_summary || status.active_run.slug || 'active')
         : 'No active run';
+    const activeRunSlug = status.active_run ? String(status.active_run.slug || 'active') : 'No active run';
     const workflowTabs = [
         {
             id: 'plan',
@@ -446,10 +465,17 @@ function renderOverview(status, archives, searchQuery = '') {
         }
     ];
     return `
-    <header class="topbar">
-      <div>
+    <header class="workspace-hero">
+      <div class="workspace-heading">
         <p class="eyebrow">${escapeHtml(getWorkspaceRoot()?.name ?? 'workspace')}</p>
         <h1>tapl Workflow</h1>
+        <p class="workspace-summary">${escapeHtml(conciseText(activeSummary, 160))}</p>
+        <div class="workspace-meta" aria-label="Workflow status summary">
+          <span class="badge ${status.active_run ? 'in-progress' : ''}">${escapeHtml(activeRunSlug)}</span>
+          ${pill('Pending', pendingTasks)}
+          ${pill('In Progress', inProgressTasks)}
+          ${pill('Blocked', blockedTasks)}
+        </div>
       </div>
       <div class="top-actions">
         <button data-command="refresh">Refresh</button>
@@ -459,28 +485,49 @@ function renderOverview(status, archives, searchQuery = '') {
         </form>
       </div>
     </header>
-    <section class="metrics">
-      ${metric('Active', status.active_run ? 'Yes' : 'No', activeSummary)}
-      ${metric('Tasks', String(status.tasks.length), `${status.incomplete_tasks} incomplete`)}
-      ${metric('Archives', String(archives.length), 'recent archived runs')}
-      ${metric('Search', status.schema.embedding_model ? 'Ready' : 'FTS', status.schema.embedding_model || 'keyword fallback')}
+    <section class="metrics insight-grid">
+      ${metric('Run progress', `${completionPercent}%`, `${completedTasks} of ${totalTasks} work items completed`)}
+      ${metric('Open work', String(openTasks), `${inProgressTasks} active / ${blockedTasks} blocked`)}
+      ${metric('Plans', String(status.plans.length), 'execution specs in this run')}
+      ${metric('Archives', String(archives.length), 'recent saved runs')}
     </section>
-    <section class="status-strip">
-      ${pill('Pending', taskCounts.Pending)}
-      ${pill('In Progress', taskCounts['In Progress'])}
-      ${pill('Completed', taskCounts.Completed)}
-      ${pill('Blocked', taskCounts.Blocked)}
-      ${pill('Skipped', taskCounts.Skipped)}
-    </section>
-    <section class="workflow-tabs" role="tablist" aria-label="Workflow records">
-      ${workflowTabs.map(renderWorkflowTabButton).join('')}
-    </section>
-    <main class="grid">
-      ${workflowTabs.map(renderWorkflowTabPanel).join('')}
-      <section class="panel">
-        <h2>Archives</h2>
-        ${archives.length ? archives.map(renderArchiveSummary).join('') : '<p class="muted">No archives.</p>'}
+    <main class="dashboard-grid">
+      <section class="dashboard-main">
+        <section class="board-section" aria-labelledby="active-board-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Work items</p>
+              <h2 id="active-board-title">Active board</h2>
+            </div>
+            <span class="muted">${escapeHtml(status.incomplete_tasks)} incomplete</span>
+          </div>
+          ${renderTaskBoard(status.tasks)}
+        </section>
+        <section class="panel saved-views">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Views</p>
+              <h2>Workflow records</h2>
+            </div>
+          </div>
+          <section class="workflow-tabs" role="tablist" aria-label="Workflow records">
+            ${workflowTabs.map(renderWorkflowTabButton).join('')}
+          </section>
+          ${workflowTabs.map((tab) => renderWorkflowTabPanel(tab, 'workflow-tab-panel saved-view-panel')).join('')}
+        </section>
       </section>
+      <aside class="dashboard-rail">
+        ${renderRunFocusPanel(status, taskCounts)}
+        <section class="panel rail-panel">
+          <div class="section-heading compact-heading">
+            <div>
+              <p class="eyebrow">Activity</p>
+              <h2>Recent archives</h2>
+            </div>
+          </div>
+          ${archives.length ? archives.map(renderArchiveSummary).join('') : '<p class="muted">No archives.</p>'}
+        </section>
+      </aside>
     </main>
     <footer class="debug-footer">
       <button data-command="debug">Debug</button>
@@ -504,11 +551,11 @@ function renderWorkflowTabButton(tab) {
     </button>
   `;
 }
-function renderWorkflowTabPanel(tab) {
+function renderWorkflowTabPanel(tab, className = 'panel workflow-tab-panel') {
     return `
     <section
       id="workflow-tab-panel-${escapeAttribute(tab.id)}"
-      class="panel workflow-tab-panel"
+      class="${escapeAttribute(className)}"
       role="tabpanel"
       data-workflow-tab-panel="${escapeAttribute(tab.id)}"
       aria-labelledby="workflow-tab-${escapeAttribute(tab.id)}"
@@ -575,7 +622,7 @@ function renderArchiveView(archive, detail) {
       ${workflowTabs.map(renderWorkflowTabButton).join('')}
     </section>
     <main class="grid">
-      ${workflowTabs.map(renderWorkflowTabPanel).join('')}
+      ${workflowTabs.map((tab) => renderWorkflowTabPanel(tab)).join('')}
       <aside class="side-stack">
         ${renderArchiveInfoPanel(archiveMeta)}
         ${detail ? renderArchiveOtherRecordsPanel(otherItems) : renderArchiveUnavailablePanel()}
@@ -635,6 +682,82 @@ function renderDebugView(status) {
     </main>
   `;
 }
+function renderTaskBoard(tasks) {
+    const statuses = ['Pending', 'In Progress', 'Blocked', 'Completed', 'Skipped'];
+    return `
+    <section class="task-board" aria-label="Tasks grouped by status">
+      ${statuses.map((status) => renderTaskLane(status, tasks.filter((task) => task.status === status))).join('')}
+    </section>
+  `;
+}
+function renderTaskLane(status, tasks) {
+    const visibleTasks = tasks.slice(0, 5);
+    const hiddenCount = Math.max(tasks.length - visibleTasks.length, 0);
+    return `
+    <section class="task-lane task-status-${statusClass(status)}">
+      <div class="lane-head">
+        <div>
+          <span class="lane-label">${escapeHtml(status)}</span>
+          <span class="lane-count">${escapeHtml(tasks.length)}</span>
+        </div>
+      </div>
+      <div class="lane-list">
+        ${visibleTasks.length ? visibleTasks.map(renderTaskCard).join('') : '<p class="muted lane-empty">No work items.</p>'}
+        ${hiddenCount ? `<p class="muted lane-more">+${escapeHtml(hiddenCount)} more</p>` : ''}
+      </div>
+    </section>
+  `;
+}
+function renderTaskCard(task) {
+    const summary = conciseText(task.body || task.title, 150);
+    const meta = [
+        formatTimestamp(task.updated_at),
+        task.source
+    ].filter(Boolean).join(' / ');
+    return `
+    <article class="work-item-card">
+      <div class="work-item-top">
+        <span class="item-id">${escapeHtml(task.stable_id)}</span>
+        ${task.status ? `<span class="badge ${statusClass(task.status)}">${escapeHtml(task.status)}</span>` : ''}
+      </div>
+      <h3 class="work-item-title">${escapeHtml(task.title)}</h3>
+      ${summary && summary !== task.title ? `<p class="work-item-summary">${escapeHtml(summary)}</p>` : ''}
+      ${meta ? `<p class="muted work-item-meta">${escapeHtml(meta)}</p>` : ''}
+    </article>
+  `;
+}
+function renderRunFocusPanel(status, taskCounts) {
+    const currentPlan = status.plans[0];
+    const blockedTasks = status.tasks.filter((task) => task.status === 'Blocked');
+    const latestFinding = status.findings[0];
+    const nextTask = status.tasks.find((task) => task.status === 'In Progress')
+        ?? status.tasks.find((task) => task.status === 'Pending');
+    return `
+    <section class="panel rail-panel">
+      <div class="section-heading compact-heading">
+        <div>
+          <p class="eyebrow">Focus</p>
+          <h2>Run health</h2>
+        </div>
+      </div>
+      <div class="focus-list">
+        ${renderFocusRow('Current plan', currentPlan ? currentPlan.title : 'No plan records', currentPlan?.stable_id)}
+        ${renderFocusRow('Next work', nextTask ? nextTask.title : 'No active task', nextTask?.stable_id)}
+        ${renderFocusRow('Blocked', `${taskCounts.Blocked ?? blockedTasks.length} work items`, blockedTasks[0]?.title)}
+        ${renderFocusRow('Latest finding', latestFinding ? latestFinding.title : 'No findings', latestFinding?.stable_id)}
+      </div>
+    </section>
+  `;
+}
+function renderFocusRow(label, value, detail) {
+    return `
+    <div class="focus-row">
+      <span class="detail-label">${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${detail ? `<small>${escapeHtml(detail)}</small>` : ''}
+    </div>
+  `;
+}
 function renderItem(item) {
     return `
     <article class="item">
@@ -661,12 +784,13 @@ function renderEvent(event) {
   `;
 }
 function renderArchiveSummary(archive) {
+    const summary = conciseText(archive.summary || 'No summary', 140);
     return `
     <button class="item item-button compact" data-command="openArchive" data-archive-id="${escapeAttribute(archive.id)}">
       <span class="item-head">
         <strong>${escapeHtml(archive.slug)}</strong>
       </span>
-      <span class="archive-summary">${escapeHtml(archive.summary || 'No summary')}</span>
+      <span class="archive-summary">${escapeHtml(summary)}</span>
       <span class="archive-time">${escapeHtml(formatTimestamp(archive.created_at))}</span>
     </button>
   `;
@@ -704,7 +828,7 @@ function renderSearchResult(result) {
       <span class="badge">${escapeHtml(result.kind)}</span>
     </span>
     ${result.status ? `<span class="muted">${escapeHtml(result.status)}</span>` : ''}
-    ${result.snippet ? `<span class="snippet">${escapeHtml(result.snippet)}</span>` : ''}
+    ${result.snippet ? `<span class="snippet">${escapeHtml(conciseText(result.snippet, 180))}</span>` : ''}
     <span class="muted">${escapeHtml(result.search_source)}${result.source ? ` - ${escapeHtml(result.source)}` : ''}</span>
   `;
     if (typeof result.id !== 'number') {
@@ -804,26 +928,124 @@ function renderDetailField(label, value) {
   `;
 }
 function renderReadableBlock(content, extraClass = '') {
-    const classes = ['reading-body', extraClass].filter(Boolean).join(' ');
-    return `<div class="${classes}"><pre>${renderReadableContent(content)}</pre></div>`;
+    const classes = ['reading-body', 'markdown-body', extraClass].filter(Boolean).join(' ');
+    return `<div class="${classes}">${renderMarkdownBody(content)}</div>`;
 }
-function renderReadableContent(content) {
-    return String(content)
-        .split(/(\r\n|\n|\r)/)
-        .map((part) => part === '\r\n' || part === '\n' || part === '\r' ? part : renderReadableLine(part))
+function renderMarkdownBody(content) {
+    const html = [];
+    let paragraph = [];
+    let list;
+    let quote = [];
+    let codeLines;
+    const flushParagraph = () => {
+        if (!paragraph.length) {
+            return;
+        }
+        html.push(`<p>${paragraph.map(renderMarkdownLine).join('<br>')}</p>`);
+        paragraph = [];
+    };
+    const flushList = () => {
+        if (!list) {
+            return;
+        }
+        html.push(`<${list.kind}>${list.items.map((item) => `<li>${renderMarkdownLine(item)}</li>`).join('')}</${list.kind}>`);
+        list = undefined;
+    };
+    const flushQuote = () => {
+        if (!quote.length) {
+            return;
+        }
+        html.push(`<blockquote>${quote.map((line) => `<p>${renderMarkdownLine(line)}</p>`).join('')}</blockquote>`);
+        quote = [];
+    };
+    const flushFlow = () => {
+        flushParagraph();
+        flushList();
+        flushQuote();
+    };
+    for (const rawLine of String(content ?? '').split(/\r\n|\n|\r/)) {
+        const line = rawLine.trimEnd();
+        const trimmed = line.trim();
+        if (codeLines) {
+            if (/^```/.test(trimmed)) {
+                html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+                codeLines = undefined;
+            }
+            else {
+                codeLines.push(rawLine);
+            }
+            continue;
+        }
+        if (/^```/.test(trimmed)) {
+            flushFlow();
+            codeLines = [];
+            continue;
+        }
+        if (!trimmed) {
+            flushFlow();
+            continue;
+        }
+        const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+            flushFlow();
+            const level = Math.min(6, heading[1].length + 2);
+            html.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`);
+            continue;
+        }
+        const quoteMatch = trimmed.match(/^>\s?(.*)$/);
+        if (quoteMatch) {
+            flushParagraph();
+            flushList();
+            quote.push(quoteMatch[1].trim());
+            continue;
+        }
+        const unordered = trimmed.match(/^[-*+]\s+(.+)$/);
+        const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+        if (unordered || ordered) {
+            flushParagraph();
+            flushQuote();
+            const kind = unordered ? 'ul' : 'ol';
+            if (list && list.kind !== kind) {
+                flushList();
+            }
+            list ?? (list = { kind, items: [] });
+            list.items.push((unordered?.[1] ?? ordered?.[1] ?? '').trim());
+            continue;
+        }
+        flushList();
+        flushQuote();
+        paragraph.push(trimmed);
+    }
+    if (codeLines) {
+        html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+    }
+    flushFlow();
+    return html.join('') || '<p class="muted">Not recorded.</p>';
+}
+function renderMarkdownLine(line) {
+    const labeled = line.match(/^([A-Za-z가-힣][A-Za-z0-9가-힣 /_-]*|REQ-\d+):\s*(.*)$/i);
+    if (!labeled || !isReadableBlockKey(labeled[1])) {
+        return renderInlineMarkdown(line);
+    }
+    return `<span class="markdown-label">${escapeHtml(normalizeMarkdownLabel(labeled[1]))}:</span> ${renderInlineMarkdown(labeled[2])}`;
+}
+function renderInlineMarkdown(value) {
+    return value
+        .split(/(`[^`]+`)/g)
+        .map((segment) => {
+        if (segment.startsWith('`') && segment.endsWith('`') && segment.length > 1) {
+            return `<code>${escapeHtml(segment.slice(1, -1))}</code>`;
+        }
+        return escapeHtml(segment)
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+            .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+            .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+            .replace(/_([^_]+)_/g, '<em>$1</em>');
+    })
         .join('');
 }
-function renderReadableLine(line) {
-    const match = line.match(/^(\s*(?:[-*]\s+)?)([A-Za-z][A-Za-z0-9 /_-]*|REQ-\d+)(:\s*)/i);
-    if (!match) {
-        return escapeHtml(line);
-    }
-    const [, prefix, label, suffix] = match;
-    if (!isReadableBlockKey(label)) {
-        return escapeHtml(line);
-    }
-    const rest = line.slice(match[0].length);
-    return `${escapeHtml(prefix)}<span class="body-key">${escapeHtml(label)}${escapeHtml(suffix)}</span>${escapeHtml(rest)}`;
+function normalizeMarkdownLabel(label) {
+    return label.trim().replace(/\s+/g, ' ');
 }
 function isReadableBlockKey(label) {
     if (/^REQ-\d+$/i.test(label)) {
@@ -878,6 +1100,13 @@ function iconForStatus(status) {
 }
 function statusClass(status) {
     return status.toLowerCase().replace(/\s+/g, '-');
+}
+function conciseText(value, maxLength) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (text.length <= maxLength) {
+        return text;
+    }
+    return `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 function formatTimestamp(value) {
     const raw = String(value ?? '');
@@ -1118,6 +1347,9 @@ function renderPage(webview, body, viewKey) {
       --surface-muted: var(--vscode-input-background, var(--surface));
       --accent: var(--vscode-focusBorder);
       --error: var(--vscode-errorForeground);
+      --success: var(--vscode-testing-iconPassed, #4e9a06);
+      --warning: var(--vscode-editorWarning-foreground, #cca700);
+      --info: var(--vscode-symbolIcon-eventForeground, var(--accent));
     }
     * { box-sizing: border-box; }
     body {
@@ -1162,7 +1394,12 @@ function renderPage(webview, body, viewKey) {
       line-height: 1.4;
       margin-bottom: 8px;
     }
-    h1, h2, h3, p, small, pre, .archive-summary, .archive-time, .item-head strong, .item-id, .snippet, .detail-value, .body-key {
+    h4, h5, h6 {
+      font-size: 13px;
+      line-height: 1.4;
+      margin: 0;
+    }
+    h1, h2, h3, h4, h5, h6, p, small, pre, code, li, .archive-summary, .archive-time, .item-head strong, .item-id, .snippet, .detail-value, .work-item-title, .work-item-summary, .focus-row strong, .markdown-label {
       min-width: 0;
       max-width: 100%;
       overflow-wrap: anywhere;
@@ -1184,6 +1421,29 @@ function renderPage(webview, body, viewKey) {
       gap: 16px;
       margin-bottom: 20px;
     }
+    .workspace-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+      gap: 20px;
+      align-items: start;
+      margin-bottom: 18px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .workspace-heading {
+      min-width: 0;
+    }
+    .workspace-summary {
+      max-width: 82ch;
+      margin: 10px 0 12px;
+      color: var(--muted);
+    }
+    .workspace-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 0;
+    }
     .top-actions {
       display: grid;
       justify-items: end;
@@ -1200,6 +1460,10 @@ function renderPage(webview, body, viewKey) {
       gap: 8px;
       margin-bottom: 12px;
     }
+    .insight-grid {
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      margin-bottom: 18px;
+    }
     .metric, .panel {
       border: 1px solid var(--border);
       border-radius: 6px;
@@ -1211,7 +1475,10 @@ function renderPage(webview, body, viewKey) {
       display: grid;
       gap: 4px;
     }
-    .metric strong { font-size: 20px; }
+    .metric strong {
+      font-size: 20px;
+      line-height: 1.2;
+    }
     .status-strip {
       display: flex;
       flex-wrap: wrap;
@@ -1227,9 +1494,157 @@ function renderPage(webview, body, viewKey) {
       color: var(--muted);
       font-size: 12px;
     }
-    .completed { color: var(--vscode-testing-iconPassed, #4e9a06); }
+    .completed { color: var(--success); }
     .blocked, .error { color: var(--error); }
     .in-progress { color: var(--accent); }
+    .pending { color: var(--warning); }
+    .skipped { color: var(--muted); }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+      gap: 14px;
+      align-items: start;
+    }
+    .dashboard-main, .dashboard-rail {
+      display: grid;
+      gap: 14px;
+      min-width: 0;
+    }
+    .board-section {
+      min-width: 0;
+    }
+    .section-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 12px;
+      min-width: 0;
+      margin-bottom: 10px;
+    }
+    .section-heading h2 {
+      margin-bottom: 0;
+    }
+    .compact-heading {
+      margin-bottom: 12px;
+    }
+    .task-board {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      align-items: start;
+      min-width: 0;
+    }
+    .task-lane {
+      --lane-accent: var(--border);
+      display: grid;
+      align-content: start;
+      min-width: 0;
+      min-height: 180px;
+      border: 1px solid var(--border);
+      border-top: 2px solid var(--lane-accent);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    .task-status-pending { --lane-accent: var(--warning); }
+    .task-status-in-progress { --lane-accent: var(--accent); }
+    .task-status-blocked { --lane-accent: var(--error); }
+    .task-status-completed { --lane-accent: var(--success); }
+    .task-status-skipped { --lane-accent: var(--muted); }
+    .lane-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 10px 8px;
+      border-bottom: 1px solid var(--border);
+      min-width: 0;
+    }
+    .lane-label {
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .lane-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      min-height: 20px;
+      margin-left: 6px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      font-size: 11px;
+    }
+    .lane-list {
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      min-width: 0;
+    }
+    .lane-empty, .lane-more {
+      margin: 0;
+    }
+    .work-item-card {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+    }
+    .work-item-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: flex-start;
+      min-width: 0;
+    }
+    .work-item-title {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .work-item-summary {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .work-item-meta {
+      margin: 0;
+    }
+    .saved-views, .rail-panel {
+      min-width: 0;
+    }
+    .saved-view-panel {
+      min-width: 0;
+      padding-top: 4px;
+    }
+    .saved-view-panel[hidden] {
+      display: none;
+    }
+    .focus-list {
+      display: grid;
+      gap: 10px;
+    }
+    .focus-row {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .focus-row:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+    .focus-row strong {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      line-height: 1.35;
+    }
     .workflow-tabs {
       display: flex;
       flex-wrap: wrap;
@@ -1350,6 +1765,79 @@ function renderPage(webview, body, viewKey) {
       color: var(--fg);
       line-height: 1.55;
     }
+    .markdown-body {
+      display: grid;
+      gap: 8px;
+      max-width: 82ch;
+      margin-top: 10px;
+      min-width: 0;
+    }
+    .markdown-body h3,
+    .markdown-body h4,
+    .markdown-body h5,
+    .markdown-body h6 {
+      color: var(--fg);
+      font-weight: 700;
+      margin-top: 6px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+    .markdown-body h3:first-child,
+    .markdown-body h4:first-child,
+    .markdown-body h5:first-child,
+    .markdown-body h6:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+    .markdown-body p,
+    .markdown-body ul,
+    .markdown-body ol,
+    .markdown-body blockquote,
+    .markdown-body pre {
+      margin: 0;
+    }
+    .markdown-body p,
+    .markdown-body li {
+      line-height: 1.55;
+    }
+    .markdown-body ul,
+    .markdown-body ol {
+      display: grid;
+      gap: 4px;
+      padding-left: 20px;
+    }
+    .markdown-body blockquote {
+      display: grid;
+      gap: 4px;
+      padding: 8px 10px;
+      border-left: 2px solid var(--border);
+      color: var(--muted);
+      background: var(--surface);
+      border-radius: 4px;
+    }
+    .markdown-body pre {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      background: var(--surface-muted);
+      border-radius: 4px;
+      overflow-x: auto;
+      font-family: var(--vscode-editor-font-family, var(--vscode-font-family));
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .markdown-body code {
+      font-family: var(--vscode-editor-font-family, var(--vscode-font-family));
+      font-size: 12px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: var(--vscode-textCodeBlock-background, var(--surface));
+    }
+    .markdown-body pre code {
+      padding: 0;
+      background: transparent;
+      border-radius: 0;
+    }
     .reading-body {
       max-width: 78ch;
       margin-top: 10px;
@@ -1362,7 +1850,7 @@ function renderPage(webview, body, viewKey) {
       max-width: 82ch;
       margin-top: 0;
     }
-    .body-key {
+    .markdown-label {
       color: var(--vscode-symbolIcon-keywordForeground, var(--accent));
       font-weight: 700;
     }
@@ -1410,7 +1898,8 @@ function renderPage(webview, body, viewKey) {
     }
     @media (max-width: 900px) {
       body { padding: 16px; }
-      .grid { grid-template-columns: 1fr; }
+      .grid, .dashboard-grid, .workspace-hero { grid-template-columns: 1fr; }
+      .task-board, .insight-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
       .topbar { display: block; }
       .top-actions {
         justify-items: stretch;
@@ -1422,6 +1911,15 @@ function renderPage(webview, body, viewKey) {
       .detail-row {
         grid-template-columns: 1fr;
         gap: 2px;
+      }
+    }
+    @media (max-width: 560px) {
+      body { padding: 12px; }
+      .task-board, .metrics, .insight-grid { grid-template-columns: 1fr; }
+      form { display: grid; }
+      .section-heading, .work-item-top {
+        display: grid;
+        justify-content: stretch;
       }
     }
   </style>
