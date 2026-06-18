@@ -75,7 +75,7 @@ class TaplCliTests(unittest.TestCase):
             task = self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -201,7 +201,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(cfg.search.hybrid_semantic_ratio, 0.65)
             self.assertEqual(cfg.search.hybrid_bm25_ratio, 0.35)
             self.assertEqual(cfg.search.semantic_provider, "auto")
-            self.assertEqual(cfg.search.searchd_idle_timeout_seconds, 1800)
+            self.assertEqual(cfg.search.searchd_model_idle_timeout_seconds, 1800)
             self.assertTrue(cfg.plan_task_execute.use_level_subagent)
             self.assertEqual(cfg.plan_task_execute.level_subagent_aggressiveness, "auto")
             self.assertEqual(cfg.plan_task_execute.plan_detail, "detailed")
@@ -231,7 +231,7 @@ class TaplCliTests(unittest.TestCase):
             recorded = self.run_cli(
                 db_path,
                 "approval",
-                "record",
+                "set",
                 "--decision",
                 "approved",
                 "--prompt",
@@ -324,7 +324,7 @@ task-granularity = "less-granular"
             self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -339,7 +339,7 @@ task-granularity = "less-granular"
             status_payload = json.loads(status.stdout)
             self.assertEqual(status_payload["config"]["search"]["mode"], "word")
             self.assertEqual(status_payload["config"]["search"]["semantic_provider"], "daemon")
-            self.assertEqual(status_payload["config"]["search"]["searchd_idle_timeout_seconds"], 0)
+            self.assertEqual(status_payload["config"]["search"]["searchd_model_idle_timeout_seconds"], 0)
             self.assertFalse(status_payload["config"]["plan_task_execute"]["use_level_subagent"])
 
             search = self.run_cli(db_path, "--config", str(config_path), "search", "substring", "--json")
@@ -367,7 +367,7 @@ max_results = 3
                 created = self.run_cli(
                     db_path,
                     "task",
-                    "upsert",
+                    "set",
                     "--id",
                     f"TASK-LIMIT-{index:03d}",
                     "--title",
@@ -433,7 +433,7 @@ require_execution_approval = true
             self.run_cli(
                 db_path,
                 "plan",
-                "upsert",
+                "set",
                 "--id",
                 "SPEC-001",
                 "--title",
@@ -444,7 +444,7 @@ require_execution_approval = true
             self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -474,7 +474,7 @@ require_execution_approval = true
             approved = self.run_cli(
                 db_path,
                 "approval",
-                "record",
+                "set",
                 "--decision",
                 "approved",
                 "--prompt",
@@ -500,7 +500,7 @@ require_execution_approval = true
             with self.assertRaises(ValueError):
                 tapl_config.load(config_path)
 
-            config_path.write_text("[search]\nsearchd_idle_timeout_seconds = -1\n", encoding="utf-8")
+            config_path.write_text("[search]\nsearchd_model_idle_timeout_seconds = -1\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 tapl_config.load(config_path)
 
@@ -541,6 +541,13 @@ searchd_start_timeout_ms = 1
             self.assertEqual(embeddings.query_embedding_blob("query", auto), b"local")
 
             daemon = tapl_config.SearchConfig(semantic_provider="daemon")
+            self.assertEqual(embeddings.query_embedding_blob("query", daemon), b"local")
+
+            def fake_error(query: str, settings: tapl_config.SearchConfig) -> bytes:
+                raise embeddings.searchd.SearchdError("bad response")
+
+            embeddings.searchd.embed_query = fake_error
+            self.assertEqual(embeddings.query_embedding_blob("query", auto), b"local")
             self.assertIsNone(embeddings.query_embedding_blob("query", daemon))
         finally:
             embeddings.searchd.embed_query = original_embed
@@ -548,6 +555,58 @@ searchd_start_timeout_ms = 1
 
     def test_searchd_handle_request_embed_and_ping(self) -> None:
         from taplctl import searchd
+
+        class FakeModelState:
+            model_loaded = False
+            model_idle_timeout_seconds = 30
+
+            def unload_if_idle(self) -> bool:
+                return False
+
+            def status_payload(self, *, started_at: float) -> dict[str, object]:
+                return {
+                    "ok": True,
+                    "pid": 1,
+                    "model": "fake",
+                    "dimension": 384,
+                    "uptime_seconds": 0.0,
+                    "model_loaded": self.model_loaded,
+                    "model_idle_timeout_seconds": self.model_idle_timeout_seconds,
+                }
+
+            def embed(self, text: str) -> dict[str, object]:
+                self.text = text
+                self.model_loaded = True
+                return {"dimension": 3, "embedding_b64": "YWJj"}
+
+        model_state = FakeModelState()
+
+        ping, stop = searchd.handle_request(
+            {"op": "ping"},
+            model_state=model_state,
+            started_at=0.0,
+        )
+        self.assertTrue(ping["ok"])
+        self.assertFalse(stop)
+        self.assertFalse(ping["model_loaded"])
+        self.assertEqual(ping["model_idle_timeout_seconds"], 30)
+
+        embed, stop = searchd.handle_request(
+            {"op": "embed", "text": "hello"},
+            model_state=model_state,
+            started_at=0.0,
+        )
+        self.assertTrue(embed["ok"])
+        self.assertFalse(stop)
+        self.assertEqual(embed["dimension"], 3)
+        self.assertEqual(embed["embedding_b64"], "YWJj")
+        self.assertTrue(embed["model_loaded"])
+
+    def test_searchd_model_state_lazy_loads_and_unloads_model(self) -> None:
+        from taplctl import searchd
+
+        current_time = 0.0
+        loaded = 0
 
         class FakeArray:
             shape = (3,)
@@ -562,35 +621,44 @@ searchd_start_timeout_ms = 1
                 return FakeArray()
 
         class FakeModel:
+            def get_sentence_embedding_dimension(self) -> int:
+                return 3
+
             def encode(self, texts: list[str], *, normalize_embeddings: bool) -> list[list[float]]:
                 self.texts = texts
                 self.normalize_embeddings = normalize_embeddings
                 return [[1.0, 2.0, 3.0]]
 
-        ping, stop = searchd.handle_request(
-            {"op": "ping"},
-            model=FakeModel(),
-            np=FakeNumpy(),
-            started_at=0.0,
-            idle_timeout_seconds=30,
-            dimension=384,
-        )
-        self.assertTrue(ping["ok"])
-        self.assertFalse(stop)
-        self.assertEqual(ping["idle_timeout_seconds"], 30)
+        def now() -> float:
+            return current_time
 
-        embed, stop = searchd.handle_request(
-            {"op": "embed", "text": "hello"},
-            model=FakeModel(),
-            np=FakeNumpy(),
-            started_at=0.0,
-            idle_timeout_seconds=30,
-            dimension=384,
+        def load_model() -> FakeModel:
+            nonlocal loaded
+            loaded += 1
+            return FakeModel()
+
+        state = searchd.ModelState(
+            model_idle_timeout_seconds=10,
+            now=now,
+            model_loader=load_model,
+            numpy_loader=FakeNumpy,
         )
-        self.assertTrue(embed["ok"])
-        self.assertFalse(stop)
-        self.assertEqual(embed["dimension"], 3)
-        self.assertEqual(embed["embedding_b64"], "YWJj")
+
+        self.assertFalse(state.status_payload(started_at=0.0)["model_loaded"])
+        self.assertEqual(loaded, 0)
+
+        first = state.embed("hello")
+        self.assertEqual(first["dimension"], 3)
+        self.assertEqual(loaded, 1)
+        self.assertTrue(state.model_loaded)
+
+        current_time = 9.0
+        self.assertFalse(state.unload_if_idle())
+        self.assertTrue(state.model_loaded)
+
+        current_time = 10.0
+        self.assertTrue(state.unload_if_idle())
+        self.assertFalse(state.model_loaded)
 
     def test_searchd_status_reports_missing_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -627,7 +695,7 @@ level_subagent_aggressiveness = "force"
                 "--config",
                 str(config_path),
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -648,7 +716,7 @@ level_subagent_aggressiveness = "force"
                 "--config",
                 str(config_path),
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -681,7 +749,7 @@ level_subagent_aggressiveness = "force"
             self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -703,7 +771,7 @@ level_subagent_aggressiveness = "force"
             self.run_cli(
                 db_path,
                 "plan",
-                "upsert",
+                "set",
                 "--id",
                 "SPEC-001",
                 "--title",
@@ -714,7 +782,7 @@ level_subagent_aggressiveness = "force"
             self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -725,7 +793,7 @@ level_subagent_aggressiveness = "force"
             self.run_cli(
                 db_path,
                 "approval",
-                "record",
+                "set",
                 "--decision",
                 "approved",
                 "--prompt",
@@ -739,6 +807,91 @@ level_subagent_aggressiveness = "force"
             self.assertIn("plan_content_missing_guidance", codes)
             self.assertIn("task_content_missing_fields", codes)
             self.assertNotIn("guidance", payload["plan_task_execute"])
+
+    def test_validate_warns_for_non_sequential_task_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            self.run_cli(
+                db_path,
+                "plan",
+                "set",
+                "--id",
+                "SPEC-001",
+                "--title",
+                "Sequential execution plan",
+                "--summary",
+                "REQ-001: execute tasks one at a time in order; Validation: validate task sequence warnings.",
+            )
+            for task_id in ("TASK-001", "TASK-002"):
+                self.run_cli(
+                    db_path,
+                    "task",
+                    "set",
+                    "--id",
+                    task_id,
+                    "--title",
+                    f"{task_id} implementation",
+                    "--status",
+                    "In Progress",
+                    "--spec-id",
+                    "SPEC-001",
+                    "--goal",
+                    f"Complete {task_id}",
+                    "--action",
+                    f"Run {task_id}",
+                    "--required-subagent",
+                    "@senior-worker",
+                    "--verification",
+                    f"Check {task_id}",
+                )
+            self.run_cli(
+                db_path,
+                "approval",
+                "set",
+                "--decision",
+                "approved",
+                "--prompt",
+                "Execute sequential task warning test",
+            )
+
+            multiple = self.run_cli(db_path, "validate", "--json")
+            self.assertEqual(multiple.returncode, 0, multiple.stderr)
+            multiple_payload = json.loads(multiple.stdout)
+            multiple_codes = {item["code"] for item in multiple_payload["plan_task_execute"]["warnings"]}
+            self.assertIn("multiple_tasks_in_progress", multiple_codes)
+
+            self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--title",
+                "TASK-001 implementation",
+                "--status",
+                "Pending",
+                "--spec-id",
+                "SPEC-001",
+                "--goal",
+                "Complete TASK-001",
+                "--action",
+                "Run TASK-001",
+                "--required-subagent",
+                "@senior-worker",
+                "--verification",
+                "Check TASK-001",
+            )
+
+            out_of_order = self.run_cli(db_path, "validate", "--json")
+            self.assertEqual(out_of_order.returncode, 0, out_of_order.stderr)
+            out_of_order_payload = json.loads(out_of_order.stdout)
+            warnings = out_of_order_payload["plan_task_execute"]["warnings"]
+            out_of_order_codes = {item["code"] for item in warnings}
+            self.assertIn("task_started_out_of_order", out_of_order_codes)
+            self.assertIn(
+                "TASK-002 is In Progress while earlier task(s) remain incomplete: TASK-001.",
+                "\n".join(item["message"] for item in warnings),
+            )
 
     def test_context_command_reports_lifecycle_packet(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -771,11 +924,12 @@ level_subagent_aggressiveness = "force"
             self.assertIn("plan-based task design", prompt_guidance)
             self.assertIn("Phase order", prompt_guidance)
             self.assertIn("stored plan", prompt_guidance)
+            self.assertIn("Execute planned tasks one at a time", prompt_guidance)
             self.assertIn("requirements trace", prompt_guidance)
             self.assertIn("meaningful implementation", prompt_guidance)
             self.assertIn("Agent contract", prompt_guidance)
             self.assertIn("@senior-worker", prompt_guidance)
-            self.assertIn("record execution approval", prompt_guidance)
+            self.assertIn("set execution approval", prompt_guidance)
             self.assertIn("taplctl finding add", prompt_guidance)
             self.assertIn("Markdown form", prompt_guidance)
             self.assertNotIn("quote every argument", prompt_instructions)
@@ -785,7 +939,7 @@ level_subagent_aggressiveness = "force"
             self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -803,9 +957,10 @@ level_subagent_aggressiveness = "force"
             active_prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             active_prompt_payload = json.loads(active_prompt_context.stdout)
             self.assertIn("Create or update plan state", "\n".join(active_prompt_payload["next_actions"]))
-            self.assertIn("before task design/upsert", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("before task design", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("ask whether to finish", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("finish, combine, defer/archive, or discard", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("Continue only TASK-001", "\n".join(active_prompt_payload["next_actions"]))
 
             text = self.run_cli(db_path, "context", "--event", "SessionStart")
             self.assertEqual(text.returncode, 0, text.stderr)
@@ -818,7 +973,7 @@ level_subagent_aggressiveness = "force"
             stop_payload = json.loads(stop_context.stdout)
             stop_instructions = "\n".join(stop_payload["instructions"])
             self.assertIn("taplctl status --json", stop_instructions)
-            self.assertIn("record result", "\n".join(stop_payload["workflow_guidance"]))
+            self.assertIn("set result", "\n".join(stop_payload["workflow_guidance"]))
             self.assertNotIn("Completion reports should", stop_instructions)
             self.assertNotIn("Archive summaries should", stop_instructions)
 
@@ -827,6 +982,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("tapl context:", prompt_text.stdout)
             self.assertIn("Flow: search relevant prior work", prompt_text.stdout)
             self.assertIn("plan-based task design", prompt_text.stdout)
+            self.assertIn("Execute planned tasks one at a time", prompt_text.stdout)
             self.assertIn("taplctl finding add", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
             self.assertIn("Markdown form", prompt_text.stdout)
@@ -841,28 +997,43 @@ level_subagent_aggressiveness = "force"
             self.assertIn("taplctl <command> <subcommand> --help", root_help.stdout)
             self.assertIn("taplctl validate --json", root_help.stdout)
             self.assertIn("Phase order", root_help.stdout)
+            self.assertIn("taplctl plan set", root_help.stdout)
+            self.assertIn("Execute planned tasks one at a time", root_help.stdout)
             self.assertIn("Markdown form", root_help.stdout)
 
-            plan_help = self.run_cli(db_path, "plan", "upsert", "--help")
+            run_help = self.run_cli(db_path, "run", "set", "--help")
+            self.assertEqual(run_help.returncode, 0, run_help.stderr)
+            self.assertIn("Set active run fields", run_help.stdout)
+            self.assertIn("--summary", run_help.stdout)
+            self.assertIn("--result", run_help.stdout)
+
+            plan_help = self.run_cli(db_path, "plan", "set", "--help")
             self.assertEqual(plan_help.returncode, 0, plan_help.stderr)
             self.assertIn("Plan writing rules", plan_help.stdout)
             self.assertIn("Plan records should include objective", plan_help.stdout)
-            self.assertIn("before task upserts", plan_help.stdout)
+            self.assertIn("before task records", plan_help.stdout)
             self.assertIn("Markdown form", plan_help.stdout)
             self.assertIn("--body", plan_help.stdout)
 
-            task_help = self.run_cli(db_path, "task", "upsert", "--help")
+            task_help = self.run_cli(db_path, "task", "set", "--help")
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
             self.assertIn("Task writing rules", task_help.stdout)
             self.assertIn("--status 'In Progress'", task_help.stdout)
+            self.assertIn("Execute planned tasks one at a time", task_help.stdout)
             self.assertIn("@senior-worker", task_help.stdout)
             self.assertIn("source plan/spec exists", task_help.stdout)
             self.assertIn("Markdown form", task_help.stdout)
             self.assertIn("--blocker/--next-action", task_help.stdout)
 
+            approval_help = self.run_cli(db_path, "approval", "set", "--help")
+            self.assertEqual(approval_help.returncode, 0, approval_help.stderr)
+            self.assertIn("Approval writing rules", approval_help.stdout)
+            self.assertIn("--decision", approval_help.stdout)
+            self.assertIn("--prompt", approval_help.stdout)
+
             finding_help = self.run_cli(db_path, "finding", "add", "--help")
             self.assertEqual(finding_help.returncode, 0, finding_help.stderr)
-            self.assertIn("Record a finding", finding_help.stdout)
+            self.assertIn("Add a finding", finding_help.stdout)
             self.assertIn("Why the finding matters", finding_help.stdout)
             self.assertIn("Finding writing rules", finding_help.stdout)
             self.assertIn("Markdown form", finding_help.stdout)
@@ -1114,7 +1285,7 @@ experimental = true
             self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -1139,7 +1310,7 @@ experimental = true
             approved = self.run_cli(
                 db_path,
                 "approval",
-                "record",
+                "set",
                 "--decision",
                 "approved",
                 "--prompt",
@@ -1176,7 +1347,7 @@ level_subagent_aggressiveness = "force"
             self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -1216,7 +1387,7 @@ task_granularity = "very_granular"
             self.run_cli(
                 db_path,
                 "plan",
-                "upsert",
+                "set",
                 "--id",
                 "SPEC-001",
                 "--title",
@@ -1227,7 +1398,7 @@ task_granularity = "very_granular"
             self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -1358,14 +1529,14 @@ task_granularity = "very_granular"
                 "New request",
             )
             self.assertIn(
-                "taplctl run summary",
+                "taplctl run set --summary",
                 "\n".join(prompt_payload["context"]["next_actions"]),
             )
 
             summary = self.run_cli(
                 db_path,
                 "run",
-                "summary",
+                "set",
                 "--summary",
                 "Start real work",
                 "--json",
@@ -1437,7 +1608,7 @@ task_granularity = "very_granular"
             summary = self.run_cli(
                 db_path,
                 "run",
-                "summary",
+                "set",
                 "--summary",
                 "Ship auto archive",
                 "--json",
@@ -1447,7 +1618,7 @@ task_granularity = "very_granular"
             plan = self.run_cli(
                 db_path,
                 "plan",
-                "upsert",
+                "set",
                 "--id",
                 "SPEC-001",
                 "--title",
@@ -1463,7 +1634,7 @@ task_granularity = "very_granular"
             task = self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",
@@ -1544,7 +1715,7 @@ task_granularity = "very_granular"
             summary = self.run_cli(
                 db_path,
                 "run",
-                "summary",
+                "set",
                 "--summary",
                 "Answer a simple question",
                 "--json",
@@ -1554,7 +1725,7 @@ task_granularity = "very_granular"
             result = self.run_cli(
                 db_path,
                 "run",
-                "result",
+                "set",
                 "--result",
                 "Answered directly without creating plan or task records.",
                 "--json",
@@ -1641,7 +1812,7 @@ task_granularity = "very_granular"
             plan = self.run_cli(
                 db_path,
                 "plan",
-                "upsert",
+                "set",
                 "--id",
                 "SPEC-001",
                 "--title",
@@ -1655,7 +1826,7 @@ task_granularity = "very_granular"
             task = self.run_cli(
                 db_path,
                 "task",
-                "upsert",
+                "set",
                 "--id",
                 "TASK-001",
                 "--title",

@@ -16,7 +16,7 @@ DEFAULT_SEARCH_MODE = "hybrid"
 DEFAULT_HYBRID_SEMANTIC_RATIO = 0.65
 DEFAULT_SEARCH_MAX_RESULTS = 7
 DEFAULT_SEMANTIC_PROVIDER = "auto"
-DEFAULT_SEARCHD_IDLE_TIMEOUT_SECONDS = 1800
+DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
 DEFAULT_USE_LEVEL_SUBAGENT = True
 DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS = "auto"
 DEFAULT_PLAN_DETAIL = "detailed"
@@ -36,7 +36,11 @@ class SearchConfig:
     hybrid_semantic_ratio: float = DEFAULT_HYBRID_SEMANTIC_RATIO
     max_results: int = DEFAULT_SEARCH_MAX_RESULTS
     semantic_provider: str = DEFAULT_SEMANTIC_PROVIDER
-    searchd_idle_timeout_seconds: int = DEFAULT_SEARCHD_IDLE_TIMEOUT_SECONDS
+    searchd_model_idle_timeout_seconds: int = DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS
+
+    @property
+    def searchd_idle_timeout_seconds(self) -> int:
+        return self.searchd_model_idle_timeout_seconds
 
     @property
     def hybrid_bm25_ratio(self) -> float:
@@ -49,7 +53,7 @@ class SearchConfig:
             "hybrid_semantic_ratio": self.hybrid_semantic_ratio,
             "hybrid_bm25_ratio": self.hybrid_bm25_ratio,
             "semantic_provider": self.semantic_provider,
-            "searchd_idle_timeout_seconds": self.searchd_idle_timeout_seconds,
+            "searchd_model_idle_timeout_seconds": self.searchd_model_idle_timeout_seconds,
         }
 
 
@@ -174,16 +178,20 @@ def load(
             SEMANTIC_PROVIDERS,
             "search.semantic_provider",
         ),
-        searchd_idle_timeout_seconds=non_negative_int(
+        searchd_model_idle_timeout_seconds=non_negative_int(
             setting(
                 search_data,
+                "searchd_model_idle_timeout_seconds",
+                "searchd-model-idle-timeout-seconds",
+                "model_idle_timeout_seconds",
+                "model-idle-timeout-seconds",
                 "searchd_idle_timeout_seconds",
                 "searchd-idle-timeout-seconds",
                 "idle_timeout_seconds",
                 "idle-timeout-seconds",
-                default=DEFAULT_SEARCHD_IDLE_TIMEOUT_SECONDS,
+                default=DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS,
             ),
-            "search.searchd_idle_timeout_seconds",
+            "search.searchd_model_idle_timeout_seconds",
         ),
     )
     plan_task_execute = PlanTaskExecuteConfig(

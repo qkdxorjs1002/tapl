@@ -50,9 +50,9 @@ That terminal flow is the workflow contract `tapl` exposes to Codex:
 ```sh
 taplctl status --json
 taplctl search 'README self PR codex cli screenshot' --json
-taplctl plan upsert --id SPEC-README-SELF-PR ...
-taplctl task upsert --id TASK-README-001 ...
-taplctl approval record --decision approved ...
+taplctl plan set --id SPEC-README-SELF-PR ...
+taplctl task set --id TASK-README-001 ...
+taplctl approval set --decision approved ...
 ```
 
 The state lives in `.tapl/tapl.db`, so the next Codex session, a hook, a human,
@@ -108,14 +108,14 @@ resume from the stored state instead of guessing from chat history.
 Plans and tasks are first-class records, not loose Markdown notes.
 
 ```sh
-taplctl plan upsert \
+taplctl plan set \
   --id SPEC-EXAMPLE \
   --title "Example implementation plan" \
   --summary "REQ-001: approach, files, order, risks, validation" \
   --status Finalized \
   --json
 
-taplctl task upsert \
+taplctl task set \
   --id TASK-EXAMPLE \
   --title "Implement the change" \
   --status "In Progress" \
@@ -131,9 +131,9 @@ The configured workflow guidance is injected into Codex lifecycle context, and
 the exact field rules stay in command help:
 
 ```sh
-taplctl plan upsert --help
-taplctl task upsert --help
-taplctl approval record --help
+taplctl plan set --help
+taplctl task set --help
+taplctl approval set --help
 ```
 
 ### 3. Searchable history for completed work
@@ -258,11 +258,11 @@ taplctl doctor --json
 taplctl status --json
 taplctl validate --json
 taplctl context --event UserPromptSubmit --json
-taplctl run summary --summary "..." --json
-taplctl plan upsert --help
-taplctl task upsert --help
+taplctl run set --summary "..." --json
+taplctl plan set --help
+taplctl task set --help
 taplctl finding add --help
-taplctl approval record --help
+taplctl approval set --help
 taplctl archive create --help
 taplctl search "query" --json
 taplctl reindex --json

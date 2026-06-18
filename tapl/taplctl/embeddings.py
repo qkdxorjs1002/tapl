@@ -216,6 +216,8 @@ def query_embedding_blob(query: str, settings: tapl_config.SearchConfig) -> byte
 
     try:
         return searchd.embed_query(query, settings)
+    except searchd.SearchdUnavailable:
+        return local_query_embedding_blob(query)
     except searchd.SearchdError:
         if settings.semantic_provider == "daemon":
             return None

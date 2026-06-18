@@ -278,7 +278,7 @@ mode = "{config.DEFAULT_SEARCH_MODE}"
 max_results = {config.DEFAULT_SEARCH_MAX_RESULTS}
 hybrid_semantic_ratio = {config.DEFAULT_HYBRID_SEMANTIC_RATIO}
 semantic_provider = "{config.DEFAULT_SEMANTIC_PROVIDER}"
-searchd_idle_timeout_seconds = {config.DEFAULT_SEARCHD_IDLE_TIMEOUT_SECONDS}
+searchd_model_idle_timeout_seconds = {config.DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS}
 
 [plan-task-execute]
 use_level_subagent = {str(config.DEFAULT_USE_LEVEL_SUBAGENT).lower()}

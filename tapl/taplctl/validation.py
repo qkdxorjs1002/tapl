@@ -39,6 +39,7 @@ def validate_plan_task_execute(
     issues.extend(validate_plan_content(plans, settings))
     issues.extend(validate_task_granularity(plans, tasks, settings))
     issues.extend(validate_task_content(tasks, settings))
+    issues.extend(validate_task_execution_order(tasks))
     issues.extend(validate_execution_approval(state, tasks, settings))
     errors = [item for item in issues if item["severity"] == "error"]
     warnings = [item for item in issues if item["severity"] == "warning"]
@@ -135,7 +136,7 @@ def validate_plan_detail(
                 severity,
                 "missing_plan",
                 f"plan_detail is `{settings.plan_detail}`, but the active run has no plan record.",
-                "Create or update a plan with `taplctl plan upsert` before durable edits.",
+                "Create or update a plan with `taplctl plan set` before durable edits.",
             )
         ]
 
@@ -254,10 +255,51 @@ def validate_task_content(
                     "warning",
                     "task_content_missing_fields",
                     f"{stable_id} is missing task field(s): {', '.join(missing)}.",
-                    "Record task goal, source SPEC, action, required subagent, verification, and result or blocker details as applicable.",
+                    "Set task goal, source SPEC, action, required subagent, verification, and result or blocker details as applicable.",
                     stable_id=stable_id,
                 )
             )
+    return issues
+
+
+def validate_task_execution_order(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    in_progress: list[tuple[int, dict[str, Any]]] = [
+        (index, task)
+        for index, task in enumerate(tasks)
+        if task_status(task) == "In Progress"
+    ]
+    if len(in_progress) > 1:
+        labels = ", ".join(task_label(task) for _, task in in_progress)
+        issues.append(
+            issue(
+                "warning",
+                "multiple_tasks_in_progress",
+                f"Multiple tasks are In Progress: {labels}.",
+                "Execute planned tasks one at a time; complete, block, or skip the current task before starting another.",
+            )
+        )
+
+    if not in_progress:
+        return issues
+
+    first_index, first_task = in_progress[0]
+    earlier_incomplete = [
+        task
+        for task in tasks[:first_index]
+        if task_status(task) in {"Pending", "Blocked"}
+    ]
+    if earlier_incomplete:
+        labels = ", ".join(task_label(task) for task in earlier_incomplete)
+        issues.append(
+            issue(
+                "warning",
+                "task_started_out_of_order",
+                f"{task_label(first_task)} is In Progress while earlier task(s) remain incomplete: {labels}.",
+                "Run tasks in task order; finish, resolve, skip, or replan earlier tasks before continuing the later task.",
+                stable_id=task_label(first_task),
+            )
+        )
     return issues
 
 
@@ -280,7 +322,7 @@ def validate_execution_approval(
                 "error",
                 "execution_approval_rejected",
                 "Execution approval was explicitly rejected for the active run.",
-                "Resolve the rejected approval or record a new approval before durable edits.",
+                "Resolve the rejected approval or set a new approval before durable edits.",
             )
         ]
 
@@ -290,7 +332,7 @@ def validate_execution_approval(
             severity,
             "execution_approval_missing",
             "Executable tasks exist but execution approval is not recorded.",
-            "Ask the user whether to execute the prepared tasks, then record approval with `taplctl approval record --decision approved --prompt '<approved scope>' --json`.",
+            "Ask the user whether to execute the prepared tasks, then set approval with `taplctl approval set --decision approved --prompt '<approved scope>' --json`.",
         )
     ]
 
@@ -301,6 +343,10 @@ def executable_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def task_status(task: dict[str, Any]) -> str:
     return str(task.get("status") or "")
+
+
+def task_label(task: dict[str, Any]) -> str:
+    return str(task.get("stable_id") or task.get("task_id") or "task")
 
 
 def has_any(text: str, needles: tuple[str, ...]) -> bool:
@@ -319,6 +365,7 @@ def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
         "plan_detail": plan_detail_guidance(settings.plan_detail),
         "plan_format": plan_format_guidance(),
         "task_granularity": task_granularity_guidance(settings.task_granularity),
+        "task_execution_order": task_execution_order_guidance(),
         "task_format": task_format_guidance(settings),
         "execution_approval": execution_approval_guidance(settings),
     }
@@ -337,7 +384,7 @@ def level_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
 
 def plan_detail_guidance(value: str) -> str:
     return {
-        "minimal": "Record objective, selected approach, affected files, and validation only.",
+        "minimal": "Write objective, selected approach, affected files, and validation only.",
         "less_detailed": "Add constraints and risks only when they affect execution.",
         "detailed": "Include requirements trace, execution order, risks, and validation.",
         "very_detailed": "Expand edge cases, alternatives considered, and per-spec validation.",
@@ -360,8 +407,8 @@ def markdown_record_guidance(subject: str = "plan, task, and finding content") -
 
 def workflow_order_guidance() -> str:
     return (
-        "Phase order: plan with the user -> `taplctl plan upsert` -> design tasks "
-        "from the stored plan -> `taplctl task upsert`."
+        "Phase order: plan with the user -> `taplctl plan set` -> design tasks "
+        "from the stored plan -> `taplctl task set`."
     )
 
 
@@ -369,6 +416,14 @@ def task_plan_dependency_guidance() -> str:
     return (
         "Create or update task records only after the source plan/spec exists; set "
         "--spec-id to the stored plan/spec id."
+    )
+
+
+def task_execution_order_guidance() -> str:
+    return (
+        "Execute planned tasks one at a time in task order: set the next task to "
+        "`In Progress` immediately before work, then update it to `Completed`, "
+        "`Blocked`, or `Skipped` before starting another task."
     )
 
 
@@ -398,8 +453,8 @@ def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
 
 def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     base = (
-        "Before durable edits, ask the user whether to execute the prepared tasks and record it with "
-        "`taplctl approval record --decision approved --prompt '<approved scope>' --json`."
+        "Before durable edits, ask the user whether to execute the prepared tasks and set it with "
+        "`taplctl approval set --decision approved --prompt '<approved scope>' --json`."
     )
     if settings.require_execution_approval:
         return base + " Missing execution approval is a validation error."

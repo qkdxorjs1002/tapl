@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import gc
 import json
 import os
 import socket
@@ -74,7 +75,7 @@ def start(
     settings: tapl_config.SearchConfig,
     *,
     socket_path: str | Path | None = None,
-    idle_timeout_seconds: int | None = None,
+    model_idle_timeout_seconds: int | None = None,
     timeout_ms: int | None = None,
     wait: bool = True,
 ) -> dict[str, Any]:
@@ -87,7 +88,11 @@ def start(
 
     remove_stale_socket(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    idle_timeout = settings.searchd_idle_timeout_seconds if idle_timeout_seconds is None else idle_timeout_seconds
+    model_idle_timeout = (
+        settings.searchd_model_idle_timeout_seconds
+        if model_idle_timeout_seconds is None
+        else model_idle_timeout_seconds
+    )
     command = [
         sys.executable,
         "-m",
@@ -97,7 +102,7 @@ def start(
         "--socket",
         str(path),
         "--idle-timeout",
-        str(idle_timeout),
+        str(model_idle_timeout),
     ]
     process = subprocess.Popen(
         command,
@@ -114,7 +119,7 @@ def start(
         "already_running": False,
         "pid": process.pid,
         "socket_path": str(path),
-        "idle_timeout_seconds": idle_timeout,
+        "model_idle_timeout_seconds": model_idle_timeout,
     }
     if not wait:
         return payload
@@ -260,11 +265,106 @@ def remove_stale_socket(socket_path: Path) -> None:
         return
 
 
+class ModelState:
+    def __init__(
+        self,
+        *,
+        model_idle_timeout_seconds: int,
+        now: Any | None = None,
+        model_loader: Any | None = None,
+        numpy_loader: Any | None = None,
+    ) -> None:
+        self.model_idle_timeout_seconds = model_idle_timeout_seconds
+        self.model: Any | None = None
+        self.np: Any | None = None
+        self.dimension = db.DEFAULT_EMBEDDING_DIMENSION
+        self.loaded_at: float | None = None
+        self.last_embed_at: float | None = None
+        self._now = now or time.monotonic
+        self._model_loader = model_loader or self._default_model_loader
+        self._numpy_loader = numpy_loader or self._default_numpy_loader
+
+    @property
+    def model_loaded(self) -> bool:
+        return self.model is not None
+
+    def status_payload(self, *, started_at: float) -> dict[str, Any]:
+        self.unload_if_idle()
+        payload: dict[str, Any] = {
+            "ok": True,
+            "pid": os.getpid(),
+            "model": db.DEFAULT_EMBEDDING_MODEL,
+            "dimension": self.dimension,
+            "uptime_seconds": round(self._now() - started_at, 3),
+            "model_loaded": self.model_loaded,
+            "model_idle_timeout_seconds": self.model_idle_timeout_seconds,
+        }
+        if self.loaded_at is not None:
+            payload["model_loaded_seconds"] = round(self._now() - self.loaded_at, 3)
+        if self.last_embed_at is not None:
+            payload["model_idle_seconds"] = round(self._now() - self.last_embed_at, 3)
+        return payload
+
+    def unload_if_idle(self) -> bool:
+        if not self.model_loaded:
+            return False
+        if self.model_idle_timeout_seconds <= 0:
+            return False
+        if self.last_embed_at is None:
+            return False
+        if self._now() - self.last_embed_at < self.model_idle_timeout_seconds:
+            return False
+        return self.unload()
+
+    def unload(self) -> bool:
+        if not self.model_loaded:
+            return False
+        self.model = None
+        self.np = None
+        self.dimension = db.DEFAULT_EMBEDDING_DIMENSION
+        self.loaded_at = None
+        gc.collect()
+        return True
+
+    def embed(self, text: str) -> dict[str, Any]:
+        self.unload_if_idle()
+        self.load()
+        vector = self.model.encode([text], normalize_embeddings=True)[0]
+        array = self.np.asarray(vector, dtype=self.np.float32)
+        self.last_embed_at = self._now()
+        return {
+            "dimension": int(array.shape[0]),
+            "embedding_b64": base64.b64encode(array.tobytes()).decode("ascii"),
+        }
+
+    def load(self) -> None:
+        if self.model_loaded:
+            return
+        self.np = self._numpy_loader()
+        self.model = self._model_loader()
+        reported_dimension = getattr(self.model, "get_sentence_embedding_dimension", lambda: None)()
+        self.dimension = int(reported_dimension or db.DEFAULT_EMBEDDING_DIMENSION)
+        self.loaded_at = self._now()
+
+    def _default_numpy_loader(self) -> Any:
+        import numpy as np
+
+        return np
+
+    def _default_model_loader(self) -> Any:
+        from sentence_transformers import SentenceTransformer
+
+        from .embeddings import suppress_model_load_progress
+
+        with suppress_model_load_progress():
+            return SentenceTransformer(db.DEFAULT_EMBEDDING_MODEL, local_files_only=True)
+
+
 def run_server(
     settings: tapl_config.SearchConfig,
     *,
     socket_path: str | Path | None = None,
-    idle_timeout_seconds: int | None = None,
+    model_idle_timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
     path = resolve_socket_path(socket_path)
     existing = status(settings, socket_path=path)
@@ -273,19 +373,13 @@ def run_server(
     remove_stale_socket(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    import numpy as np
-    from sentence_transformers import SentenceTransformer
-
-    from .embeddings import suppress_model_load_progress
-
-    with suppress_model_load_progress():
-        model = SentenceTransformer(db.DEFAULT_EMBEDDING_MODEL, local_files_only=True)
-
-    reported_dimension = getattr(model, "get_sentence_embedding_dimension", lambda: None)()
-    dimension = int(reported_dimension or db.DEFAULT_EMBEDDING_DIMENSION)
-    idle_timeout = settings.searchd_idle_timeout_seconds if idle_timeout_seconds is None else idle_timeout_seconds
+    model_idle_timeout = (
+        settings.searchd_model_idle_timeout_seconds
+        if model_idle_timeout_seconds is None
+        else model_idle_timeout_seconds
+    )
+    model_state = ModelState(model_idle_timeout_seconds=model_idle_timeout)
     started_at = time.monotonic()
-    last_activity = started_at
 
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         server.bind(str(path))
@@ -293,8 +387,7 @@ def run_server(
         server.settimeout(0.5)
         try:
             while True:
-                if idle_timeout > 0 and time.monotonic() - last_activity >= idle_timeout:
-                    return {"ok": True, "reason": "idle_timeout", "socket_path": str(path)}
+                model_state.unload_if_idle()
                 try:
                     conn, _ = server.accept()
                 except socket.timeout:
@@ -304,17 +397,13 @@ def run_server(
                         request_payload = read_request(conn)
                         response, should_stop = handle_request(
                             request_payload,
-                            model=model,
-                            np=np,
+                            model_state=model_state,
                             started_at=started_at,
-                            idle_timeout_seconds=idle_timeout,
-                            dimension=dimension,
                         )
                     except SearchdError as exc:
                         response = {"ok": False, "error": str(exc)}
                         should_stop = False
                     conn.sendall(json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n")
-                last_activity = time.monotonic()
                 if should_stop:
                     return {"ok": True, "reason": "shutdown", "socket_path": str(path)}
         finally:
@@ -335,25 +424,13 @@ def read_request(conn: socket.socket) -> dict[str, Any]:
 def handle_request(
     request_payload: dict[str, Any],
     *,
-    model: Any,
-    np: Any,
+    model_state: ModelState,
     started_at: float,
-    idle_timeout_seconds: int,
-    dimension: int,
 ) -> tuple[dict[str, Any], bool]:
+    model_state.unload_if_idle()
     op = request_payload.get("op")
     if op == "ping":
-        return (
-            {
-                "ok": True,
-                "pid": os.getpid(),
-                "model": db.DEFAULT_EMBEDDING_MODEL,
-                "dimension": dimension,
-                "uptime_seconds": round(time.monotonic() - started_at, 3),
-                "idle_timeout_seconds": idle_timeout_seconds,
-            },
-            False,
-        )
+        return (model_state.status_payload(started_at=started_at), False)
 
     if op == "shutdown":
         return ({"ok": True, "pid": os.getpid(), "message": "searchd shutting down"}, True)
@@ -373,15 +450,16 @@ def handle_request(
     text = request_payload.get("text")
     if not isinstance(text, str):
         return ({"ok": False, "error": "embed request text must be a string"}, False)
-    vector = model.encode([text], normalize_embeddings=True)[0]
-    array = np.asarray(vector, dtype=np.float32)
+    embedding = model_state.embed(text)
     return (
         {
             "ok": True,
             "pid": os.getpid(),
             "model": db.DEFAULT_EMBEDDING_MODEL,
-            "dimension": int(array.shape[0]),
-            "embedding_b64": base64.b64encode(array.tobytes()).decode("ascii"),
+            "dimension": embedding["dimension"],
+            "embedding_b64": embedding["embedding_b64"],
+            "model_loaded": model_state.model_loaded,
+            "model_idle_timeout_seconds": model_state.model_idle_timeout_seconds,
         },
         False,
     )

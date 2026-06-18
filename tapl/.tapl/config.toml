@@ -13,8 +13,8 @@ hybrid_semantic_ratio = 0.65
 # auto uses searchd when it is already running, then falls back to local loading.
 semantic_provider = "auto"
 
-# 0 disables idle shutdown. The default keeps the model warm for 30 minutes.
-searchd_idle_timeout_seconds = 1800
+# 0 disables model unload. The default keeps the model warm for 30 minutes after the last search.
+searchd_model_idle_timeout_seconds = 1800
 
 [plan-task-execute]
 use_level_subagent = true

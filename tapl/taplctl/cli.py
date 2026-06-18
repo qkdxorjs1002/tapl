@@ -33,17 +33,18 @@ def command_help_epilog() -> str:
         "Workflow guidance:\n"
         "  Use `taplctl status --json` to inspect state before non-trivial work.\n"
         f"  {validation.workflow_order_guidance()}\n"
+        f"  {validation.task_execution_order_guidance()}\n"
         "  Use `taplctl <command> <subcommand> --help` for field-writing rules.\n"
         f"  {validation.markdown_record_guidance()}\n"
         "  Use `taplctl validate --json` after updates to catch missing plan/task details."
     )
 
 
-def plan_upsert_epilog() -> str:
+def plan_set_epilog() -> str:
     return (
         "Plan writing rules:\n"
         f"  {validation.markdown_record_guidance()}\n"
-        "  Write or update the plan before task upserts; downstream tasks should derive from this record.\n"
+        "  Write or update the plan before task records; downstream tasks should derive from this record.\n"
         f"  {validation.plan_format_guidance()}\n"
         "  Summary should be a compact trace such as `REQ-001: approach, files, risks, validation`.\n"
         "  Body is for the durable plan: objective, requirements trace, selected approach,\n"
@@ -51,19 +52,20 @@ def plan_upsert_epilog() -> str:
         "  Status is free-form; common values are Draft, Finalized, Imported, and Superseded.\n"
         "\n"
         "Example:\n"
-        "  taplctl plan upsert --id SPEC-001 --title 'Plan title' \\\n"
+        "  taplctl plan set --id SPEC-001 --title 'Plan title' \\\n"
         "    --summary 'REQ-001: approach, affected files, risks, validation' \\\n"
         "    --body 'Objective: ...\\nValidation: ...' --status Finalized --json"
     )
 
 
-def task_upsert_epilog() -> str:
+def task_set_epilog() -> str:
     statuses = ", ".join(db.TASK_STATUSES)
     subagents = ", ".join(validation.LEVEL_SUBAGENTS)
     return (
         "Task writing rules:\n"
         f"  {validation.markdown_record_guidance()}\n"
         f"  {validation.task_plan_dependency_guidance()}\n"
+        f"  {validation.task_execution_order_guidance()}\n"
         "  Executable tasks should include source spec_id, goal, action, required_subagent,\n"
         "  verification, and result when completed; blocked tasks should include blocker and next_action.\n"
         "  Split tasks by meaningful implementation or verification step.\n"
@@ -80,7 +82,7 @@ def task_upsert_epilog() -> str:
         "  --blocker/--next-action: why a Blocked task cannot proceed and what unblocks it.\n"
         "\n"
         "Example:\n"
-        "  taplctl task upsert --id TASK-001 --title 'Implement change' \\\n"
+        "  taplctl task set --id TASK-001 --title 'Implement change' \\\n"
         "    --status 'In Progress' --spec-id SPEC-001 --goal 'Make requested behavior work' \\\n"
         "    --action 'Edit the relevant files' --required-subagent '@senior-worker' \\\n"
         "    --verification 'Run focused tests' --json"
@@ -91,7 +93,7 @@ def finding_add_epilog() -> str:
     return (
         "Finding writing rules:\n"
         f"  {validation.markdown_record_guidance('finding details and impact')}\n"
-        "  Record only decision-relevant facts; include source and impact when they affect\n"
+        "  Add only decision-relevant facts; include source and impact when they affect\n"
         "  requirements, plan, tasks, or verification.\n"
         "\n"
         "Example:\n"
@@ -100,14 +102,14 @@ def finding_add_epilog() -> str:
     )
 
 
-def approval_record_epilog() -> str:
+def approval_set_epilog() -> str:
     return (
         "Approval writing rules:\n"
-        "  Record explicit execution approval before durable edits when plan-task-execute\n"
+        "  Set explicit execution approval before durable edits when plan-task-execute\n"
         "  requires it. The prompt should describe the approved scope, not just `yes`.\n"
         "\n"
         "Example:\n"
-        "  taplctl approval record --decision approved \\\n"
+        "  taplctl approval set --decision approved \\\n"
         "    --prompt 'Execute TASK-001 from SPEC-001' --json"
     )
 
@@ -118,6 +120,43 @@ def add_json_arg(parser: argparse.ArgumentParser) -> None:
 
 def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dry-run", action="store_true", help=DRY_RUN_HELP)
+
+
+def add_run_set_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--summary", default=None, help="Short description of the current request.")
+    parser.add_argument("--result", default=None, help="Short description of the completed result.")
+    add_json_arg(parser)
+
+
+def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", default="PLAN-001", help="Stable plan id, commonly SPEC-* or PLAN-*.")
+    parser.add_argument("--title", default="Plan", help="Short human-readable plan title.")
+    parser.add_argument("--summary", default="", help="Compact requirements trace and approach summary.")
+    parser.add_argument("--body", default="", help="Detailed plan body; use newlines for sections.")
+    parser.add_argument("--status", default="Draft", help="Plan lifecycle label, e.g. Draft or Finalized.")
+    add_json_arg(parser)
+
+
+def add_task_write_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", required=True, help="Stable task id, commonly TASK-*.")
+    parser.add_argument("--title", required=True, help="Short human-readable task title.")
+    parser.add_argument("--status", required=True, choices=db.TASK_STATUSES, help="Task lifecycle status.")
+    parser.add_argument("--spec-id", default="", help="Source plan/spec stable id.")
+    parser.add_argument("--goal", default="", help="Outcome this task must achieve.")
+    parser.add_argument("--action", default="", help="Concrete work to perform.")
+    parser.add_argument("--required-subagent", default="", help="One of the configured @*-worker values.")
+    parser.add_argument("--verification", default="", help="Command, check, or review proving completion.")
+    parser.add_argument("--result", default="", help="Completion note for Completed tasks.")
+    parser.add_argument("--blocker", default="", help="Reason a Blocked task cannot proceed.")
+    parser.add_argument("--next-action", default="", help="Specific action that would unblock a Blocked task.")
+    add_json_arg(parser)
+
+
+def add_approval_write_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help="Approval kind.")
+    parser.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS, help="Approval decision.")
+    parser.add_argument("--prompt", default="", help="Approved or rejected execution scope.")
+    add_json_arg(parser)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -178,22 +217,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", help="Manage the active workflow run.")
     run_sub = run.add_subparsers(dest="run_command")
-    run_summary = run_sub.add_parser(
-        "summary",
-        help="Update the active run request summary.",
-        description="Update the active run request summary.",
+    run_set = run_sub.add_parser(
+        "set",
+        help="Set active run fields.",
+        description="Set active run fields.",
     )
-    run_summary.add_argument("--summary", required=True, help="Short description of the current request.")
-    add_json_arg(run_summary)
-    run_summary.set_defaults(handler=cmd_run_summary)
-    run_result = run_sub.add_parser(
-        "result",
-        help="Update the active run result summary.",
-        description="Update the active run result summary.",
-    )
-    run_result.add_argument("--result", required=True, help="Short description of the completed result.")
-    add_json_arg(run_result)
-    run_result.set_defaults(handler=cmd_run_result)
+    add_run_set_args(run_set)
+    run_set.set_defaults(handler=cmd_run_set)
 
     install = sub.add_parser("install", help="Install tapl workflow hooks and repo-local state.")
     install_sub = install.add_subparsers(dest="install_command")
@@ -216,50 +246,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     plan = sub.add_parser("plan", help="Manage plan items.", formatter_class=HELP_FORMATTER)
     plan_sub = plan.add_subparsers(dest="plan_command")
-    plan_upsert = plan_sub.add_parser(
-        "upsert",
+    plan_set = plan_sub.add_parser(
+        "set",
         help="Create or update a plan.",
         description="Create or update a durable plan record.",
-        epilog=plan_upsert_epilog(),
+        epilog=plan_set_epilog(),
         formatter_class=HELP_FORMATTER,
     )
-    plan_upsert.add_argument("--id", default="PLAN-001", help="Stable plan id, commonly SPEC-* or PLAN-*.")
-    plan_upsert.add_argument("--title", default="Plan", help="Short human-readable plan title.")
-    plan_upsert.add_argument("--summary", default="", help="Compact requirements trace and approach summary.")
-    plan_upsert.add_argument("--body", default="", help="Detailed plan body; use newlines for sections.")
-    plan_upsert.add_argument("--status", default="Draft", help="Plan lifecycle label, e.g. Draft or Finalized.")
-    add_json_arg(plan_upsert)
-    plan_upsert.set_defaults(handler=cmd_plan_upsert)
+    add_plan_write_args(plan_set)
+    plan_set.set_defaults(handler=cmd_plan_set)
 
     task = sub.add_parser("task", help="Manage tasks.", formatter_class=HELP_FORMATTER)
     task_sub = task.add_subparsers(dest="task_command")
-    task_upsert = task_sub.add_parser(
-        "upsert",
+    task_set = task_sub.add_parser(
+        "set",
         help="Create or update a task.",
         description="Create or update an executable task record.",
-        epilog=task_upsert_epilog(),
+        epilog=task_set_epilog(),
         formatter_class=HELP_FORMATTER,
     )
-    task_upsert.add_argument("--id", required=True, help="Stable task id, commonly TASK-*.")
-    task_upsert.add_argument("--title", required=True, help="Short human-readable task title.")
-    task_upsert.add_argument("--status", required=True, choices=db.TASK_STATUSES, help="Task lifecycle status.")
-    task_upsert.add_argument("--spec-id", default="", help="Source plan/spec stable id.")
-    task_upsert.add_argument("--goal", default="", help="Outcome this task must achieve.")
-    task_upsert.add_argument("--action", default="", help="Concrete work to perform.")
-    task_upsert.add_argument("--required-subagent", default="", help="One of the configured @*-worker values.")
-    task_upsert.add_argument("--verification", default="", help="Command, check, or review proving completion.")
-    task_upsert.add_argument("--result", default="", help="Completion note for Completed tasks.")
-    task_upsert.add_argument("--blocker", default="", help="Reason a Blocked task cannot proceed.")
-    task_upsert.add_argument("--next-action", default="", help="Specific action that would unblock a Blocked task.")
-    add_json_arg(task_upsert)
-    task_upsert.set_defaults(handler=cmd_task_upsert)
+    add_task_write_args(task_set)
+    task_set.set_defaults(handler=cmd_task_set)
 
     finding = sub.add_parser("finding", help="Manage findings.")
     finding_sub = finding.add_subparsers(dest="finding_command")
     finding_add = finding_sub.add_parser(
         "add",
-        help="Record a finding.",
-        description="Record a finding.",
+        help="Add a finding.",
+        description="Add a finding.",
         epilog=finding_add_epilog(),
         formatter_class=HELP_FORMATTER,
     )
@@ -273,18 +287,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     approval = sub.add_parser("approval", help="Manage explicit workflow approvals.", formatter_class=HELP_FORMATTER)
     approval_sub = approval.add_subparsers(dest="approval_command")
-    approval_record = approval_sub.add_parser(
-        "record",
-        help="Record an approval decision.",
-        description="Record a user decision for workflow execution.",
-        epilog=approval_record_epilog(),
+    approval_set = approval_sub.add_parser(
+        "set",
+        help="Set an approval decision.",
+        description="Set a user decision for workflow execution.",
+        epilog=approval_set_epilog(),
         formatter_class=HELP_FORMATTER,
     )
-    approval_record.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help="Approval kind.")
-    approval_record.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS, help="Approval decision.")
-    approval_record.add_argument("--prompt", default="", help="Approved or rejected execution scope.")
-    add_json_arg(approval_record)
-    approval_record.set_defaults(handler=cmd_approval_record)
+    add_approval_write_args(approval_set)
+    approval_set.set_defaults(handler=cmd_approval_set)
     approval_status = approval_sub.add_parser(
         "status",
         help="Show current approval state.",
@@ -350,7 +361,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--idle-timeout",
         type=non_negative_int_arg,
         default=None,
-        help="Seconds before idle shutdown. Defaults to search.searchd_idle_timeout_seconds.",
+        help="Seconds before unloading an idle model. Defaults to search.searchd_model_idle_timeout_seconds.",
     )
     searchd_start.add_argument(
         "--timeout-ms",
@@ -609,16 +620,22 @@ def cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_run_summary(args: argparse.Namespace) -> int:
+def cmd_run_set(args: argparse.Namespace) -> int:
+    if args.summary is None and args.result is None:
+        emit(
+            {
+                "ok": False,
+                "error": "provide --summary, --result, or both",
+            },
+            args.json,
+        )
+        return 1
     conn = open_conn(args)
-    run = db.update_active_run_summary(conn, request_summary=args.summary)
-    emit({"ok": True, "active_run": db.row_to_dict(run)}, args.json)
-    return 0
-
-
-def cmd_run_result(args: argparse.Namespace) -> int:
-    conn = open_conn(args)
-    run = db.update_active_run_summary(conn, result_summary=args.result)
+    run = db.update_active_run_summary(
+        conn,
+        request_summary=args.summary,
+        result_summary=args.result,
+    )
     emit({"ok": True, "active_run": db.row_to_dict(run)}, args.json)
     return 0
 
@@ -647,7 +664,7 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_plan_upsert(args: argparse.Namespace) -> int:
+def cmd_plan_set(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     settings = load_config(args)
     item = db.upsert_item(
@@ -672,7 +689,7 @@ def cmd_plan_upsert(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_task_upsert(args: argparse.Namespace) -> int:
+def cmd_task_set(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     settings = load_config(args)
     input_check = validation.validate_task_input(
@@ -727,7 +744,7 @@ def cmd_finding_add(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_approval_record(args: argparse.Namespace) -> int:
+def cmd_approval_set(args: argparse.Namespace) -> int:
     approval = db.record_approval(
         open_conn(args),
         kind=args.kind,
@@ -802,7 +819,7 @@ def cmd_searchd_start(args: argparse.Namespace) -> int:
     payload = searchd.start(
         settings.search,
         socket_path=args.socket,
-        idle_timeout_seconds=args.idle_timeout,
+        model_idle_timeout_seconds=args.idle_timeout,
         timeout_ms=args.timeout_ms,
         wait=not args.no_wait,
     )
@@ -832,7 +849,7 @@ def cmd_searchd_run(args: argparse.Namespace) -> int:
     payload = searchd.run_server(
         settings.search,
         socket_path=args.socket,
-        idle_timeout_seconds=args.idle_timeout,
+        model_idle_timeout_seconds=args.idle_timeout,
     )
     emit(payload, args.json)
     return 0 if payload.get("ok") else 1

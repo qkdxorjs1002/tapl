@@ -50,9 +50,9 @@ taplctl doctor --json
 ```sh
 taplctl status --json
 taplctl search 'README self PR codex cli screenshot' --json
-taplctl plan upsert --id SPEC-README-SELF-PR ...
-taplctl task upsert --id TASK-README-001 ...
-taplctl approval record --decision approved ...
+taplctl plan set --id SPEC-README-SELF-PR ...
+taplctl task set --id TASK-README-001 ...
+taplctl approval set --decision approved ...
 ```
 
 상태는 `.tapl/tapl.db`에 저장됩니다. 그래서 다음 Codex session, hook, 사람,
@@ -107,14 +107,14 @@ history를 추측하지 않고 저장된 state에서 이어갈 수 있습니다.
 Plan과 task는 흩어진 Markdown 메모가 아니라 first-class record입니다.
 
 ```sh
-taplctl plan upsert \
+taplctl plan set \
   --id SPEC-EXAMPLE \
   --title "Example implementation plan" \
   --summary "REQ-001: approach, files, order, risks, validation" \
   --status Finalized \
   --json
 
-taplctl task upsert \
+taplctl task set \
   --id TASK-EXAMPLE \
   --title "Implement the change" \
   --status "In Progress" \
@@ -130,9 +130,9 @@ taplctl task upsert \
 규칙은 command help에 둡니다.
 
 ```sh
-taplctl plan upsert --help
-taplctl task upsert --help
-taplctl approval record --help
+taplctl plan set --help
+taplctl task set --help
+taplctl approval set --help
 ```
 
 ### 3. 검색 가능한 완료 작업 history
@@ -255,11 +255,11 @@ taplctl doctor --json
 taplctl status --json
 taplctl validate --json
 taplctl context --event UserPromptSubmit --json
-taplctl run summary --summary "..." --json
-taplctl plan upsert --help
-taplctl task upsert --help
+taplctl run set --summary "..." --json
+taplctl plan set --help
+taplctl task set --help
 taplctl finding add --help
-taplctl approval record --help
+taplctl approval set --help
 taplctl archive create --help
 taplctl search "query" --json
 taplctl reindex --json

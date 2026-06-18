@@ -38,7 +38,7 @@ def taplctl_help_guidance() -> str:
 def external_findings_guidance() -> str:
     return (
         "Findings: if external search/docs changed requirements, plan, tasks, or verification, "
-        "record only decision-relevant facts with `taplctl finding add`. "
+        "add only decision-relevant facts with `taplctl finding add`. "
         f"{validation.markdown_record_guidance('finding details and impact')}"
     )
 
@@ -131,7 +131,7 @@ def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> 
     if event == "Stop":
         return [
             *base,
-            "Before stopping, record the result and finish, block, or skip tasks so archive state is accurate.",
+            "Before stopping, set the result and finish, block, or skip tasks so archive state is accurate.",
         ]
 
     return [
@@ -148,14 +148,14 @@ def workflow_guidance(
     prompt: str = "",
 ) -> list[str]:
     lines = [
-        "Flow: search relevant prior work -> summarize request -> plan with the user -> plan upsert -> plan-based task design -> task upsert -> approval -> execute/update -> result/archive.",
+        "Flow: search relevant prior work -> summarize request -> plan set -> plan-based task design -> task set -> approval set -> execute/update -> result/archive.",
     ]
 
     if event == "SessionStart":
         return lines
 
     if event == "Stop":
-        lines.append("Stop: record result, leave no actionable task unmarked, then archive completed work.")
+        lines.append("Stop: set result, leave no actionable task unmarked, then archive completed work.")
         return lines
 
     if event == "UserPromptSubmit":
@@ -184,15 +184,15 @@ def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> l
         f"Records: {validation.markdown_record_guidance()}",
         f"Order: {validation.workflow_order_guidance()}",
         f"Plan: {validation.plan_detail_guidance(settings.plan_detail)} Ask the user to choose when scope, risk, API, UX, data, or compatibility decisions matter.",
-        f"Tasks: {validation.task_plan_dependency_guidance()} {validation.task_granularity_guidance(settings.task_granularity)} {validation.task_format_guidance(settings)}",
+        f"Tasks: {validation.task_plan_dependency_guidance()} {validation.task_granularity_guidance(settings.task_granularity)} {validation.task_execution_order_guidance()} {validation.task_format_guidance(settings)}",
         validation.agent_writer_contract_guidance(),
     ]
     if settings.use_level_subagent:
         guidance.append(f"Subagents: {subagent_context_guidance(settings)}")
     if settings.require_execution_approval:
-        guidance.append("Approval: before durable edits, record execution approval with `taplctl approval record --decision approved --prompt '<approved scope>' --json`.")
+        guidance.append("Approval: before durable edits, set execution approval with `taplctl approval set --decision approved --prompt '<approved scope>' --json`.")
     else:
-        guidance.append("Approval: record execution approval when risk or scope warrants it; missing approval is reported as a warning.")
+        guidance.append("Approval: set execution approval when risk or scope warrants it; missing approval is reported as a warning.")
     return guidance
 
 
@@ -220,7 +220,7 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
     if run.get("request_summary") == db.DEFAULT_REQUEST_SUMMARY:
         actions.append(
-            "Summarize the user's request and update the active run with `taplctl run summary --summary '<request summary>' --json`."
+            "Summarize the user's request and update the active run with `taplctl run set --summary '<request summary>' --json`."
         )
     if event == "UserPromptSubmit" and state.get("incomplete_tasks", 0):
         actions.append(
@@ -229,13 +229,16 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
     has_plans = bool(state.get("plans"))
     has_tasks = bool(state.get("tasks"))
     if not has_plans:
-        actions.append("Create or update plan state with `taplctl plan upsert` before task design/upsert.")
+        actions.append("Create or update plan state with `taplctl plan set` before task design.")
         covered_issue_codes.add("missing_plan")
     elif not has_tasks:
         actions.append(
-            "Using the stored plan, design executable tasks and create task state with `taplctl task upsert` before durable edits."
+            "Using the stored plan, design executable tasks and create task state with `taplctl task set` before durable edits."
         )
     if state.get("incomplete_tasks", 0):
+        execution_action = task_execution_next_action(state)
+        if execution_action:
+            actions.append(execution_action)
         actions.append("Complete, block, or skip remaining tasks before Stop can auto-archive.")
 
     for issue in (plan_task.get("issues") or [])[:3]:
@@ -243,6 +246,33 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
             continue
         actions.append(f"{issue['message']} {issue['remediation']}")
     return actions
+
+
+def task_execution_next_action(state: dict[str, Any]) -> str:
+    tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
+    if not tasks:
+        return ""
+
+    in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
+    if len(in_progress) > 1:
+        labels = ", ".join(task_label(task) for task in in_progress)
+        return f"Only one task may be In Progress at a time; finish, block, or skip all but the earliest task before continuing: {labels}."
+    if in_progress:
+        label = task_label(in_progress[0])
+        return f"Continue only {label}; update it to Completed, Blocked, or Skipped before starting another task."
+
+    for task in tasks:
+        status = str(task.get("status") or "")
+        label = task_label(task)
+        if status == "Pending":
+            return f"Start next task {label} by updating it to In Progress immediately before execution."
+        if status == "Blocked":
+            return f"Resolve, replan, or skip blocked task {label} before starting later tasks."
+    return ""
+
+
+def task_label(task: dict[str, Any]) -> str:
+    return str(task.get("stable_id") or task.get("task_id") or "task")
 
 
 def prompt_summary(payload: dict[str, Any]) -> str:
