@@ -20,6 +20,7 @@ DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
 DEFAULT_USE_LEVEL_SUBAGENT = True
 DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS = "auto"
 DEFAULT_PLAN_DETAIL = "detailed"
+DEFAULT_PLANNING_APPROVAL_LEVEL = "auto"
 DEFAULT_TASK_GRANULARITY = "granular"
 DEFAULT_REQUIRE_EXECUTION_APPROVAL = True
 
@@ -27,6 +28,7 @@ SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
 LEVEL_SUBAGENT_AGGRESSIVENESS = ("minimal", "auto", "force")
 PLAN_DETAILS = ("minimal", "less_detailed", "detailed", "very_detailed")
+PLANNING_APPROVAL_LEVELS = ("less", "auto", "more")
 TASK_GRANULARITIES = ("minimal", "less_granular", "granular", "very_granular")
 
 
@@ -62,6 +64,7 @@ class PlanTaskExecuteConfig:
     use_level_subagent: bool = DEFAULT_USE_LEVEL_SUBAGENT
     level_subagent_aggressiveness: str = DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS
     plan_detail: str = DEFAULT_PLAN_DETAIL
+    planning_approval_level: str = DEFAULT_PLANNING_APPROVAL_LEVEL
     task_granularity: str = DEFAULT_TASK_GRANULARITY
     require_execution_approval: bool = DEFAULT_REQUIRE_EXECUTION_APPROVAL
 
@@ -70,6 +73,7 @@ class PlanTaskExecuteConfig:
             "use_level_subagent": self.use_level_subagent,
             "level_subagent_aggressiveness": self.level_subagent_aggressiveness,
             "plan_detail": self.plan_detail,
+            "planning_approval_level": self.planning_approval_level,
             "task_granularity": self.task_granularity,
             "require_execution_approval": self.require_execution_approval,
         }
@@ -218,6 +222,16 @@ def load(
             setting(plan_task_data, "plan_detail", "plan-detail", default=DEFAULT_PLAN_DETAIL),
             PLAN_DETAILS,
             "plan_task_execute.plan_detail",
+        ),
+        planning_approval_level=choice(
+            setting(
+                plan_task_data,
+                "planning_approval_level",
+                "planning-approval-level",
+                default=DEFAULT_PLANNING_APPROVAL_LEVEL,
+            ),
+            PLANNING_APPROVAL_LEVELS,
+            "plan_task_execute.planning_approval_level",
         ),
         task_granularity=choice(
             setting(plan_task_data, "task_granularity", "task-granularity", default=DEFAULT_TASK_GRANULARITY),

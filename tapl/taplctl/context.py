@@ -206,7 +206,7 @@ def plan_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
         "detailed": "requirements trace, execution order, risks, validation",
         "very_detailed": "requirements trace, execution order, risks, edge cases, alternatives, per-spec validation",
     }[settings.plan_detail]
-    return f"Plan: include {detail}; ask user only for material scope/risk/API/UX/data/compat choices."
+    return f"Plan: include {detail}; {validation.planning_approval_guidance(settings.planning_approval_level)}"
 
 
 def task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:

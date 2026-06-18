@@ -306,8 +306,9 @@ taplctl reindex --json
 
 Plan/task validation is controlled by `[plan-task-execute]` in the same config
 files. Settings such as `plan_detail`, `task_granularity`,
-`level_subagent_aggressiveness`, and `require_execution_approval` are reflected
-in lifecycle context and validation issues.
+`planning_approval_level`, `level_subagent_aggressiveness`, and
+`require_execution_approval` are reflected in lifecycle context and validation
+issues.
 
 ## Repository Layout
 

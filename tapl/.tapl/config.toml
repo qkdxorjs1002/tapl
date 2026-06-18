@@ -25,6 +25,9 @@ level_subagent_aggressiveness = "auto"
 # Plan detail: minimal, less_detailed, detailed, or very_detailed.
 plan_detail = "detailed"
 
+# Planning approval: less, auto, or more.
+planning_approval_level = "auto"
+
 # Task split granularity: minimal, less_granular, granular, or very_granular.
 task_granularity = "granular"
 

@@ -344,6 +344,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertTrue(cfg.plan_task_execute.use_level_subagent)
             self.assertEqual(cfg.plan_task_execute.level_subagent_aggressiveness, "auto")
             self.assertEqual(cfg.plan_task_execute.plan_detail, "detailed")
+            self.assertEqual(cfg.plan_task_execute.planning_approval_level, "auto")
             self.assertEqual(cfg.plan_task_execute.task_granularity, "granular")
             self.assertTrue(cfg.plan_task_execute.require_execution_approval)
 
@@ -410,6 +411,7 @@ mode = "bm25"
 
 [plan-task-execute]
 plan-detail = "minimal"
+planning-approval-level = "more"
 """,
                 encoding="utf-8",
             )
@@ -419,6 +421,7 @@ plan-detail = "minimal"
             self.assertEqual(cfg.path, str(user_config))
             self.assertEqual(cfg.search.mode, "bm25")
             self.assertEqual(cfg.plan_task_execute.plan_detail, "minimal")
+            self.assertEqual(cfg.plan_task_execute.planning_approval_level, "more")
 
     def test_config_prefers_repo_config_over_user_global(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -454,6 +457,7 @@ idle-timeout-seconds = 0
 use-level-subagent = false
 level-subagent-aggressiveness = "minimal"
 plan-detail = "less-detailed"
+planning-approval-level = "less"
 task-granularity = "less-granular"
 """,
                 encoding="utf-8",
@@ -480,6 +484,7 @@ task-granularity = "less-granular"
             self.assertEqual(status_payload["config"]["search"]["semantic_provider"], "daemon")
             self.assertEqual(status_payload["config"]["search"]["searchd_model_idle_timeout_seconds"], 0)
             self.assertFalse(status_payload["config"]["plan_task_execute"]["use_level_subagent"])
+            self.assertEqual(status_payload["config"]["plan_task_execute"]["planning_approval_level"], "less")
 
             search = self.run_cli(db_path, "--config", str(config_path), "search", "substring", "--json")
             search_payload = json.loads(search.stdout)
@@ -554,6 +559,17 @@ max_results = 3
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "tapl.toml"
             config_path.write_text("[search]\nmax_results = 0\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                tapl_config.load(config_path)
+
+    def test_config_rejects_unknown_planning_approval_level(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "tapl.toml"
+            config_path.write_text(
+                "[plan-task-execute]\nplanning_approval_level = \"always\"\n",
+                encoding="utf-8",
+            )
 
             with self.assertRaises(ValueError):
                 tapl_config.load(config_path)
@@ -1065,6 +1081,8 @@ level_subagent_aggressiveness = "force"
             self.assertIn("stored plan", prompt_guidance)
             self.assertIn("Execute planned tasks one at a time", prompt_guidance)
             self.assertIn("requirements trace", prompt_guidance)
+            self.assertIn("request_user_input", prompt_guidance)
+            self.assertIn("1-3 concise options", prompt_guidance)
             self.assertIn("meaningful implementation", prompt_guidance)
             self.assertIn("Agent contract", prompt_guidance)
             self.assertIn("spawn it to execute that task", prompt_guidance)
@@ -1075,6 +1093,46 @@ level_subagent_aggressiveness = "force"
             self.assertNotIn("quote every argument", prompt_instructions)
             self.assertNotIn("Do not use level names such as `level2`", prompt_guidance)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
+
+            less_planning_config = Path(tmp) / "less-planning.toml"
+            less_planning_config.write_text(
+                "[plan-task-execute]\nplanning-approval-level = \"less\"\n",
+                encoding="utf-8",
+            )
+            less_planning_context = self.run_cli(
+                db_path,
+                "--config",
+                str(less_planning_config),
+                "context",
+                "--event",
+                "UserPromptSubmit",
+                "--json",
+            )
+            less_planning_payload = json.loads(less_planning_context.stdout)
+            self.assertIn(
+                "blocking or high-risk planning choices",
+                "\n".join(less_planning_payload["workflow_guidance"]),
+            )
+
+            more_planning_config = Path(tmp) / "more-planning.toml"
+            more_planning_config.write_text(
+                "[plan-task-execute]\nplanning-approval-level = \"more\"\n",
+                encoding="utf-8",
+            )
+            more_planning_context = self.run_cli(
+                db_path,
+                "--config",
+                str(more_planning_config),
+                "context",
+                "--event",
+                "UserPromptSubmit",
+                "--json",
+            )
+            more_planning_payload = json.loads(more_planning_context.stdout)
+            self.assertIn(
+                "use request_user_input Tool early",
+                "\n".join(more_planning_payload["workflow_guidance"]),
+            )
 
             no_subagent_config = Path(tmp) / "no-subagent.toml"
             no_subagent_config.write_text(
@@ -1287,6 +1345,10 @@ level_subagent_aggressiveness = "force"
                 "task_granularity",
                 (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8"),
             )
+            self.assertIn(
+                "planning_approval_level",
+                (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8"),
+            )
             self.assertTrue((codex_home / "agents" / "senior-worker.toml").exists())
 
     def test_install_user_merges_existing_codex_config_without_overwriting_user_values(self) -> None:
@@ -1449,6 +1511,7 @@ experimental = true
             self.assertTrue((repo / ".codex" / "config.toml").exists())
             self.assertTrue((repo / ".codex" / "agents" / "senior-worker.toml").exists())
             self.assertIn("task_granularity", (repo / ".tapl" / "config.toml").read_text())
+            self.assertIn("planning_approval_level", (repo / ".tapl" / "config.toml").read_text())
             self.assertFalse((repo / ".codex" / "tapl" / "tapl.toml").exists())
             self.assertTrue((repo / ".tapl" / "tapl.db").exists())
 

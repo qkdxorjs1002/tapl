@@ -302,9 +302,9 @@ taplctl reindex --json
 때는 `--limit`을 사용합니다.
 
 Plan/task validation은 같은 config 파일의 `[plan-task-execute]`로 제어합니다.
-`plan_detail`, `task_granularity`, `level_subagent_aggressiveness`,
-`require_execution_approval` 같은 설정은 lifecycle context와 validation issue에
-반영됩니다.
+`plan_detail`, `task_granularity`, `planning_approval_level`,
+`level_subagent_aggressiveness`, `require_execution_approval` 같은 설정은 lifecycle
+context와 validation issue에 반영됩니다.
 
 ## 저장소 구조
 

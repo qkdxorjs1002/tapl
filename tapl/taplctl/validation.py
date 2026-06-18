@@ -438,6 +438,7 @@ def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
         "level_subagent": level_subagent_guidance(settings),
         "subagent_execution": subagent_execution_guidance(settings),
         "plan_detail": plan_detail_guidance(settings.plan_detail),
+        "planning_approval": planning_approval_guidance(settings.planning_approval_level),
         "plan_format": plan_format_guidance(),
         "task_granularity": task_granularity_guidance(settings.task_granularity),
         "task_execution_order": task_execution_order_guidance(),
@@ -472,6 +473,14 @@ def plan_detail_guidance(value: str) -> str:
         "less_detailed": "Add constraints and risks only when they affect execution.",
         "detailed": "Include requirements trace, execution order, risks, and validation.",
         "very_detailed": "Expand edge cases, alternatives considered, and per-spec validation.",
+    }[value]
+
+
+def planning_approval_guidance(value: str) -> str:
+    return {
+        "less": "When available, use request_user_input Tool only for blocking or high-risk planning choices; otherwise state assumptions.",
+        "auto": "When available and planning choices are ambiguous, use request_user_input Tool with 1-3 concise options for material scope/risk/API/UX/data/compat decisions.",
+        "more": "When available, use request_user_input Tool early for unclear planning methods, scope, or tradeoffs; propose concise options before plan set.",
     }[value]
 
 
