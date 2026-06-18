@@ -13,24 +13,36 @@ lifecycle event, archive, 검색 가능한 history를 repo-local SQLite DB에
 context가 사라진 뒤의 재개를 가능하게 합니다.
 
 ```sh
+####################################
+# Homebrew tap 추가
+####################################
+
 brew tap qkdxorjs1002/tap
 brew trust qkdxorjs1002/tap
 
-### taplctl 설치
+####################################
+# taplctl 설치
+####################################
 
-# Option 1. 의미 검색 없이 설치
+### Choice 1. 의미 검색 없이 설치
 brew install taplctl
 
-# Option 2. 의미 검색 포함 설치
+### Choice 2. 의미 검색 포함 설치 (권장)
 brew install taplctl-semantic
 
-### Codex hooks, configs 설치
+####################################
+# Codex hooks, configs 설치
+####################################
 
-# Option 1. 사용자 전역에 설치
+### Choice 1. 사용자 전역에 설치 (권장)
 taplctl install user
 
-# Option 2. 레포지터리에 설치
+### Choice 2. 레포지터리에 설치
 taplctl install repo
+
+####################################
+# taplctl 점검
+####################################
 
 taplctl doctor --json
 ```

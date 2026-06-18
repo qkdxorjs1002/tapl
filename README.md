@@ -13,24 +13,36 @@ SQLite database. Codex still writes the code; `tapl` makes the work visible
 while it is happening and resumable after the chat context is gone.
 
 ```sh
+####################################
+# Add homebrew tap
+####################################
+
 brew tap qkdxorjs1002/tap
 brew trust qkdxorjs1002/tap
 
-### Install taplctl
+####################################
+# Install taplctl
+####################################
 
-# Option 1. Without semantic search
+### Choice 1. Without semantic search
 brew install taplctl
 
-# Option 2. With semantic search
+### Choice 2. With semantic search (Recommend)
 brew install taplctl-semantic
 
-### Install codex hooks and configs
+####################################
+# Install codex hooks and configs
+####################################
 
-# Option 1. User account scope
+### Choice 1. User account scope (Recommend)
 taplctl install user
 
-# Option 2. Repo scope
+### Choice 2. Repo scope
 taplctl install repo
+
+####################################
+# taplctl doctor
+####################################
 
 taplctl doctor --json
 ```
