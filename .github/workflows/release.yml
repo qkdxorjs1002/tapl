@@ -194,6 +194,43 @@ jobs:
             line.end_with?("\n") ? "#{content}\n" : content
           end
 
+          def find_block_end(lines, start_index, indent)
+            ((start_index + 1)...lines.length).find do |index|
+              lines[index].match?(/^#{Regexp.escape(indent)}end\s*$/)
+            end
+          end
+
+          def searchd_service_block(indent)
+            [
+              "#{indent}service do\n",
+              "#{indent}  run [opt_bin/\"taplctl\", \"searchd\", \"run\"]\n",
+              "#{indent}  keep_alive true\n",
+              "#{indent}end\n",
+            ]
+          end
+
+          def upsert_searchd_service_block(lines, install_indent)
+            service_start = lines.index { |line| line.match?(/^#{Regexp.escape(install_indent)}service\s+do\s*$/) }
+            if service_start
+              service_end = find_block_end(lines, service_start, install_indent)
+              raise "Could not find end of service block" unless service_end
+
+              lines[service_start..service_end] = searchd_service_block(install_indent)
+              return
+            end
+
+            install_start = lines.index { |line| line.match?(/^#{Regexp.escape(install_indent)}def install\s*$/) }
+            raise "Could not find install block for service insertion" unless install_start
+
+            install_end = find_block_end(lines, install_start, install_indent)
+            raise "Could not find end of install block for service insertion" unless install_end
+
+            insert_index = install_end + 1
+            block = ["\n", *searchd_service_block(install_indent)]
+            block << "\n" unless lines[insert_index]&.match?(/^\s*$/)
+            lines.insert(insert_index, *block)
+          end
+
           def update_formula(file, version, wheel_url, wheel_sha256)
             semantic = File.basename(file) == "taplctl-semantic.rb"
             text = File.read(file)
@@ -265,6 +302,8 @@ jobs:
                 "#{install_indent}end\n",
               ]
             end
+
+            upsert_searchd_service_block(lines, install_indent)
 
             File.write(file, lines.join)
           end
