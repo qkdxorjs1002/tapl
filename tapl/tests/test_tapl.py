@@ -956,11 +956,15 @@ level_subagent_aggressiveness = "force"
 
             active_prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             active_prompt_payload = json.loads(active_prompt_context.stdout)
+            active_actions = active_prompt_payload["next_actions"]
             self.assertIn("Create or update plan state", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("before task design", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("ask whether to finish", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("finish, combine, defer/archive, or discard", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("Continue only TASK-001", "\n".join(active_prompt_payload["next_actions"]))
+            approval_index = next(index for index, action in enumerate(active_actions) if "approval set" in action)
+            continue_index = next(index for index, action in enumerate(active_actions) if "Continue only TASK-001" in action)
+            self.assertLess(approval_index, continue_index)
 
             text = self.run_cli(db_path, "context", "--event", "SessionStart")
             self.assertEqual(text.returncode, 0, text.stderr)
@@ -1028,6 +1032,8 @@ level_subagent_aggressiveness = "force"
             approval_help = self.run_cli(db_path, "approval", "set", "--help")
             self.assertEqual(approval_help.returncode, 0, approval_help.stderr)
             self.assertIn("Approval writing rules", approval_help.stdout)
+            self.assertIn("before starting or", approval_help.stdout)
+            self.assertIn("continuing task execution", approval_help.stdout)
             self.assertIn("--decision", approval_help.stdout)
             self.assertIn("--prompt", approval_help.stdout)
 

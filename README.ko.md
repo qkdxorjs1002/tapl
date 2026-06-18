@@ -105,6 +105,8 @@ history를 추측하지 않고 저장된 state에서 이어갈 수 있습니다.
 ### 2. 도구가 읽을 수 있는 plan과 task
 
 Plan과 task는 흩어진 Markdown 메모가 아니라 first-class record입니다.
+Plan과 task를 설정한 뒤에는 task 실행을 시작하거나 이어가기 전에 execution
+approval을 설정합니다.
 
 ```sh
 taplctl plan set \
@@ -123,6 +125,11 @@ taplctl task set \
   --action "Edit the relevant files" \
   --required-subagent "@senior-worker" \
   --verification "Run focused checks" \
+  --json
+
+taplctl approval set \
+  --decision approved \
+  --prompt "Execute SPEC-EXAMPLE tasks" \
   --json
 ```
 

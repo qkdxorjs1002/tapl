@@ -105,8 +105,9 @@ def finding_add_epilog() -> str:
 def approval_set_epilog() -> str:
     return (
         "Approval writing rules:\n"
-        "  Set explicit execution approval before durable edits when plan-task-execute\n"
-        "  requires it. The prompt should describe the approved scope, not just `yes`.\n"
+        "  Set explicit execution approval after task design and before starting or\n"
+        "  continuing task execution. The prompt should describe the approved scope,\n"
+        "  not just `yes`.\n"
         "\n"
         "Example:\n"
         "  taplctl approval set --decision approved \\\n"

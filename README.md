@@ -106,6 +106,8 @@ resume from the stored state instead of guessing from chat history.
 ### 2. Plans and tasks that tools can read
 
 Plans and tasks are first-class records, not loose Markdown notes.
+After setting the plan and tasks, set execution approval before starting or
+continuing task execution.
 
 ```sh
 taplctl plan set \
@@ -124,6 +126,11 @@ taplctl task set \
   --action "Edit the relevant files" \
   --required-subagent "@senior-worker" \
   --verification "Run focused checks" \
+  --json
+
+taplctl approval set \
+  --decision approved \
+  --prompt "Execute SPEC-EXAMPLE tasks" \
   --json
 ```
 

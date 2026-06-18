@@ -236,6 +236,10 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
             "Using the stored plan, design executable tasks and create task state with `taplctl task set` before durable edits."
         )
     if state.get("incomplete_tasks", 0):
+        approval_action = approval_next_action(plan_task)
+        if approval_action:
+            actions.append(approval_action)
+            covered_issue_codes.update({"execution_approval_missing", "execution_approval_rejected"})
         execution_action = task_execution_next_action(state)
         if execution_action:
             actions.append(execution_action)
@@ -246,6 +250,22 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
             continue
         actions.append(f"{issue['message']} {issue['remediation']}")
     return actions
+
+
+def approval_next_action(plan_task: dict[str, Any]) -> str:
+    issues = plan_task.get("issues") if isinstance(plan_task.get("issues"), list) else []
+    codes = {str(issue.get("code") or "") for issue in issues if isinstance(issue, dict)}
+    if "execution_approval_rejected" in codes:
+        return (
+            "Execution approval is rejected; resolve scope with the user, then set approval with "
+            "`taplctl approval set --decision approved --prompt '<approved scope>' --json` before continuing tasks."
+        )
+    if "execution_approval_missing" in codes:
+        return (
+            "Before starting or continuing task execution, set execution approval with "
+            "`taplctl approval set --decision approved --prompt '<approved scope>' --json`."
+        )
+    return ""
 
 
 def task_execution_next_action(state: dict[str, Any]) -> str:

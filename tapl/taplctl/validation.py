@@ -322,7 +322,7 @@ def validate_execution_approval(
                 "error",
                 "execution_approval_rejected",
                 "Execution approval was explicitly rejected for the active run.",
-                "Resolve the rejected approval or set a new approval before durable edits.",
+                "Resolve scope with the user, then set approval before starting or continuing task execution.",
             )
         ]
 
@@ -332,7 +332,7 @@ def validate_execution_approval(
             severity,
             "execution_approval_missing",
             "Executable tasks exist but execution approval is not recorded.",
-            "Ask the user whether to execute the prepared tasks, then set approval with `taplctl approval set --decision approved --prompt '<approved scope>' --json`.",
+            "Before starting or continuing tasks, set approval with `taplctl approval set --decision approved --prompt '<approved scope>' --json`.",
         )
     ]
 
@@ -453,7 +453,7 @@ def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
 
 def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     base = (
-        "Before durable edits, ask the user whether to execute the prepared tasks and set it with "
+        "After task design and before starting or continuing task execution, set approval with "
         "`taplctl approval set --decision approved --prompt '<approved scope>' --json`."
     )
     if settings.require_execution_approval:
