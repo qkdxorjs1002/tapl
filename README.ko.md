@@ -131,6 +131,12 @@ taplctl approval set \
   --decision approved \
   --prompt "Execute SPEC-EXAMPLE tasks" \
   --json
+
+taplctl task set \
+  --id TASK-EXAMPLE \
+  --status Completed \
+  --result "Focused checks passed" \
+  --json
 ```
 
 설정된 workflow guidance는 Codex lifecycle context로 주입됩니다. 정확한 필드

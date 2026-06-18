@@ -347,6 +347,22 @@ def upsert_item(
     return item
 
 
+def get_active_task(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
+    run = active_run(conn)
+    if not run:
+        return None
+    return conn.execute(
+        """
+        SELECT i.*, t.spec_id, t.goal, t.action, t.required_subagent, t.verification, t.result, t.blocker, t.next_action
+        FROM items i
+        LEFT JOIN tasks t ON t.item_id = i.id
+        WHERE i.run_id = ? AND i.kind = 'task' AND i.stable_id = ?
+        LIMIT 1
+        """,
+        (run["id"], task_id),
+    ).fetchone()
+
+
 def upsert_task(
     conn: sqlite3.Connection,
     *,

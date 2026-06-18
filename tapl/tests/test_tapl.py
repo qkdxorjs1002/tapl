@@ -142,6 +142,77 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(item["stable_id"], "TASK-001")
             self.assertEqual(item["goal"], "Create DB-backed workflow state")
 
+    def test_task_set_allows_partial_update_for_existing_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            created = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Implement partial updates",
+                "--status",
+                "In Progress",
+                "--spec-id",
+                "SPEC-001",
+                "--goal",
+                "Preserve unchanged fields",
+                "--action",
+                "Merge supplied task fields with stored values",
+                "--required-subagent",
+                "@senior-worker",
+                "--verification",
+                "Run focused tests",
+                "--json",
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+
+            updated = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--status",
+                "Completed",
+                "--result",
+                "Focused tests passed",
+                "--json",
+            )
+            self.assertEqual(updated.returncode, 0, updated.stderr)
+
+            status = self.run_cli(db_path, "status", "--json", "--full")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            task = json.loads(status.stdout)["tasks"][0]
+            self.assertEqual(task["title"], "Implement partial updates")
+            self.assertEqual(task["status"], "Completed")
+            self.assertEqual(task["spec_id"], "SPEC-001")
+            self.assertEqual(task["goal"], "Preserve unchanged fields")
+            self.assertEqual(task["action"], "Merge supplied task fields with stored values")
+            self.assertEqual(task["required_subagent"], "@senior-worker")
+            self.assertEqual(task["verification"], "Run focused tests")
+            self.assertEqual(task["result"], "Focused tests passed")
+
+    def test_task_set_requires_title_and_status_for_new_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            missing = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--json",
+            )
+            self.assertEqual(missing.returncode, 1)
+            payload = json.loads(missing.stdout)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["plan_task_execute"]["errors"][0]["code"], "task_create_missing_fields")
+            self.assertIn("--title", payload["error"])
+            self.assertIn("--status", payload["error"])
+
     def test_load_model_suppresses_loading_weights_progress(self) -> None:
         from taplctl import embeddings
 
@@ -1022,6 +1093,8 @@ level_subagent_aggressiveness = "force"
             task_help = self.run_cli(db_path, "task", "set", "--help")
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
             self.assertIn("Task writing rules", task_help.stdout)
+            self.assertIn("Existing task updates are partial", task_help.stdout)
+            self.assertIn("New task creation requires --title and --status", task_help.stdout)
             self.assertIn("--status 'In Progress'", task_help.stdout)
             self.assertIn("Execute planned tasks one at a time", task_help.stdout)
             self.assertIn("@senior-worker", task_help.stdout)

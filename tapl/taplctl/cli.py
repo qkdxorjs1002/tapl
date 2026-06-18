@@ -66,6 +66,8 @@ def task_set_epilog() -> str:
         f"  {validation.markdown_record_guidance()}\n"
         f"  {validation.task_plan_dependency_guidance()}\n"
         f"  {validation.task_execution_order_guidance()}\n"
+        "  Existing task updates are partial: pass --id plus only changed fields;\n"
+        "  omitted fields keep their stored values. New task creation requires --title and --status.\n"
         "  Executable tasks should include source spec_id, goal, action, required_subagent,\n"
         "  verification, and result when completed; blocked tasks should include blocker and next_action.\n"
         "  Split tasks by meaningful implementation or verification step.\n"
@@ -85,7 +87,8 @@ def task_set_epilog() -> str:
         "  taplctl task set --id TASK-001 --title 'Implement change' \\\n"
         "    --status 'In Progress' --spec-id SPEC-001 --goal 'Make requested behavior work' \\\n"
         "    --action 'Edit the relevant files' --required-subagent '@senior-worker' \\\n"
-        "    --verification 'Run focused tests' --json"
+        "    --verification 'Run focused tests' --json\n"
+        "  taplctl task set --id TASK-001 --status Completed --result 'Focused tests passed' --json"
     )
 
 
@@ -140,16 +143,21 @@ def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
 
 def add_task_write_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", required=True, help="Stable task id, commonly TASK-*.")
-    parser.add_argument("--title", required=True, help="Short human-readable task title.")
-    parser.add_argument("--status", required=True, choices=db.TASK_STATUSES, help="Task lifecycle status.")
-    parser.add_argument("--spec-id", default="", help="Source plan/spec stable id.")
-    parser.add_argument("--goal", default="", help="Outcome this task must achieve.")
-    parser.add_argument("--action", default="", help="Concrete work to perform.")
-    parser.add_argument("--required-subagent", default="", help="One of the configured @*-worker values.")
-    parser.add_argument("--verification", default="", help="Command, check, or review proving completion.")
-    parser.add_argument("--result", default="", help="Completion note for Completed tasks.")
-    parser.add_argument("--blocker", default="", help="Reason a Blocked task cannot proceed.")
-    parser.add_argument("--next-action", default="", help="Specific action that would unblock a Blocked task.")
+    parser.add_argument("--title", default=None, help="Short human-readable task title. Required when creating a task.")
+    parser.add_argument(
+        "--status",
+        default=None,
+        choices=db.TASK_STATUSES,
+        help="Task lifecycle status. Required when creating a task; omitted updates keep the stored status.",
+    )
+    parser.add_argument("--spec-id", default=None, help="Source plan/spec stable id.")
+    parser.add_argument("--goal", default=None, help="Outcome this task must achieve.")
+    parser.add_argument("--action", default=None, help="Concrete work to perform.")
+    parser.add_argument("--required-subagent", default=None, help="One of the configured @*-worker values.")
+    parser.add_argument("--verification", default=None, help="Command, check, or review proving completion.")
+    parser.add_argument("--result", default=None, help="Completion note for Completed tasks.")
+    parser.add_argument("--blocker", default=None, help="Reason a Blocked task cannot proceed.")
+    parser.add_argument("--next-action", default=None, help="Specific action that would unblock a Blocked task.")
     add_json_arg(parser)
 
 
@@ -693,10 +701,58 @@ def cmd_plan_set(args: argparse.Namespace) -> int:
 def cmd_task_set(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     settings = load_config(args)
+    existing = db.get_active_task(conn, args.id)
+    if existing is None:
+        missing = [flag for flag, value in (("--title", args.title), ("--status", args.status)) if value is None]
+        if missing:
+            missing_text = ", ".join(missing)
+            issue = validation.issue(
+                "error",
+                "task_create_missing_fields",
+                f"{args.id} does not exist and is missing required field(s): {missing_text}.",
+                "Create a new task with --title and --status, or update an existing task id with changed fields only.",
+                stable_id=args.id,
+            )
+            emit(
+                {
+                    "ok": False,
+                    "error": issue["message"],
+                    "plan_task_execute": {
+                        "ok": False,
+                        "errors": [issue],
+                        "warnings": [],
+                        "issues": [issue],
+                        "guidance": validation.guidance(settings.plan_task_execute),
+                    },
+                },
+                args.json,
+            )
+            return 1
+
+    def merged_field(name: str) -> str:
+        value = getattr(args, name)
+        if value is not None:
+            return value
+        if existing is None:
+            return ""
+        stored = existing[name]
+        return "" if stored is None else str(stored)
+
+    title = merged_field("title")
+    status = merged_field("status")
+    spec_id = merged_field("spec_id")
+    goal = merged_field("goal")
+    action = merged_field("action")
+    required_subagent = merged_field("required_subagent")
+    verification = merged_field("verification")
+    result = merged_field("result")
+    blocker = merged_field("blocker")
+    next_action = merged_field("next_action")
+
     input_check = validation.validate_task_input(
         task_id=args.id,
-        status=args.status,
-        required_subagent=args.required_subagent,
+        status=status,
+        required_subagent=required_subagent,
         settings=settings.plan_task_execute,
     )
     if not input_check["ok"]:
@@ -706,16 +762,16 @@ def cmd_task_set(args: argparse.Namespace) -> int:
     item = db.upsert_task(
         conn,
         task_id=args.id,
-        title=args.title,
-        status=args.status,
-        spec_id=args.spec_id,
-        goal=args.goal,
-        action=args.action,
-        required_subagent=args.required_subagent,
-        verification=args.verification,
-        result=args.result,
-        blocker=args.blocker,
-        next_action=args.next_action,
+        title=title,
+        status=status,
+        spec_id=spec_id,
+        goal=goal,
+        action=action,
+        required_subagent=required_subagent,
+        verification=verification,
+        result=result,
+        blocker=blocker,
+        next_action=next_action,
     )
     emit(
         {

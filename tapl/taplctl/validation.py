@@ -447,7 +447,8 @@ def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     subagent = "required_subagent, " if settings.use_level_subagent else ""
     return (
         f"Executable tasks should include source spec_id, goal, action, {subagent}verification, "
-        "and result when completed; blocked tasks should include blocker and next_action."
+        "and result when completed; blocked tasks should include blocker and next_action. "
+        "When updating an existing task, pass only changed fields; omitted fields keep stored values."
     )
 
 
