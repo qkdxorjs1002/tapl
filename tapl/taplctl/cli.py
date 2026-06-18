@@ -72,6 +72,8 @@ def task_set_epilog() -> str:
         "  omitted fields keep their stored values. New task creation requires --title and --status.\n"
         "  Executable tasks should include source spec_id, goal, action, required_subagent,\n"
         "  verification, and result when completed; blocked tasks should include blocker and next_action.\n"
+        "  When level subagent routing is enabled, spawn the task's required_subagent\n"
+        "  and assign only that task; the main agent keeps TAPL status updates.\n"
         "  Split tasks by meaningful implementation or verification step.\n"
         f"  Status values: {statuses}. Quote multi-word statuses, e.g. --status 'In Progress'.\n"
         f"  Required subagents: {subagents}. Do not use level names such as `level2`.\n"

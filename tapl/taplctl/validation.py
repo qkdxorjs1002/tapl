@@ -436,6 +436,7 @@ def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
         "task_dependency": task_plan_dependency_guidance(),
         "agent_writer_contract": agent_writer_contract_guidance(),
         "level_subagent": level_subagent_guidance(settings),
+        "subagent_execution": subagent_execution_guidance(settings),
         "plan_detail": plan_detail_guidance(settings.plan_detail),
         "plan_format": plan_format_guidance(),
         "task_granularity": task_granularity_guidance(settings.task_granularity),
@@ -454,6 +455,15 @@ def level_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     if settings.level_subagent_aggressiveness == "force":
         return f"Every executable task must use one of: {allowed}."
     return f"Choose one of {allowed} based on task risk; do not use level labels such as `level2`."
+
+
+def subagent_execution_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    if not settings.use_level_subagent:
+        return "Subagent execution routing is disabled."
+    return (
+        "When executing a task with required_subagent, spawn that subagent and assign only that task; "
+        "the main agent keeps TAPL plan/task records and final status updates."
+    )
 
 
 def plan_detail_guidance(value: str) -> str:
@@ -511,7 +521,7 @@ def task_execution_order_guidance() -> str:
 def agent_writer_contract_guidance() -> str:
     return (
         "Agent contract: subagents may propose task drafts, but the main agent writes "
-        "plan/task records in order."
+        "plan/task records and final task status in order."
     )
 
 

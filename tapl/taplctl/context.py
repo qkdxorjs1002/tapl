@@ -69,7 +69,7 @@ def build_context(
             state=state,
             prompt=prompt,
         ),
-        "next_actions": next_actions(state, plan_task, event, prompt),
+        "next_actions": next_actions(state, plan_task, event, prompt, settings.plan_task_execute),
         "prompt_summary": prompt,
     }
 
@@ -188,7 +188,7 @@ def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> l
         "`taplctl task set`.",
         plan_context_guidance(settings),
         task_context_guidance(settings),
-        "Agent contract: main agent writes plan/task records; subagents may draft only.",
+        "Agent contract: main agent writes plan/task records and final status; subagents may draft/execute only.",
     ]
     if settings.use_level_subagent:
         guidance.append(f"Subagents: {subagent_context_guidance(settings)}")
@@ -225,13 +225,19 @@ def task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
 def subagent_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     allowed = ", ".join(validation.LEVEL_SUBAGENTS)
     if settings.level_subagent_aggressiveness == "minimal":
-        return f"Set required_subagent only for clear risk/routing. Allowed: {allowed}."
+        return f"Set required_subagent only for clear risk/routing. Spawn it for task execution. Allowed: {allowed}."
     if settings.level_subagent_aggressiveness == "force":
-        return f"Every executable task needs required_subagent. Allowed: {allowed}."
-    return f"Choose required_subagent by task risk. Allowed: {allowed}."
+        return f"Every executable task needs required_subagent; spawn it to execute that task. Allowed: {allowed}."
+    return f"Choose required_subagent by task risk; spawn it to execute that task. Allowed: {allowed}."
 
 
-def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, prompt: str = "") -> list[str]:
+def next_actions(
+    state: dict[str, Any],
+    plan_task: dict[str, Any],
+    event: str,
+    prompt: str = "",
+    settings: tapl_config.PlanTaskExecuteConfig | None = None,
+) -> list[str]:
     actions: list[str] = []
     covered_issue_codes: set[str] = set()
     if event == "SessionStart":
@@ -266,7 +272,10 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
         if approval_action:
             actions.append(approval_action)
             covered_issue_codes.update({"execution_approval_missing", "execution_approval_rejected"})
-        execution_action = task_execution_next_action(state)
+        execution_action = task_execution_next_action(
+            state,
+            settings or tapl_config.PlanTaskExecuteConfig(),
+        )
         if execution_action:
             actions.append(execution_action)
         actions.append("Complete, block, or skip remaining tasks before Stop auto-archives.")
@@ -294,7 +303,10 @@ def approval_next_action(plan_task: dict[str, Any]) -> str:
     return ""
 
 
-def task_execution_next_action(state: dict[str, Any]) -> str:
+def task_execution_next_action(
+    state: dict[str, Any],
+    settings: tapl_config.PlanTaskExecuteConfig,
+) -> str:
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
     if not tasks:
         return ""
@@ -304,17 +316,34 @@ def task_execution_next_action(state: dict[str, Any]) -> str:
         labels = ", ".join(task_label(task) for task in in_progress)
         return f"Only one task may be In Progress; finish/block/skip all but earliest: {labels}."
     if in_progress:
-        label = task_label(in_progress[0])
-        return f"Continue only {label}; set Completed, Blocked, or Skipped before another task."
+        task = in_progress[0]
+        label = task_label(task)
+        assignment = subagent_assignment_guidance(task, settings)
+        route = f" {assignment};" if assignment else ""
+        return f"Continue only {label};{route} set Completed, Blocked, or Skipped before another task."
 
     for task in tasks:
         status = str(task.get("status") or "")
         label = task_label(task)
         if status == "Pending":
-            return f"Start next task {label}: set In Progress immediately before execution."
+            assignment = subagent_assignment_guidance(task, settings)
+            route = f"; {assignment}" if assignment else ""
+            return f"Start next task {label}: set In Progress immediately before execution{route}."
         if status == "Blocked":
             return f"Resolve, replan, or skip blocked task {label} before later tasks."
     return ""
+
+
+def subagent_assignment_guidance(
+    task: dict[str, Any],
+    settings: tapl_config.PlanTaskExecuteConfig,
+) -> str:
+    if not settings.use_level_subagent:
+        return ""
+    required = str(task.get("required_subagent") or "").strip()
+    if not required:
+        return ""
+    return f"spawn {required} and assign only this task"
 
 
 def task_label(task: dict[str, Any]) -> str:

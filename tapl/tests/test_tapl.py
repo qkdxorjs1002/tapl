@@ -1067,6 +1067,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("requirements trace", prompt_guidance)
             self.assertIn("meaningful implementation", prompt_guidance)
             self.assertIn("Agent contract", prompt_guidance)
+            self.assertIn("spawn it to execute that task", prompt_guidance)
             self.assertIn("@senior-worker", prompt_guidance)
             self.assertIn("set execution approval", prompt_guidance)
             self.assertIn("taplctl finding add", prompt_guidance)
@@ -1074,6 +1075,25 @@ level_subagent_aggressiveness = "force"
             self.assertNotIn("quote every argument", prompt_instructions)
             self.assertNotIn("Do not use level names such as `level2`", prompt_guidance)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
+
+            no_subagent_config = Path(tmp) / "no-subagent.toml"
+            no_subagent_config.write_text(
+                "[plan-task-execute]\nuse-level-subagent = false\n",
+                encoding="utf-8",
+            )
+            no_subagent_context = self.run_cli(
+                db_path,
+                "--config",
+                str(no_subagent_config),
+                "context",
+                "--event",
+                "UserPromptSubmit",
+                "--json",
+            )
+            no_subagent_payload = json.loads(no_subagent_context.stdout)
+            no_subagent_guidance = "\n".join(no_subagent_payload["workflow_guidance"])
+            self.assertNotIn("spawn it to execute that task", no_subagent_guidance)
+            self.assertNotIn("required_subagent", no_subagent_guidance)
 
             self.run_cli(
                 db_path,
@@ -1101,9 +1121,25 @@ level_subagent_aggressiveness = "force"
             self.assertIn("ask whether to finish", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("finish, combine, defer/archive, or discard", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("Continue only TASK-001", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("spawn @senior-worker and assign only this task", "\n".join(active_prompt_payload["next_actions"]))
             approval_index = next(index for index, action in enumerate(active_actions) if "approval set" in action)
             continue_index = next(index for index, action in enumerate(active_actions) if "Continue only TASK-001" in action)
             self.assertLess(approval_index, continue_index)
+
+            active_no_subagent_context = self.run_cli(
+                db_path,
+                "--config",
+                str(no_subagent_config),
+                "context",
+                "--event",
+                "UserPromptSubmit",
+                "--json",
+            )
+            active_no_subagent_payload = json.loads(active_no_subagent_context.stdout)
+            self.assertNotIn(
+                "spawn @senior-worker",
+                "\n".join(active_no_subagent_payload["next_actions"]),
+            )
 
             text = self.run_cli(db_path, "context", "--event", "SessionStart")
             self.assertEqual(text.returncode, 0, text.stderr)
@@ -1126,6 +1162,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Flow: search relevant prior work", prompt_text.stdout)
             self.assertIn("plan-based task design", prompt_text.stdout)
             self.assertIn("Execute planned tasks one at a time", prompt_text.stdout)
+            self.assertIn("spawn it to execute that task", prompt_text.stdout)
             self.assertIn("taplctl finding add", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
             self.assertIn("Markdown form", prompt_text.stdout)
@@ -1169,6 +1206,8 @@ level_subagent_aggressiveness = "force"
             self.assertIn("New task creation requires --title and --status", task_help.stdout)
             self.assertIn("--status 'In Progress'", task_help.stdout)
             self.assertIn("Execute planned tasks one at a time", task_help.stdout)
+            self.assertIn("When level subagent routing is enabled", task_help.stdout)
+            self.assertIn("spawn the task's required_subagent", task_help.stdout)
             self.assertIn("@senior-worker", task_help.stdout)
             self.assertIn("source plan/spec exists", task_help.stdout)
             self.assertIn("Markdown form", task_help.stdout)
