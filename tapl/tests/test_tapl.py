@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from taplctl import __version__, cli as tapl_cli, config as tapl_config
+from taplctl import __version__, cli as tapl_cli, config as tapl_config, install as tapl_install
 
 
 class TaplCliTests(unittest.TestCase):
@@ -43,14 +43,18 @@ class TaplCliTests(unittest.TestCase):
         *args: str,
         input_text: str | None = None,
         cwd: Path | None = None,
+        env_overrides: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        env = self.tapl_env()
+        if env_overrides:
+            env.update(env_overrides)
         return subprocess.run(
             [sys.executable, "-m", "taplctl", *args],
             input=input_text,
             text=True,
             capture_output=True,
             check=False,
-            env=self.tapl_env(),
+            env=env,
             cwd=str(cwd) if cwd else None,
         )
 
@@ -1349,6 +1353,10 @@ level_subagent_aggressiveness = "force"
                 "planning_approval_level",
                 (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8"),
             )
+            self.assertEqual(
+                (base / "home" / ".tapl" / "version").read_text(encoding="utf-8").strip(),
+                __version__,
+            )
             self.assertTrue((codex_home / "agents" / "senior-worker.toml").exists())
 
     def test_install_user_merges_existing_codex_config_without_overwriting_user_values(self) -> None:
@@ -1512,8 +1520,56 @@ experimental = true
             self.assertTrue((repo / ".codex" / "agents" / "senior-worker.toml").exists())
             self.assertIn("task_granularity", (repo / ".tapl" / "config.toml").read_text())
             self.assertIn("planning_approval_level", (repo / ".tapl" / "config.toml").read_text())
+            self.assertEqual(
+                (repo / ".tapl" / "version").read_text(encoding="utf-8").strip(),
+                __version__,
+            )
             self.assertFalse((repo / ".codex" / "tapl" / "tapl.toml").exists())
             self.assertTrue((repo / ".tapl" / "tapl.db").exists())
+
+    def test_auto_install_refreshes_stale_user_and_repo_scopes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            home = base / "home"
+            repo = base / "repo"
+            repo.mkdir()
+            (home / ".tapl").mkdir(parents=True)
+            (repo / ".tapl").mkdir(parents=True)
+            (home / ".tapl" / "version").write_text("0.0.0\n", encoding="utf-8")
+            (repo / ".tapl" / "version").write_text("0.0.0\n", encoding="utf-8")
+
+            results = tapl_install.auto_install_if_needed(
+                start=repo,
+                home=home,
+                taplctl_command="taplctl",
+            )
+
+            self.assertEqual([result["install"] for result in results], ["user", "repo"])
+            self.assertEqual(
+                (home / ".tapl" / "version").read_text(encoding="utf-8").strip(),
+                __version__,
+            )
+            self.assertEqual(
+                (repo / ".tapl" / "version").read_text(encoding="utf-8").strip(),
+                __version__,
+            )
+            self.assertTrue((home / ".codex" / "hooks.json").exists())
+            self.assertTrue((repo / ".codex" / "hooks.json").exists())
+
+    def test_auto_install_does_not_treat_repo_db_as_install_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            home = base / "home"
+            repo = base / "repo"
+            repo.mkdir()
+            (repo / ".tapl").mkdir()
+            (repo / ".tapl" / "tapl.db").write_bytes(b"not a marker")
+
+            results = tapl_install.auto_install_if_needed(start=repo, home=home)
+
+            self.assertEqual(results, [])
+            self.assertFalse((repo / ".codex").exists())
+            self.assertFalse((repo / ".tapl" / "version").exists())
 
     def test_hook_enforce_blocks_without_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2033,8 +2089,12 @@ task_granularity = "very_granular"
             base = Path(tmp)
             workspace = base / "workspace"
             outside = base / "outside"
+            home = base / "home"
             workspace.mkdir()
             outside.mkdir()
+            home.mkdir()
+            (workspace / ".tapl").mkdir()
+            (workspace / ".tapl" / "version").write_text("0.0.0\n", encoding="utf-8")
 
             event = self.run_taplctl(
                 "hook-event",
@@ -2045,6 +2105,7 @@ task_granularity = "very_granular"
                 "--json",
                 input_text=json.dumps({"cwd": str(workspace), "prompt": "Global install workspace"}),
                 cwd=outside,
+                env_overrides={"HOME": str(home)},
             )
             self.assertEqual(event.returncode, 0, event.stderr)
             payload = json.loads(event.stdout)
@@ -2055,7 +2116,13 @@ task_granularity = "very_granular"
                 "New request",
             )
             self.assertTrue((workspace / ".tapl" / "tapl.db").exists())
+            self.assertEqual(
+                (workspace / ".tapl" / "version").read_text(encoding="utf-8").strip(),
+                __version__,
+            )
+            self.assertTrue((workspace / ".codex" / "hooks.json").exists())
             self.assertFalse((outside / ".tapl").exists())
+            self.assertFalse((outside / ".codex").exists())
 
     def test_archive_show_includes_items_and_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -179,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
     try:
+        auto_install_before_handler(args)
         return int(args.handler(args) or 0)
     except Exception as exc:
         if getattr(args, "json", False):
@@ -186,6 +187,21 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"taplctl: {exc}", file=sys.stderr)
         return 1
+
+
+def auto_install_before_handler(args: argparse.Namespace) -> None:
+    if should_skip_auto_install(args):
+        return
+    tapl_install.auto_install_if_needed()
+
+
+def should_skip_auto_install(args: argparse.Namespace) -> bool:
+    command = getattr(args, "command", None)
+    if args.db is not None or args.config is not None:
+        return True
+    if command in {None, "install", "hook-event"}:
+        return True
+    return command == "searchd" and getattr(args, "searchd_command", None) == "run"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -948,6 +964,8 @@ def cmd_hook_event(args: argparse.Namespace) -> int:
             payload = {"raw": raw}
 
     start = payload_cwd(payload)
+    if args.db is None and args.config is None:
+        tapl_install.auto_install_if_needed(start=start)
     settings = load_config(args, start=start)
     outcome = hooks.handle_event(
         open_conn(args, start=start),

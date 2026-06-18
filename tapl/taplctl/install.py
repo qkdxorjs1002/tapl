@@ -13,10 +13,11 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from . import config, db
+from . import __version__, config, db
 
 
 DEFAULT_HOOK_MODE = "observe"
+VERSION_RELATIVE = Path(".tapl") / "version"
 HOOK_EVENTS: tuple[dict[str, str | None], ...] = (
     {"event": "UserPromptSubmit", "matcher": None},
     {"event": "PreToolUse", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit"},
@@ -44,10 +45,12 @@ def install_user(
     tapl_config_path = config.user_config_path(target.parent)
     command = resolved_taplctl_command(taplctl_command)
     hooks_path = target / "hooks.json"
+    version_path = tapl_config_path.parent / "version"
     files = [
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
         *install_static_codex_templates(target, force=force, dry_run=dry_run),
         write_text_if_needed(tapl_config_path, default_config_text(), force=force, dry_run=dry_run),
+        write_version_marker(version_path, dry_run=dry_run),
     ]
     return {
         "ok": True,
@@ -75,11 +78,13 @@ def install_repo(
     hooks_path = root / ".codex" / "hooks.json"
     config_path = root / config.CONFIG_RELATIVE
     db_path = root / db.DEFAULT_DB_RELATIVE
+    version_path = root / VERSION_RELATIVE
 
     files = [
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
         *install_static_codex_templates(root / ".codex", force=force, dry_run=dry_run),
         write_text_if_needed(config_path, default_config_text(), force=force, dry_run=dry_run),
+        write_version_marker(version_path, dry_run=dry_run),
         initialize_db(db_path, dry_run=dry_run),
     ]
     return {
@@ -92,6 +97,96 @@ def install_repo(
         "dry_run": dry_run,
         "files": files,
     }
+
+
+def auto_install_if_needed(
+    *,
+    start: Path | None = None,
+    taplctl_command: str | None = None,
+    mode: str = DEFAULT_HOOK_MODE,
+    home: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Refresh existing tapl installs whose version marker is stale."""
+    results: list[dict[str, Any]] = []
+    home_path = (home or Path.home()).expanduser()
+
+    if user_scope_needs_install(home_path):
+        results.append(
+            install_user(
+                codex_home=home_path / ".codex",
+                taplctl_command=taplctl_command,
+                mode=mode,
+            )
+        )
+
+    root = db.find_repo_root(start)
+    if repo_scope_needs_install(root):
+        results.append(
+            install_repo(
+                repo=root,
+                taplctl_command=taplctl_command,
+                mode=mode,
+            )
+        )
+
+    return results
+
+
+def user_scope_needs_install(home: Path) -> bool:
+    version_path = home / VERSION_RELATIVE
+    return scope_has_user_install(home) and installed_version(version_path) != __version__
+
+
+def repo_scope_needs_install(root: Path) -> bool:
+    version_path = root / VERSION_RELATIVE
+    return scope_has_repo_install(root) and installed_version(version_path) != __version__
+
+
+def scope_has_user_install(home: Path) -> bool:
+    return (
+        (home / VERSION_RELATIVE).exists()
+        or config.user_config_path(home).exists()
+        or hooks_file_has_tapl_command(home / ".codex" / "hooks.json")
+    )
+
+
+def scope_has_repo_install(root: Path) -> bool:
+    return (
+        (root / VERSION_RELATIVE).exists()
+        or (root / config.CONFIG_RELATIVE).exists()
+        or hooks_file_has_tapl_command(root / ".codex" / "hooks.json")
+    )
+
+
+def installed_version(path: Path) -> str | None:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    return value or None
+
+
+def write_version_marker(path: Path, *, dry_run: bool) -> dict[str, str]:
+    return write_text_if_needed(path, f"{__version__}\n", force=True, dry_run=dry_run)
+
+
+def hooks_file_has_tapl_command(path: Path) -> bool:
+    try:
+        hooks = read_json(path)
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        return False
+    return hooks_config_has_tapl_command(hooks)
+
+
+def hooks_config_has_tapl_command(value: Any) -> bool:
+    if isinstance(value, dict):
+        command = value.get("command")
+        if isinstance(command, str) and is_tapl_hook_command(command):
+            return True
+        return any(hooks_config_has_tapl_command(child) for child in value.values())
+    if isinstance(value, list):
+        return any(hooks_config_has_tapl_command(item) for item in value)
+    return False
 
 
 def install_hooks(path: Path, *, taplctl_command: str, mode: str, dry_run: bool) -> dict[str, str]:
