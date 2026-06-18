@@ -10,7 +10,7 @@ from . import config as tapl_config, db, validation
 
 def taplctl_execution_guidance() -> str:
     return (
-        "Use the literal global `taplctl` command; keep workflow DB/config repo-local."
+        "Use literal global `taplctl`; keep workflow DB/config repo-local."
     )
 
 
@@ -24,22 +24,20 @@ def taplctl_argument_guidance() -> str:
 
 def taplctl_command_guidance() -> str:
     return (
-        "Inspect state with `taplctl status --json`; search with one quoted query: "
-        "`taplctl search '<query>' --json`."
+        "Inspect/search: `taplctl status --json`; `taplctl search '<query>' --json`."
     )
 
 
 def taplctl_help_guidance() -> str:
     return (
-        "For command syntax, run `taplctl <command> <subcommand> --help`."
+        "Syntax: `taplctl <command> <subcommand> --help`."
     )
 
 
 def external_findings_guidance() -> str:
     return (
-        "Findings: if external search/docs changed requirements, plan, tasks, or verification, "
-        "add only decision-relevant facts with `taplctl finding add`. "
-        f"{validation.markdown_record_guidance('finding details and impact')}"
+        "Findings: if external search/docs changes requirements/plan/tasks/verification, "
+        "add decision-relevant facts with `taplctl finding add`; Markdown form for details/impact."
     )
 
 
@@ -84,7 +82,10 @@ def format_context(packet: dict[str, Any]) -> str:
     ]
     if run["present"]:
         summary = f"active run: {run['request_summary']}" if run["request_summary"] else "active run present"
-        lines.append(f"- State: {summary}; {counts['plans']} plan(s), {counts['tasks']} task(s), {counts['incomplete_tasks']} incomplete.")
+        lines.append(
+            f"- State: {summary}; plans={counts['plans']}, tasks={counts['tasks']}, "
+            f"incomplete={counts['incomplete_tasks']}."
+        )
     else:
         lines.append("- State: no active run.")
 
@@ -111,7 +112,7 @@ def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
 
 def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> list[str]:
     base = [
-        "Use repo-local tapl DB state; write tapl records in the user's language.",
+        "Use repo-local tapl DB; write records in the user's language.",
         taplctl_command_guidance(),
     ]
 
@@ -181,25 +182,50 @@ def should_suggest_prior_search(state: dict[str, Any], prompt: str) -> bool:
 
 def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
     guidance = [
-        f"Records: {validation.markdown_record_guidance()} {validation.stable_id_guidance()}",
-        f"Order: {validation.workflow_order_guidance()}",
-        f"Plan: {validation.plan_detail_guidance(settings.plan_detail)} Ask the user to choose when scope, risk, API, UX, data, or compatibility decisions matter.",
-        f"Tasks: {validation.task_plan_dependency_guidance()} {validation.task_granularity_guidance(settings.task_granularity)} {validation.task_execution_order_guidance()} {validation.task_format_guidance(settings)}",
-        validation.agent_writer_contract_guidance(),
+        "Records: Markdown form for multi-line content; Use numeric stable ids only: "
+        "PLAN-001/SPEC-001, TASK-001; no word suffixes.",
+        "Order: Phase order: plan with user -> `taplctl plan set`; derive tasks from stored plan -> "
+        "`taplctl task set`.",
+        plan_context_guidance(settings),
+        task_context_guidance(settings),
+        "Agent contract: main agent writes plan/task records; subagents may draft only.",
     ]
     if settings.use_level_subagent:
         guidance.append(f"Subagents: {subagent_context_guidance(settings)}")
     if settings.require_execution_approval:
-        guidance.append("Approval: before durable edits, set execution approval with `taplctl approval set --decision approved --prompt '<approved scope>' --json`.")
+        guidance.append("Approval: set execution approval before durable edits: `taplctl approval set --decision approved --prompt '<approved scope>' --json`.")
     else:
-        guidance.append("Approval: set execution approval when risk or scope warrants it; missing approval is reported as a warning.")
+        guidance.append("Approval: set execution approval for material risk/scope; missing approval is a warning.")
     return guidance
+
+
+def plan_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    detail = {
+        "minimal": "objective, approach, affected files, validation",
+        "less_detailed": "objective, approach, constraints, affected files, risks, validation",
+        "detailed": "requirements trace, execution order, risks, validation",
+        "very_detailed": "requirements trace, execution order, risks, edge cases, alternatives, per-spec validation",
+    }[settings.plan_detail]
+    return f"Plan: include {detail}; ask user only for material scope/risk/API/UX/data/compat choices."
+
+
+def task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    fields = "spec_id, goal, action, "
+    if settings.use_level_subagent:
+        fields += "required_subagent, "
+    fields += "verification, result"
+    return (
+        "Tasks: after source plan exists, set --spec-id PLAN-001/SPEC-001; split by meaningful "
+        "implementation/verification; Execute planned tasks one at a time in order: In Progress "
+        f"before work, then Completed/Blocked/Skipped; fields: {fields}; "
+        "blocked: blocker, next_action; updates are partial."
+    )
 
 
 def subagent_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     allowed = ", ".join(validation.LEVEL_SUBAGENTS)
     if settings.level_subagent_aggressiveness == "minimal":
-        return f"Set required_subagent only for clear risk or explicit routing. Allowed: {allowed}."
+        return f"Set required_subagent only for clear risk/routing. Allowed: {allowed}."
     if settings.level_subagent_aggressiveness == "force":
         return f"Every executable task needs required_subagent. Allowed: {allowed}."
     return f"Choose required_subagent by task risk. Allowed: {allowed}."
@@ -220,11 +246,11 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
     if run.get("request_summary") == db.DEFAULT_REQUEST_SUMMARY:
         actions.append(
-            "Summarize the user's request and update the active run with `taplctl run set --summary '<request summary>' --json`."
+            "Summarize request: `taplctl run set --summary '<request summary>' --json`."
         )
     if event == "UserPromptSubmit" and state.get("incomplete_tasks", 0):
         actions.append(
-            "If this is a new request, ask whether to finish, combine, defer/archive, or discard remaining work before durable edits."
+            "If new request, ask whether to finish, combine, defer/archive, or discard remaining work before durable edits."
         )
     has_plans = bool(state.get("plans"))
     has_tasks = bool(state.get("tasks"))
@@ -233,7 +259,7 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
         covered_issue_codes.add("missing_plan")
     elif not has_tasks:
         actions.append(
-            "Using the stored plan, design executable tasks and create task state with `taplctl task set` before durable edits."
+            "Using the stored plan, create executable tasks with `taplctl task set` before durable edits."
         )
     if state.get("incomplete_tasks", 0):
         approval_action = approval_next_action(plan_task)
@@ -243,7 +269,7 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
         execution_action = task_execution_next_action(state)
         if execution_action:
             actions.append(execution_action)
-        actions.append("Complete, block, or skip remaining tasks before Stop can auto-archive.")
+        actions.append("Complete, block, or skip remaining tasks before Stop auto-archives.")
 
     for issue in (plan_task.get("issues") or [])[:3]:
         if issue.get("code") in covered_issue_codes:
@@ -257,13 +283,13 @@ def approval_next_action(plan_task: dict[str, Any]) -> str:
     codes = {str(issue.get("code") or "") for issue in issues if isinstance(issue, dict)}
     if "execution_approval_rejected" in codes:
         return (
-            "Execution approval is rejected; resolve scope with the user, then set approval with "
-            "`taplctl approval set --decision approved --prompt '<approved scope>' --json` before continuing tasks."
+            "Approval rejected; resolve scope, then set `taplctl approval set --decision approved "
+            "--prompt '<approved scope>' --json` before continuing."
         )
     if "execution_approval_missing" in codes:
         return (
-            "Before starting or continuing task execution, set execution approval with "
-            "`taplctl approval set --decision approved --prompt '<approved scope>' --json`."
+            "Before task execution, set execution approval: `taplctl approval set --decision approved "
+            "--prompt '<approved scope>' --json`."
         )
     return ""
 
@@ -276,18 +302,18 @@ def task_execution_next_action(state: dict[str, Any]) -> str:
     in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
     if len(in_progress) > 1:
         labels = ", ".join(task_label(task) for task in in_progress)
-        return f"Only one task may be In Progress at a time; finish, block, or skip all but the earliest task before continuing: {labels}."
+        return f"Only one task may be In Progress; finish/block/skip all but earliest: {labels}."
     if in_progress:
         label = task_label(in_progress[0])
-        return f"Continue only {label}; update it to Completed, Blocked, or Skipped before starting another task."
+        return f"Continue only {label}; set Completed, Blocked, or Skipped before another task."
 
     for task in tasks:
         status = str(task.get("status") or "")
         label = task_label(task)
         if status == "Pending":
-            return f"Start next task {label} by updating it to In Progress immediately before execution."
+            return f"Start next task {label}: set In Progress immediately before execution."
         if status == "Blocked":
-            return f"Resolve, replan, or skip blocked task {label} before starting later tasks."
+            return f"Resolve, replan, or skip blocked task {label} before later tasks."
     return ""
 
 
