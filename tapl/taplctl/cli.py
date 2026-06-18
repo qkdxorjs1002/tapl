@@ -18,6 +18,7 @@ from . import (
     hooks,
     importer,
     install as tapl_install,
+    searchd,
     validation,
 )
 
@@ -312,6 +313,70 @@ def build_parser() -> argparse.ArgumentParser:
     add_json_arg(reindex)
     reindex.set_defaults(handler=cmd_reindex)
 
+    searchd_cmd = sub.add_parser("searchd", help="Manage the semantic search daemon.")
+    searchd_sub = searchd_cmd.add_subparsers(dest="searchd_command")
+    searchd_start = searchd_sub.add_parser(
+        "start",
+        help="Start the semantic search daemon.",
+        description="Start the semantic search daemon.",
+    )
+    searchd_start.add_argument("--socket", default=None, help="Unix socket path. Defaults to ~/.tapl/searchd.sock.")
+    searchd_start.add_argument(
+        "--idle-timeout",
+        type=non_negative_int_arg,
+        default=None,
+        help="Seconds before idle shutdown. Defaults to search.searchd_idle_timeout_seconds.",
+    )
+    searchd_start.add_argument(
+        "--timeout-ms",
+        type=positive_int_arg,
+        default=None,
+        help="Milliseconds to wait for daemon readiness. Defaults to 15000.",
+    )
+    searchd_start.add_argument("--no-wait", action="store_true", help="Return immediately after spawning searchd.")
+    add_json_arg(searchd_start)
+    searchd_start.set_defaults(handler=cmd_searchd_start)
+
+    searchd_status = searchd_sub.add_parser(
+        "status",
+        help="Show semantic search daemon status.",
+        description="Show semantic search daemon status.",
+    )
+    searchd_status.add_argument("--socket", default=None, help="Unix socket path. Defaults to ~/.tapl/searchd.sock.")
+    searchd_status.add_argument(
+        "--timeout-ms",
+        type=positive_int_arg,
+        default=None,
+        help="Milliseconds to wait for daemon response. Defaults to 250.",
+    )
+    add_json_arg(searchd_status)
+    searchd_status.set_defaults(handler=cmd_searchd_status)
+
+    searchd_stop = searchd_sub.add_parser(
+        "stop",
+        help="Stop the semantic search daemon.",
+        description="Stop the semantic search daemon.",
+    )
+    searchd_stop.add_argument("--socket", default=None, help="Unix socket path. Defaults to ~/.tapl/searchd.sock.")
+    searchd_stop.add_argument(
+        "--timeout-ms",
+        type=positive_int_arg,
+        default=None,
+        help="Milliseconds to wait for daemon response. Defaults to 250.",
+    )
+    add_json_arg(searchd_stop)
+    searchd_stop.set_defaults(handler=cmd_searchd_stop)
+
+    searchd_run = searchd_sub.add_parser(
+        "run",
+        help=argparse.SUPPRESS,
+        description="Run the semantic search daemon server loop.",
+    )
+    searchd_run.add_argument("--socket", default=None, help=argparse.SUPPRESS)
+    searchd_run.add_argument("--idle-timeout", type=non_negative_int_arg, default=None, help=argparse.SUPPRESS)
+    add_json_arg(searchd_run)
+    searchd_run.set_defaults(handler=cmd_searchd_run)
+
     import_md = sub.add_parser("import-md", help="Import legacy .agent-workflow markdown.")
     import_md.add_argument("--path", type=Path, default=Path(".agent-workflow"), help="Legacy workflow directory.")
     add_dry_run_arg(import_md)
@@ -352,6 +417,16 @@ def positive_int_arg(value: str) -> int:
         raise argparse.ArgumentTypeError("must be a positive integer") from exc
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def non_negative_int_arg(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a non-negative integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
     return parsed
 
 
@@ -693,6 +768,47 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 def cmd_reindex(args: argparse.Namespace) -> int:
     payload = embeddings.reindex(open_conn(args), dry_run=args.dry_run)
+    emit(payload, args.json)
+    return 0 if payload.get("ok") else 1
+
+
+def cmd_searchd_start(args: argparse.Namespace) -> int:
+    settings = load_config(args)
+    payload = searchd.start(
+        settings.search,
+        socket_path=args.socket,
+        idle_timeout_seconds=args.idle_timeout,
+        timeout_ms=args.timeout_ms,
+        wait=not args.no_wait,
+    )
+    payload["config"] = settings.search.as_dict()
+    emit(payload, args.json)
+    return 0 if payload.get("ok") else 1
+
+
+def cmd_searchd_status(args: argparse.Namespace) -> int:
+    settings = load_config(args)
+    payload = searchd.status(settings.search, socket_path=args.socket, timeout_ms=args.timeout_ms)
+    payload["config"] = settings.search.as_dict()
+    emit(payload, args.json)
+    return 0
+
+
+def cmd_searchd_stop(args: argparse.Namespace) -> int:
+    settings = load_config(args)
+    payload = searchd.stop(settings.search, socket_path=args.socket, timeout_ms=args.timeout_ms)
+    payload["config"] = settings.search.as_dict()
+    emit(payload, args.json)
+    return 0 if payload.get("ok") else 1
+
+
+def cmd_searchd_run(args: argparse.Namespace) -> int:
+    settings = load_config(args)
+    payload = searchd.run_server(
+        settings.search,
+        socket_path=args.socket,
+        idle_timeout_seconds=args.idle_timeout,
+    )
     emit(payload, args.json)
     return 0 if payload.get("ok") else 1
 

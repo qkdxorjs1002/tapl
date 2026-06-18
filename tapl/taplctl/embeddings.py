@@ -10,7 +10,7 @@ import sys
 from collections.abc import Iterator
 from typing import Any
 
-from . import config as tapl_config, db
+from . import config as tapl_config, db, searchd
 
 _MODEL_LOAD_PROGRESS_MARKERS = ("Loading weights:",)
 
@@ -117,7 +117,7 @@ def search(
     }
 
     if settings.mode == "semantic":
-        semantic = semantic_search(conn, query, limit=limit)
+        semantic = semantic_search(conn, query, limit=limit, search_config=settings)
         if semantic is not None:
             payload.update({"mode": "semantic", "results": semantic})
             return payload
@@ -138,7 +138,7 @@ def search(
         payload.update({"mode": "word", "results": db.search_word(conn, query, limit=limit)})
         return payload
 
-    semantic = semantic_search(conn, query, limit=max(limit * 2, limit))
+    semantic = semantic_search(conn, query, limit=max(limit * 2, limit), search_config=settings)
     bm25 = db.search_bm25(conn, query, limit=max(limit * 2, limit))
     if semantic is None:
         payload.update(
@@ -164,12 +164,18 @@ def search(
     return payload
 
 
-def semantic_search(conn: sqlite3.Connection, query: str, *, limit: int) -> list[dict[str, Any]] | None:
-    if not all(dependency_status().values()):
+def semantic_search(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int,
+    search_config: tapl_config.SearchConfig | None = None,
+) -> list[dict[str, Any]] | None:
+    settings = search_config or tapl_config.SearchConfig()
+    if importlib.util.find_spec("sqlite_vec") is None:
         return None
 
     try:
-        import numpy as np
         import sqlite_vec
 
         conn.enable_load_extension(True)
@@ -186,9 +192,9 @@ def semantic_search(conn: sqlite3.Connection, query: str, *, limit: int) -> list
         if not count:
             return None
 
-        model = load_model(prefer_local=True)
-        vector = model.encode([query], normalize_embeddings=True)[0]
-        blob = np.asarray(vector, dtype=np.float32).tobytes()
+        blob = query_embedding_blob(query, settings)
+        if blob is None:
+            return None
         rows = conn.execute(
             """
             SELECT i.*, item_embeddings.distance AS score
@@ -202,6 +208,31 @@ def semantic_search(conn: sqlite3.Connection, query: str, *, limit: int) -> list
         return [db.search_row(row, "semantic") for row in rows]
     except Exception:
         return None
+
+
+def query_embedding_blob(query: str, settings: tapl_config.SearchConfig) -> bytes | None:
+    if settings.semantic_provider == "local":
+        return local_query_embedding_blob(query)
+
+    try:
+        return searchd.embed_query(query, settings)
+    except searchd.SearchdError:
+        if settings.semantic_provider == "daemon":
+            return None
+
+    return local_query_embedding_blob(query)
+
+
+def local_query_embedding_blob(query: str) -> bytes | None:
+    status = dependency_status()
+    if not status["sentence_transformers"] or not status["numpy"]:
+        return None
+
+    import numpy as np
+
+    model = load_model(prefer_local=True)
+    vector = model.encode([query], normalize_embeddings=True)[0]
+    return np.asarray(vector, dtype=np.float32).tobytes()
 
 
 def hybrid_results(

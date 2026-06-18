@@ -200,6 +200,8 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(cfg.search.max_results, 7)
             self.assertEqual(cfg.search.hybrid_semantic_ratio, 0.65)
             self.assertEqual(cfg.search.hybrid_bm25_ratio, 0.35)
+            self.assertEqual(cfg.search.semantic_provider, "auto")
+            self.assertEqual(cfg.search.searchd_idle_timeout_seconds, 1800)
             self.assertTrue(cfg.plan_task_execute.use_level_subagent)
             self.assertEqual(cfg.plan_task_execute.level_subagent_aggressiveness, "auto")
             self.assertEqual(cfg.plan_task_execute.plan_detail, "detailed")
@@ -306,6 +308,8 @@ plan-detail = "minimal"
 mode = "word"
 max_results = 2
 hybrid_semantic_ratio = 0.25
+semantic-provider = "daemon"
+idle-timeout-seconds = 0
 
 [plan-task-execute]
 use-level-subagent = false
@@ -334,6 +338,8 @@ task-granularity = "less-granular"
             status = self.run_cli(db_path, "--config", str(config_path), "status", "--json")
             status_payload = json.loads(status.stdout)
             self.assertEqual(status_payload["config"]["search"]["mode"], "word")
+            self.assertEqual(status_payload["config"]["search"]["semantic_provider"], "daemon")
+            self.assertEqual(status_payload["config"]["search"]["searchd_idle_timeout_seconds"], 0)
             self.assertFalse(status_payload["config"]["plan_task_execute"]["use_level_subagent"])
 
             search = self.run_cli(db_path, "--config", str(config_path), "search", "substring", "--json")
@@ -486,6 +492,122 @@ require_execution_approval = true
             config_path.write_text('[search]\nmode = "unknown"\n', encoding="utf-8")
             with self.assertRaises(ValueError):
                 tapl_config.load(config_path)
+
+    def test_config_rejects_unknown_searchd_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "tapl.toml"
+            config_path.write_text('[search]\nsemantic_provider = "remote"\n', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                tapl_config.load(config_path)
+
+            config_path.write_text("[search]\nsearchd_idle_timeout_seconds = -1\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                tapl_config.load(config_path)
+
+    def test_config_ignores_removed_searchd_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "tapl.toml"
+            config_path.write_text(
+                """
+[search]
+searchd_missing = "explode"
+searchd_socket_path = "~/ignored.sock"
+searchd_connect_timeout_ms = 1
+searchd_start_timeout_ms = 1
+""",
+                encoding="utf-8",
+            )
+
+            cfg = tapl_config.load(config_path)
+            self.assertEqual(cfg.search.semantic_provider, "auto")
+            self.assertFalse(hasattr(cfg.search, "searchd_missing"))
+            self.assertFalse(hasattr(cfg.search, "searchd_socket_path"))
+            self.assertFalse(hasattr(cfg.search, "searchd_connect_timeout_ms"))
+            self.assertFalse(hasattr(cfg.search, "searchd_start_timeout_ms"))
+
+    def test_query_embedding_blob_provider_fallback(self) -> None:
+        from taplctl import embeddings
+
+        original_embed = embeddings.searchd.embed_query
+        original_local = embeddings.local_query_embedding_blob
+        try:
+            def fake_embed(query: str, settings: tapl_config.SearchConfig) -> bytes:
+                raise embeddings.searchd.SearchdUnavailable("down")
+
+            embeddings.searchd.embed_query = fake_embed
+            embeddings.local_query_embedding_blob = lambda query: b"local"
+
+            auto = tapl_config.SearchConfig(semantic_provider="auto")
+            self.assertEqual(embeddings.query_embedding_blob("query", auto), b"local")
+
+            daemon = tapl_config.SearchConfig(semantic_provider="daemon")
+            self.assertIsNone(embeddings.query_embedding_blob("query", daemon))
+        finally:
+            embeddings.searchd.embed_query = original_embed
+            embeddings.local_query_embedding_blob = original_local
+
+    def test_searchd_handle_request_embed_and_ping(self) -> None:
+        from taplctl import searchd
+
+        class FakeArray:
+            shape = (3,)
+
+            def tobytes(self) -> bytes:
+                return b"abc"
+
+        class FakeNumpy:
+            float32 = object()
+
+            def asarray(self, vector: object, dtype: object) -> FakeArray:
+                return FakeArray()
+
+        class FakeModel:
+            def encode(self, texts: list[str], *, normalize_embeddings: bool) -> list[list[float]]:
+                self.texts = texts
+                self.normalize_embeddings = normalize_embeddings
+                return [[1.0, 2.0, 3.0]]
+
+        ping, stop = searchd.handle_request(
+            {"op": "ping"},
+            model=FakeModel(),
+            np=FakeNumpy(),
+            started_at=0.0,
+            idle_timeout_seconds=30,
+            dimension=384,
+        )
+        self.assertTrue(ping["ok"])
+        self.assertFalse(stop)
+        self.assertEqual(ping["idle_timeout_seconds"], 30)
+
+        embed, stop = searchd.handle_request(
+            {"op": "embed", "text": "hello"},
+            model=FakeModel(),
+            np=FakeNumpy(),
+            started_at=0.0,
+            idle_timeout_seconds=30,
+            dimension=384,
+        )
+        self.assertTrue(embed["ok"])
+        self.assertFalse(stop)
+        self.assertEqual(embed["dimension"], 3)
+        self.assertEqual(embed["embedding_b64"], "YWJj")
+
+    def test_searchd_status_reports_missing_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            status = self.run_cli(
+                db_path,
+                "searchd",
+                "status",
+                "--socket",
+                str(Path(tmp) / "missing.sock"),
+                "--json",
+            )
+            self.assertEqual(status.returncode, 0, status.stderr)
+            payload = json.loads(status.stdout)
+            self.assertFalse(payload["ok"])
+            self.assertFalse(payload["running"])
+            self.assertIn("missing.sock", payload["socket_path"])
 
     def test_task_upsert_enforces_forced_level_subagent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

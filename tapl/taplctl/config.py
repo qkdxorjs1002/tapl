@@ -15,6 +15,8 @@ CONFIG_RELATIVE = Path(".tapl") / "config.toml"
 DEFAULT_SEARCH_MODE = "hybrid"
 DEFAULT_HYBRID_SEMANTIC_RATIO = 0.65
 DEFAULT_SEARCH_MAX_RESULTS = 7
+DEFAULT_SEMANTIC_PROVIDER = "auto"
+DEFAULT_SEARCHD_IDLE_TIMEOUT_SECONDS = 1800
 DEFAULT_USE_LEVEL_SUBAGENT = True
 DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS = "auto"
 DEFAULT_PLAN_DETAIL = "detailed"
@@ -22,6 +24,7 @@ DEFAULT_TASK_GRANULARITY = "granular"
 DEFAULT_REQUIRE_EXECUTION_APPROVAL = True
 
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
+SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
 LEVEL_SUBAGENT_AGGRESSIVENESS = ("minimal", "auto", "force")
 PLAN_DETAILS = ("minimal", "less_detailed", "detailed", "very_detailed")
 TASK_GRANULARITIES = ("minimal", "less_granular", "granular", "very_granular")
@@ -32,6 +35,8 @@ class SearchConfig:
     mode: str = DEFAULT_SEARCH_MODE
     hybrid_semantic_ratio: float = DEFAULT_HYBRID_SEMANTIC_RATIO
     max_results: int = DEFAULT_SEARCH_MAX_RESULTS
+    semantic_provider: str = DEFAULT_SEMANTIC_PROVIDER
+    searchd_idle_timeout_seconds: int = DEFAULT_SEARCHD_IDLE_TIMEOUT_SECONDS
 
     @property
     def hybrid_bm25_ratio(self) -> float:
@@ -43,6 +48,8 @@ class SearchConfig:
             "max_results": self.max_results,
             "hybrid_semantic_ratio": self.hybrid_semantic_ratio,
             "hybrid_bm25_ratio": self.hybrid_bm25_ratio,
+            "semantic_provider": self.semantic_provider,
+            "searchd_idle_timeout_seconds": self.searchd_idle_timeout_seconds,
         }
 
 
@@ -157,6 +164,27 @@ def load(
             ),
             "search.max_results",
         ),
+        semantic_provider=choice(
+            setting(
+                search_data,
+                "semantic_provider",
+                "semantic-provider",
+                default=DEFAULT_SEMANTIC_PROVIDER,
+            ),
+            SEMANTIC_PROVIDERS,
+            "search.semantic_provider",
+        ),
+        searchd_idle_timeout_seconds=non_negative_int(
+            setting(
+                search_data,
+                "searchd_idle_timeout_seconds",
+                "searchd-idle-timeout-seconds",
+                "idle_timeout_seconds",
+                "idle-timeout-seconds",
+                default=DEFAULT_SEARCHD_IDLE_TIMEOUT_SECONDS,
+            ),
+            "search.searchd_idle_timeout_seconds",
+        ),
     )
     plan_task_execute = PlanTaskExecuteConfig(
         use_level_subagent=boolean(
@@ -248,6 +276,14 @@ def positive_int(value: Any, key: str) -> int:
         raise ValueError(f"{key} must be a positive integer")
     if value < 1:
         raise ValueError(f"{key} must be a positive integer")
+    return value
+
+
+def non_negative_int(value: Any, key: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key} must be a non-negative integer")
+    if value < 0:
+        raise ValueError(f"{key} must be a non-negative integer")
     return value
 
 
