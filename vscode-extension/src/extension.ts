@@ -104,6 +104,11 @@ interface WorkflowTab {
   content: string;
 }
 
+type MarkdownLabelRun = {
+  label: string;
+  value: string;
+};
+
 type PanelView =
   | { type: 'overview' }
   | { type: 'archive'; archive: TaplArchive; detail?: TaplArchiveDetail }
@@ -171,6 +176,13 @@ const READABLE_BLOCK_KEY_LABELS = new Set([
   '위험',
   '차단 사유'
 ]);
+const READABLE_BLOCK_LABEL_PATTERN = new RegExp(
+  `(?:^|\\s)(REQ-\\d+|${Array.from(READABLE_BLOCK_KEY_LABELS)
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegExp)
+    .join('|')}):\\s*`,
+  'gi'
+);
 
 export function activate(context: vscode.ExtensionContext): void {
   const activeProvider = new ActiveProvider();
@@ -1125,7 +1137,7 @@ function renderMarkdownBody(content: unknown): string {
     if (!paragraph.length) {
       return;
     }
-    html.push(`<p>${paragraph.map(renderMarkdownLine).join('<br>')}</p>`);
+    html.push(renderMarkdownParagraph(paragraph));
     paragraph = [];
   };
   const flushList = () => {
@@ -1215,6 +1227,52 @@ function renderMarkdownBody(content: unknown): string {
   return html.join('') || '<p class="muted">Not recorded.</p>';
 }
 
+function renderMarkdownParagraph(lines: string[]): string {
+  const labeledRuns = lines.map(parseMarkdownLabelRuns);
+  if (labeledRuns.every(Boolean)) {
+    return renderMarkdownFieldList(labeledRuns.flatMap((runs) => runs ?? []));
+  }
+  return `<p>${lines.map(renderMarkdownLine).join('<br>')}</p>`;
+}
+
+function parseMarkdownLabelRuns(line: string): MarkdownLabelRun[] | undefined {
+  READABLE_BLOCK_LABEL_PATTERN.lastIndex = 0;
+  const matches = Array.from(line.matchAll(READABLE_BLOCK_LABEL_PATTERN));
+  if (!matches.length) {
+    return undefined;
+  }
+
+  const firstIndex = matches[0].index ?? 0;
+  if (line.slice(0, firstIndex).trim()) {
+    return undefined;
+  }
+
+  const runs = matches.map((match, index) => {
+    const next = matches[index + 1];
+    const valueStart = (match.index ?? 0) + match[0].length;
+    const valueEnd = next?.index ?? line.length;
+    return {
+      label: normalizeMarkdownLabel(match[1]),
+      value: line.slice(valueStart, valueEnd).trim()
+    };
+  });
+
+  return runs.length ? runs : undefined;
+}
+
+function renderMarkdownFieldList(runs: MarkdownLabelRun[]): string {
+  return `
+    <div class="markdown-field-list">
+      ${runs.map((run) => `
+        <div class="markdown-field-row">
+          <span class="markdown-label">${escapeHtml(run.label)}:</span>
+          <span class="markdown-field-value">${run.value ? renderInlineMarkdown(run.value) : '<span class="muted">Not recorded.</span>'}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function renderMarkdownLine(line: string): string {
   const labeled = line.match(/^([A-Za-z가-힣][A-Za-z0-9가-힣 /_-]*|REQ-\d+):\s*(.*)$/i);
   if (!labeled || !isReadableBlockKey(labeled[1])) {
@@ -1248,6 +1306,10 @@ function isReadableBlockKey(label: string): boolean {
     return true;
   }
   return READABLE_BLOCK_KEY_LABELS.has(label.trim().toLowerCase().replace(/\s+/g, ' '));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function renderError(message: string): string {
@@ -2065,6 +2127,31 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
       background: transparent;
       border-radius: 0;
     }
+    .markdown-field-list {
+      display: grid;
+      gap: 0;
+      min-width: 0;
+    }
+    .markdown-field-row {
+      display: grid;
+      grid-template-columns: minmax(86px, max-content) minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      padding: 6px 0;
+      border-top: 1px solid var(--border);
+    }
+    .markdown-field-row:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+    .markdown-field-row:last-child {
+      padding-bottom: 0;
+    }
+    .markdown-field-value {
+      min-width: 0;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
     .reading-body {
       max-width: 78ch;
       margin-top: 10px;
@@ -2136,6 +2223,10 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
         width: 100%;
       }
       .detail-row {
+        grid-template-columns: 1fr;
+        gap: 2px;
+      }
+      .markdown-field-row {
         grid-template-columns: 1fr;
         gap: 2px;
       }
