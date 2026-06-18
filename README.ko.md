@@ -50,8 +50,8 @@ taplctl doctor --json
 ```sh
 taplctl status --json
 taplctl search 'README self PR codex cli screenshot' --json
-taplctl plan set --id SPEC-README-SELF-PR ...
-taplctl task set --id TASK-README-001 ...
+taplctl plan set --id PLAN-001 ...
+taplctl task set --id TASK-001 ...
 taplctl approval set --decision approved ...
 ```
 
@@ -110,17 +110,17 @@ approval을 설정합니다.
 
 ```sh
 taplctl plan set \
-  --id SPEC-EXAMPLE \
+  --id PLAN-001 \
   --title "Example implementation plan" \
   --summary "REQ-001: approach, files, order, risks, validation" \
   --status Finalized \
   --json
 
 taplctl task set \
-  --id TASK-EXAMPLE \
+  --id TASK-001 \
   --title "Implement the change" \
   --status "In Progress" \
-  --spec-id SPEC-EXAMPLE \
+  --spec-id PLAN-001 \
   --goal "Make the requested behavior work" \
   --action "Edit the relevant files" \
   --required-subagent "@senior-worker" \
@@ -129,11 +129,11 @@ taplctl task set \
 
 taplctl approval set \
   --decision approved \
-  --prompt "Execute SPEC-EXAMPLE tasks" \
+  --prompt "Execute PLAN-001 tasks" \
   --json
 
 taplctl task set \
-  --id TASK-EXAMPLE \
+  --id TASK-001 \
   --status Completed \
   --result "Focused checks passed" \
   --json

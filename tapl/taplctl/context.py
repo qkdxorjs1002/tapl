@@ -181,7 +181,7 @@ def should_suggest_prior_search(state: dict[str, Any], prompt: str) -> bool:
 
 def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
     guidance = [
-        f"Records: {validation.markdown_record_guidance()}",
+        f"Records: {validation.markdown_record_guidance()} {validation.stable_id_guidance()}",
         f"Order: {validation.workflow_order_guidance()}",
         f"Plan: {validation.plan_detail_guidance(settings.plan_detail)} Ask the user to choose when scope, risk, API, UX, data, or compatibility decisions matter.",
         f"Tasks: {validation.task_plan_dependency_guidance()} {validation.task_granularity_guidance(settings.task_granularity)} {validation.task_execution_order_guidance()} {validation.task_format_guidance(settings)}",

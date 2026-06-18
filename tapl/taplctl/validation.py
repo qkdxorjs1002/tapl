@@ -11,6 +11,8 @@ from . import config as tapl_config, db
 
 LEVEL_SUBAGENTS = ("@junior-worker", "@senior-worker", "@specialist-worker")
 EXECUTABLE_STATUSES = ("Pending", "In Progress", "Blocked")
+PLAN_ID_PATTERN = re.compile(r"^(?:PLAN|SPEC)-\d{3,}$")
+TASK_ID_PATTERN = re.compile(r"^TASK-\d{3,}$")
 
 
 def validate_plan_task_execute(
@@ -34,6 +36,7 @@ def validate_plan_task_execute(
     plans = state.get("plans", [])
     tasks = state.get("tasks", [])
     issues: list[dict[str, Any]] = []
+    issues.extend(validate_stable_ids(plans, tasks))
     issues.extend(validate_level_subagents(tasks, settings))
     issues.extend(validate_plan_detail(plans, settings))
     issues.extend(validate_plan_content(plans, settings))
@@ -54,19 +57,12 @@ def validate_plan_task_execute(
     return result
 
 
-def validate_task_input(
+def validate_plan_input(
     *,
-    task_id: str,
-    status: str,
-    required_subagent: str,
+    plan_id: str,
     settings: tapl_config.PlanTaskExecuteConfig,
 ) -> dict[str, Any]:
-    task = {
-        "stable_id": task_id,
-        "status": status,
-        "required_subagent": required_subagent,
-    }
-    issues = validate_level_subagents([task], settings)
+    issues = validate_stable_ids([{"stable_id": plan_id}], [])
     errors = [item for item in issues if item["severity"] == "error"]
     warnings = [item for item in issues if item["severity"] == "warning"]
     return {
@@ -76,6 +72,83 @@ def validate_task_input(
         "issues": issues,
         "guidance": guidance(settings),
     }
+
+
+def validate_task_input(
+    *,
+    task_id: str,
+    status: str,
+    spec_id: str,
+    required_subagent: str,
+    settings: tapl_config.PlanTaskExecuteConfig,
+) -> dict[str, Any]:
+    task = {
+        "stable_id": task_id,
+        "status": status,
+        "spec_id": spec_id,
+        "required_subagent": required_subagent,
+    }
+    issues = validate_stable_ids([], [task])
+    issues.extend(validate_level_subagents([task], settings))
+    errors = [item for item in issues if item["severity"] == "error"]
+    warnings = [item for item in issues if item["severity"] == "warning"]
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "issues": issues,
+        "guidance": guidance(settings),
+    }
+
+
+def validate_stable_ids(plans: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    for plan in plans:
+        stable_id = str(plan.get("stable_id") or "").strip()
+        if not is_numeric_plan_id(stable_id):
+            issues.append(
+                issue(
+                    "error",
+                    "invalid_plan_id",
+                    f"Plan id `{stable_id or 'plan'}` must use a numeric stable id.",
+                    "Use `PLAN-001` or `SPEC-001`; do not use word suffixes such as `PLAN-MEANINGS`.",
+                    stable_id=stable_id or None,
+                )
+            )
+
+    for task in tasks:
+        stable_id = str(task.get("stable_id") or task.get("task_id") or "").strip()
+        if not is_numeric_task_id(stable_id):
+            issues.append(
+                issue(
+                    "error",
+                    "invalid_task_id",
+                    f"Task id `{stable_id or 'task'}` must use a numeric stable id.",
+                    "Use `TASK-001`; do not use word suffixes such as `TASK-MEANINGS`.",
+                    stable_id=stable_id or None,
+                )
+            )
+
+        spec_id = str(task.get("spec_id") or "").strip()
+        if spec_id and not is_numeric_plan_id(spec_id):
+            issues.append(
+                issue(
+                    "error",
+                    "invalid_task_spec_id",
+                    f"Task source spec id `{spec_id}` must use a numeric plan/spec stable id.",
+                    "Set --spec-id to a stored numeric plan/spec id such as `PLAN-001` or `SPEC-001`.",
+                    stable_id=stable_id or None,
+                )
+            )
+    return issues
+
+
+def is_numeric_plan_id(stable_id: str) -> bool:
+    return bool(PLAN_ID_PATTERN.fullmatch(stable_id))
+
+
+def is_numeric_task_id(stable_id: str) -> bool:
+    return bool(TASK_ID_PATTERN.fullmatch(stable_id))
 
 
 def validate_level_subagents(
@@ -255,7 +328,7 @@ def validate_task_content(
                     "warning",
                     "task_content_missing_fields",
                     f"{stable_id} is missing task field(s): {', '.join(missing)}.",
-                    "Set task goal, source SPEC, action, required subagent, verification, and result or blocker details as applicable.",
+                    "Set task goal, numeric source plan/spec id, action, required subagent, verification, and result or blocker details as applicable.",
                     stable_id=stable_id,
                 )
             )
@@ -358,6 +431,7 @@ def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
     return {
         "allowed_level_subagents": list(LEVEL_SUBAGENTS),
         "record_format": markdown_record_guidance(),
+        "stable_ids": stable_id_guidance(),
         "workflow_order": workflow_order_guidance(),
         "task_dependency": task_plan_dependency_guidance(),
         "agent_writer_contract": agent_writer_contract_guidance(),
@@ -405,6 +479,13 @@ def markdown_record_guidance(subject: str = "plan, task, and finding content") -
     )
 
 
+def stable_id_guidance() -> str:
+    return (
+        "Use numeric stable ids only: `PLAN-001` or `SPEC-001` for plans/specs, "
+        "`TASK-001` for tasks. Do not use word suffixes such as `TASK-MEANINGS`."
+    )
+
+
 def workflow_order_guidance() -> str:
     return (
         "Phase order: plan with the user -> `taplctl plan set` -> design tasks "
@@ -415,7 +496,7 @@ def workflow_order_guidance() -> str:
 def task_plan_dependency_guidance() -> str:
     return (
         "Create or update task records only after the source plan/spec exists; set "
-        "--spec-id to the stored plan/spec id."
+        "--spec-id to the stored numeric plan/spec id, e.g. `PLAN-001` or `SPEC-001`."
     )
 
 

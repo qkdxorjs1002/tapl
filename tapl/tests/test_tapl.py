@@ -213,6 +213,74 @@ class TaplCliTests(unittest.TestCase):
             self.assertIn("--title", payload["error"])
             self.assertIn("--status", payload["error"])
 
+    def test_plan_and_task_ids_require_numeric_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+
+            bad_plan = self.run_cli(
+                db_path,
+                "plan",
+                "set",
+                "--id",
+                "SPEC-MEANINGS",
+                "--title",
+                "Bad plan id",
+                "--json",
+            )
+            self.assertEqual(bad_plan.returncode, 1)
+            bad_plan_payload = json.loads(bad_plan.stdout)
+            self.assertEqual(bad_plan_payload["plan_task_execute"]["errors"][0]["code"], "invalid_plan_id")
+
+            good_plan = self.run_cli(
+                db_path,
+                "plan",
+                "set",
+                "--id",
+                "PLAN-001",
+                "--title",
+                "Good plan id",
+                "--summary",
+                "REQ-001: Use numeric stable ids. Validation: CLI rejects word suffixes.",
+                "--json",
+            )
+            self.assertEqual(good_plan.returncode, 0, good_plan.stderr)
+
+            bad_task = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-MEANINGS",
+                "--title",
+                "Bad task id",
+                "--status",
+                "Pending",
+                "--spec-id",
+                "PLAN-001",
+                "--json",
+            )
+            self.assertEqual(bad_task.returncode, 1)
+            bad_task_payload = json.loads(bad_task.stdout)
+            self.assertEqual(bad_task_payload["plan_task_execute"]["errors"][0]["code"], "invalid_task_id")
+
+            bad_spec = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Bad spec id",
+                "--status",
+                "Pending",
+                "--spec-id",
+                "SPEC-MEANINGS",
+                "--json",
+            )
+            self.assertEqual(bad_spec.returncode, 1)
+            bad_spec_payload = json.loads(bad_spec.stdout)
+            self.assertEqual(bad_spec_payload["plan_task_execute"]["errors"][0]["code"], "invalid_task_spec_id")
+
     def test_load_model_suppresses_loading_weights_progress(self) -> None:
         from taplctl import embeddings
 
@@ -440,7 +508,7 @@ max_results = 3
                     "task",
                     "set",
                     "--id",
-                    f"TASK-LIMIT-{index:03d}",
+                    f"TASK-{index + 1:03d}",
                     "--title",
                     f"Needle task {index}",
                     "--status",
@@ -1061,6 +1129,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("taplctl finding add", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
             self.assertIn("Markdown form", prompt_text.stdout)
+            self.assertIn("Use numeric stable ids only", prompt_text.stdout)
             self.assertNotIn("quote every argument", prompt_text.stdout)
 
     def test_command_help_exposes_field_guidance(self) -> None:
@@ -1088,11 +1157,14 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Plan records should include objective", plan_help.stdout)
             self.assertIn("before task records", plan_help.stdout)
             self.assertIn("Markdown form", plan_help.stdout)
+            self.assertIn("Use numeric stable ids only", plan_help.stdout)
+            self.assertIn("PLAN-001", plan_help.stdout)
             self.assertIn("--body", plan_help.stdout)
 
             task_help = self.run_cli(db_path, "task", "set", "--help")
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
             self.assertIn("Task writing rules", task_help.stdout)
+            self.assertIn("Use numeric stable ids only", task_help.stdout)
             self.assertIn("Existing task updates are partial", task_help.stdout)
             self.assertIn("New task creation requires --title and --status", task_help.stdout)
             self.assertIn("--status 'In Progress'", task_help.stdout)

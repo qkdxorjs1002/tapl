@@ -44,6 +44,7 @@ def plan_set_epilog() -> str:
     return (
         "Plan writing rules:\n"
         f"  {validation.markdown_record_guidance()}\n"
+        f"  {validation.stable_id_guidance()}\n"
         "  Write or update the plan before task records; downstream tasks should derive from this record.\n"
         f"  {validation.plan_format_guidance()}\n"
         "  Summary should be a compact trace such as `REQ-001: approach, files, risks, validation`.\n"
@@ -52,7 +53,7 @@ def plan_set_epilog() -> str:
         "  Status is free-form; common values are Draft, Finalized, Imported, and Superseded.\n"
         "\n"
         "Example:\n"
-        "  taplctl plan set --id SPEC-001 --title 'Plan title' \\\n"
+        "  taplctl plan set --id PLAN-001 --title 'Plan title' \\\n"
         "    --summary 'REQ-001: approach, affected files, risks, validation' \\\n"
         "    --body 'Objective: ...\\nValidation: ...' --status Finalized --json"
     )
@@ -64,6 +65,7 @@ def task_set_epilog() -> str:
     return (
         "Task writing rules:\n"
         f"  {validation.markdown_record_guidance()}\n"
+        f"  {validation.stable_id_guidance()}\n"
         f"  {validation.task_plan_dependency_guidance()}\n"
         f"  {validation.task_execution_order_guidance()}\n"
         "  Existing task updates are partial: pass --id plus only changed fields;\n"
@@ -76,7 +78,7 @@ def task_set_epilog() -> str:
         "  Keep task text in the user's language unless asked otherwise.\n"
         "\n"
         "Field guidance:\n"
-        "  --spec-id: stable id of the source plan/spec, e.g. SPEC-001.\n"
+        "  --spec-id: numeric stable id of the source plan/spec, e.g. PLAN-001 or SPEC-001.\n"
         "  --goal: outcome the task must achieve.\n"
         "  --action: concrete work to perform.\n"
         "  --verification: command, check, or review that proves the task is done.\n"
@@ -85,7 +87,7 @@ def task_set_epilog() -> str:
         "\n"
         "Example:\n"
         "  taplctl task set --id TASK-001 --title 'Implement change' \\\n"
-        "    --status 'In Progress' --spec-id SPEC-001 --goal 'Make requested behavior work' \\\n"
+        "    --status 'In Progress' --spec-id PLAN-001 --goal 'Make requested behavior work' \\\n"
         "    --action 'Edit the relevant files' --required-subagent '@senior-worker' \\\n"
         "    --verification 'Run focused tests' --json\n"
         "  taplctl task set --id TASK-001 --status Completed --result 'Focused tests passed' --json"
@@ -114,7 +116,7 @@ def approval_set_epilog() -> str:
         "\n"
         "Example:\n"
         "  taplctl approval set --decision approved \\\n"
-        "    --prompt 'Execute TASK-001 from SPEC-001' --json"
+        "    --prompt 'Execute TASK-001 from PLAN-001' --json"
     )
 
 
@@ -133,7 +135,7 @@ def add_run_set_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--id", default="PLAN-001", help="Stable plan id, commonly SPEC-* or PLAN-*.")
+    parser.add_argument("--id", default="PLAN-001", help="Numeric plan id, e.g. PLAN-001 or SPEC-001.")
     parser.add_argument("--title", default="Plan", help="Short human-readable plan title.")
     parser.add_argument("--summary", default="", help="Compact requirements trace and approach summary.")
     parser.add_argument("--body", default="", help="Detailed plan body; use newlines for sections.")
@@ -142,7 +144,7 @@ def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_task_write_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--id", required=True, help="Stable task id, commonly TASK-*.")
+    parser.add_argument("--id", required=True, help="Numeric task id, e.g. TASK-001.")
     parser.add_argument("--title", default=None, help="Short human-readable task title. Required when creating a task.")
     parser.add_argument(
         "--status",
@@ -150,7 +152,7 @@ def add_task_write_args(parser: argparse.ArgumentParser) -> None:
         choices=db.TASK_STATUSES,
         help="Task lifecycle status. Required when creating a task; omitted updates keep the stored status.",
     )
-    parser.add_argument("--spec-id", default=None, help="Source plan/spec stable id.")
+    parser.add_argument("--spec-id", default=None, help="Numeric source plan/spec id, e.g. PLAN-001 or SPEC-001.")
     parser.add_argument("--goal", default=None, help="Outcome this task must achieve.")
     parser.add_argument("--action", default=None, help="Concrete work to perform.")
     parser.add_argument("--required-subagent", default=None, help="One of the configured @*-worker values.")
@@ -676,6 +678,14 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
 def cmd_plan_set(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     settings = load_config(args)
+    input_check = validation.validate_plan_input(
+        plan_id=args.id,
+        settings=settings.plan_task_execute,
+    )
+    if not input_check["ok"]:
+        emit({"ok": False, "plan_task_execute": input_check}, args.json)
+        return 1
+
     item = db.upsert_item(
         conn,
         kind="plan",
@@ -752,6 +762,7 @@ def cmd_task_set(args: argparse.Namespace) -> int:
     input_check = validation.validate_task_input(
         task_id=args.id,
         status=status,
+        spec_id=spec_id,
         required_subagent=required_subagent,
         settings=settings.plan_task_execute,
     )
