@@ -47,6 +47,13 @@ taplctl install repo
 taplctl doctor --json
 ```
 
+`taplctl install user` 또는 `taplctl install repo` 실행 후에는 Codex가 처음
+확인을 요청할 때 설치된 hook을 trust 해줘야 합니다.
+
+<p align="center">
+  <img src="assets/tapl-trust-hook.png" alt="설치된 tapl hook에 대한 Codex trust prompt" />
+</p>
+
 ## 어떻게 동작하나요?
 
 핵심은 또 하나의 prompt template이 아닙니다. 평범한 Codex CLI 요청 주변에

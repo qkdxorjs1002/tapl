@@ -47,6 +47,13 @@ taplctl install repo
 taplctl doctor --json
 ```
 
+After running `taplctl install user` or `taplctl install repo`, trust the
+installed Codex hook the first time Codex asks for confirmation.
+
+<p align="center">
+  <img src="assets/tapl-trust-hook.png" alt="Codex trust prompt for the installed tapl hook" />
+</p>
+
 ## How does it work?
 
 The point is not another prompt template. The point is that a normal Codex CLI
