@@ -312,6 +312,9 @@ def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
     return {
         "allowed_level_subagents": list(LEVEL_SUBAGENTS),
         "record_format": markdown_record_guidance(),
+        "workflow_order": workflow_order_guidance(),
+        "task_dependency": task_plan_dependency_guidance(),
+        "agent_writer_contract": agent_writer_contract_guidance(),
         "level_subagent": level_subagent_guidance(settings),
         "plan_detail": plan_detail_guidance(settings.plan_detail),
         "plan_format": plan_format_guidance(),
@@ -352,6 +355,27 @@ def markdown_record_guidance(subject: str = "plan, task, and finding content") -
     return (
         f"Write {subject} in Markdown form; use headings, bullets, or concise labeled "
         "sections for multi-line fields."
+    )
+
+
+def workflow_order_guidance() -> str:
+    return (
+        "Phase order: plan with the user -> `taplctl plan upsert` -> design tasks "
+        "from the stored plan -> `taplctl task upsert`."
+    )
+
+
+def task_plan_dependency_guidance() -> str:
+    return (
+        "Create or update task records only after the source plan/spec exists; set "
+        "--spec-id to the stored plan/spec id."
+    )
+
+
+def agent_writer_contract_guidance() -> str:
+    return (
+        "Agent contract: subagents may propose task drafts, but the main agent writes "
+        "plan/task records in order."
     )
 
 

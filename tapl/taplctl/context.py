@@ -148,7 +148,7 @@ def workflow_guidance(
     prompt: str = "",
 ) -> list[str]:
     lines = [
-        "Flow: search relevant prior work -> summarize request -> plan -> tasks -> approval -> execute/update -> result/archive.",
+        "Flow: search relevant prior work -> summarize request -> plan with the user -> plan upsert -> plan-based task design -> task upsert -> approval -> execute/update -> result/archive.",
     ]
 
     if event == "SessionStart":
@@ -182,8 +182,10 @@ def should_suggest_prior_search(state: dict[str, Any], prompt: str) -> bool:
 def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
     guidance = [
         f"Records: {validation.markdown_record_guidance()}",
+        f"Order: {validation.workflow_order_guidance()}",
         f"Plan: {validation.plan_detail_guidance(settings.plan_detail)} Ask the user to choose when scope, risk, API, UX, data, or compatibility decisions matter.",
-        f"Tasks: {validation.task_granularity_guidance(settings.task_granularity)} {validation.task_format_guidance(settings)}",
+        f"Tasks: {validation.task_plan_dependency_guidance()} {validation.task_granularity_guidance(settings.task_granularity)} {validation.task_format_guidance(settings)}",
+        validation.agent_writer_contract_guidance(),
     ]
     if settings.use_level_subagent:
         guidance.append(f"Subagents: {subagent_context_guidance(settings)}")
@@ -224,11 +226,15 @@ def next_actions(state: dict[str, Any], plan_task: dict[str, Any], event: str, p
         actions.append(
             "If this is a new request, ask whether to finish, combine, defer/archive, or discard remaining work before durable edits."
         )
-    if not state.get("plans"):
-        actions.append("Create or update plan state with `taplctl plan upsert`.")
+    has_plans = bool(state.get("plans"))
+    has_tasks = bool(state.get("tasks"))
+    if not has_plans:
+        actions.append("Create or update plan state with `taplctl plan upsert` before task design/upsert.")
         covered_issue_codes.add("missing_plan")
-    if not state.get("tasks"):
-        actions.append("Create executable task state with `taplctl task upsert` before durable edits.")
+    elif not has_tasks:
+        actions.append(
+            "Using the stored plan, design executable tasks and create task state with `taplctl task upsert` before durable edits."
+        )
     if state.get("incomplete_tasks", 0):
         actions.append("Complete, block, or skip remaining tasks before Stop can auto-archive.")
 

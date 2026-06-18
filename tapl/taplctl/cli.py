@@ -32,6 +32,7 @@ def command_help_epilog() -> str:
     return (
         "Workflow guidance:\n"
         "  Use `taplctl status --json` to inspect state before non-trivial work.\n"
+        f"  {validation.workflow_order_guidance()}\n"
         "  Use `taplctl <command> <subcommand> --help` for field-writing rules.\n"
         f"  {validation.markdown_record_guidance()}\n"
         "  Use `taplctl validate --json` after updates to catch missing plan/task details."
@@ -42,6 +43,7 @@ def plan_upsert_epilog() -> str:
     return (
         "Plan writing rules:\n"
         f"  {validation.markdown_record_guidance()}\n"
+        "  Write or update the plan before task upserts; downstream tasks should derive from this record.\n"
         f"  {validation.plan_format_guidance()}\n"
         "  Summary should be a compact trace such as `REQ-001: approach, files, risks, validation`.\n"
         "  Body is for the durable plan: objective, requirements trace, selected approach,\n"
@@ -61,6 +63,7 @@ def task_upsert_epilog() -> str:
     return (
         "Task writing rules:\n"
         f"  {validation.markdown_record_guidance()}\n"
+        f"  {validation.task_plan_dependency_guidance()}\n"
         "  Executable tasks should include source spec_id, goal, action, required_subagent,\n"
         "  verification, and result when completed; blocked tasks should include blocker and next_action.\n"
         "  Split tasks by meaningful implementation or verification step.\n"
