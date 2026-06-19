@@ -20,6 +20,7 @@ MAX_LINE_BYTES = 1024 * 1024
 SOCKET_ENV = "TAPL_SEARCHD_SOCKET"
 DEFAULT_CONNECT_TIMEOUT_MS = 250
 DEFAULT_START_TIMEOUT_MS = 15000
+DEFAULT_EMBED_TIMEOUT_MS = 30000
 
 
 class SearchdError(RuntimeError):
@@ -199,7 +200,7 @@ def embed_query(query: str, settings: tapl_config.SearchConfig) -> bytes:
             "dimension": db.DEFAULT_EMBEDDING_DIMENSION,
             "text": query,
         },
-        timeout_ms=DEFAULT_CONNECT_TIMEOUT_MS,
+        timeout_ms=DEFAULT_EMBED_TIMEOUT_MS,
     )
     if not response.get("ok"):
         raise SearchdError(str(response.get("error") or "searchd embedding failed"))
@@ -403,11 +404,23 @@ def run_server(
                     except SearchdError as exc:
                         response = {"ok": False, "error": str(exc)}
                         should_stop = False
-                    conn.sendall(json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n")
+                    except Exception as exc:
+                        response = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                        should_stop = False
+                    send_response(conn, response)
                 if should_stop:
                     return {"ok": True, "reason": "shutdown", "socket_path": str(path)}
         finally:
             remove_stale_socket(path)
+
+
+def send_response(conn: socket.socket, response: dict[str, Any]) -> bool:
+    data = json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n"
+    try:
+        conn.sendall(data)
+    except OSError:
+        return False
+    return True
 
 
 def read_request(conn: socket.socket) -> dict[str, Any]:

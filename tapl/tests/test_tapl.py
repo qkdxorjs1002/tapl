@@ -761,6 +761,51 @@ searchd_start_timeout_ms = 1
         self.assertEqual(embed["embedding_b64"], "YWJj")
         self.assertTrue(embed["model_loaded"])
 
+    def test_searchd_embed_query_uses_embed_timeout(self) -> None:
+        from taplctl import searchd
+
+        captured: dict[str, object] = {}
+        original_request = searchd.request
+        try:
+            def fake_request(
+                socket_path: Path,
+                payload: dict[str, object],
+                *,
+                timeout_ms: int,
+            ) -> dict[str, object]:
+                captured["payload"] = payload
+                captured["timeout_ms"] = timeout_ms
+                return {"ok": True, "dimension": 384, "embedding_b64": "YWJj"}
+
+            searchd.request = fake_request
+
+            embedded = searchd.embed_query("hello", tapl_config.SearchConfig())
+
+            self.assertEqual(embedded, b"abc")
+            self.assertEqual(captured["payload"]["op"], "embed")
+            self.assertEqual(captured["timeout_ms"], searchd.DEFAULT_EMBED_TIMEOUT_MS)
+        finally:
+            searchd.request = original_request
+
+    def test_searchd_send_response_ignores_disconnected_clients(self) -> None:
+        from taplctl import searchd
+
+        class RecordingConn:
+            sent = b""
+
+            def sendall(self, data: bytes) -> None:
+                self.sent = data
+
+        class ClosedConn:
+            def sendall(self, data: bytes) -> None:
+                raise BrokenPipeError("closed")
+
+        conn = RecordingConn()
+
+        self.assertTrue(searchd.send_response(conn, {"ok": True}))
+        self.assertIn(b'"ok":true', conn.sent)
+        self.assertFalse(searchd.send_response(ClosedConn(), {"ok": True}))
+
     def test_searchd_model_state_lazy_loads_and_unloads_model(self) -> None:
         from taplctl import searchd
 
