@@ -1296,8 +1296,10 @@ level_subagent_aggressiveness = "force"
             active_actions = active_prompt_payload["next_actions"]
             self.assertIn("Create or update plan state", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("before task design", "\n".join(active_prompt_payload["next_actions"]))
-            self.assertIn("ask whether to finish", "\n".join(active_prompt_payload["next_actions"]))
-            self.assertIn("finish, combine, defer/archive, or discard", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("get user approval", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("finish existing work first", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("defer the existing run", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("merge the work into one plan", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("Continue only TASK-001", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("spawn @senior-worker and assign only this task", "\n".join(active_prompt_payload["next_actions"]))
             approval_index = next(index for index, action in enumerate(active_actions) if "approval set" in action)
@@ -2133,6 +2135,92 @@ task_granularity = "very_granular"
                 [("plan", "SPEC-001", 1), ("task", "TASK-001", 1)],
             )
             self.assertEqual(detail_payload["events"][-1]["event_type"], "Stop")
+
+    def test_stop_hook_keeps_plan_only_run_active(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            prompt = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Plan only work"}',
+            )
+            self.assertEqual(prompt.returncode, 0, prompt.stderr)
+
+            summary = self.run_cli(
+                db_path,
+                "run",
+                "set",
+                "--summary",
+                "Plan only work",
+                "--result",
+                "Plan was prepared; execution has not started.",
+                "--json",
+            )
+            self.assertEqual(summary.returncode, 0, summary.stderr)
+
+            plan = self.run_cli(
+                db_path,
+                "plan",
+                "set",
+                "--id",
+                "SPEC-001",
+                "--title",
+                "Plan only run",
+                "--summary",
+                "Prepare a plan without executing implementation tasks.",
+                "--body",
+                "Requirements trace: REQ-001 documents that only planning happened. "
+                "Execution order: create plan and wait for explicit user approval before work. "
+                "Risks: archiving now would hide work that still needs execution. "
+                "Validation: Stop hook leaves the run active because no task completed.",
+                "--json",
+            )
+            self.assertEqual(plan.returncode, 0, plan.stderr)
+
+            stopped = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "Stop",
+                "--mode",
+                "observe",
+                "--json",
+                input_text="{}",
+            )
+            self.assertEqual(stopped.returncode, 0, stopped.stderr)
+            payload = json.loads(stopped.stdout)
+            self.assertTrue(payload["ok"])
+            self.assertNotIn("archive", payload)
+
+            status = self.run_cli(db_path, "status", "--json")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            status_payload = json.loads(status.stdout)
+            self.assertIsNotNone(status_payload["active_run"])
+            self.assertEqual(status_payload["active_run"]["request_summary"], "Plan only work")
+            self.assertEqual(status_payload["counts"]["archives"], 0)
+
+            next_prompt = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Implement a different feature"}',
+            )
+            self.assertEqual(next_prompt.returncode, 0, next_prompt.stderr)
+            next_payload = json.loads(next_prompt.stdout)
+            next_actions = "\n".join(next_payload["context"]["next_actions"])
+            self.assertIn("get user approval", next_actions)
+            self.assertIn("finish existing work first", next_actions)
+            self.assertIn("defer the existing run", next_actions)
+            self.assertIn("merge the work into one plan", next_actions)
 
     def test_stop_hook_auto_archives_simple_result_run_without_items(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

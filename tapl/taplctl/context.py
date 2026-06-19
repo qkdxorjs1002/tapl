@@ -270,9 +270,10 @@ def next_actions(
         actions.append(
             "Summarize request: `taplctl run set --summary '<request summary>' --json`."
         )
-    if event == "UserPromptSubmit" and state.get("incomplete_tasks", 0):
+    if event == "UserPromptSubmit" and should_request_active_run_direction(state, prompt):
         actions.append(
-            "If new request, ask whether to finish, combine, defer/archive, or discard remaining work before durable edits."
+            "If this request is different from the open run, get user approval before durable edits: "
+            "finish existing work first, defer the existing run, or merge the work into one plan."
         )
     has_plans = bool(state.get("plans"))
     has_tasks = bool(state.get("tasks"))
@@ -301,6 +302,29 @@ def next_actions(
             continue
         actions.append(f"{issue['message']} {issue['remediation']}")
     return actions
+
+
+def should_request_active_run_direction(state: dict[str, Any], prompt: str) -> bool:
+    if state.get("incomplete_tasks", 0):
+        return True
+
+    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
+    request_summary = str(run.get("request_summary") or "").strip()
+    if not prompt.strip():
+        return False
+
+    has_records = bool(state.get("plans") or state.get("tasks") or state.get("findings"))
+    if has_records:
+        return True
+
+    if not request_summary or request_summary == db.DEFAULT_REQUEST_SUMMARY:
+        return False
+
+    return normalized_prompt(prompt) != normalized_prompt(request_summary)
+
+
+def normalized_prompt(value: str) -> str:
+    return " ".join(value.split()).casefold()
 
 
 def approval_next_action(plan_task: dict[str, Any]) -> str:

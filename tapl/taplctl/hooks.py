@@ -167,14 +167,17 @@ def should_auto_archive_on_stop(
 ) -> bool:
     run = state.get("active_run")
     result = run.get("result_summary") if isinstance(run, dict) else ""
-    has_items = bool(state.get("plans") or state.get("tasks") or state.get("findings"))
     has_simple_result = bool(str(result or "").strip() or stop_result_summary(payload or {}))
+    tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
+    has_completed_task = any(task.get("status") == "Completed" for task in tasks)
+    has_recorded_items = bool(state.get("plans") or state.get("tasks") or state.get("findings"))
+    is_simple_result_run = has_simple_result and not has_recorded_items
     return bool(
         run
         and not state.get("incomplete_tasks", 0)
         and not check.get("errors")
         and not block
-        and (has_items or has_simple_result)
+        and (has_completed_task or is_simple_result_run)
     )
 
 
