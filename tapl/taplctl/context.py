@@ -233,17 +233,22 @@ def subagent_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> st
     allowed = ", ".join(validation.LEVEL_SUBAGENTS)
     if settings.level_subagent_aggressiveness == "minimal":
         return (
-            "Set required_subagent only for clear risk/routing; if set, mark the task In Progress, "
-            f"spawn that exact subagent for only that task, then main records result/status. Allowed: {allowed}."
+            "Set required_subagent only for clear risk/routing; it is routing metadata. "
+            "If set, mark the task In Progress before work; spawn that exact subagent only when the "
+            "subagent tool is available and user/session policy allows delegation; otherwise do not claim "
+            f"delegation occurred; main records result/status. Allowed: {allowed}."
         )
     if settings.level_subagent_aggressiveness == "force":
         return (
-            "Every executable task needs required_subagent; mark In Progress, spawn that exact "
-            f"subagent for only that task, then main records result/status. Allowed: {allowed}."
+            "Every executable task needs required_subagent in the task creation command; treat it as routing metadata. "
+            "mark In Progress before work; spawn that exact subagent only when the subagent tool is available and "
+            f"user/session policy allows delegation; otherwise do not claim delegation occurred; main records result/status. Allowed: {allowed}."
         )
     return (
-        "Choose required_subagent by task risk/config; mark In Progress, spawn that exact "
-        f"subagent for only that task, then main records result/status. Allowed: {allowed}."
+        "Choose required_subagent by task risk/config in the same command that creates each executable task; "
+        "treat it as routing metadata; mark In Progress before work; spawn that exact subagent only when the "
+        "subagent tool is available and user/session policy allows delegation; otherwise do not claim delegation "
+        f"occurred; main records result/status. Allowed: {allowed}."
     )
 
 
@@ -383,7 +388,10 @@ def subagent_assignment_guidance(
     required = str(task.get("required_subagent") or "").strip()
     if not required:
         return ""
-    return f"spawn {required} and assign only this task"
+    return (
+        f"if subagent delegation is available and allowed, spawn {required} for only this task; "
+        "otherwise do not claim delegation occurred"
+    )
 
 
 def task_label(task: dict[str, Any]) -> str:

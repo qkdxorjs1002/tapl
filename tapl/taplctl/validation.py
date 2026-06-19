@@ -111,6 +111,36 @@ def validate_task_input(
     }
 
 
+def validate_new_task_routing(
+    *,
+    task_id: str,
+    status: str,
+    required_subagent: str,
+    settings: tapl_config.PlanTaskExecuteConfig,
+) -> list[dict[str, Any]]:
+    if not requires_required_subagent(settings):
+        return []
+    if status not in EXECUTABLE_STATUSES:
+        return []
+    if required_subagent.strip():
+        return []
+    allowed = ", ".join(LEVEL_SUBAGENTS)
+    return [
+        issue(
+            "error",
+            "missing_required_subagent",
+            f"{task_id} is executable and new task creation requires required_subagent.",
+            "Pass --required-subagent in the same `taplctl task set` command "
+            f"using one of: {allowed}. Use minimal routing config only for intentionally direct tasks.",
+            stable_id=task_id,
+        )
+    ]
+
+
+def requires_required_subagent(settings: tapl_config.PlanTaskExecuteConfig) -> bool:
+    return bool(settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal")
+
+
 def validate_stable_ids(plans: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     for plan in plans:
@@ -468,13 +498,16 @@ def level_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     if settings.level_subagent_aggressiveness == "minimal":
         return (
             "Set required_subagent only for obvious risk or explicit routing; missing values do "
-            f"not warn or error. Allowed values: {allowed}."
+            f"not warn or error. Treat it as routing metadata. Allowed values: {allowed}."
         )
     if settings.level_subagent_aggressiveness == "force":
-        return f"Every executable task must set required_subagent to one of {allowed}; missing values are errors."
+        return (
+            f"Every executable task must set required_subagent to one of {allowed}; missing values are errors. "
+            "Set it when creating the task, not as a follow-up repair."
+        )
     return (
-        f"Choose required_subagent from {allowed} based on task risk/config; missing executable "
-        "task values are warnings. Do not use level labels such as `level2`."
+        f"Choose required_subagent from {allowed} based on task risk/config and set it when creating "
+        "new executable tasks; existing unrouted executable tasks warn. Do not use level labels such as `level2`."
     )
 
 
@@ -482,8 +515,9 @@ def subagent_execution_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> 
     if not settings.use_level_subagent:
         return "Subagent execution routing is disabled; execute tasks directly without subagent assignment."
     return (
-        "Before executing a task with required_subagent, set it In Progress; spawn that exact "
-        "subagent and assign only that task; the main agent records the result and final status."
+        "Before executing a task with required_subagent, set it In Progress. Spawn that exact subagent "
+        "only when a subagent tool is available and user/session policy allows delegation; otherwise "
+        "do not claim delegation occurred, and the main agent records direct execution, result, and final status."
     )
 
 

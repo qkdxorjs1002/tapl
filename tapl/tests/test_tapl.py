@@ -88,6 +88,8 @@ class TaplCliTests(unittest.TestCase):
                 "In Progress",
                 "--goal",
                 "Create DB-backed workflow state",
+                "--required-subagent",
+                "@senior-worker",
                 "--json",
             )
             self.assertEqual(task.returncode, 0, task.stderr)
@@ -884,6 +886,26 @@ searchd_start_timeout_ms = 1
     def test_task_upsert_enforces_forced_level_subagent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
+            default_missing = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Needs routing",
+                "--status",
+                "In Progress",
+                "--json",
+            )
+            self.assertEqual(default_missing.returncode, 1)
+            default_missing_payload = json.loads(default_missing.stdout)
+            self.assertEqual(
+                default_missing_payload["plan_task_execute"]["errors"][0]["code"],
+                "missing_required_subagent",
+            )
+            self.assertEqual(default_missing_payload["plan_task_execute"]["warnings"], [])
+
             config_path = Path(tmp) / "tapl.toml"
             config_path.write_text(
                 """
@@ -993,6 +1015,15 @@ level_subagent_aggressiveness = "minimal"
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
             config_path = Path(tmp) / "tapl.toml"
+            minimal_config_path = Path(tmp) / "minimal.toml"
+            minimal_config_path.write_text(
+                """
+[plan-task-execute]
+use_level_subagent = true
+level_subagent_aggressiveness = "minimal"
+""",
+                encoding="utf-8",
+            )
             config_path.write_text(
                 """
 [plan-task-execute]
@@ -1003,6 +1034,8 @@ level_subagent_aggressiveness = "force"
             )
             self.run_cli(
                 db_path,
+                "--config",
+                str(minimal_config_path),
                 "task",
                 "set",
                 "--id",
@@ -1044,6 +1077,8 @@ level_subagent_aggressiveness = "force"
                 "Sparse task",
                 "--status",
                 "In Progress",
+                "--required-subagent",
+                "@senior-worker",
             )
             self.run_cli(
                 db_path,
@@ -1195,8 +1230,11 @@ level_subagent_aggressiveness = "force"
             self.assertIn("meaningful implementation", prompt_guidance)
             self.assertIn("Agent contract", prompt_guidance)
             self.assertIn("Choose required_subagent by task risk/config", prompt_guidance)
+            self.assertIn("same command that creates each executable task", prompt_guidance)
+            self.assertIn("routing metadata", prompt_guidance)
             self.assertIn("mark In Progress", prompt_guidance)
-            self.assertIn("spawn that exact subagent for only that task", prompt_guidance)
+            self.assertIn("only when the subagent tool is available", prompt_guidance)
+            self.assertIn("do not claim delegation occurred", prompt_guidance)
             self.assertIn("main records result/status", prompt_guidance)
             self.assertIn("@senior-worker", prompt_guidance)
             self.assertIn("set execution approval", prompt_guidance)
@@ -1301,7 +1339,8 @@ level_subagent_aggressiveness = "force"
             self.assertIn("defer the existing run", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("merge the work into one plan", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("Continue only TASK-001", "\n".join(active_prompt_payload["next_actions"]))
-            self.assertIn("spawn @senior-worker and assign only this task", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("spawn @senior-worker for only this task", "\n".join(active_prompt_payload["next_actions"]))
+            self.assertIn("do not claim delegation occurred", "\n".join(active_prompt_payload["next_actions"]))
             approval_index = next(index for index, action in enumerate(active_actions) if "approval set" in action)
             continue_index = next(index for index, action in enumerate(active_actions) if "Continue only TASK-001" in action)
             self.assertLess(approval_index, continue_index)
@@ -1346,7 +1385,8 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Flow: search relevant prior work", prompt_text.stdout)
             self.assertIn("plan-based task design", prompt_text.stdout)
             self.assertIn("Execute planned tasks one at a time", prompt_text.stdout)
-            self.assertIn("spawn that exact subagent for only that task", prompt_text.stdout)
+            self.assertIn("only when the subagent tool is available", prompt_text.stdout)
+            self.assertIn("do not claim delegation occurred", prompt_text.stdout)
             self.assertIn("taplctl finding add", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
             self.assertIn("Markdown form", prompt_text.stdout)
@@ -1394,10 +1434,11 @@ level_subagent_aggressiveness = "force"
             self.assertIn("--status 'In Progress'", task_help.stdout)
             self.assertIn("Execute planned tasks one at a time", task_help.stdout)
             self.assertIn(
-                "When level subagent routing is enabled, also set required_subagent as configured",
+                "When level subagent routing is enabled, set required_subagent in the same command",
                 task_help.stdout,
             )
-            self.assertIn("spawn that exact subagent for only that task", task_help.stdout)
+            self.assertIn("tool is available and user/session policy allows delegation", task_help.stdout)
+            self.assertIn("do not claim", task_help.stdout)
             self.assertIn("@senior-worker", task_help.stdout)
             self.assertIn("source plan/spec exists", task_help.stdout)
             self.assertIn("Markdown form", task_help.stdout)
@@ -1729,6 +1770,8 @@ experimental = true
                 "Approved edit",
                 "--status",
                 "In Progress",
+                "--required-subagent",
+                "@senior-worker",
             )
             approval_blocked = self.run_cli(
                 db_path,
@@ -1773,6 +1816,15 @@ experimental = true
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
             config_path = Path(tmp) / "tapl.toml"
+            minimal_config_path = Path(tmp) / "minimal.toml"
+            minimal_config_path.write_text(
+                """
+[plan-task-execute]
+use_level_subagent = true
+level_subagent_aggressiveness = "minimal"
+""",
+                encoding="utf-8",
+            )
             config_path.write_text(
                 """
 [plan-task-execute]
@@ -1783,6 +1835,8 @@ level_subagent_aggressiveness = "force"
             )
             self.run_cli(
                 db_path,
+                "--config",
+                str(minimal_config_path),
                 "task",
                 "set",
                 "--id",

@@ -72,9 +72,11 @@ def task_set_epilog() -> str:
         "  omitted fields keep their stored values. New task creation requires --title and --status.\n"
         "  Executable tasks should include source spec_id, goal, action, verification,\n"
         "  and result when completed; blocked tasks should include blocker and next_action.\n"
-        "  When level subagent routing is enabled, also set required_subagent as configured;\n"
-        "  before execution set In Progress, spawn that exact subagent for only that task,\n"
-        "  then the main agent records result/status.\n"
+        "  When level subagent routing is enabled, set required_subagent in the same command\n"
+        "  that creates each executable task; treat it as routing metadata.\n"
+        "  Before execution set In Progress; spawn that exact subagent only when a subagent\n"
+        "  tool is available and user/session policy allows delegation. Otherwise do not claim\n"
+        "  delegation occurred; the main agent records direct execution and result/status.\n"
         "  Split tasks by meaningful implementation or verification step.\n"
         f"  Status values: {statuses}. Quote multi-word statuses, e.g. --status 'In Progress'.\n"
         f"  Allowed required_subagent values when enabled: {subagents}. Do not use level names such as `level2`.\n"
@@ -785,6 +787,26 @@ def cmd_task_set(args: argparse.Namespace) -> int:
         required_subagent=required_subagent,
         settings=settings.plan_task_execute,
     )
+    if existing is None:
+        create_routing_issues = validation.validate_new_task_routing(
+            task_id=args.id,
+            status=status,
+            required_subagent=required_subagent,
+            settings=settings.plan_task_execute,
+        )
+        if create_routing_issues:
+            input_check["issues"] = [
+                issue for issue in input_check["issues"] if issue.get("code") != "missing_required_subagent"
+            ]
+            input_check["warnings"] = [
+                issue for issue in input_check["warnings"] if issue.get("code") != "missing_required_subagent"
+            ]
+            input_check["errors"] = [
+                issue for issue in input_check["errors"] if issue.get("code") != "missing_required_subagent"
+            ]
+            input_check["issues"].extend(create_routing_issues)
+            input_check["errors"].extend(create_routing_issues)
+            input_check["ok"] = False
     if not input_check["ok"]:
         emit({"ok": False, "plan_task_execute": input_check}, args.json)
         return 1
