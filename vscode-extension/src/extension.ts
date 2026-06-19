@@ -929,7 +929,7 @@ function renderDebugView(status: TaplStatus): string {
 function renderTaskBoard(tasks: TaplItem[]): string {
   const statuses = ['Pending', 'In Progress', 'Blocked', 'Completed', 'Skipped'];
   return `
-    <section class="task-board" aria-label="Tasks grouped by status">
+    <section class="task-board" data-scroll-state-key="active-board" aria-label="Tasks grouped by status">
       ${statuses.map((status) => renderTaskLane(status, tasks.filter((task) => task.status === status))).join('')}
     </section>
   `;
@@ -1887,16 +1887,23 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
       margin-bottom: 12px;
     }
     .task-board {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 10px;
-      align-items: start;
+      --task-lane-width: clamp(260px, 24vw, 320px);
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      max-width: 100%;
       min-width: 0;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      padding-bottom: 12px;
+      scrollbar-gutter: stable;
     }
     .task-lane {
       --lane-accent: var(--border);
+      flex: 0 0 var(--task-lane-width);
       display: grid;
       align-content: start;
+      width: var(--task-lane-width);
       min-width: 0;
       min-height: 180px;
       border: 1px solid var(--border);
@@ -2283,7 +2290,7 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     @media (max-width: 900px) {
       body { padding: 16px; }
       .grid, .dashboard-grid, .workspace-hero { grid-template-columns: 1fr; }
-      .task-board, .insight-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+      .insight-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
       .topbar { display: block; }
       .top-actions {
         justify-items: stretch;
@@ -2303,7 +2310,8 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     }
     @media (max-width: 560px) {
       body { padding: 12px; }
-      .task-board, .metrics, .insight-grid { grid-template-columns: 1fr; }
+      .task-board { --task-lane-width: min(82vw, 300px); }
+      .metrics, .insight-grid { grid-template-columns: 1fr; }
       form { display: grid; }
       .section-heading, .work-item-top {
         display: grid;
@@ -2355,12 +2363,24 @@ ${body}
   }
   const workflowTabs = Array.from(document.querySelectorAll('[data-workflow-tab]'));
   const workflowPanels = Array.from(document.querySelectorAll('[data-workflow-tab-panel]'));
+  const scrollContainers = Array.from(document.querySelectorAll('[data-scroll-state-key]'));
   const hasWorkflowTab = (tabId) => workflowTabs.some((tab) => tab.dataset.workflowTab === tabId);
   const workflowTabState = (state) => {
     if (!state || typeof state !== 'object' || !state.workflowTabsByView || typeof state.workflowTabsByView !== 'object') {
       return {};
     }
     return state.workflowTabsByView;
+  };
+  const scrollPositionState = (state) => {
+    if (!state || typeof state !== 'object' || !state.scrollPositionsByView || typeof state.scrollPositionsByView !== 'object') {
+      return {};
+    }
+    return state.scrollPositionsByView;
+  };
+  const scrollPositionsForCurrentView = (state) => {
+    const positionsByView = scrollPositionState(state);
+    const positions = positionsByView[workflowViewKey];
+    return positions && typeof positions === 'object' ? positions : {};
   };
   const saveWorkflowTab = (tabId) => {
     const currentState = vscode.getState();
@@ -2379,6 +2399,36 @@ ${body}
     const tabsByView = workflowTabState(currentState);
     const tabId = typeof tabsByView[workflowViewKey] === 'string' ? tabsByView[workflowViewKey] : '';
     return hasWorkflowTab(tabId) ? tabId : '';
+  };
+  const saveScrollPosition = (container) => {
+    const key = container.dataset.scrollStateKey;
+    if (!key) {
+      return;
+    }
+    const currentState = vscode.getState();
+    const state = currentState && typeof currentState === 'object' ? currentState : {};
+    const positionsByView = scrollPositionState(state);
+    const positions = scrollPositionsForCurrentView(state);
+    vscode.setState({
+      ...state,
+      scrollPositionsByView: {
+        ...positionsByView,
+        [workflowViewKey]: {
+          ...positions,
+          [key]: container.scrollLeft
+        }
+      }
+    });
+  };
+  const restoreScrollPositions = () => {
+    const positions = scrollPositionsForCurrentView(vscode.getState());
+    scrollContainers.forEach((container) => {
+      const key = container.dataset.scrollStateKey;
+      const left = key ? positions[key] : undefined;
+      if (typeof left === 'number' && Number.isFinite(left)) {
+        container.scrollLeft = left;
+      }
+    });
   };
   const selectWorkflowTab = (tabId, options = {}) => {
     if (!hasWorkflowTab(tabId)) {
@@ -2411,6 +2461,11 @@ ${body}
   });
   const renderedSelectedWorkflowTab = workflowTabs.find((tab) => tab.getAttribute('aria-selected') === 'true')?.dataset.workflowTab || 'plan';
   selectWorkflowTab(getStoredWorkflowTab() || renderedSelectedWorkflowTab, { persist: false });
+  scrollContainers.forEach((container) => {
+    container.addEventListener('scroll', () => saveScrollPosition(container), { passive: true });
+  });
+  restoreScrollPositions();
+  window.requestAnimationFrame(restoreScrollPositions);
 </script>
 </body>
 </html>`;
