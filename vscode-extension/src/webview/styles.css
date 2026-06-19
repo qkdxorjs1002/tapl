@@ -129,7 +129,7 @@ pre {
 }
 
 .tapl-hero-main {
-  @apply grid w-full min-w-0 items-stretch gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,420px)];
+  @apply grid w-full min-w-0 items-stretch gap-5;
 }
 
 .tapl-hero-copy {
@@ -176,11 +176,11 @@ pre {
 }
 
 .tapl-metric-grid {
-  @apply grid gap-3 sm:grid-cols-2 xl:grid-cols-4;
+  @apply grid gap-3 sm:grid-cols-2;
 }
 
 .tapl-stats {
-  @apply stats stats-vertical w-full overflow-hidden rounded-lg border shadow-none lg:stats-horizontal;
+  @apply stats stats-vertical w-full overflow-hidden rounded-lg border shadow-none;
   border-color: var(--tapl-border);
   background: var(--tapl-surface);
   box-shadow: var(--tapl-shadow-soft);
@@ -212,7 +212,7 @@ pre {
 }
 
 .tapl-grid {
-  @apply grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,380px)];
+  @apply grid gap-4;
 }
 
 .tapl-main,
@@ -477,6 +477,28 @@ pre {
 
 .progress-primary::-moz-progress-bar {
   background-color: var(--tapl-accent);
+}
+
+@media (min-width: 860px) {
+  .tapl-hero-main {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
+  }
+}
+
+@media (min-width: 900px) {
+  .tapl-metric-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .tapl-stats {
+    @apply stats-horizontal;
+  }
+}
+
+@media (min-width: 980px) {
+  .tapl-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  }
 }
 
 @media (max-width: 720px) {
