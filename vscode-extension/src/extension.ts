@@ -112,6 +112,7 @@ type MarkdownLabelRun = {
 type PanelView =
   | { type: 'overview' }
   | { type: 'archive'; archive: TaplArchive; detail?: TaplArchiveDetail }
+  | { type: 'archiveEvents'; archive: TaplArchive; detail?: TaplArchiveDetail }
   | { type: 'debug' }
   | { type: 'search'; search: TaplSearchPayload }
   | { type: 'searchItem'; result: TaplSearchResult; detail?: TaplItemDetail };
@@ -411,6 +412,9 @@ class WorkflowWebviewManager {
     if (view.type === 'archive') {
       return view.archive.slug;
     }
+    if (view.type === 'archiveEvents') {
+      return `${view.archive.slug} Events`;
+    }
     if (view.type === 'debug') {
       return 'tapl Debug';
     }
@@ -463,6 +467,13 @@ class WorkflowWebviewManager {
         `archive:${this.currentView.archive.id}`
       );
     }
+    if (this.currentView.type === 'archiveEvents') {
+      return renderPage(
+        webview,
+        renderArchiveEventsView(this.currentView.archive, this.currentView.detail),
+        `archive-events:${this.currentView.archive.id}`
+      );
+    }
     if (this.currentView.type === 'search') {
       return renderPage(
         webview,
@@ -509,6 +520,10 @@ class WorkflowWebviewManager {
     }
     if (message.command === 'debug') {
       await this.navigate({ type: 'debug' }, { pushHistory: true, reveal: false });
+      return;
+    }
+    if (message.command === 'archiveEvents' && typeof message.archiveId === 'string') {
+      await this.openArchiveEventsById(message.archiveId);
       return;
     }
     if (message.command === 'openArchive' && typeof message.archiveId === 'string') {
@@ -590,6 +605,37 @@ class WorkflowWebviewManager {
     }
     void vscode.window.showWarningMessage(detail.error);
   }
+
+  private async openArchiveEventsById(archiveId: string): Promise<void> {
+    if (this.currentView.type === 'archive' && this.currentView.archive.id === archiveId) {
+      await this.navigate(
+        { type: 'archiveEvents', archive: this.currentView.archive, detail: this.currentView.detail },
+        { pushHistory: true, reveal: false }
+      );
+      return;
+    }
+
+    const detail = await safeArchiveDetail(archiveId);
+    if (detail.ok) {
+      await this.navigate(
+        { type: 'archiveEvents', archive: detail.value.archive, detail: detail.value },
+        { pushHistory: true, reveal: false }
+      );
+      return;
+    }
+
+    const archives = await safeArchives();
+    if (!archives.ok) {
+      void vscode.window.showWarningMessage(`${detail.error}\n${archives.error}`);
+      return;
+    }
+    const archive = archives.value.find((item) => item.id === archiveId);
+    if (archive) {
+      await this.navigate({ type: 'archiveEvents', archive }, { pushHistory: true, reveal: false });
+      return;
+    }
+    void vscode.window.showWarningMessage(detail.error);
+  }
 }
 
 function renderOverview(status: TaplStatus, archives: TaplArchive[], searchQuery = ''): string {
@@ -610,14 +656,14 @@ function renderOverview(status: TaplStatus, archives: TaplArchive[], searchQuery
       id: 'plan',
       label: 'Plan',
       count: status.plans.length,
-      selected: false,
+      selected: true,
       content: status.plans.length ? status.plans.map(renderItem).join('') : '<p class="muted">No plan records.</p>'
     },
     {
       id: 'tasks',
       label: 'Tasks',
       count: status.tasks.length,
-      selected: true,
+      selected: false,
       content: status.tasks.length ? status.tasks.map(renderItem).join('') : '<p class="muted">No task records.</p>'
     },
     {
@@ -747,14 +793,14 @@ function renderArchiveView(archive: TaplArchive, detail?: TaplArchiveDetail): st
       id: 'plan',
       label: 'Plan',
       count: plans.length,
-      selected: false,
+      selected: true,
       content: detail && plans.length ? plans.map(renderItem).join('') : `<p class="muted">${detail ? 'No plan records.' : 'Archive details unavailable.'}</p>`
     },
     {
       id: 'tasks',
       label: 'Tasks',
       count: tasks.length,
-      selected: true,
+      selected: false,
       content: detail && tasks.length ? tasks.map(renderItem).join('') : `<p class="muted">${detail ? 'No task records.' : 'Archive details unavailable.'}</p>`
     },
     {
@@ -795,11 +841,35 @@ function renderArchiveView(archive: TaplArchive, detail?: TaplArchiveDetail): st
       <aside class="side-stack">
         ${renderArchiveInfoPanel(archiveMeta)}
         ${detail ? renderArchiveOtherRecordsPanel(otherItems) : renderArchiveUnavailablePanel()}
-        <section class="panel">
-          <h2>Hook Events</h2>
-          ${detail?.events.length ? detail.events.map(renderEvent).join('') : '<p class="muted">No archived hook events.</p>'}
-        </section>
       </aside>
+    </main>
+    <footer class="debug-footer">
+      <button data-command="archiveEvents" data-archive-id="${escapeAttribute(archiveMeta.id)}">Hook Events</button>
+    </footer>
+  `;
+}
+
+function renderArchiveEventsView(archive: TaplArchive, detail?: TaplArchiveDetail): string {
+  const archiveMeta = detail?.archive ?? archive;
+  const events = detail?.events ?? [];
+
+  return `
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">${escapeHtml(archiveMeta.slug)}</p>
+        <h1>Hook Events</h1>
+      </div>
+      <button data-command="back">Back</button>
+    </header>
+    <section class="metrics">
+      ${metric('Archive', 'Saved', formatTimestamp(archiveMeta.created_at) || archiveMeta.slug)}
+      ${metric('Events', String(events.length), detail ? 'archived hook events' : 'detail unavailable')}
+    </section>
+    <main class="single">
+      <section class="panel">
+        <h2>Archived Hook Events</h2>
+        ${events.length ? events.map(renderEvent).join('') : `<p class="muted">${detail ? 'No archived hook events.' : 'Archive details unavailable.'}</p>`}
+      </section>
     </main>
   `;
 }
@@ -2246,6 +2316,7 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
 ${body}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
+  const workflowViewKey = ${escapeScriptJson(viewKey)};
   document.querySelectorAll('[data-command]').forEach((element) => {
     element.addEventListener('click', () => vscode.postMessage({
       command: element.dataset.command,
@@ -2285,16 +2356,28 @@ ${body}
   const workflowTabs = Array.from(document.querySelectorAll('[data-workflow-tab]'));
   const workflowPanels = Array.from(document.querySelectorAll('[data-workflow-tab-panel]'));
   const hasWorkflowTab = (tabId) => workflowTabs.some((tab) => tab.dataset.workflowTab === tabId);
+  const workflowTabState = (state) => {
+    if (!state || typeof state !== 'object' || !state.workflowTabsByView || typeof state.workflowTabsByView !== 'object') {
+      return {};
+    }
+    return state.workflowTabsByView;
+  };
   const saveWorkflowTab = (tabId) => {
     const currentState = vscode.getState();
+    const state = currentState && typeof currentState === 'object' ? currentState : {};
+    const tabsByView = workflowTabState(state);
     vscode.setState({
-      ...(currentState && typeof currentState === 'object' ? currentState : {}),
-      workflowTab: tabId
+      ...state,
+      workflowTabsByView: {
+        ...tabsByView,
+        [workflowViewKey]: tabId
+      }
     });
   };
   const getStoredWorkflowTab = () => {
     const currentState = vscode.getState();
-    const tabId = currentState && typeof currentState.workflowTab === 'string' ? currentState.workflowTab : '';
+    const tabsByView = workflowTabState(currentState);
+    const tabId = typeof tabsByView[workflowViewKey] === 'string' ? tabsByView[workflowViewKey] : '';
     return hasWorkflowTab(tabId) ? tabId : '';
   };
   const selectWorkflowTab = (tabId, options = {}) => {
@@ -2326,11 +2409,15 @@ ${body}
       next.focus();
     });
   });
-  const renderedSelectedWorkflowTab = workflowTabs.find((tab) => tab.getAttribute('aria-selected') === 'true')?.dataset.workflowTab || 'tasks';
+  const renderedSelectedWorkflowTab = workflowTabs.find((tab) => tab.getAttribute('aria-selected') === 'true')?.dataset.workflowTab || 'plan';
   selectWorkflowTab(getStoredWorkflowTab() || renderedSelectedWorkflowTab, { persist: false });
 </script>
 </body>
 </html>`;
+}
+
+function escapeScriptJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
 }
 
 function createNonce(seed: string): string {
