@@ -938,6 +938,57 @@ level_subagent_aggressiveness = "force"
                 "invalid_required_subagent",
             )
 
+    def test_minimal_level_subagent_allows_unrouted_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            config_path = Path(tmp) / "tapl.toml"
+            config_path.write_text(
+                """
+[plan-task-execute]
+use_level_subagent = true
+level_subagent_aggressiveness = "minimal"
+""",
+                encoding="utf-8",
+            )
+
+            task = self.run_cli(
+                db_path,
+                "--config",
+                str(config_path),
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Direct task",
+                "--status",
+                "In Progress",
+                "--json",
+            )
+            self.assertEqual(task.returncode, 0, task.stderr)
+            task_payload = json.loads(task.stdout)
+            issue_codes = {
+                issue["code"]
+                for issue in task_payload["plan_task_execute"]["errors"]
+                + task_payload["plan_task_execute"]["warnings"]
+            }
+            self.assertNotIn("missing_required_subagent", issue_codes)
+
+            context = self.run_cli(
+                db_path,
+                "--config",
+                str(config_path),
+                "context",
+                "--event",
+                "UserPromptSubmit",
+                "--json",
+            )
+            self.assertEqual(context.returncode, 0, context.stderr)
+            context_payload = json.loads(context.stdout)
+            guidance = "\n".join(context_payload["workflow_guidance"])
+            self.assertIn("Use required_subagent only for explicit subagent routing", guidance)
+            self.assertNotIn("fields: spec_id, goal, action, required_subagent", guidance)
+
     def test_validate_reports_plan_task_execute_issues(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
@@ -1134,14 +1185,19 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Objective", prompt_guidance)
             self.assertIn("Requirements trace", prompt_guidance)
             self.assertIn("Selected approach", prompt_guidance)
+            self.assertIn("Before `taplctl plan set`", prompt_guidance)
             self.assertIn("request_user_input", prompt_guidance)
+            self.assertIn("material scope/risk/API/UX/data/compat", prompt_guidance)
             self.assertIn("prefer one short question", prompt_guidance)
             self.assertIn("2-3 mutually exclusive options", prompt_guidance)
             self.assertIn("Tool is available in the current mode", prompt_guidance)
             self.assertIn("one concise plain-text question only when blocked", prompt_guidance)
             self.assertIn("meaningful implementation", prompt_guidance)
             self.assertIn("Agent contract", prompt_guidance)
-            self.assertIn("spawn it to execute that task", prompt_guidance)
+            self.assertIn("Choose required_subagent by task risk/config", prompt_guidance)
+            self.assertIn("mark In Progress", prompt_guidance)
+            self.assertIn("spawn that exact subagent for only that task", prompt_guidance)
+            self.assertIn("main records result/status", prompt_guidance)
             self.assertIn("@senior-worker", prompt_guidance)
             self.assertIn("set execution approval", prompt_guidance)
             self.assertIn("taplctl finding add", prompt_guidance)
@@ -1167,7 +1223,7 @@ level_subagent_aggressiveness = "force"
             less_planning_payload = json.loads(less_planning_context.stdout)
             less_planning_guidance = "\n".join(less_planning_payload["workflow_guidance"])
             self.assertIn(
-                "blocking or high-risk planning choices",
+                "only for blocking or high-risk material scope/risk/API/UX/data/compat choices",
                 less_planning_guidance,
             )
             self.assertIn("otherwise state assumptions", less_planning_guidance)
@@ -1190,10 +1246,12 @@ level_subagent_aggressiveness = "force"
             more_planning_payload = json.loads(more_planning_context.stdout)
             more_planning_guidance = "\n".join(more_planning_payload["workflow_guidance"])
             self.assertIn(
-                "Use request_user_input Tool early",
+                "use request_user_input Tool early",
                 more_planning_guidance,
             )
-            self.assertIn("before plan set", more_planning_guidance)
+            self.assertIn("Before `taplctl plan set`", more_planning_guidance)
+            self.assertIn("prefer one short question", more_planning_guidance)
+            self.assertIn("2-3 mutually exclusive options", more_planning_guidance)
             self.assertIn("if unavailable", more_planning_guidance)
 
             no_subagent_config = Path(tmp) / "no-subagent.toml"
@@ -1212,7 +1270,7 @@ level_subagent_aggressiveness = "force"
             )
             no_subagent_payload = json.loads(no_subagent_context.stdout)
             no_subagent_guidance = "\n".join(no_subagent_payload["workflow_guidance"])
-            self.assertNotIn("spawn it to execute that task", no_subagent_guidance)
+            self.assertNotIn("spawn", no_subagent_guidance)
             self.assertNotIn("required_subagent", no_subagent_guidance)
 
             self.run_cli(
@@ -1260,6 +1318,10 @@ level_subagent_aggressiveness = "force"
                 "spawn @senior-worker",
                 "\n".join(active_no_subagent_payload["next_actions"]),
             )
+            self.assertNotIn(
+                "required_subagent",
+                "\n".join(active_no_subagent_payload["next_actions"]),
+            )
 
             text = self.run_cli(db_path, "context", "--event", "SessionStart")
             self.assertEqual(text.returncode, 0, text.stderr)
@@ -1282,7 +1344,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Flow: search relevant prior work", prompt_text.stdout)
             self.assertIn("plan-based task design", prompt_text.stdout)
             self.assertIn("Execute planned tasks one at a time", prompt_text.stdout)
-            self.assertIn("spawn it to execute that task", prompt_text.stdout)
+            self.assertIn("spawn that exact subagent for only that task", prompt_text.stdout)
             self.assertIn("taplctl finding add", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
             self.assertIn("Markdown form", prompt_text.stdout)
@@ -1329,8 +1391,11 @@ level_subagent_aggressiveness = "force"
             self.assertIn("New task creation requires --title and --status", task_help.stdout)
             self.assertIn("--status 'In Progress'", task_help.stdout)
             self.assertIn("Execute planned tasks one at a time", task_help.stdout)
-            self.assertIn("When level subagent routing is enabled", task_help.stdout)
-            self.assertIn("spawn the task's required_subagent", task_help.stdout)
+            self.assertIn(
+                "When level subagent routing is enabled, also set required_subagent as configured",
+                task_help.stdout,
+            )
+            self.assertIn("spawn that exact subagent for only that task", task_help.stdout)
             self.assertIn("@senior-worker", task_help.stdout)
             self.assertIn("source plan/spec exists", task_help.stdout)
             self.assertIn("Markdown form", task_help.stdout)

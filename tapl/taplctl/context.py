@@ -214,24 +214,37 @@ def plan_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
 
 def task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     fields = "spec_id, goal, action, "
-    if settings.use_level_subagent:
+    if settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal":
         fields += "required_subagent, "
     fields += "verification, result"
+    subagent_note = ""
+    if settings.use_level_subagent and settings.level_subagent_aggressiveness == "minimal":
+        subagent_note = " Use required_subagent only for explicit subagent routing."
     return (
         "Tasks: after source plan exists, set --spec-id PLAN-001/SPEC-001; split by meaningful "
         "implementation/verification; Execute planned tasks one at a time in order: In Progress "
         f"before work, then Completed/Blocked/Skipped; fields: {fields}; "
         "blocked: blocker, next_action; updates are partial."
+        f"{subagent_note}"
     )
 
 
 def subagent_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     allowed = ", ".join(validation.LEVEL_SUBAGENTS)
     if settings.level_subagent_aggressiveness == "minimal":
-        return f"Set required_subagent only for clear risk/routing. Spawn it for task execution. Allowed: {allowed}."
+        return (
+            "Set required_subagent only for clear risk/routing; if set, mark the task In Progress, "
+            f"spawn that exact subagent for only that task, then main records result/status. Allowed: {allowed}."
+        )
     if settings.level_subagent_aggressiveness == "force":
-        return f"Every executable task needs required_subagent; spawn it to execute that task. Allowed: {allowed}."
-    return f"Choose required_subagent by task risk; spawn it to execute that task. Allowed: {allowed}."
+        return (
+            "Every executable task needs required_subagent; mark In Progress, spawn that exact "
+            f"subagent for only that task, then main records result/status. Allowed: {allowed}."
+        )
+    return (
+        "Choose required_subagent by task risk/config; mark In Progress, spawn that exact "
+        f"subagent for only that task, then main records result/status. Allowed: {allowed}."
+    )
 
 
 def next_actions(

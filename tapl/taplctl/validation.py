@@ -321,7 +321,11 @@ def validate_task_content(
             for field in required_fields:
                 if not str(task.get(field) or "").strip():
                     missing.append(field)
-            if settings.use_level_subagent and not str(task.get("required_subagent") or "").strip():
+            if (
+                settings.use_level_subagent
+                and settings.level_subagent_aggressiveness != "minimal"
+                and not str(task.get("required_subagent") or "").strip()
+            ):
                 missing.append("required_subagent")
             if status == "Blocked":
                 for field in ("blocker", "next_action"):
@@ -460,20 +464,26 @@ def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
 def level_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     allowed = ", ".join(LEVEL_SUBAGENTS)
     if not settings.use_level_subagent:
-        return "Level subagent routing is disabled."
+        return "Level subagent routing is disabled; omit required_subagent and do not spawn subagents."
     if settings.level_subagent_aggressiveness == "minimal":
-        return f"Set a level subagent only for obvious risk or explicit routing. Allowed values: {allowed}."
+        return (
+            "Set required_subagent only for obvious risk or explicit routing; missing values do "
+            f"not warn or error. Allowed values: {allowed}."
+        )
     if settings.level_subagent_aggressiveness == "force":
-        return f"Every executable task must use one of: {allowed}."
-    return f"Choose one of {allowed} based on task risk; do not use level labels such as `level2`."
+        return f"Every executable task must set required_subagent to one of {allowed}; missing values are errors."
+    return (
+        f"Choose required_subagent from {allowed} based on task risk/config; missing executable "
+        "task values are warnings. Do not use level labels such as `level2`."
+    )
 
 
 def subagent_execution_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     if not settings.use_level_subagent:
-        return "Subagent execution routing is disabled."
+        return "Subagent execution routing is disabled; execute tasks directly without subagent assignment."
     return (
-        "When executing a task with required_subagent, spawn that subagent and assign only that task; "
-        "the main agent keeps TAPL plan/task records and final status updates."
+        "Before executing a task with required_subagent, set it In Progress; spawn that exact "
+        "subagent and assign only that task; the main agent records the result and final status."
     )
 
 
@@ -489,16 +499,18 @@ def plan_detail_guidance(value: str) -> str:
 def planning_approval_guidance(value: str) -> str:
     guidance = {
         "less": (
-            "Use request_user_input Tool only for blocking or high-risk planning choices; "
-            "otherwise state assumptions."
+            "Before `taplctl plan set`, use request_user_input Tool only for blocking or "
+            "high-risk material scope/risk/API/UX/data/compat choices; otherwise state assumptions."
         ),
         "auto": (
-            "Use request_user_input Tool for ambiguous material scope/risk/API/UX/data/compat "
-            "decisions; prefer one short question with 2-3 mutually exclusive options."
+            "Before `taplctl plan set`, use request_user_input Tool for ambiguous material "
+            "scope/risk/API/UX/data/compat decisions; prefer one short question with 2-3 "
+            "mutually exclusive options."
         ),
         "more": (
-            "Use request_user_input Tool early, before plan set, for unclear planning methods, "
-            "scope, or tradeoffs; propose concise options."
+            "Before `taplctl plan set`, use request_user_input Tool early for unclear planning "
+            "methods, material scope/risk/API/UX/data/compat, or tradeoffs; prefer one short "
+            "question with 2-3 mutually exclusive options."
         ),
     }[value]
     return (
@@ -575,11 +587,17 @@ def task_granularity_guidance(value: str) -> str:
 
 
 def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    subagent = "required_subagent, " if settings.use_level_subagent else ""
+    subagent = ""
+    if settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal":
+        subagent = "required_subagent, "
+    optional_subagent = ""
+    if settings.use_level_subagent and settings.level_subagent_aggressiveness == "minimal":
+        optional_subagent = " Set required_subagent only for explicit subagent routing."
     return (
         f"Executable tasks should include source spec_id, goal, action, {subagent}verification, "
         "and result when completed; blocked tasks should include blocker and next_action. "
         "When updating an existing task, pass only changed fields; omitted fields keep stored values."
+        f"{optional_subagent}"
     )
 
 
