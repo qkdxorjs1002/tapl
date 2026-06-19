@@ -13,6 +13,7 @@
     "skipLibCheck": true
   },
   "include": [
-    "src"
+    "src/extension.ts",
+    "src/vscode.d.ts"
   ]
 }

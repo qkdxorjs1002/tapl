@@ -1,8 +1,15 @@
 .git/**
 .codex/**
 out/**/*.map
+webview-dist/**/*.map
+webview-dist/**/*.html
 src/**
+pnpm-lock.yaml
 tsconfig.json
+tsconfig.webview.json
+vite.config.ts
+tailwind.config.cjs
+postcss.config.cjs
 *.vsix
 node_modules/**
 README.ko.md

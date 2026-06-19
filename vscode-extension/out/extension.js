@@ -104,7 +104,7 @@ const READABLE_BLOCK_LABEL_PATTERN = new RegExp(`(?:^|\\s)(REQ-\\d+|${Array.from
 function activate(context) {
     const activeProvider = new ActiveProvider();
     const archiveProvider = new ArchiveProvider();
-    const webviewManager = new WorkflowWebviewManager();
+    const webviewManager = new WorkflowWebviewManager(context.extensionUri);
     const refreshTrees = () => {
         activeProvider.refresh();
         archiveProvider.refresh();
@@ -239,9 +239,11 @@ class ArchiveProvider {
     }
 }
 class WorkflowWebviewManager {
-    constructor() {
+    constructor(extensionUri) {
+        this.extensionUri = extensionUri;
         this.currentView = { type: 'overview' };
         this.backStack = [];
+        this.shellReady = false;
     }
     async openOverview() {
         this.backStack.length = 0;
@@ -256,7 +258,7 @@ class WorkflowWebviewManager {
     }
     async refresh() {
         if (this.panel) {
-            await this.render(this.titleForView(this.currentView), { reveal: false });
+            await this.postCurrentView('view:update');
         }
     }
     async searchFromCommand() {
@@ -302,7 +304,11 @@ class WorkflowWebviewManager {
     async render(title, options = {}) {
         const panel = this.ensurePanel(title, options.reveal ?? true);
         panel.title = title;
-        panel.webview.html = await this.renderCurrentView(panel.webview);
+        if (!this.shellReady) {
+            panel.webview.html = this.renderShell(panel.webview);
+            this.shellReady = true;
+        }
+        await this.postCurrentView('view:update');
     }
     ensurePanel(title, reveal) {
         if (this.panel) {
@@ -313,48 +319,80 @@ class WorkflowWebviewManager {
         }
         this.panel = vscode.window.createWebviewPanel('taplWorkflow.viewer', title, vscode.ViewColumn.One, {
             enableScripts: true,
-            retainContextWhenHidden: false
+            retainContextWhenHidden: true,
+            localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'webview-dist')]
         });
         this.panel.webview.onDidReceiveMessage((message) => {
             void this.handleMessage(message);
         });
         this.panel.onDidDispose(() => {
             this.panel = undefined;
+            this.shellReady = false;
         });
         return this.panel;
     }
-    async renderCurrentView(webview) {
+    renderShell(webview) {
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets', 'index.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets', 'index.css'));
+        return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src ${webview.cspSource}; font-src ${webview.cspSource};">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="${styleUri}">
+  <title>tapl Workflow</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="${scriptUri}"></script>
+</body>
+</html>`;
+    }
+    async postCurrentView(type) {
+        if (!this.panel) {
+            return;
+        }
+        const view = await this.buildCurrentView();
+        const message = { type, view };
+        await this.panel.webview.postMessage(message);
+    }
+    async buildCurrentView() {
         if (this.currentView.type === 'archive') {
-            return renderPage(webview, renderArchiveView(this.currentView.archive, this.currentView.detail), `archive:${this.currentView.archive.id}`);
+            return { type: 'archive', archive: this.currentView.archive, detail: this.currentView.detail };
         }
         if (this.currentView.type === 'archiveEvents') {
-            return renderPage(webview, renderArchiveEventsView(this.currentView.archive, this.currentView.detail), `archive-events:${this.currentView.archive.id}`);
+            return { type: 'archiveEvents', archive: this.currentView.archive, detail: this.currentView.detail };
         }
         if (this.currentView.type === 'search') {
-            return renderPage(webview, renderSearchView(this.currentView.search), `search:${this.currentView.search.query}`);
+            return { type: 'search', search: this.currentView.search };
         }
         if (this.currentView.type === 'searchItem') {
-            return renderPage(webview, renderSearchItemView(this.currentView.result, this.currentView.detail), `search-item:${this.currentView.result.id ?? this.currentView.result.stable_id}`);
+            return { type: 'searchItem', result: this.currentView.result, detail: this.currentView.detail };
         }
         if (this.currentView.type === 'debug') {
             const status = await safeTapl(['status', '--json', '--include-events']);
             if (!status.ok) {
-                return renderPage(webview, renderError(status.error), 'error');
+                return { type: 'error', message: status.error };
             }
-            return renderPage(webview, renderDebugView(status.value), 'debug');
+            return { type: 'debug', status: status.value };
         }
         const status = await safeTapl(['status', '--json', '--full']);
         if (!status.ok) {
-            return renderPage(webview, renderError(status.error), 'error');
+            return { type: 'error', message: status.error };
         }
         const archives = await safeArchives(8);
         if (!archives.ok) {
-            return renderPage(webview, renderError(archives.error), 'error');
+            return { type: 'error', message: archives.error };
         }
-        return renderPage(webview, renderOverview(status.value, archives.value, this.lastSearch?.query ?? ''), 'overview');
+        return { type: 'overview', status: status.value, archives: archives.value, searchQuery: this.lastSearch?.query ?? '' };
     }
     async handleMessage(message) {
         if (!isRecord(message) || typeof message.command !== 'string') {
+            return;
+        }
+        if (message.command === 'ready') {
+            await this.postCurrentView('hydrate');
             return;
         }
         if (message.command === 'refresh') {

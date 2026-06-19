@@ -7,5 +7,6 @@ tapl/uv.lock
 tapl/.venv/
 tapl/dist/
 __pycache__/
+.pnpm-store/
 vscode-extension/node_modules/
 vscode-extension/tapl-workflow-viewer-*.vsix

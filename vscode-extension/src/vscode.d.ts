@@ -69,6 +69,7 @@ declare module 'vscode' {
 
   export interface ExtensionContext {
     subscriptions: Disposable[];
+    extensionUri: Uri;
   }
 
   export interface WorkspaceFolder {
@@ -86,11 +87,14 @@ declare module 'vscode' {
   export interface Webview {
     html: string;
     cspSource: string;
+    asWebviewUri(localResource: Uri): Uri;
     onDidReceiveMessage(listener: (message: unknown) => unknown): Disposable;
+    postMessage(message: unknown): Thenable<boolean>;
   }
 
   export interface WebviewOptions {
     enableScripts?: boolean;
+    localResourceRoots?: Uri[];
   }
 
   export interface WebviewPanelOptions {
