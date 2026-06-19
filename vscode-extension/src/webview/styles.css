@@ -4,27 +4,45 @@
 
 :root {
   color-scheme: light dark;
-  --tapl-border: var(--vscode-panel-border);
-  --tapl-muted: var(--vscode-descriptionForeground);
-  --tapl-panel: var(--vscode-sideBar-background);
+  --rounded-box: 0.5rem;
+  --rounded-btn: 0.375rem;
+  --rounded-badge: 999px;
+  --tapl-page-bg: var(--vscode-sideBar-background, var(--vscode-panel-background, var(--vscode-editor-background)));
+  --tapl-border: var(--vscode-panel-border, #3f3f46);
+  --tapl-border-strong: var(--vscode-focusBorder, #6ca6f8);
+  --tapl-muted: var(--vscode-descriptionForeground, #9ca3af);
+  --tapl-panel: var(--vscode-sideBar-background, var(--tapl-page-bg));
   --tapl-surface: var(--vscode-editorWidget-background, var(--tapl-panel));
+  --tapl-surface-muted: var(--vscode-input-background, var(--tapl-surface));
+  --tapl-item-bg: var(--vscode-editor-background, var(--tapl-surface));
+  --tapl-hover: var(--vscode-list-hoverBackground, var(--tapl-surface-muted));
   --tapl-success: var(--vscode-testing-iconPassed, #4e9a06);
   --tapl-warning: var(--vscode-editorWarning-foreground, #cca700);
-  --tapl-error: var(--vscode-errorForeground);
-  --tapl-accent: var(--vscode-focusBorder);
+  --tapl-error: var(--vscode-errorForeground, #f48771);
+  --tapl-accent: var(--vscode-focusBorder, #3794ff);
+  --tapl-info: var(--vscode-symbolIcon-eventForeground, var(--tapl-accent));
+  --tapl-shadow: 0 14px 40px rgb(0 0 0 / 0.18);
+  --tapl-shadow-soft: 0 8px 20px rgb(0 0 0 / 0.12);
 }
 
 html {
-  background: var(--vscode-editor-background);
+  min-height: 100%;
+  background: var(--tapl-page-bg);
 }
 
 body {
+  min-height: 100vh;
   min-width: 0;
   margin: 0;
-  padding: 24px;
+  padding: 20px;
   color: var(--vscode-editor-foreground);
-  background: var(--vscode-editor-background);
+  background: var(--tapl-page-bg);
   font-family: var(--vscode-font-family);
+}
+
+#root {
+  min-height: 100%;
+  background: var(--tapl-page-bg);
 }
 
 button,
@@ -36,6 +54,7 @@ input {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
   border-color: var(--vscode-button-background);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.16);
 }
 
 .btn-primary:hover {
@@ -51,12 +70,17 @@ input {
 
 .btn-secondary:hover {
   background: var(--vscode-button-secondaryHoverBackground, var(--tapl-surface));
+  border-color: var(--tapl-border-strong);
 }
 
 .input {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border-color: var(--vscode-input-border, var(--tapl-border));
+}
+
+.input::placeholder {
+  color: var(--tapl-muted);
 }
 
 button:focus-visible,
@@ -84,79 +108,200 @@ pre {
 }
 
 .tapl-shell {
-  @apply grid gap-4;
+  @apply mx-auto grid w-full gap-4;
+  max-width: 1440px;
+  background: var(--tapl-page-bg);
 }
 
-.tapl-topbar,
-.tapl-hero {
-  @apply flex flex-wrap items-start justify-between gap-4;
-}
-
-.tapl-hero {
-  @apply border-b pb-4;
+.tapl-topbar {
+  @apply flex flex-wrap items-start justify-between gap-4 rounded-lg border p-4;
   border-color: var(--tapl-border);
+  background: var(--tapl-surface);
+  box-shadow: var(--tapl-shadow-soft);
+}
+
+.tapl-hero {
+  @apply hero overflow-hidden rounded-lg border p-5;
+  border-color: var(--tapl-border);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--tapl-surface) 92%, var(--tapl-accent) 8%), var(--tapl-panel));
+  box-shadow: var(--tapl-shadow);
+}
+
+.tapl-hero-main {
+  @apply grid w-full min-w-0 items-stretch gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,420px)];
+}
+
+.tapl-hero-copy {
+  @apply grid min-w-0 content-center gap-3;
+}
+
+.tapl-hero-meta,
+.tapl-hero-pills,
+.tapl-command-actions {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.tapl-hero-summary {
+  @apply m-0 max-w-4xl text-sm leading-6;
+  color: var(--tapl-muted);
+}
+
+.tapl-command-panel {
+  @apply grid min-w-0 content-start gap-3 rounded-lg border p-3;
+  border-color: var(--tapl-border);
+  background: color-mix(in srgb, var(--tapl-surface-muted) 82%, transparent);
+}
+
+.tapl-command-actions {
+  @apply justify-end;
 }
 
 .tapl-search {
-  @apply flex w-full max-w-md gap-2;
+  @apply flex w-full min-w-0;
 }
 
 .tapl-search .input {
   @apply min-w-0 flex-1;
 }
 
-.tapl-stats {
-  @apply stats stats-vertical w-full border bg-base-200 shadow-none lg:stats-horizontal;
+.tapl-progress-card {
+  @apply grid gap-2 rounded-md border p-3;
   border-color: var(--tapl-border);
+  background: var(--tapl-surface);
+}
+
+.tapl-progress {
+  height: 0.5rem;
+}
+
+.tapl-metric-grid {
+  @apply grid gap-3 sm:grid-cols-2 xl:grid-cols-4;
+}
+
+.tapl-stats {
+  @apply stats stats-vertical w-full overflow-hidden rounded-lg border shadow-none lg:stats-horizontal;
+  border-color: var(--tapl-border);
+  background: var(--tapl-surface);
+  box-shadow: var(--tapl-shadow-soft);
+}
+
+.tapl-stat {
+  @apply rounded-lg border shadow-none;
+  min-height: 112px;
+  border-color: var(--tapl-border);
+  background: var(--tapl-surface);
+  box-shadow: var(--tapl-shadow-soft);
+}
+
+.tapl-stat.pending {
+  border-top: 3px solid var(--tapl-warning);
+}
+
+.tapl-stat.in-progress,
+.tapl-stat.info {
+  border-top: 3px solid var(--tapl-accent);
+}
+
+.tapl-stat.blocked {
+  border-top: 3px solid var(--tapl-error);
+}
+
+.tapl-stat.completed {
+  border-top: 3px solid var(--tapl-success);
 }
 
 .tapl-grid {
-  @apply grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)];
+  @apply grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,380px)];
 }
 
 .tapl-main,
 .tapl-rail,
 .tapl-stack {
-  @apply grid min-w-0 content-start gap-4;
+  @apply grid min-w-0 content-start gap-3;
 }
 
 .tapl-card {
-  @apply card min-w-0 border bg-base-200 shadow-none;
+  @apply card min-w-0 overflow-hidden border shadow-none;
   border-color: var(--tapl-border);
+  background: var(--tapl-surface);
+  border-radius: 0.5rem;
+  box-shadow: var(--tapl-shadow-soft);
 }
 
 .tapl-card-body {
   @apply card-body min-w-0 gap-3 p-4;
 }
 
+.tapl-card-header {
+  @apply flex min-w-0 items-start justify-between gap-3 border-b pb-3;
+  border-color: var(--tapl-border);
+}
+
 .tapl-board {
-  @apply flex max-w-full gap-3 overflow-x-auto pb-3;
+  @apply flex max-w-full gap-3 overflow-x-auto pb-2;
   scrollbar-gutter: stable;
 }
 
 .tapl-lane {
-  @apply card min-w-64 max-w-80 flex-none border bg-base-200 shadow-none;
+  @apply card flex-none overflow-hidden border shadow-none;
+  width: clamp(220px, 23vw, 300px);
   border-color: var(--tapl-border);
+  background: var(--tapl-surface);
+  border-radius: 0.5rem;
 }
 
 .tapl-lane.pending {
-  border-top: 2px solid var(--tapl-warning);
+  border-top: 3px solid var(--tapl-warning);
 }
 
 .tapl-lane.in-progress {
-  border-top: 2px solid var(--tapl-accent);
+  border-top: 3px solid var(--tapl-accent);
 }
 
 .tapl-lane.blocked {
-  border-top: 2px solid var(--tapl-error);
+  border-top: 3px solid var(--tapl-error);
 }
 
 .tapl-lane.completed {
-  border-top: 2px solid var(--tapl-success);
+  border-top: 3px solid var(--tapl-success);
 }
 
 .tapl-lane.skipped {
-  border-top: 2px solid var(--tapl-muted);
+  border-top: 3px solid var(--tapl-muted);
+}
+
+.tapl-lane.empty {
+  background: color-mix(in srgb, var(--tapl-surface) 84%, transparent);
+}
+
+.tapl-lane-body {
+  @apply grid gap-3 p-3;
+}
+
+.tapl-lane-header {
+  @apply flex min-w-0 items-center justify-between gap-2;
+}
+
+.tapl-status-dot {
+  @apply inline-block h-2.5 w-2.5 flex-none rounded-full;
+  background: var(--tapl-muted);
+}
+
+.tapl-status-dot.pending {
+  background: var(--tapl-warning);
+}
+
+.tapl-status-dot.in-progress {
+  background: var(--tapl-accent);
+}
+
+.tapl-status-dot.blocked {
+  background: var(--tapl-error);
+}
+
+.tapl-status-dot.completed {
+  background: var(--tapl-success);
 }
 
 .tapl-muted,
@@ -165,12 +310,14 @@ pre {
 }
 
 .tapl-eyebrow {
-  @apply text-xs uppercase tracking-normal;
+  @apply text-xs font-semibold uppercase tracking-normal;
 }
 
 .tapl-item {
-  @apply min-w-0 rounded-md border bg-base-100 p-3;
+  @apply min-w-0 rounded-md border p-3;
   border-color: var(--tapl-border);
+  background: var(--tapl-item-bg);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.08);
 }
 
 .tapl-clickable {
@@ -178,7 +325,39 @@ pre {
 }
 
 .tapl-clickable:hover {
-  background: var(--vscode-list-hoverBackground);
+  border-color: var(--tapl-border-strong);
+  background: var(--tapl-hover);
+}
+
+.tapl-clickable:focus-visible {
+  outline: 2px solid var(--tapl-accent);
+  outline-offset: 2px;
+}
+
+.tapl-task-card,
+.tapl-record-card {
+  @apply grid gap-1;
+}
+
+.tapl-archive-button {
+  @apply grid gap-1;
+}
+
+.tapl-archive-title {
+  @apply text-sm font-semibold;
+}
+
+.tapl-empty-state {
+  @apply m-0 rounded-md border border-dashed p-3 text-sm;
+  border-color: var(--tapl-border);
+  color: var(--tapl-muted);
+  background: color-mix(in srgb, var(--tapl-surface-muted) 72%, transparent);
+}
+
+.kbd {
+  border-color: var(--tapl-border);
+  background: var(--tapl-surface-muted);
+  color: var(--vscode-editor-foreground);
 }
 
 .tapl-detail-grid {
@@ -192,6 +371,20 @@ pre {
 
 .tapl-detail-row:first-child {
   @apply border-t-0 pt-0;
+}
+
+.tapl-focus-card .tapl-card-body {
+  @apply gap-2;
+}
+
+.tapl-focus-row {
+  @apply rounded-md border p-3;
+  border-color: var(--tapl-border);
+  background: var(--tapl-item-bg);
+}
+
+.tapl-focus-row:first-child {
+  border-top-width: 1px;
 }
 
 .tapl-readable {
@@ -224,15 +417,34 @@ pre {
 
 .tapl-readable pre {
   @apply overflow-x-auto rounded-md p-3;
-  background: var(--vscode-textCodeBlock-background, var(--tapl-surface));
+  background: var(--vscode-textCodeBlock-background, var(--tapl-surface-muted));
 }
 
 .tapl-tabs {
-  @apply tabs tabs-bordered;
+  @apply tabs;
+  border-radius: 0.375rem;
+  background: var(--tapl-surface-muted);
+  padding: 0.25rem;
+}
+
+.tapl-tabs .tab {
+  @apply rounded-md;
+  min-height: 1.8rem;
+}
+
+.tapl-tabs .tab-active {
+  background: var(--vscode-button-secondaryBackground, var(--tapl-surface));
+  color: var(--vscode-editor-foreground);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.12);
 }
 
 .tapl-tab-panel {
   @apply mt-3 grid gap-3;
+}
+
+.badge {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
 .badge.pending,
@@ -259,12 +471,56 @@ pre {
   color: var(--tapl-muted);
 }
 
+.progress-primary::-webkit-progress-value {
+  background-color: var(--tapl-accent);
+}
+
+.progress-primary::-moz-progress-bar {
+  background-color: var(--tapl-accent);
+}
+
 @media (max-width: 720px) {
   body {
     padding: 16px;
   }
 
+  .tapl-hero {
+    padding: 16px;
+  }
+
+  .tapl-command-actions {
+    justify-content: stretch;
+  }
+
+  .tapl-command-actions .btn {
+    flex: 1 1 0;
+  }
+
   .tapl-search {
     max-width: none;
+  }
+
+  .tapl-board {
+    gap: 10px;
+  }
+
+  .tapl-lane {
+    width: min(82vw, 290px);
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    padding: 12px;
+  }
+
+  .tapl-metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tapl-card-body,
+  .tapl-lane-body,
+  .tapl-command-panel {
+    padding: 12px;
   }
 }

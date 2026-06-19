@@ -105,33 +105,53 @@ function OverviewView({
     ? String(status.active_run.request_summary || status.active_run.slug || 'active')
     : 'No active run';
   const activeRunSlug = status.active_run ? String(status.active_run.slug || 'active') : 'No active run';
+  const pendingCount = counts.Pending ?? 0;
+  const activeCount = counts['In Progress'] ?? 0;
+  const blockedCount = counts.Blocked ?? 0;
+  const nextTask = status.tasks.find((task) => task.status === 'In Progress')
+    ?? status.tasks.find((task) => task.status === 'Pending');
+  const currentPlan = status.plans[0];
 
   return (
     <>
       <header className="tapl-hero">
-        <div className="min-w-0">
-          <p className="tapl-eyebrow">workspace</p>
-          <h1 className="m-0 text-3xl font-semibold">tapl Workflow</h1>
-          <p className="tapl-muted mt-2 max-w-4xl">{conciseText(activeSummary, 180)}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Badge label={activeRunSlug} tone={status.active_run ? 'in-progress' : undefined} />
-            <Pill label="Pending" value={counts.Pending} />
-            <Pill label="In Progress" value={counts['In Progress']} />
-            <Pill label="Blocked" value={counts.Blocked} />
+        <div className="tapl-hero-main">
+          <div className="tapl-hero-copy">
+            <div className="tapl-hero-meta">
+              <span className="tapl-eyebrow">workspace</span>
+              <Badge label={activeRunSlug} tone={status.active_run ? 'in-progress' : undefined} />
+            </div>
+            <h1 className="m-0 text-3xl font-semibold">tapl Workflow</h1>
+            <p className="tapl-hero-summary">{conciseText(activeSummary, 220)}</p>
+            <div className="tapl-hero-pills">
+              <Pill label="Pending" value={pendingCount} />
+              <Pill label="In Progress" value={activeCount} />
+              <Pill label="Blocked" value={blockedCount} />
+            </div>
+          </div>
+          <div className="tapl-command-panel">
+            <div className="tapl-command-actions">
+              <button className="btn btn-primary btn-sm" type="button" onClick={() => send({ command: 'refresh' })}>
+                Refresh
+              </button>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'debug' })}>
+                Debug
+              </button>
+            </div>
+            <SearchForm defaultQuery={searchQuery} send={send} />
+            <ProgressMeter
+              label="Run progress"
+              value={completionPercent}
+              detail={`${completedTasks} of ${totalTasks} work items completed`}
+            />
           </div>
         </div>
-        <div className="grid w-full max-w-md justify-items-end gap-2">
-          <button className="btn btn-primary btn-sm" type="button" onClick={() => send({ command: 'refresh' })}>
-            Refresh
-          </button>
-          <SearchForm defaultQuery={searchQuery} send={send} />
-        </div>
       </header>
-      <section className="tapl-stats">
-        <Stat label="Run progress" value={`${completionPercent}%`} detail={`${completedTasks} of ${totalTasks} work items completed`} />
-        <Stat label="Open work" value={String(openTasks)} detail={`${counts['In Progress'] ?? 0} active / ${counts.Blocked ?? 0} blocked`} />
-        <Stat label="Plans" value={String(status.plans.length)} detail="execution specs in this run" />
-        <Stat label="Archives" value={String(archives.length)} detail="recent saved runs" />
+      <section className="tapl-metric-grid">
+        <Stat label="Open work" value={String(openTasks)} detail={`${activeCount} active / ${blockedCount} blocked`} tone={blockedCount ? 'blocked' : 'in-progress'} />
+        <Stat label="Current plan" value={String(status.plans.length)} detail={currentPlan ? conciseText(currentPlan.title, 48) : 'no execution spec'} tone="info" />
+        <Stat label="Next task" value={nextTask ? nextTask.stable_id : 'None'} detail={nextTask ? conciseText(nextTask.title, 48) : 'queue is clear'} tone="pending" />
+        <Stat label="Archives" value={String(archives.length)} detail="recent saved runs" tone="completed" />
       </section>
       <section className="tapl-grid">
         <div className="tapl-main">
@@ -159,11 +179,6 @@ function OverviewView({
           </Card>
         </aside>
       </section>
-      <footer>
-        <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'debug' })}>
-          Debug
-        </button>
-      </footer>
     </>
   );
 }
@@ -371,11 +386,23 @@ function Topbar({ eyebrow, title, action }: { eyebrow: string; title: string; ac
   );
 }
 
-function Card({ title, eyebrow, aside, children }: { title: string; eyebrow?: string; aside?: ReactNode; children: ReactNode }): JSX.Element {
+function Card({
+  title,
+  eyebrow,
+  aside,
+  children,
+  className
+}: {
+  title: string;
+  eyebrow?: string;
+  aside?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}): JSX.Element {
   return (
-    <section className="tapl-card">
+    <section className={['tapl-card', className].filter(Boolean).join(' ')}>
       <div className="tapl-card-body">
-        <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="tapl-card-header">
           <div className="min-w-0">
             {eyebrow ? <p className="tapl-eyebrow">{eyebrow}</p> : null}
             <h2 className="card-title m-0 text-base">{title}</h2>
@@ -388,13 +415,26 @@ function Card({ title, eyebrow, aside, children }: { title: string; eyebrow?: st
   );
 }
 
-function Stat({ label, value, detail }: { label: string; value: string; detail: string }): JSX.Element {
+function Stat({ label, value, detail, tone }: { label: string; value: string; detail: string; tone?: string }): JSX.Element {
   return (
-    <article className="stat min-w-0">
+    <article className={`tapl-stat stat min-w-0 ${tone ? statusClass(tone) : ''}`}>
       <span className="stat-title">{label}</span>
       <strong className="stat-value text-xl">{value}</strong>
       <small className="stat-desc">{detail}</small>
     </article>
+  );
+}
+
+function ProgressMeter({ label, value, detail }: { label: string; value: number; detail: string }): JSX.Element {
+  return (
+    <div className="tapl-progress-card">
+      <div className="flex items-center justify-between gap-3">
+        <span className="tapl-eyebrow">{label}</span>
+        <strong>{value}%</strong>
+      </div>
+      <progress className="progress progress-primary tapl-progress" value={value} max={100} />
+      <small className="tapl-muted">{detail}</small>
+    </div>
   );
 }
 
@@ -408,15 +448,15 @@ function SearchForm({ defaultQuery, send }: { defaultQuery: string; send: (messa
     }
   };
   return (
-    <form className="tapl-search" onSubmit={submit}>
+    <form className="tapl-search join" onSubmit={submit}>
       <input
-        className="input input-bordered input-sm"
+        className="input input-bordered input-sm join-item"
         value={query}
         placeholder="Search workflow history"
         aria-label="Search workflow history"
         onChange={(event) => setQuery(event.target.value)}
       />
-      <button className="btn btn-primary btn-sm" type="submit">Search</button>
+      <button className="btn btn-primary btn-sm join-item" type="submit">Search</button>
     </form>
   );
 }
@@ -426,7 +466,7 @@ function RecordTabs({ tabs }: { tabs: Array<{ id: string; label: string; count: 
   const selectedTab = tabs.find((tab) => tab.id === selected) ?? tabs[0];
   return (
     <div>
-      <div className="tapl-tabs" role="tablist">
+      <div className="tapl-tabs tabs-boxed" role="tablist">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -451,20 +491,27 @@ function RecordTabs({ tabs }: { tabs: Array<{ id: string; label: string; count: 
 function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
   return (
     <section className="tapl-board" aria-label="Tasks grouped by status">
-      {TASK_STATUSES.map((status) => (
-        <section key={status} className={`tapl-lane ${statusClass(status)}`}>
-          <div className="card-body gap-3 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="m-0 text-sm font-semibold">{status}</h3>
-              <span className="badge badge-sm">{tasks.filter((task) => task.status === status).length}</span>
+      {TASK_STATUSES.map((status) => {
+        const statusTasks = tasks.filter((task) => task.status === status);
+        return (
+          <section key={status} className={`tapl-lane ${statusClass(status)} ${statusTasks.length ? '' : 'empty'}`}>
+            <div className="tapl-lane-body">
+              <div className="tapl-lane-header">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={`tapl-status-dot ${statusClass(status)}`} />
+                  <h3 className="m-0 text-sm font-semibold">{status}</h3>
+                </div>
+                <span className="badge badge-sm">{statusTasks.length}</span>
+              </div>
+              <div className="tapl-stack">
+                {statusTasks.slice(0, 5).map((task) => <TaskCard key={task.stable_id} task={task} />)}
+                {statusTasks.length > 5 ? <p className="tapl-muted m-0 text-xs">+{statusTasks.length - 5} more</p> : null}
+                {!statusTasks.length ? <p className="tapl-empty-state">No work items.</p> : null}
+              </div>
             </div>
-            <div className="tapl-stack">
-              {tasks.filter((task) => task.status === status).slice(0, 5).map((task) => <TaskCard key={task.stable_id} task={task} />)}
-              {!tasks.some((task) => task.status === status) ? <p className="tapl-muted m-0 text-sm">No work items.</p> : null}
-            </div>
-          </div>
-        </section>
-      ))}
+          </section>
+        );
+      })}
     </section>
   );
 }
@@ -472,9 +519,9 @@ function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
 function TaskCard({ task }: { task: TaplItem }): JSX.Element {
   const summary = conciseText(task.body || task.title, 150);
   return (
-    <article className="tapl-item">
+    <article className="tapl-item tapl-task-card">
       <div className="mb-2 flex items-start justify-between gap-2">
-        <span className="font-mono text-xs">{task.stable_id}</span>
+        <span className="kbd kbd-xs">{task.stable_id}</span>
         {task.status ? <Badge label={task.status} tone={statusClass(task.status)} /> : null}
       </div>
       <h4 className="m-0 text-sm font-semibold">{task.title}</h4>
@@ -486,7 +533,7 @@ function TaskCard({ task }: { task: TaplItem }): JSX.Element {
 
 function ItemList({ items, empty }: { items: TaplItem[]; empty: string }): JSX.Element {
   if (!items.length) {
-    return <p className="tapl-muted m-0">{empty}</p>;
+    return <p className="tapl-empty-state">{empty}</p>;
   }
   return (
     <div className="tapl-stack">
@@ -497,9 +544,9 @@ function ItemList({ items, empty }: { items: TaplItem[]; empty: string }): JSX.E
 
 function ItemCard({ item }: { item: TaplItem }): JSX.Element {
   return (
-    <article className="tapl-item">
+    <article className="tapl-item tapl-record-card">
       <div className="mb-2 flex items-start justify-between gap-2">
-        <span className="font-mono text-xs">{item.stable_id}</span>
+        <span className="kbd kbd-xs">{item.stable_id}</span>
         {item.status ? <Badge label={item.status} tone={statusClass(item.status)} /> : null}
       </div>
       <h3 className="m-0 text-sm font-semibold">{item.title}</h3>
@@ -510,7 +557,7 @@ function ItemCard({ item }: { item: TaplItem }): JSX.Element {
 
 function EventList({ events, empty }: { events: TaplEvent[]; empty: string }): JSX.Element {
   if (!events.length) {
-    return <p className="tapl-muted m-0">{empty}</p>;
+    return <p className="tapl-empty-state">{empty}</p>;
   }
   return (
     <div className="tapl-stack">
@@ -521,7 +568,7 @@ function EventList({ events, empty }: { events: TaplEvent[]; empty: string }): J
 
 function EventCard({ event }: { event: TaplEvent }): JSX.Element {
   return (
-    <article className="tapl-item">
+    <article className="tapl-item tapl-record-card">
       <div className="mb-2 flex items-start justify-between gap-2">
         <strong>{event.event_type}{event.tool_name ? ` ${event.tool_name}` : ''}</strong>
         <Badge label={event.mode} />
@@ -534,18 +581,18 @@ function EventCard({ event }: { event: TaplEvent }): JSX.Element {
 
 function ArchiveList({ archives, send }: { archives: TaplArchive[]; send: (message: WebviewCommand) => void }): JSX.Element {
   if (!archives.length) {
-    return <p className="tapl-muted m-0">No archives.</p>;
+    return <p className="tapl-empty-state">No archives.</p>;
   }
   return (
     <div className="tapl-stack">
       {archives.map((archive) => (
         <button
           key={archive.id}
-          className="tapl-item tapl-clickable"
+          className="tapl-item tapl-clickable tapl-archive-button"
           type="button"
           onClick={() => send({ command: 'openArchive', archiveId: archive.id })}
         >
-          <strong>{archive.slug}</strong>
+          <span className="tapl-archive-title">{archive.slug}</span>
           <span className="tapl-muted mt-1 block text-sm">{conciseText(archive.summary || 'No summary', 140)}</span>
           <span className="tapl-muted mt-1 block text-xs">{formatTimestamp(archive.created_at)}</span>
         </button>
@@ -578,7 +625,7 @@ function RunFocus({ status, counts }: { status: TaplStatus; counts: Record<strin
   const nextTask = status.tasks.find((task) => task.status === 'In Progress')
     ?? status.tasks.find((task) => task.status === 'Pending');
   return (
-    <Card title="Run health" eyebrow="Focus">
+    <Card title="Run health" eyebrow="Focus" className="tapl-focus-card">
       <div className="tapl-detail-grid">
         <FocusRow label="Current plan" value={currentPlan ? currentPlan.title : 'No plan records'} detail={currentPlan?.stable_id} />
         <FocusRow label="Next work" value={nextTask ? nextTask.title : 'No active task'} detail={nextTask?.stable_id} />
@@ -591,7 +638,7 @@ function RunFocus({ status, counts }: { status: TaplStatus; counts: Record<strin
 
 function FocusRow({ label, value, detail }: { label: string; value: string; detail?: string }): JSX.Element {
   return (
-    <div className="tapl-detail-row">
+    <div className="tapl-detail-row tapl-focus-row">
       <span className="tapl-muted text-xs">{label}</span>
       <strong className="text-sm">{value}</strong>
       {detail ? <small className="tapl-muted">{detail}</small> : null}
@@ -603,7 +650,7 @@ function SearchResult({ result, send }: { result: TaplSearchResult; send: (messa
   const content = (
     <>
       <div className="mb-1 flex items-start justify-between gap-2">
-        <strong><span className="font-mono text-xs">{result.stable_id}</span> {result.title}</strong>
+        <strong><span className="kbd kbd-xs">{result.stable_id}</span> {result.title}</strong>
         <Badge label={result.kind} />
       </div>
       {result.status ? <span className="tapl-muted text-sm">{result.status}</span> : null}
@@ -612,10 +659,10 @@ function SearchResult({ result, send }: { result: TaplSearchResult; send: (messa
     </>
   );
   if (typeof result.id !== 'number') {
-    return <article className="tapl-item">{content}</article>;
+    return <article className="tapl-item tapl-record-card">{content}</article>;
   }
   return (
-    <button className="tapl-item tapl-clickable" type="button" onClick={() => send({ command: 'openSearchResult', itemId: result.id as number })}>
+    <button className="tapl-item tapl-clickable tapl-record-card" type="button" onClick={() => send({ command: 'openSearchResult', itemId: result.id as number })}>
       {content}
     </button>
   );
