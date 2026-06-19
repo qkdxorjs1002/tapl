@@ -11,6 +11,16 @@ from . import config as tapl_config, db
 
 LEVEL_SUBAGENTS = ("@junior-worker", "@senior-worker", "@specialist-worker")
 EXECUTABLE_STATUSES = ("Pending", "In Progress", "Blocked")
+PLAN_KEY_LABELS = (
+    "Objective",
+    "Requirements trace",
+    "Selected approach",
+    "Affected files/interfaces",
+    "Execution order",
+    "Risks",
+    "Validation",
+    "Approval needs",
+)
 PLAN_ID_PATTERN = re.compile(r"^(?:PLAN|SPEC)-\d{3,}$")
 TASK_ID_PATTERN = re.compile(r"^TASK-\d{3,}$")
 
@@ -488,6 +498,14 @@ def plan_format_guidance() -> str:
     return (
         "Plan records should include objective, related REQ-* trace, selected approach, "
         "affected files/interfaces, execution order, risks, validation, and approval needs when applicable."
+    )
+
+
+def plan_key_label_guidance() -> str:
+    labels = ", ".join(PLAN_KEY_LABELS)
+    return (
+        f"Keep plan section labels in English: {labels}; "
+        "write each section's content in the user's language."
     )
 
 
