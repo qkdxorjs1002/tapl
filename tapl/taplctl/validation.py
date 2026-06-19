@@ -487,11 +487,24 @@ def plan_detail_guidance(value: str) -> str:
 
 
 def planning_approval_guidance(value: str) -> str:
-    return {
-        "less": "When available, use request_user_input Tool only for blocking or high-risk planning choices; otherwise state assumptions.",
-        "auto": "When available and planning choices are ambiguous, use request_user_input Tool with 1-3 concise options for material scope/risk/API/UX/data/compat decisions.",
-        "more": "When available, use request_user_input Tool early for unclear planning methods, scope, or tradeoffs; propose concise options before plan set.",
+    guidance = {
+        "less": (
+            "Use request_user_input Tool only for blocking or high-risk planning choices; "
+            "otherwise state assumptions."
+        ),
+        "auto": (
+            "Use request_user_input Tool for ambiguous material scope/risk/API/UX/data/compat "
+            "decisions; prefer one short question with 2-3 mutually exclusive options."
+        ),
+        "more": (
+            "Use request_user_input Tool early, before plan set, for unclear planning methods, "
+            "scope, or tradeoffs; propose concise options."
+        ),
     }[value]
+    return (
+        f"{guidance} Invoke it only when the Tool is available in the current mode; "
+        "if unavailable, state assumptions or ask one concise plain-text question only when blocked."
+    )
 
 
 def plan_format_guidance() -> str:

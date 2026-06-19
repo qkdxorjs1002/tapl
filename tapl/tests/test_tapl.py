@@ -1135,7 +1135,10 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Requirements trace", prompt_guidance)
             self.assertIn("Selected approach", prompt_guidance)
             self.assertIn("request_user_input", prompt_guidance)
-            self.assertIn("1-3 concise options", prompt_guidance)
+            self.assertIn("prefer one short question", prompt_guidance)
+            self.assertIn("2-3 mutually exclusive options", prompt_guidance)
+            self.assertIn("Tool is available in the current mode", prompt_guidance)
+            self.assertIn("one concise plain-text question only when blocked", prompt_guidance)
             self.assertIn("meaningful implementation", prompt_guidance)
             self.assertIn("Agent contract", prompt_guidance)
             self.assertIn("spawn it to execute that task", prompt_guidance)
@@ -1162,10 +1165,13 @@ level_subagent_aggressiveness = "force"
                 "--json",
             )
             less_planning_payload = json.loads(less_planning_context.stdout)
+            less_planning_guidance = "\n".join(less_planning_payload["workflow_guidance"])
             self.assertIn(
                 "blocking or high-risk planning choices",
-                "\n".join(less_planning_payload["workflow_guidance"]),
+                less_planning_guidance,
             )
+            self.assertIn("otherwise state assumptions", less_planning_guidance)
+            self.assertIn("if unavailable", less_planning_guidance)
 
             more_planning_config = Path(tmp) / "more-planning.toml"
             more_planning_config.write_text(
@@ -1182,10 +1188,13 @@ level_subagent_aggressiveness = "force"
                 "--json",
             )
             more_planning_payload = json.loads(more_planning_context.stdout)
+            more_planning_guidance = "\n".join(more_planning_payload["workflow_guidance"])
             self.assertIn(
-                "use request_user_input Tool early",
-                "\n".join(more_planning_payload["workflow_guidance"]),
+                "Use request_user_input Tool early",
+                more_planning_guidance,
             )
+            self.assertIn("before plan set", more_planning_guidance)
+            self.assertIn("if unavailable", more_planning_guidance)
 
             no_subagent_config = Path(tmp) / "no-subagent.toml"
             no_subagent_config.write_text(
