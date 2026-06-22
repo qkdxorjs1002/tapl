@@ -223,7 +223,7 @@ The VS Code extension in `vscode-extension/` reads the same state through:
 taplctl status --json
 taplctl archive list --json
 taplctl search --json
-taplctl item show --json
+taplctl item show --id <id> --json
 ```
 
 It gives you an activity-bar view over active runs, plans, tasks, findings,
@@ -300,12 +300,15 @@ taplctl finding add --help
 taplctl approval set --help
 taplctl archive create --help
 taplctl search "query" --json
+taplctl item show --id 1 --json
 taplctl reindex --json
 ```
 
 `taplctl search` returns 7 results by default. Set `[search] max_results` in
 `.tapl/config.toml` or `~/.tapl/config.toml` to change the default, and use
-`--limit` for one-off overrides.
+`--limit` for one-off overrides. When a search result is relevant and the
+snippet is not enough context, use its numeric `id` with
+`taplctl item show --id <id> --json` before relying on the full record details.
 
 Plan/task validation is controlled by `[plan-task-execute]` in the same config
 files. Settings such as `plan_detail`, `task_granularity`,

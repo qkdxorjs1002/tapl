@@ -24,7 +24,8 @@ def taplctl_argument_guidance() -> str:
 
 def taplctl_command_guidance() -> str:
     return (
-        "Inspect/search: `taplctl status --json`; `taplctl search '<query>' --json`."
+        "Inspect/search/detail: `taplctl status --json`; "
+        "`taplctl search '<query>' --json`; `taplctl item show --id <id> --json`."
     )
 
 
@@ -38,6 +39,15 @@ def external_findings_guidance() -> str:
     return (
         "Findings: if external search/docs changes requirements/plan/tasks/verification, "
         "add decision-relevant facts with `taplctl finding add`; Markdown form for details/impact."
+    )
+
+
+def prior_search_guidance() -> str:
+    return (
+        "Search: before planning non-trivial work, run "
+        "`taplctl search '<compact prompt query>' --json` and use only relevant results; "
+        "for results you judge relevant where the snippet is insufficient, run "
+        "`taplctl item show --id <id> --json` before relying on full details."
     )
 
 
@@ -161,9 +171,7 @@ def workflow_guidance(
 
     if event == "UserPromptSubmit":
         if should_suggest_prior_search(state, prompt):
-            lines.append(
-                "Search: before planning non-trivial work, run `taplctl search '<compact prompt query>' --json` and use only relevant results."
-            )
+            lines.append(prior_search_guidance())
         lines.extend(plan_task_context_guidance(settings))
         lines.append(external_findings_guidance())
         return lines

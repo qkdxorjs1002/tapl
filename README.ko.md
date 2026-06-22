@@ -221,7 +221,7 @@ workspace로 새지 않게 합니다.
 taplctl status --json
 taplctl archive list --json
 taplctl search --json
-taplctl item show --json
+taplctl item show --id <id> --json
 ```
 
 Activity bar에서 active run, plan, task, finding, archive, search result를 볼
@@ -297,12 +297,15 @@ taplctl finding add --help
 taplctl approval set --help
 taplctl archive create --help
 taplctl search "query" --json
+taplctl item show --id 1 --json
 taplctl reindex --json
 ```
 
 `taplctl search`는 기본 7개 결과를 반환합니다. 기본값은 `.tapl/config.toml` 또는
 `~/.tapl/config.toml`의 `[search] max_results`로 바꿀 수 있고, 한 번만 바꿀
-때는 `--limit`을 사용합니다.
+때는 `--limit`을 사용합니다. 검색 결과가 관련 있고 snippet만으로 맥락이
+부족하면, 결과의 numeric `id`를 `taplctl item show --id <id> --json`에 넘겨
+전체 record detail을 확인한 뒤 사용합니다.
 
 Plan/task validation은 같은 config 파일의 `[plan-task-execute]`로 제어합니다.
 `plan_detail`, `task_granularity`, `planning_approval_level`,
