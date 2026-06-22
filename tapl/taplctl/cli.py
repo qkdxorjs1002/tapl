@@ -766,6 +766,7 @@ AGENT_LIST_ITEM_TAGS = {
     "plans": "plan",
     "results": "result",
     "tasks": "task",
+    "updated_fields": "field",
     "workflow_guidance": "guidance",
 }
 
@@ -843,6 +844,50 @@ def agent_output(payload: dict[str, Any], root_tag: str = "tapl_output") -> str:
         append_agent_node(lines, 1, key, value)
     lines.append(f"</{root_tag}>")
     return "\n".join(lines)
+
+
+def agent_write_receipt(
+    operation: str,
+    *,
+    active_run: Any = None,
+    item: Any = None,
+    approval: Any = None,
+    archive: Any = None,
+    updated_fields: tuple[str, ...] | list[str] = (),
+    plan_task_execute: dict[str, Any] | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "ok": True,
+        "operation": operation,
+    }
+    if updated_fields:
+        payload["updated_fields"] = list(updated_fields)
+    active_run_fields = agent_select_fields(active_run, ("id", "slug", "status"))
+    item_fields = agent_select_fields(item, ("id", "stable_id", "kind", "status"))
+    approval_fields = agent_select_fields(approval, ("id", "kind", "decision"))
+    archive_fields = agent_select_fields(archive, ("id", "slug"))
+    if active_run_fields:
+        payload["active_run"] = active_run_fields
+    if item_fields:
+        payload["item"] = item_fields
+    if approval_fields:
+        payload["approval"] = approval_fields
+    if archive_fields:
+        payload["archive"] = archive_fields
+    if plan_task_execute is not None:
+        payload["plan_task_execute"] = plan_task_execute
+    return agent_output(payload)
+
+
+def agent_select_fields(value: Any, fields: tuple[str, ...]) -> dict[str, Any]:
+    if value is None:
+        return {}
+    data = value if isinstance(value, dict) else db.row_to_dict(value)
+    return {field: data.get(field) for field in fields if agent_value_present(data.get(field))}
+
+
+def provided_arg_fields(args: argparse.Namespace, fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(field for field in fields if getattr(args, field, None) is not None)
 
 
 def append_agent_node(lines: list[str], depth: int, tag: str, value: Any) -> None:
@@ -1032,6 +1077,14 @@ def cmd_run_set(args: argparse.Namespace) -> int:
         request_summary=args.summary,
         result_summary=args.result,
     )
+    if args.agent:
+        updated_fields = tuple(
+            field
+            for field, value in (("request_summary", args.summary), ("result_summary", args.result))
+            if value is not None
+        )
+        print(agent_write_receipt("run_set", active_run=run, updated_fields=updated_fields))
+        return 0
     emit({"ok": True, "active_run": db.row_to_dict(run)}, args.json, args.agent)
     return 0
 
@@ -1100,15 +1153,41 @@ def cmd_plan_set(args: argparse.Namespace) -> int:
         approval_needs=merged_field("approval_needs"),
         notes=merged_field("notes"),
     )
-    output_item = db.item_detail(conn, item["id"]) if args.agent else db.row_to_dict(item)
+    plan_task_execute = validation.validate_plan_task_execute(
+        conn,
+        settings.plan_task_execute,
+    )
+    if args.agent:
+        print(
+            agent_write_receipt(
+                "plan_set",
+                item=item,
+                updated_fields=provided_arg_fields(
+                    args,
+                    (
+                        "title",
+                        "status",
+                        "summary",
+                        "objective",
+                        "requirements_trace",
+                        "selected_approach",
+                        "affected_files",
+                        "execution_order",
+                        "risks",
+                        "validation",
+                        "approval_needs",
+                        "notes",
+                    ),
+                ),
+                plan_task_execute=plan_task_execute,
+            )
+        )
+        return 0
     emit(
         {
             "ok": True,
-            "item": output_item,
-            "plan_task_execute": validation.validate_plan_task_execute(
-                conn,
-                settings.plan_task_execute,
-            ),
+            "item": db.row_to_dict(item),
+            "plan_task_execute": plan_task_execute,
         },
         args.json,
         args.agent,
@@ -1213,15 +1292,39 @@ def cmd_task_set(args: argparse.Namespace) -> int:
         blocker=blocker,
         next_action=next_action,
     )
-    output_item = db.item_detail(conn, item["id"]) if args.agent else db.row_to_dict(item)
+    plan_task_execute = validation.validate_plan_task_execute(
+        conn,
+        settings.plan_task_execute,
+    )
+    if args.agent:
+        print(
+            agent_write_receipt(
+                "task_set",
+                item=item,
+                updated_fields=provided_arg_fields(
+                    args,
+                    (
+                        "title",
+                        "status",
+                        "spec_id",
+                        "goal",
+                        "action",
+                        "required_subagent",
+                        "verification",
+                        "result",
+                        "blocker",
+                        "next_action",
+                    ),
+                ),
+                plan_task_execute=plan_task_execute,
+            )
+        )
+        return 0
     emit(
         {
             "ok": True,
-            "item": output_item,
-            "plan_task_execute": validation.validate_plan_task_execute(
-                conn,
-                settings.plan_task_execute,
-            ),
+            "item": db.row_to_dict(item),
+            "plan_task_execute": plan_task_execute,
         },
         args.json,
         args.agent,
@@ -1239,8 +1342,26 @@ def cmd_finding_add(args: argparse.Namespace) -> int:
         impact=args.impact,
         related_ids=args.related_ids,
     )
-    output_item = db.item_detail(conn, item["id"]) if args.agent else db.row_to_dict(item)
-    emit({"ok": True, "item": output_item}, args.json, args.agent)
+    if args.agent:
+        print(
+            agent_write_receipt(
+                "finding_add",
+                item=item,
+                updated_fields=tuple(
+                    field
+                    for field, value in (
+                        ("title", args.title),
+                        ("source", args.source),
+                        ("finding", args.finding),
+                        ("impact", args.impact),
+                        ("related_ids", args.related_ids),
+                    )
+                    if value
+                ),
+            )
+        )
+        return 0
+    emit({"ok": True, "item": db.row_to_dict(item)}, args.json, args.agent)
     return 0
 
 
@@ -1251,6 +1372,9 @@ def cmd_approval_set(args: argparse.Namespace) -> int:
         decision=args.decision,
         prompt=args.prompt,
     )
+    if args.agent:
+        print(agent_write_receipt("approval_set", approval=approval, updated_fields=("decision",)))
+        return 0
     emit({"ok": True, "approval": db.row_to_dict(approval)}, args.json, args.agent)
     return 0
 
@@ -1286,6 +1410,10 @@ def cmd_item_show(args: argparse.Namespace) -> int:
 
 def cmd_archive_create(args: argparse.Namespace) -> int:
     archive = db.archive_active_run(open_conn(args), slug=args.slug, summary=args.summary)
+    if args.agent:
+        updated_fields = ("summary",) if args.summary else ()
+        print(agent_write_receipt("archive_create", archive=archive, updated_fields=updated_fields))
+        return 0
     emit({"ok": True, "archive": db.row_to_dict(archive)}, args.json, args.agent)
     return 0
 

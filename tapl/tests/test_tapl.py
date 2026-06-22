@@ -237,9 +237,13 @@ class TaplCliTests(unittest.TestCase):
             )
             self.assertEqual(plan.returncode, 0, plan.stderr)
             self.assertIn("<tapl_output>", plan.stdout)
+            self.assertIn("<operation>plan_set</operation>", plan.stdout)
             self.assertIn("<kind>plan</kind>", plan.stdout)
             self.assertIn("<stable_id>PLAN-001</stable_id>", plan.stdout)
-            self.assertIn("<objective>Expose compact agent output</objective>", plan.stdout)
+            self.assertIn("<field>objective</field>", plan.stdout)
+            self.assertNotIn("Expose compact agent output", plan.stdout)
+            self.assertNotIn("REQ-001: agent output", plan.stdout)
+            self.assertNotIn("<objective>", plan.stdout)
             self.assertNotIn("<body>", plan.stdout)
             self.assertNotIn("<created_at>", plan.stdout)
 
@@ -266,9 +270,15 @@ class TaplCliTests(unittest.TestCase):
                 "--agent",
             )
             self.assertEqual(task.returncode, 0, task.stderr)
+            self.assertIn("<operation>task_set</operation>", task.stdout)
             self.assertIn("<stable_id>TASK-001</stable_id>", task.stdout)
-            self.assertIn("<goal>Use agent output</goal>", task.stdout)
-            self.assertIn("<required_subagent>@senior-worker</required_subagent>", task.stdout)
+            self.assertIn("<status>In Progress</status>", task.stdout)
+            self.assertIn("<field>goal</field>", task.stdout)
+            self.assertNotIn("Use agent output", task.stdout)
+            self.assertNotIn("Run workflow commands with --agent", task.stdout)
+            self.assertNotIn("@senior-worker", task.stdout)
+            self.assertNotIn("<goal>", task.stdout)
+            self.assertNotIn("<required_subagent>", task.stdout)
             self.assertIn("<code>execution_approval_missing</code>", task.stdout)
             self.assertNotIn("<config>", task.stdout)
 
@@ -291,12 +301,17 @@ class TaplCliTests(unittest.TestCase):
                 "--agent",
             )
             self.assertEqual(approval.returncode, 0, approval.stderr)
+            self.assertIn("<operation>approval_set</operation>", approval.stdout)
             self.assertIn("<decision>approved</decision>", approval.stdout)
-            self.assertIn("<prompt>Execute agent task</prompt>", approval.stdout)
+            self.assertNotIn("Execute agent task", approval.stdout)
+            self.assertNotIn("<prompt>", approval.stdout)
 
             run = self.run_cli(db_path, "run", "set", "--summary", "Agent run", "--agent")
             self.assertEqual(run.returncode, 0, run.stderr)
-            self.assertIn("<request_summary>Agent run</request_summary>", run.stdout)
+            self.assertIn("<operation>run_set</operation>", run.stdout)
+            self.assertIn("<field>request_summary</field>", run.stdout)
+            self.assertNotIn("Agent run", run.stdout)
+            self.assertNotIn("<request_summary>", run.stdout)
 
             finding = self.run_cli(
                 db_path,
@@ -311,8 +326,12 @@ class TaplCliTests(unittest.TestCase):
                 "--agent",
             )
             self.assertEqual(finding.returncode, 0, finding.stderr)
+            self.assertIn("<operation>finding_add</operation>", finding.stdout)
             self.assertIn("<kind>finding</kind>", finding.stdout)
-            self.assertIn("<impact>Affects implementation</impact>", finding.stdout)
+            self.assertIn("<field>finding</field>", finding.stdout)
+            self.assertNotIn("Useful fact", finding.stdout)
+            self.assertNotIn("Affects implementation", finding.stdout)
+            self.assertNotIn("<impact>", finding.stdout)
 
             context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--agent")
             self.assertEqual(context.returncode, 0, context.stderr)
@@ -400,6 +419,23 @@ class TaplCliTests(unittest.TestCase):
             )
             self.assertEqual(install_repo.returncode, 0, install_repo.stderr)
             self.assertIn("<tapl_output>", install_repo.stdout)
+
+            archive = self.run_cli(
+                db_path,
+                "archive",
+                "create",
+                "--slug",
+                "agent-receipt",
+                "--summary",
+                "Archived agent receipt run",
+                "--agent",
+            )
+            self.assertEqual(archive.returncode, 0, archive.stderr)
+            self.assertIn("<operation>archive_create</operation>", archive.stdout)
+            self.assertIn("<slug>agent-receipt</slug>", archive.stdout)
+            self.assertIn("<field>summary</field>", archive.stdout)
+            self.assertNotIn("Archived agent receipt run", archive.stdout)
+            self.assertNotIn("<summary>", archive.stdout)
 
     def test_plan_set_uses_structured_fields_and_partial_updates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
