@@ -30,6 +30,9 @@ brew install taplctl
 ### Choice 2. 의미 검색 포함 설치 (권장)
 brew install taplctl-semantic
 
+### Option. 미리 로딩된 의미 검색 데몬 자동 시작
+brew services start taplctl-semantic
+
 ####################################
 # Codex hooks, configs 설치
 ####################################

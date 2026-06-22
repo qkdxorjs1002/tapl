@@ -30,6 +30,9 @@ brew install taplctl
 ### Choice 2. With semantic search (Recommend)
 brew install taplctl-semantic
 
+### Option. Auto-run pre-loaded semantic search daemon
+brew services start taplctl-semantic
+
 ####################################
 # Install codex hooks and configs
 ####################################
