@@ -1,3 +1,5 @@
+@import 'github-markdown-css/github-markdown.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -405,37 +407,81 @@ pre {
   border-top-width: 1px;
 }
 
-.tapl-readable {
-  @apply grid gap-2 text-sm leading-6;
+.tapl-readable.markdown-body {
+  @apply text-sm leading-6;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 82ch;
+  color: var(--vscode-editor-foreground);
+  background: transparent;
+  font-family: var(--vscode-font-family);
 }
 
-.tapl-readable ul,
-.tapl-readable ol {
-  @apply ml-5 grid gap-1;
+.tapl-readable.markdown-body > *:first-child {
+  margin-top: 0;
 }
 
-.tapl-readable ul {
-  @apply list-disc;
+.tapl-readable.markdown-body > *:last-child {
+  margin-bottom: 0;
 }
 
-.tapl-readable ol {
-  @apply list-decimal;
+.tapl-readable.markdown-body h1,
+.tapl-readable.markdown-body h2 {
+  padding-bottom: 0.3em;
+  border-bottom-color: var(--tapl-border-subtle);
 }
 
-.tapl-readable blockquote {
-  @apply border-l-2 pl-3;
-  border-color: var(--tapl-border-control);
+.tapl-readable.markdown-body h1,
+.tapl-readable.markdown-body h2,
+.tapl-readable.markdown-body h3,
+.tapl-readable.markdown-body h4,
+.tapl-readable.markdown-body h5,
+.tapl-readable.markdown-body h6 {
+  color: var(--vscode-editor-foreground);
+}
+
+.tapl-readable.markdown-body a {
+  color: var(--vscode-textLink-foreground, var(--tapl-accent));
+}
+
+.tapl-readable.markdown-body blockquote {
   color: var(--tapl-muted);
+  border-left-color: var(--tapl-border-control);
 }
 
-.tapl-readable code {
-  @apply rounded px-1 py-0.5;
-  background: var(--vscode-textCodeBlock-background, var(--tapl-surface));
+.tapl-readable.markdown-body hr {
+  background-color: var(--tapl-border-subtle);
 }
 
-.tapl-readable pre {
-  @apply overflow-x-auto rounded-md p-3;
-  background: var(--vscode-textCodeBlock-background, var(--tapl-surface-muted));
+.tapl-readable.markdown-body table tr {
+  background-color: var(--tapl-item-bg);
+  border-top-color: var(--tapl-border-subtle);
+}
+
+.tapl-readable.markdown-body table tr:nth-child(2n) {
+  background-color: var(--tapl-surface-muted);
+}
+
+.tapl-readable.markdown-body table th,
+.tapl-readable.markdown-body table td {
+  border-color: var(--tapl-border-subtle);
+}
+
+.tapl-readable.markdown-body img {
+  background-color: transparent;
+}
+
+.tapl-readable.markdown-body code,
+.tapl-readable.markdown-body tt {
+  background-color: var(--vscode-textCodeBlock-background, var(--tapl-surface-muted));
+}
+
+.tapl-readable.markdown-body pre {
+  background-color: var(--vscode-textCodeBlock-background, var(--tapl-surface-muted));
+}
+
+.tapl-readable.markdown-body pre code {
+  background-color: transparent;
 }
 
 .tapl-tabs {

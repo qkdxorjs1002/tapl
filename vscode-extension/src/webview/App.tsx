@@ -720,7 +720,7 @@ function ReadableBlock({ content }: { content: unknown }): JSX.Element {
   if (!blocks.length) {
     return <p className="tapl-muted m-0">Not recorded.</p>;
   }
-  return <div className="tapl-readable mt-3">{blocks}</div>;
+  return <div className="tapl-readable markdown-body mt-3">{blocks}</div>;
 }
 
 function parseReadableBlocks(content: string): ReactNode[] {
