@@ -104,6 +104,20 @@ class TaplCliTests(unittest.TestCase):
             self.assertNotIn("body", payload["tasks"][0])
             self.assertNotIn("goal", payload["tasks"][0])
 
+            agent_status = self.run_cli(db_path, "status", "--agent")
+            self.assertEqual(agent_status.returncode, 0, agent_status.stderr)
+            self.assertIn("<tapl_status>", agent_status.stdout)
+            self.assertIn("<tasks>1</tasks>", agent_status.stdout)
+            self.assertIn("<incomplete_tasks>1</incomplete_tasks>", agent_status.stdout)
+            self.assertIn("<in_progress>1</in_progress>", agent_status.stdout)
+            self.assertIn("<goal>Create DB-backed workflow state</goal>", agent_status.stdout)
+            self.assertIn("<required_subagent>@senior-worker</required_subagent>", agent_status.stdout)
+            self.assertIn("<code>execution_approval_missing</code>", agent_status.stdout)
+            self.assertNotIn("<schema>", agent_status.stdout)
+            self.assertNotIn("<config>", agent_status.stdout)
+            self.assertNotIn("<created_at>", agent_status.stdout)
+            self.assertNotIn("<body>", agent_status.stdout)
+
             full_status = self.run_cli(db_path, "status", "--json", "--full")
             self.assertEqual(full_status.returncode, 0, full_status.stderr)
             full_payload = json.loads(full_status.stdout)
@@ -143,11 +157,249 @@ class TaplCliTests(unittest.TestCase):
             results = json.loads(search.stdout)["results"]
             self.assertEqual(results[0]["stable_id"], "TASK-001")
 
+            agent_search = self.run_cli(db_path, "search", "workflow", "--agent")
+            self.assertEqual(agent_search.returncode, 0, agent_search.stderr)
+            self.assertIn("<tapl_search>", agent_search.stdout)
+            self.assertIn("<query>workflow</query>", agent_search.stdout)
+            self.assertIn("<stable_id>TASK-001</stable_id>", agent_search.stdout)
+            self.assertNotIn("search_config", agent_search.stdout)
+            self.assertNotIn("source_scores", agent_search.stdout)
+
             detail = self.run_cli(db_path, "item", "show", "--id", str(results[0]["id"]), "--json")
             self.assertEqual(detail.returncode, 0, detail.stderr)
             item = json.loads(detail.stdout)["item"]
             self.assertEqual(item["stable_id"], "TASK-001")
             self.assertEqual(item["goal"], "Create DB-backed workflow state")
+
+            agent_detail = self.run_cli(db_path, "item", "show", "--id", str(results[0]["id"]), "--agent")
+            self.assertEqual(agent_detail.returncode, 0, agent_detail.stderr)
+            self.assertIn("<tapl_item>", agent_detail.stdout)
+            self.assertIn("<stable_id>TASK-001</stable_id>", agent_detail.stdout)
+            self.assertIn("<goal>Create DB-backed workflow state</goal>", agent_detail.stdout)
+            self.assertNotIn("<body>", agent_detail.stdout)
+            self.assertNotIn("<created_at>", agent_detail.stdout)
+
+            conflict = self.run_cli(db_path, "status", "--json", "--agent")
+            self.assertEqual(conflict.returncode, 2)
+            self.assertIn("not allowed with argument", conflict.stderr)
+
+            item_conflict = self.run_cli(db_path, "item", "show", "--id", str(results[0]["id"]), "--json", "--agent")
+            self.assertEqual(item_conflict.returncode, 2)
+            self.assertIn("not allowed with argument", item_conflict.stderr)
+
+            missing_agent_detail = self.run_cli(db_path, "item", "show", "--id", "999", "--agent")
+            self.assertEqual(missing_agent_detail.returncode, 1)
+            self.assertIn("<tapl_error>", missing_agent_detail.stdout)
+            self.assertIn("<message>item not found: 999</message>", missing_agent_detail.stdout)
+
+            search_conflict = self.run_cli(db_path, "search", "workflow", "--json", "--agent")
+            self.assertEqual(search_conflict.returncode, 2)
+            self.assertIn("not allowed with argument", search_conflict.stderr)
+
+    def test_agent_output_for_workflow_commands_keeps_json_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            init = self.run_cli(db_path, "init", "--agent")
+            self.assertEqual(init.returncode, 0, init.stderr)
+            self.assertIn("<tapl_output>", init.stdout)
+            self.assertIn("<db>", init.stdout)
+            self.assertNotIn("<schema>", init.stdout)
+
+            doctor = self.run_cli(db_path, "doctor", "--agent")
+            self.assertEqual(doctor.returncode, 0, doctor.stderr)
+            self.assertIn("<tapl_output>", doctor.stdout)
+            self.assertIn("<version>", doctor.stdout)
+            self.assertNotIn("<config>", doctor.stdout)
+            self.assertNotIn("<schema>", doctor.stdout)
+
+            run_error = self.run_cli(db_path, "run", "set", "--agent")
+            self.assertEqual(run_error.returncode, 1)
+            self.assertIn("<tapl_output>", run_error.stdout)
+            self.assertIn("<error>provide --summary, --result, or both</error>", run_error.stdout)
+
+            plan = self.run_cli(
+                db_path,
+                "plan",
+                "set",
+                "--id",
+                "PLAN-001",
+                "--title",
+                "Agent plan",
+                "--status",
+                "Finalized",
+                "--summary",
+                "REQ-001: agent output",
+                "--objective",
+                "Expose compact agent output",
+                "--validation",
+                "Run focused checks",
+                "--agent",
+            )
+            self.assertEqual(plan.returncode, 0, plan.stderr)
+            self.assertIn("<tapl_output>", plan.stdout)
+            self.assertIn("<kind>plan</kind>", plan.stdout)
+            self.assertIn("<stable_id>PLAN-001</stable_id>", plan.stdout)
+            self.assertIn("<objective>Expose compact agent output</objective>", plan.stdout)
+            self.assertNotIn("<body>", plan.stdout)
+            self.assertNotIn("<created_at>", plan.stdout)
+
+            task = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Agent task",
+                "--status",
+                "In Progress",
+                "--spec-id",
+                "PLAN-001",
+                "--goal",
+                "Use agent output",
+                "--action",
+                "Run workflow commands with --agent",
+                "--required-subagent",
+                "@senior-worker",
+                "--verification",
+                "Agent output includes needed task fields",
+                "--agent",
+            )
+            self.assertEqual(task.returncode, 0, task.stderr)
+            self.assertIn("<stable_id>TASK-001</stable_id>", task.stdout)
+            self.assertIn("<goal>Use agent output</goal>", task.stdout)
+            self.assertIn("<required_subagent>@senior-worker</required_subagent>", task.stdout)
+            self.assertIn("<code>execution_approval_missing</code>", task.stdout)
+            self.assertNotIn("<config>", task.stdout)
+
+            missing_approval = self.run_cli(db_path, "validate", "--agent")
+            self.assertEqual(missing_approval.returncode, 1)
+            self.assertIn("<tapl_output>", missing_approval.stdout)
+            self.assertIn("<code>execution_approval_missing</code>", missing_approval.stdout)
+            self.assertIn("taplctl approval set --decision approved", missing_approval.stdout)
+            self.assertIn("--agent", missing_approval.stdout)
+            self.assertNotIn("<config>", missing_approval.stdout)
+
+            approval = self.run_cli(
+                db_path,
+                "approval",
+                "set",
+                "--decision",
+                "approved",
+                "--prompt",
+                "Execute agent task",
+                "--agent",
+            )
+            self.assertEqual(approval.returncode, 0, approval.stderr)
+            self.assertIn("<decision>approved</decision>", approval.stdout)
+            self.assertIn("<prompt>Execute agent task</prompt>", approval.stdout)
+
+            run = self.run_cli(db_path, "run", "set", "--summary", "Agent run", "--agent")
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertIn("<request_summary>Agent run</request_summary>", run.stdout)
+
+            finding = self.run_cli(
+                db_path,
+                "finding",
+                "add",
+                "--title",
+                "Agent finding",
+                "--finding",
+                "Useful fact",
+                "--impact",
+                "Affects implementation",
+                "--agent",
+            )
+            self.assertEqual(finding.returncode, 0, finding.stderr)
+            self.assertIn("<kind>finding</kind>", finding.stdout)
+            self.assertIn("<impact>Affects implementation</impact>", finding.stdout)
+
+            context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--agent")
+            self.assertEqual(context.returncode, 0, context.stderr)
+            self.assertIn("<tapl_context>", context.stdout)
+            self.assertIn("taplctl status --agent", context.stdout)
+            self.assertIn("taplctl approval set --decision approved", context.stdout)
+            self.assertNotIn("<config>", context.stdout)
+
+            validate = self.run_cli(db_path, "validate", "--agent")
+            self.assertEqual(validate.returncode, 0, validate.stdout)
+            self.assertIn("<tapl_output>", validate.stdout)
+            self.assertIn("<incomplete_tasks>1</incomplete_tasks>", validate.stdout)
+            self.assertNotIn("<config>", validate.stdout)
+
+            json_status = self.run_cli(db_path, "status", "--json")
+            self.assertEqual(json_status.returncode, 0, json_status.stderr)
+            json_payload = json.loads(json_status.stdout)
+            self.assertIn("config", json_payload)
+            self.assertEqual(json_payload["active_run"]["request_summary"], "Agent run")
+
+            conflict = self.run_cli(db_path, "plan", "set", "--id", "PLAN-001", "--json", "--agent")
+            self.assertEqual(conflict.returncode, 2)
+            self.assertIn("not allowed with argument", conflict.stderr)
+
+            reindex = self.run_cli(db_path, "reindex", "--dry-run", "--agent")
+            self.assertEqual(reindex.returncode, 0, reindex.stderr)
+            self.assertIn("<tapl_output>", reindex.stdout)
+
+            missing_workflow = Path(tmp) / "missing-workflow"
+            imported = self.run_cli(db_path, "import-md", "--path", str(missing_workflow), "--dry-run", "--agent")
+            self.assertEqual(imported.returncode, 0, imported.stderr)
+            self.assertIn("<tapl_output>", imported.stdout)
+            self.assertIn("<exists>false</exists>", imported.stdout)
+
+            searchd_status = self.run_cli(
+                db_path,
+                "searchd",
+                "status",
+                "--socket",
+                str(Path(tmp) / "missing.sock"),
+                "--agent",
+            )
+            self.assertEqual(searchd_status.returncode, 0, searchd_status.stderr)
+            self.assertIn("<tapl_output>", searchd_status.stdout)
+            self.assertIn("<running>false</running>", searchd_status.stdout)
+            self.assertNotIn("<config>", searchd_status.stdout)
+
+            hook = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--agent",
+                input_text='{"prompt": "Agent hook"}',
+            )
+            self.assertEqual(hook.returncode, 0, hook.stderr)
+            self.assertIn("<tapl_hook_event>", hook.stdout)
+            self.assertIn("<event>UserPromptSubmit</event>", hook.stdout)
+
+            codex_home = Path(tmp) / "codex-home"
+            install_user = self.run_cli(
+                db_path,
+                "install",
+                "user",
+                "--codex-home",
+                str(codex_home),
+                "--dry-run",
+                "--agent",
+            )
+            self.assertEqual(install_user.returncode, 0, install_user.stderr)
+            self.assertIn("<tapl_output>", install_user.stdout)
+
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            install_repo = self.run_cli(
+                db_path,
+                "install",
+                "repo",
+                "--repo",
+                str(repo),
+                "--dry-run",
+                "--agent",
+            )
+            self.assertEqual(install_repo.returncode, 0, install_repo.stderr)
+            self.assertIn("<tapl_output>", install_repo.stdout)
 
     def test_plan_set_uses_structured_fields_and_partial_updates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1303,9 +1555,9 @@ level_subagent_aggressiveness = "force"
             self.assertIn("SessionStart is bootstrap only", "\n".join(payload["instructions"]))
             self.assertIn("literal global `taplctl`", "\n".join(payload["instructions"]))
             self.assertIn("workflow DB/config repo-local", "\n".join(payload["instructions"]))
-            self.assertIn("taplctl status --json", "\n".join(payload["instructions"]))
-            self.assertIn("taplctl search '<query>' --json", "\n".join(payload["instructions"]))
-            self.assertIn("taplctl item show --id <id> --json", "\n".join(payload["instructions"]))
+            self.assertIn("taplctl status --agent", "\n".join(payload["instructions"]))
+            self.assertIn("taplctl search '<query>' --agent", "\n".join(payload["instructions"]))
+            self.assertIn("taplctl item show --id <id> --agent", "\n".join(payload["instructions"]))
             self.assertIn("search relevant prior work", "\n".join(payload["workflow_guidance"]))
             self.assertEqual(payload["next_actions"], [])
 
@@ -1482,7 +1734,7 @@ level_subagent_aggressiveness = "force"
             stop_context = self.run_cli(db_path, "context", "--event", "Stop", "--json")
             stop_payload = json.loads(stop_context.stdout)
             stop_instructions = "\n".join(stop_payload["instructions"])
-            self.assertIn("taplctl status --json", stop_instructions)
+            self.assertIn("taplctl status --agent", stop_instructions)
             self.assertIn("set result", "\n".join(stop_payload["workflow_guidance"]))
             self.assertNotIn("Completion reports should", stop_instructions)
             self.assertNotIn("Archive summaries should", stop_instructions)
@@ -1508,7 +1760,8 @@ level_subagent_aggressiveness = "force"
             root_help = self.run_cli(db_path, "--help")
             self.assertEqual(root_help.returncode, 0, root_help.stderr)
             self.assertIn("taplctl <command> <subcommand> --help", root_help.stdout)
-            self.assertIn("taplctl validate --json", root_help.stdout)
+            self.assertIn("taplctl validate --agent", root_help.stdout)
+            self.assertNotIn("taplctl validate --json", root_help.stdout)
             self.assertIn("Phase order", root_help.stdout)
             self.assertIn("taplctl plan set", root_help.stdout)
             self.assertIn("Execute planned tasks one at a time", root_help.stdout)
@@ -1519,6 +1772,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Set active run fields", run_help.stdout)
             self.assertIn("--summary", run_help.stdout)
             self.assertIn("--result", run_help.stdout)
+            self.assertIn("--agent", run_help.stdout)
 
             plan_help = self.run_cli(db_path, "plan", "set", "--help")
             self.assertEqual(plan_help.returncode, 0, plan_help.stderr)
@@ -1535,10 +1789,12 @@ level_subagent_aggressiveness = "force"
             self.assertIn("--requirements-trace", plan_help.stdout)
             self.assertIn("--selected-approach", plan_help.stdout)
             self.assertIn("--notes", plan_help.stdout)
+            self.assertIn("--agent", plan_help.stdout)
             self.assertNotIn("--body", plan_help.stdout)
 
             task_help = self.run_cli(db_path, "task", "set", "--help")
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
+            self.assertIn("--agent", task_help.stdout)
             self.assertIn("Task writing rules", task_help.stdout)
             self.assertIn("Use numeric stable ids only", task_help.stdout)
             self.assertIn("Existing task updates are partial", task_help.stdout)
@@ -1569,6 +1825,21 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Add a finding", finding_help.stdout)
             self.assertIn("Why the finding matters", finding_help.stdout)
             self.assertIn("Finding writing rules", finding_help.stdout)
+
+            for args in (
+                ("init", "--help"),
+                ("doctor", "--help"),
+                ("reindex", "--help"),
+                ("import-md", "--help"),
+                ("hook-event", "--help"),
+                ("install", "user", "--help"),
+                ("install", "repo", "--help"),
+                ("searchd", "start", "--help"),
+                ("searchd", "run", "--help"),
+            ):
+                help_result = self.run_cli(db_path, *args)
+                self.assertEqual(help_result.returncode, 0, help_result.stderr)
+                self.assertIn("--agent", help_result.stdout)
             self.assertIn("Markdown form", finding_help.stdout)
 
             hook_help = self.run_cli(db_path, "hook-event", "--help")
@@ -2043,9 +2314,9 @@ task_granularity = "very_granular"
             )
             self.assertEqual(event.returncode, 0, event.stderr)
             self.assertIn("tapl context:", event.stdout)
-            self.assertIn("taplctl status --json", event.stdout)
-            self.assertIn("taplctl search '<query>' --json", event.stdout)
-            self.assertIn("taplctl item show --id <id> --json", event.stdout)
+            self.assertIn("taplctl status --agent", event.stdout)
+            self.assertIn("taplctl search '<query>' --agent", event.stdout)
+            self.assertIn("taplctl item show --id <id> --agent", event.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", event.stdout)
             self.assertNotIn("Do not use level names such as `level2`", event.stdout)
             self.assertIn("Flow: search relevant prior work", event.stdout)

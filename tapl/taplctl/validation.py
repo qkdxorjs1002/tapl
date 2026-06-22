@@ -449,7 +449,7 @@ def validate_execution_approval(
             severity,
             "execution_approval_missing",
             "Executable tasks exist but execution approval is not recorded.",
-            "Before starting or continuing tasks, set approval with `taplctl approval set --decision approved --prompt '<approved scope>' --json`.",
+            "Before starting or continuing tasks, set approval with `taplctl approval set --decision approved --prompt '<approved scope>' --agent`.",
         )
     ]
 
@@ -648,7 +648,7 @@ def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
 def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     base = (
         "After task design and before starting or continuing task execution, set approval with "
-        "`taplctl approval set --decision approved --prompt '<approved scope>' --json`."
+        "`taplctl approval set --decision approved --prompt '<approved scope>' --agent`."
     )
     if settings.require_execution_approval:
         return base + " Missing execution approval is a validation error."

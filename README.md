@@ -12,50 +12,10 @@ approvals, lifecycle events, archives, and searchable history in a repo-local
 SQLite database. Codex still writes the code; `tapl` makes the work visible
 while it is happening and resumable after the chat context is gone.
 
-```sh
-####################################
-# Add homebrew tap
-####################################
+## Quick Start
 
-brew tap qkdxorjs1002/tap
-brew trust qkdxorjs1002/tap
-
-####################################
-# Install taplctl
-####################################
-
-### Choice 1. Without semantic search
-brew install taplctl
-
-### Choice 2. With semantic search (Recommend)
-brew install taplctl-semantic
-
-### Option. Auto-run pre-loaded semantic search daemon
-brew services start taplctl-semantic
-
-####################################
-# Install codex hooks and configs
-####################################
-
-### Choice 1. User account scope (Recommend)
-taplctl install user
-
-### Choice 2. Repo scope
-taplctl install repo
-
-####################################
-# taplctl doctor
-####################################
-
-taplctl doctor --json
-```
-
-After running `taplctl install user` or `taplctl install repo`, trust the
-installed Codex hook the first time Codex asks for confirmation.
-
-<p align="center">
-  <img src="assets/tapl-trust-hook.png" alt="Codex trust prompt for the installed tapl hook" />
-</p>
+Follow [Install Details](#install-details) once, then keep using Codex normally
+inside your repositories.
 
 ## How does it work?
 
@@ -67,18 +27,13 @@ commands `tapl` recorded around this README rewrite.
   <img src="assets/tapl-codex-iterm-demo.svg" alt="Terminal-style capture of Codex CLI using tapl state before editing README files" />
 </p>
 
-That terminal flow is the workflow contract `tapl` exposes to Codex:
+After installation, keep using Codex normally. `tapl` gives Codex a
+repo-local workflow state before tool calls, records plans and tasks as the
+work progresses, and validates the run before Codex stops. You usually do not
+need to run the workflow-writing commands yourself.
 
-```sh
-taplctl status --json
-taplctl search 'README self PR codex cli screenshot' --json
-taplctl plan set --id PLAN-001 ...
-taplctl task set --id TASK-001 ...
-taplctl approval set --decision approved ...
-```
-
-The state lives in `.tapl/tapl.db`, so the next Codex session, a hook, a human,
-or the VS Code viewer can inspect the same run.
+The state lives in `.tapl/tapl.db`, so the next Codex session, a hook, you, or
+the VS Code viewer can inspect the same run.
 
 ## Why This Exists
 
@@ -98,81 +53,38 @@ database.
 ## Features
 
 After installation, this workflow runs automatically during normal Codex CLI
-use. Hooks call `taplctl`, lifecycle context tells Codex what state to
-record.
+use. Hooks call `taplctl`, lifecycle context tells Codex what state to record,
+and you can inspect or validate that state when you want to understand what
+Codex is doing.
 
-### 1. State before edits
+### 1. Check the current Codex run
 
-`taplctl status --json` is the source of truth for the current run.
-
-```json
-{
-  "active_run": {
-    "request_summary": "Rewrite README.* as self-PR docs..."
-  },
-  "approvals": {
-    "execution": {
-      "state": "approved"
-    }
-  },
-  "task_counts": {
-    "In Progress": 1,
-    "Pending": 3
-  }
-}
-```
-
-Hooks can warn or block when the workflow contract is missing. The agent can
-resume from the stored state instead of guessing from chat history.
-
-### 2. Plans and tasks that tools can read
-
-Plans and tasks are first-class records, not loose Markdown notes.
-Agents pass plan/task content as CLI fields; tapl renders the stored Markdown
-body from stable templates when records are merged.
-After setting the plan and tasks, set execution approval before starting or
-continuing task execution.
+Use these commands when you want to see what Codex has recorded for the current
+repository:
 
 ```sh
-taplctl plan set \
-  --id PLAN-001 \
-  --title "Example implementation plan" \
-  --summary "REQ-001: approach, files, order, risks, validation" \
-  --objective "Make the requested behavior work" \
-  --requirements-trace "REQ-001: implement the requested behavior" \
-  --selected-approach "Use the existing module boundaries" \
-  --affected-files "tapl/taplctl/db.py and tapl/taplctl/cli.py" \
-  --execution-order "1. Update storage. 2. Update CLI. 3. Run tests." \
-  --risks "Keep existing records readable during migration" \
-  --validation "Run focused checks" \
-  --status Finalized \
-  --json
-
-taplctl task set \
-  --id TASK-001 \
-  --title "Implement the change" \
-  --status "In Progress" \
-  --spec-id PLAN-001 \
-  --goal "Make the requested behavior work" \
-  --action "Edit the relevant files" \
-  --required-subagent "@senior-worker" \
-  --verification "Run focused checks" \
-  --json
-
-taplctl approval set \
-  --decision approved \
-  --prompt "Execute PLAN-001 tasks" \
-  --json
-
-taplctl task set \
-  --id TASK-001 \
-  --status Completed \
-  --result "Focused checks passed" \
-  --json
+taplctl status
+taplctl validate
 ```
 
-The configured workflow guidance is injected into Codex lifecycle context, and
-the exact field rules stay in command help:
+`status` shows the active request, plans, tasks, findings, approval state, and
+recent activity. `validate` reports missing plan/task/approval records that may
+make a long Codex session harder to resume.
+
+For integrations, `--json` remains available. Codex hooks use `--agent`
+internally for compact output that Codex can read efficiently; it is not the
+normal human-facing mode.
+
+### 2. Let Codex record plans and tasks
+
+Plans and tasks are first-class records, not loose Markdown notes.
+Codex receives lifecycle guidance from `tapl`, writes plan/task content through
+structured CLI fields, and `tapl` renders stable Markdown bodies for stored
+records.
+
+For normal use, ask Codex to do the work and let the installed hooks keep the
+records current. If you are debugging or manually repairing workflow state, the
+field rules are available in command help:
 
 ```sh
 taplctl plan set --help
@@ -185,23 +97,14 @@ taplctl approval set --help
 Past work is archived and searchable.
 
 ```sh
-taplctl finding add \
-  --title "Important implementation note" \
-  --finding "What was learned" \
-  --impact "Why it matters" \
-  --json
-
-taplctl archive create \
-  --slug completed-change \
-  --summary "What changed, how it was verified, and what remains" \
-  --json
-
-taplctl search "workflow dashboard" --json
-taplctl search "workflow dashboard" --limit 5 --json
+taplctl search "workflow dashboard"
+taplctl search "workflow dashboard" --limit 5
+taplctl item show --id 1
 ```
 
 Search uses SQLite FTS, with optional semantic/vector search when the semantic
-dependencies are installed.
+dependencies are installed. Use `taplctl archive list` and
+`taplctl archive show --id <id>` to inspect completed runs.
 
 ### 4. Hooks around the Codex lifecycle
 
@@ -253,26 +156,45 @@ archives, and search results.
 ```sh
 brew tap qkdxorjs1002/tap
 brew trust --formula qkdxorjs1002/tap/taplctl
+```
+
+Then install one of the two formulas:
+
+```sh
+# Basic workflow tracking
 brew install taplctl
 ```
 
-For semantic search support:
-
 ```sh
+# Workflow tracking with semantic search support
 brew install taplctl-semantic
 ```
 
-Then wire it into Codex:
+If you chose `taplctl-semantic`, you can keep the semantic search model
+pre-loaded:
 
 ```sh
-# user-level Codex hook and agent templates
+brew services start taplctl-semantic
+```
+
+Then choose how to wire it into Codex:
+
+```sh
+# Most users: install once for your Codex account
 taplctl install user
 
-# repo-local hooks, config, and .tapl/tapl.db
+# Or install only in the current repository
 taplctl install repo
 
-taplctl validate --json
+taplctl validate
 ```
+
+The first time Codex asks for confirmation after installation, trust the
+installed hook.
+
+<p align="center">
+  <img src="assets/tapl-trust-hook.png" alt="Codex trust prompt for the installed tapl hook" />
+</p>
 
 Install merge policy:
 
@@ -294,30 +216,33 @@ uv run taplctl --version
 uv build
 ```
 
-## Command Map
+## Useful Commands
 
 ```sh
 taplctl init
-taplctl doctor --json
-taplctl status --json
-taplctl validate --json
-taplctl context --event UserPromptSubmit --json
-taplctl run set --summary "..." --json
+taplctl doctor
+taplctl status
+taplctl validate
+taplctl search "query"
+taplctl item show --id 1
+taplctl archive list
+taplctl archive show --id <id>
+taplctl reindex
+
+# Advanced workflow repair/debugging
+taplctl run set --help
 taplctl plan set --help
 taplctl task set --help
 taplctl finding add --help
 taplctl approval set --help
 taplctl archive create --help
-taplctl search "query" --json
-taplctl item show --id 1 --json
-taplctl reindex --json
 ```
 
 `taplctl search` returns 7 results by default. Set `[search] max_results` in
 `.tapl/config.toml` or `~/.tapl/config.toml` to change the default, and use
 `--limit` for one-off overrides. When a search result is relevant and the
 snippet is not enough context, use its numeric `id` with
-`taplctl item show --id <id> --json` before relying on the full record details.
+`taplctl item show --id <id>` before relying on the full record details.
 
 Plan/task validation is controlled by `[plan-task-execute]` in the same config
 files. Settings such as `plan_detail`, `task_granularity`,
@@ -325,7 +250,7 @@ files. Settings such as `plan_detail`, `task_granularity`,
 `require_execution_approval` are reflected in lifecycle context and validation
 issues.
 
-## Repository Layout
+## Source Layout
 
 ```text
 .
@@ -350,7 +275,7 @@ tapl/.venv/
 tapl/dist/
 ```
 
-## Development Checks
+## Contributor Checks
 
 ```sh
 uv --directory tapl sync --extra test
@@ -358,7 +283,7 @@ uv --directory tapl run --extra test python -m unittest discover -s tests
 uv --directory tapl build
 npm --prefix vscode-extension run compile
 git diff --check
-taplctl validate --json
+taplctl validate
 ```
 
 ## License

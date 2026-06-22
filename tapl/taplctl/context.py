@@ -24,8 +24,8 @@ def taplctl_argument_guidance() -> str:
 
 def taplctl_command_guidance() -> str:
     return (
-        "Inspect/search/detail: `taplctl status --json`; "
-        "`taplctl search '<query>' --json`; `taplctl item show --id <id> --json`."
+        "Inspect/search/detail: `taplctl status --agent`; "
+        "`taplctl search '<query>' --agent`; `taplctl item show --id <id> --agent`."
     )
 
 
@@ -38,16 +38,16 @@ def taplctl_help_guidance() -> str:
 def external_findings_guidance() -> str:
     return (
         "Findings: if external search/docs changes requirements/plan/tasks/verification, "
-        "add decision-relevant facts with `taplctl finding add`; Use markdown for details/impact."
+        "add decision-relevant facts with `taplctl finding add ... --agent`; Use markdown for details/impact."
     )
 
 
 def prior_search_guidance() -> str:
     return (
         "Search: before planning non-trivial work, run "
-        "`taplctl search '<compact prompt query>' --json` and use only relevant results; "
+        "`taplctl search '<compact prompt query>' --agent` and use only relevant results; "
         "for results you judge relevant where the snippet is insufficient, run "
-        "`taplctl item show --id <id> --json` before relying on full details."
+        "`taplctl item show --id <id> --agent` before relying on full details."
     )
 
 
@@ -201,7 +201,7 @@ def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> l
     if settings.use_level_subagent:
         guidance.append(f"Subagents: {subagent_context_guidance(settings)}")
     if settings.require_execution_approval:
-        guidance.append("Approval: set execution approval before durable edits: `taplctl approval set --decision approved --prompt '<approved scope>' --json`.")
+        guidance.append("Approval: set execution approval before durable edits: `taplctl approval set --decision approved --prompt '<approved scope>' --agent`.")
     else:
         guidance.append("Approval: set execution approval for material risk/scope; missing approval is a warning.")
     return guidance
@@ -281,7 +281,7 @@ def next_actions(
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
     if run.get("request_summary") == db.DEFAULT_REQUEST_SUMMARY:
         actions.append(
-            "Summarize request: `taplctl run set --summary '<request summary>' --json`."
+            "Summarize request: `taplctl run set --summary '<request summary>' --agent`."
         )
     if event == "UserPromptSubmit" and should_request_active_run_direction(state, prompt):
         actions.append(
@@ -346,12 +346,12 @@ def approval_next_action(plan_task: dict[str, Any]) -> str:
     if "execution_approval_rejected" in codes:
         return (
             "Approval rejected; resolve scope, then set `taplctl approval set --decision approved "
-            "--prompt '<approved scope>' --json` before continuing."
+            "--prompt '<approved scope>' --agent` before continuing."
         )
     if "execution_approval_missing" in codes:
         return (
             "Before task execution, set execution approval: `taplctl approval set --decision approved "
-            "--prompt '<approved scope>' --json`."
+            "--prompt '<approved scope>' --agent`."
         )
     return ""
 

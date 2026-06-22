@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import sqlite3
 import sys
@@ -25,18 +26,19 @@ from . import (
 
 HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 JSON_HELP = "Print JSON output."
+AGENT_HELP = "Print agent-optimized XML-like output."
 DRY_RUN_HELP = "Preview changes without writing files."
 
 
 def command_help_epilog() -> str:
     return (
         "Workflow guidance:\n"
-        "  Use `taplctl status --json` to inspect state before non-trivial work.\n"
+        "  Use `taplctl status --agent` to inspect state before non-trivial work.\n"
         f"  {validation.workflow_order_guidance()}\n"
         f"  {validation.task_execution_order_guidance()}\n"
         "  Use `taplctl <command> <subcommand> --help` for field-writing rules.\n"
         f"  {validation.structured_record_guidance()}\n"
-        "  Use `taplctl validate --json` after updates to catch missing plan/task details."
+        "  Use `taplctl validate --agent` after updates to catch missing plan/task details."
     )
 
 
@@ -58,7 +60,7 @@ def plan_set_epilog() -> str:
         "    --summary 'REQ-001: approach, affected files, risks, validation' \\\n"
         "    --objective 'Implement requested behavior' \\\n"
         "    --requirements-trace 'REQ-001: field-based plan records' \\\n"
-        "    --validation 'Run focused tests' --status Finalized --json"
+        "    --validation 'Run focused tests' --status Finalized --agent"
     )
 
 
@@ -97,8 +99,8 @@ def task_set_epilog() -> str:
         "  taplctl task set --id TASK-001 --title 'Implement change' \\\n"
         "    --status 'In Progress' --spec-id PLAN-001 --goal 'Make requested behavior work' \\\n"
         "    --action 'Edit the relevant files' --required-subagent '@senior-worker' \\\n"
-        "    --verification 'Run focused tests' --json\n"
-        "  taplctl task set --id TASK-001 --status Completed --result 'Focused tests passed' --json"
+        "    --verification 'Run focused tests' --agent\n"
+        "  taplctl task set --id TASK-001 --status Completed --result 'Focused tests passed' --agent"
     )
 
 
@@ -111,7 +113,7 @@ def finding_add_epilog() -> str:
         "\n"
         "Example:\n"
         "  taplctl finding add --title 'Finding title' --source 'Source' \\\n"
-        "    --finding 'What was learned' --impact 'Why it matters' --json"
+        "    --finding 'What was learned' --impact 'Why it matters' --agent"
     )
 
 
@@ -124,12 +126,14 @@ def approval_set_epilog() -> str:
         "\n"
         "Example:\n"
         "  taplctl approval set --decision approved \\\n"
-        "    --prompt 'Execute TASK-001 from PLAN-001' --json"
+        "    --prompt 'Execute TASK-001 from PLAN-001' --agent"
     )
 
 
-def add_json_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--json", action="store_true", help=JSON_HELP)
+def add_agent_output_args(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--json", action="store_true", help=JSON_HELP)
+    group.add_argument("--agent", action="store_true", help=AGENT_HELP)
 
 
 def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
@@ -139,7 +143,7 @@ def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
 def add_run_set_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--summary", default=None, help="Short description of the current request.")
     parser.add_argument("--result", default=None, help="Short description of the completed result.")
-    add_json_arg(parser)
+    add_agent_output_args(parser)
 
 
 def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
@@ -162,7 +166,7 @@ def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--approval-needs", default=None, help="Approval requirements before execution.")
     parser.add_argument("--notes", default=None, help="Additional notes rendered after standard plan fields.")
     parser.add_argument("--status", default=None, help="Plan lifecycle label, e.g. Draft or Finalized.")
-    add_json_arg(parser)
+    add_agent_output_args(parser)
 
 
 def add_task_write_args(parser: argparse.ArgumentParser) -> None:
@@ -182,14 +186,14 @@ def add_task_write_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--result", default=None, help="Completion note for Completed tasks.")
     parser.add_argument("--blocker", default=None, help="Reason a Blocked task cannot proceed.")
     parser.add_argument("--next-action", default=None, help="Specific action that would unblock a Blocked task.")
-    add_json_arg(parser)
+    add_agent_output_args(parser)
 
 
 def add_approval_write_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help="Approval kind.")
     parser.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS, help="Approval decision.")
     parser.add_argument("--prompt", default="", help="Approved or rejected execution scope.")
-    add_json_arg(parser)
+    add_agent_output_args(parser)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -204,6 +208,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         if getattr(args, "json", False):
             print_json({"ok": False, "error": str(exc)})
+        elif getattr(args, "agent", False):
+            print(agent_error(str(exc)))
         else:
             print(f"taplctl: {exc}", file=sys.stderr)
         return 1
@@ -237,15 +243,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     init = sub.add_parser("init", help="Initialize the tapl database.")
-    add_json_arg(init)
+    add_agent_output_args(init)
     init.set_defaults(handler=cmd_init)
 
     doctor = sub.add_parser("doctor", help="Check tapl runtime dependencies.")
-    add_json_arg(doctor)
+    add_agent_output_args(doctor)
     doctor.set_defaults(handler=cmd_doctor)
 
     status = sub.add_parser("status", help="Show active workflow state.")
-    add_json_arg(status)
+    add_agent_output_args(status)
     status.add_argument("--full", action="store_true", help="Include full plan/task/finding item details.")
     status.add_argument(
         "--include-events",
@@ -256,12 +262,12 @@ def build_parser() -> argparse.ArgumentParser:
     status.set_defaults(handler=cmd_status)
 
     validate = sub.add_parser("validate", help="Validate tapl database state.")
-    add_json_arg(validate)
+    add_agent_output_args(validate)
     validate.set_defaults(handler=cmd_validate)
 
     context_cmd = sub.add_parser("context", help="Show lifecycle context for Codex.")
     context_cmd.add_argument("--event", default="Manual", help="Lifecycle event name to format context for.")
-    add_json_arg(context_cmd)
+    add_agent_output_args(context_cmd)
     context_cmd.set_defaults(handler=cmd_context)
 
     run = sub.add_parser("run", help="Manage the active workflow run.")
@@ -331,7 +337,7 @@ def build_parser() -> argparse.ArgumentParser:
     finding_add.add_argument("--finding", default="", help="Finding details.")
     finding_add.add_argument("--impact", default="", help="Why the finding matters.")
     finding_add.add_argument("--related-ids", default="", help="Related plan, task, or item ids.")
-    add_json_arg(finding_add)
+    add_agent_output_args(finding_add)
     finding_add.set_defaults(handler=cmd_finding_add)
 
     approval = sub.add_parser("approval", help="Manage explicit workflow approvals.", formatter_class=HELP_FORMATTER)
@@ -351,19 +357,19 @@ def build_parser() -> argparse.ArgumentParser:
         description="Show current approval state.",
     )
     approval_status.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help="Approval kind to inspect.")
-    add_json_arg(approval_status)
+    add_agent_output_args(approval_status)
     approval_status.set_defaults(handler=cmd_approval_status)
     approval_list = approval_sub.add_parser("list", help="List recent approvals.", description="List recent approvals.")
     approval_list.add_argument("--kind", default="", help="Filter by approval kind.")
     approval_list.add_argument("--limit", type=int, default=10, help="Maximum approvals to return.")
-    add_json_arg(approval_list)
+    add_agent_output_args(approval_list)
     approval_list.set_defaults(handler=cmd_approval_list)
 
     item = sub.add_parser("item", help="Inspect workflow items.")
     item_sub = item.add_subparsers(dest="item_command")
     item_show = item_sub.add_parser("show", help="Show one item by numeric id.", description="Show one item by numeric id.")
     item_show.add_argument("--id", type=int, required=True, help="Numeric item id.")
-    add_json_arg(item_show)
+    add_agent_output_args(item_show)
     item_show.set_defaults(handler=cmd_item_show)
 
     archive = sub.add_parser("archive", help="Manage archives.")
@@ -371,15 +377,15 @@ def build_parser() -> argparse.ArgumentParser:
     archive_create = archive_sub.add_parser("create", help="Archive the active run.", description="Archive the active run.")
     archive_create.add_argument("--slug", required=True, help="Stable archive slug.")
     archive_create.add_argument("--summary", default="", help="Archive summary text.")
-    add_json_arg(archive_create)
+    add_agent_output_args(archive_create)
     archive_create.set_defaults(handler=cmd_archive_create)
     archive_list = archive_sub.add_parser("list", help="List archives.", description="List archives.")
     archive_list.add_argument("--limit", type=int, default=None, help="Maximum archives to return.")
-    add_json_arg(archive_list)
+    add_agent_output_args(archive_list)
     archive_list.set_defaults(handler=cmd_archive_list)
     archive_show = archive_sub.add_parser("show", help="Show archive details.", description="Show archive details.")
     archive_show.add_argument("--id", required=True, help="Archive id or slug.")
-    add_json_arg(archive_show)
+    add_agent_output_args(archive_show)
     archive_show.set_defaults(handler=cmd_archive_show)
 
     search = sub.add_parser("search", help="Search workflow state and archive history.")
@@ -390,12 +396,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Maximum results to return. Defaults to search.max_results config.",
     )
-    add_json_arg(search)
+    add_agent_output_args(search)
     search.set_defaults(handler=cmd_search)
 
     reindex = sub.add_parser("reindex", help="Build semantic index when optional deps are installed.")
     add_dry_run_arg(reindex)
-    add_json_arg(reindex)
+    add_agent_output_args(reindex)
     reindex.set_defaults(handler=cmd_reindex)
 
     searchd_cmd = sub.add_parser("searchd", help="Manage the semantic search daemon.")
@@ -419,7 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Milliseconds to wait for daemon readiness. Defaults to 15000.",
     )
     searchd_start.add_argument("--no-wait", action="store_true", help="Return immediately after spawning searchd.")
-    add_json_arg(searchd_start)
+    add_agent_output_args(searchd_start)
     searchd_start.set_defaults(handler=cmd_searchd_start)
 
     searchd_status = searchd_sub.add_parser(
@@ -434,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Milliseconds to wait for daemon response. Defaults to 250.",
     )
-    add_json_arg(searchd_status)
+    add_agent_output_args(searchd_status)
     searchd_status.set_defaults(handler=cmd_searchd_status)
 
     searchd_stop = searchd_sub.add_parser(
@@ -449,7 +455,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Milliseconds to wait for daemon response. Defaults to 250.",
     )
-    add_json_arg(searchd_stop)
+    add_agent_output_args(searchd_stop)
     searchd_stop.set_defaults(handler=cmd_searchd_stop)
 
     searchd_run = searchd_sub.add_parser(
@@ -459,7 +465,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     searchd_run.add_argument("--socket", default=None, help=argparse.SUPPRESS)
     searchd_run.add_argument("--idle-timeout", type=non_negative_int_arg, default=None, help=argparse.SUPPRESS)
-    add_json_arg(searchd_run)
+    add_agent_output_args(searchd_run)
     searchd_run.set_defaults(handler=cmd_searchd_run)
 
     import_md = sub.add_parser("import-md", help="Import legacy .agent-workflow markdown.")
@@ -470,14 +476,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Convert older raw MD-* legacy import runs already stored in the DB.",
     )
-    add_json_arg(import_md)
+    add_agent_output_args(import_md)
     import_md.set_defaults(handler=cmd_import_md)
 
     hook = sub.add_parser("hook-event", help="Handle a Codex hook event.")
     hook.add_argument("--event", required=True, help="Codex hook event name.")
     hook.add_argument("--mode", choices=("observe", "enforce"), default="observe", help="Hook handling mode.")
     hook.add_argument("--tool", default=None, help="Tool name for tool hook events.")
-    add_json_arg(hook)
+    add_agent_output_args(hook)
     hook.set_defaults(handler=cmd_hook_event)
 
     return parser
@@ -492,7 +498,7 @@ def add_install_common_args(parser: argparse.ArgumentParser) -> None:
         help="Overwrite static templates and make managed Codex config keys use tapl defaults.",
     )
     add_dry_run_arg(parser)
-    add_json_arg(parser)
+    add_agent_output_args(parser)
 
 
 def positive_int_arg(value: str) -> int:
@@ -530,7 +536,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         "db": str(args.db or db.default_db_path()),
         "schema": db.get_meta(conn),
     }
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0
 
 
@@ -546,7 +552,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "dependencies": embeddings.dependency_status(),
         "schema": db.get_meta(conn),
     }
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0
 
 
@@ -561,11 +567,14 @@ def cmd_status(args: argparse.Namespace) -> int:
     )
     payload = status_output_payload(
         payload,
-        full=args.full,
+        full=args.full or args.agent,
         include_events=args.include_events,
         events_limit=args.events_limit,
     )
-    emit(payload, args.json)
+    if args.agent:
+        print(agent_status(payload))
+        return 0
+    emit(payload, args.json, args.agent)
     return 0
 
 
@@ -636,6 +645,341 @@ def compact_status_event(event: dict[str, Any]) -> dict[str, Any]:
     return {key: event[key] for key in STATUS_EVENT_SUMMARY_FIELDS if key in event}
 
 
+AGENT_STATUS_PLAN_FIELDS = (
+    "id",
+    "stable_id",
+    "title",
+    "status",
+    "summary",
+)
+
+AGENT_STATUS_TASK_FIELDS = (
+    "id",
+    "stable_id",
+    "title",
+    "status",
+    "spec_id",
+    "goal",
+    "action",
+    "required_subagent",
+    "verification",
+    "result",
+    "blocker",
+    "next_action",
+)
+
+AGENT_STATUS_FINDING_FIELDS = (
+    "id",
+    "stable_id",
+    "title",
+    "source",
+)
+
+AGENT_STATUS_EVENT_FIELDS = (
+    "event_type",
+    "tool_name",
+    "mode",
+    "message",
+    "created_at",
+)
+
+AGENT_SEARCH_RESULT_FIELDS = (
+    "id",
+    "stable_id",
+    "kind",
+    "title",
+    "status",
+    "source",
+    "snippet",
+)
+
+AGENT_ITEM_BASE_FIELDS = (
+    "id",
+    "stable_id",
+    "kind",
+    "title",
+    "status",
+    "source",
+    "run_status",
+    "request_summary",
+    "archive_slug",
+)
+
+AGENT_ITEM_PLAN_FIELDS = (
+    "plan_id",
+    "summary",
+    "objective",
+    "requirements_trace",
+    "selected_approach",
+    "affected_files",
+    "execution_order",
+    "risks",
+    "validation",
+    "approval_needs",
+    "notes",
+)
+
+AGENT_ITEM_TASK_FIELDS = (
+    "spec_id",
+    "goal",
+    "action",
+    "required_subagent",
+    "verification",
+    "result",
+    "blocker",
+    "next_action",
+)
+
+AGENT_ITEM_FINDING_FIELDS = (
+    "body",
+    "impact",
+    "related_ids",
+)
+
+AGENT_SKIP_KEYS = {
+    "archived",
+    "archived_at",
+    "archive_created_at",
+    "body",
+    "config",
+    "created_at",
+    "errors",
+    "payload_json",
+    "raw_text",
+    "run_id",
+    "schema",
+    "search_config",
+    "source_scores",
+    "updated_at",
+    "warnings",
+}
+
+AGENT_LIST_ITEM_TAGS = {
+    "approvals": "approval",
+    "archives": "archive",
+    "files": "file",
+    "findings": "finding",
+    "instructions": "instruction",
+    "issues": "issue",
+    "items": "item",
+    "next_actions": "next_action",
+    "plans": "plan",
+    "results": "result",
+    "tasks": "task",
+    "workflow_guidance": "guidance",
+}
+
+TASK_STATUS_AGENT_TAGS = {
+    "Pending": "pending",
+    "In Progress": "in_progress",
+    "Completed": "completed",
+    "Blocked": "blocked",
+    "Skipped": "skipped",
+}
+
+
+def agent_status(payload: dict[str, Any]) -> str:
+    lines = ["<tapl_status>"]
+    append_agent_mapping(
+        lines,
+        1,
+        "active_run",
+        payload.get("active_run") or {},
+        ("request_summary", "result_summary", "status"),
+    )
+    append_agent_counts(lines, payload)
+    append_agent_task_counts(lines, payload.get("task_counts"))
+    approvals = payload.get("approvals") if isinstance(payload.get("approvals"), dict) else {}
+    approval = approvals.get(db.DEFAULT_APPROVAL_KIND) if isinstance(approvals, dict) else None
+    append_agent_mapping(lines, 1, "execution_approval", approval or {}, ("state", "decision", "prompt"))
+    append_agent_issues(lines, payload.get("plan_task_execute"))
+    append_agent_items(lines, 1, "plans", "plan", payload.get("plans"), AGENT_STATUS_PLAN_FIELDS)
+    append_agent_items(lines, 1, "tasks", "task", payload.get("tasks"), AGENT_STATUS_TASK_FIELDS)
+    append_agent_items(lines, 1, "findings", "finding", payload.get("findings"), AGENT_STATUS_FINDING_FIELDS)
+    append_agent_items(lines, 1, "recent_events", "event", payload.get("recent_events"), AGENT_STATUS_EVENT_FIELDS)
+    lines.append("</tapl_status>")
+    return "\n".join(lines)
+
+
+def agent_search(payload: dict[str, Any]) -> str:
+    lines = ["<tapl_search>"]
+    append_agent_value(lines, 1, "query", payload.get("query"))
+    append_agent_value(lines, 1, "mode", payload.get("mode"))
+    append_agent_value(lines, 1, "fallback_reason", payload.get("fallback_reason"))
+    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    append_agent_value(lines, 1, "result_count", len(results))
+    append_agent_items(lines, 1, "results", "result", results, AGENT_SEARCH_RESULT_FIELDS)
+    lines.append("</tapl_search>")
+    return "\n".join(lines)
+
+
+def agent_item(payload: dict[str, Any]) -> str:
+    lines = ["<tapl_item>"]
+    item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
+    append_agent_fields(lines, 1, item, AGENT_ITEM_BASE_FIELDS)
+    kind = str(item.get("kind") or "")
+    if kind == "plan":
+        append_agent_fields(lines, 1, item, AGENT_ITEM_PLAN_FIELDS)
+    elif kind == "task":
+        append_agent_fields(lines, 1, item, AGENT_ITEM_TASK_FIELDS)
+    elif kind == "finding":
+        append_agent_fields(lines, 1, item, AGENT_ITEM_FINDING_FIELDS)
+    else:
+        append_agent_fields(lines, 1, item, ("body", "raw_text"))
+    lines.append("</tapl_item>")
+    return "\n".join(lines)
+
+
+def agent_error(message: str) -> str:
+    lines = ["<tapl_error>"]
+    append_agent_value(lines, 1, "message", message)
+    lines.append("</tapl_error>")
+    return "\n".join(lines)
+
+
+def agent_output(payload: dict[str, Any], root_tag: str = "tapl_output") -> str:
+    lines = [f"<{root_tag}>"]
+    for key, value in payload.items():
+        append_agent_node(lines, 1, key, value)
+    lines.append(f"</{root_tag}>")
+    return "\n".join(lines)
+
+
+def append_agent_node(lines: list[str], depth: int, tag: str, value: Any) -> None:
+    if tag in AGENT_SKIP_KEYS or not agent_value_present(value):
+        return
+    tag_name = agent_tag_name(tag)
+    if isinstance(value, dict):
+        section: list[str] = []
+        for key, child in value.items():
+            append_agent_node(section, depth + 1, str(key), child)
+        if section:
+            indent = "  " * depth
+            lines.append(f"{indent}<{tag_name}>")
+            lines.extend(section)
+            lines.append(f"{indent}</{tag_name}>")
+        return
+    if isinstance(value, list):
+        item_tag = AGENT_LIST_ITEM_TAGS.get(tag, "item")
+        section = []
+        for child in value:
+            append_agent_node(section, depth + 1, item_tag, child)
+        if section:
+            indent = "  " * depth
+            lines.append(f"{indent}<{tag_name}>")
+            lines.extend(section)
+            lines.append(f"{indent}</{tag_name}>")
+        return
+    append_agent_value(lines, depth, tag_name, value)
+
+
+def append_agent_counts(lines: list[str], payload: dict[str, Any]) -> None:
+    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    values = {
+        "plans": counts.get("plans", 0),
+        "tasks": counts.get("tasks", 0),
+        "findings": counts.get("findings", 0),
+        "incomplete_tasks": payload.get("incomplete_tasks", 0),
+    }
+    append_agent_mapping(lines, 1, "counts", values, tuple(values.keys()))
+
+
+def append_agent_task_counts(lines: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        return
+    lines_to_add: list[str] = []
+    for status, tag in TASK_STATUS_AGENT_TAGS.items():
+        count = int(value.get(status) or 0)
+        if count:
+            append_agent_value(lines_to_add, 2, tag, count)
+    if lines_to_add:
+        lines.append("  <task_counts>")
+        lines.extend(lines_to_add)
+        lines.append("  </task_counts>")
+
+
+def append_agent_issues(lines: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        return
+    issues = value.get("issues") if isinstance(value.get("issues"), list) else []
+    append_agent_items(lines, 1, "issues", "issue", issues, ("severity", "code", "stable_id", "message", "remediation"))
+
+
+def append_agent_items(
+    lines: list[str],
+    depth: int,
+    container_tag: str,
+    item_tag: str,
+    value: Any,
+    fields: tuple[str, ...],
+) -> None:
+    if not isinstance(value, list):
+        return
+    rendered_items: list[list[str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        item_lines: list[str] = []
+        append_agent_fields(item_lines, depth + 2, item, fields)
+        if item_lines:
+            rendered_items.append(item_lines)
+    if not rendered_items:
+        return
+    indent = "  " * depth
+    lines.append(f"{indent}<{container_tag}>")
+    for item_lines in rendered_items:
+        item_indent = "  " * (depth + 1)
+        lines.append(f"{item_indent}<{item_tag}>")
+        lines.extend(item_lines)
+        lines.append(f"{item_indent}</{item_tag}>")
+    lines.append(f"{indent}</{container_tag}>")
+
+
+def append_agent_mapping(
+    lines: list[str],
+    depth: int,
+    tag: str,
+    value: dict[str, Any],
+    fields: tuple[str, ...],
+) -> None:
+    section: list[str] = []
+    append_agent_fields(section, depth + 1, value, fields)
+    if not section:
+        return
+    indent = "  " * depth
+    lines.append(f"{indent}<{tag}>")
+    lines.extend(section)
+    lines.append(f"{indent}</{tag}>")
+
+
+def append_agent_fields(lines: list[str], depth: int, item: dict[str, Any], fields: tuple[str, ...]) -> None:
+    for field in fields:
+        append_agent_value(lines, depth, agent_tag_name(field), item.get(field))
+
+
+def append_agent_value(lines: list[str], depth: int, tag: str, value: Any) -> None:
+    if not agent_value_present(value):
+        return
+    indent = "  " * depth
+    lines.append(f"{indent}<{tag}>{agent_escape(value)}</{tag}>")
+
+
+def agent_value_present(value: Any) -> bool:
+    return value is not None and value != "" and value != [] and value != {}
+
+
+def agent_tag_name(value: str) -> str:
+    return value.replace("-", "_")
+
+
+def agent_escape(value: Any) -> str:
+    if isinstance(value, bool):
+        text = "true" if value else "false"
+    else:
+        text = str(value)
+    return html.escape(text, quote=False)
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     settings = load_config(args)
@@ -652,7 +996,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         "config": settings.as_dict(),
         "plan_task_execute": plan_task_execute,
     }
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0 if payload["ok"] else 1
 
 
@@ -664,6 +1008,8 @@ def cmd_context(args: argparse.Namespace) -> int:
     )
     if args.json:
         print_json(packet)
+    elif args.agent:
+        print(agent_output(packet, "tapl_context"))
     else:
         print(tapl_context.format_context(packet))
     return 0
@@ -677,6 +1023,7 @@ def cmd_run_set(args: argparse.Namespace) -> int:
                 "error": "provide --summary, --result, or both",
             },
             args.json,
+            args.agent,
         )
         return 1
     conn = open_conn(args)
@@ -685,7 +1032,7 @@ def cmd_run_set(args: argparse.Namespace) -> int:
         request_summary=args.summary,
         result_summary=args.result,
     )
-    emit({"ok": True, "active_run": db.row_to_dict(run)}, args.json)
+    emit({"ok": True, "active_run": db.row_to_dict(run)}, args.json, args.agent)
     return 0
 
 
@@ -697,7 +1044,7 @@ def cmd_install_user(args: argparse.Namespace) -> int:
         force=args.force,
         dry_run=args.dry_run,
     )
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0
 
 
@@ -709,7 +1056,7 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
         force=args.force,
         dry_run=args.dry_run,
     )
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0
 
 
@@ -722,7 +1069,7 @@ def cmd_plan_set(args: argparse.Namespace) -> int:
         settings=settings.plan_task_execute,
     )
     if not input_check["ok"]:
-        emit({"ok": False, "plan_task_execute": input_check}, args.json)
+        emit({"ok": False, "plan_task_execute": input_check}, args.json, args.agent)
         return 1
 
     def merged_field(name: str, value: str | None = None, *, default: str = "") -> str:
@@ -753,16 +1100,18 @@ def cmd_plan_set(args: argparse.Namespace) -> int:
         approval_needs=merged_field("approval_needs"),
         notes=merged_field("notes"),
     )
+    output_item = db.item_detail(conn, item["id"]) if args.agent else db.row_to_dict(item)
     emit(
         {
             "ok": True,
-            "item": db.row_to_dict(item),
+            "item": output_item,
             "plan_task_execute": validation.validate_plan_task_execute(
                 conn,
                 settings.plan_task_execute,
             ),
         },
         args.json,
+        args.agent,
     )
     return 0
 
@@ -795,6 +1144,7 @@ def cmd_task_set(args: argparse.Namespace) -> int:
                     },
                 },
                 args.json,
+                args.agent,
             )
             return 1
 
@@ -846,7 +1196,7 @@ def cmd_task_set(args: argparse.Namespace) -> int:
             input_check["errors"].extend(create_routing_issues)
             input_check["ok"] = False
     if not input_check["ok"]:
-        emit({"ok": False, "plan_task_execute": input_check}, args.json)
+        emit({"ok": False, "plan_task_execute": input_check}, args.json, args.agent)
         return 1
 
     item = db.upsert_task(
@@ -863,16 +1213,18 @@ def cmd_task_set(args: argparse.Namespace) -> int:
         blocker=blocker,
         next_action=next_action,
     )
+    output_item = db.item_detail(conn, item["id"]) if args.agent else db.row_to_dict(item)
     emit(
         {
             "ok": True,
-            "item": db.row_to_dict(item),
+            "item": output_item,
             "plan_task_execute": validation.validate_plan_task_execute(
                 conn,
                 settings.plan_task_execute,
             ),
         },
         args.json,
+        args.agent,
     )
     return 0
 
@@ -887,7 +1239,8 @@ def cmd_finding_add(args: argparse.Namespace) -> int:
         impact=args.impact,
         related_ids=args.related_ids,
     )
-    emit({"ok": True, "item": db.row_to_dict(item)}, args.json)
+    output_item = db.item_detail(conn, item["id"]) if args.agent else db.row_to_dict(item)
+    emit({"ok": True, "item": output_item}, args.json, args.agent)
     return 0
 
 
@@ -898,51 +1251,58 @@ def cmd_approval_set(args: argparse.Namespace) -> int:
         decision=args.decision,
         prompt=args.prompt,
     )
-    emit({"ok": True, "approval": db.row_to_dict(approval)}, args.json)
+    emit({"ok": True, "approval": db.row_to_dict(approval)}, args.json, args.agent)
     return 0
 
 
 def cmd_approval_status(args: argparse.Namespace) -> int:
     status = db.approval_status(open_conn(args), kind=args.kind)
-    emit({"ok": True, "approval": status}, args.json)
+    emit({"ok": True, "approval": status}, args.json, args.agent)
     return 0
 
 
 def cmd_approval_list(args: argparse.Namespace) -> int:
     kind = args.kind.strip() or None
     approvals = db.list_approvals(open_conn(args), kind=kind, limit=args.limit)
-    emit({"ok": True, "approvals": approvals}, args.json)
+    emit({"ok": True, "approvals": approvals}, args.json, args.agent)
     return 0
 
 
 def cmd_item_show(args: argparse.Namespace) -> int:
     item = db.item_detail(open_conn(args), args.id)
     if item is None:
-        emit({"ok": False, "error": f"item not found: {args.id}"}, args.json)
+        if args.agent:
+            print(agent_error(f"item not found: {args.id}"))
+            return 1
+        emit({"ok": False, "error": f"item not found: {args.id}"}, args.json, args.agent)
         return 1
-    emit({"ok": True, "item": item}, args.json)
+    payload = {"ok": True, "item": item}
+    if args.agent:
+        print(agent_item(payload))
+        return 0
+    emit(payload, args.json, args.agent)
     return 0
 
 
 def cmd_archive_create(args: argparse.Namespace) -> int:
     archive = db.archive_active_run(open_conn(args), slug=args.slug, summary=args.summary)
-    emit({"ok": True, "archive": db.row_to_dict(archive)}, args.json)
+    emit({"ok": True, "archive": db.row_to_dict(archive)}, args.json, args.agent)
     return 0
 
 
 def cmd_archive_list(args: argparse.Namespace) -> int:
     archives = db.list_archives(open_conn(args), limit=args.limit)
-    emit({"ok": True, "archives": archives}, args.json)
+    emit({"ok": True, "archives": archives}, args.json, args.agent)
     return 0
 
 
 def cmd_archive_show(args: argparse.Namespace) -> int:
     detail = db.archive_detail(open_conn(args), args.id)
     if detail is None:
-        emit({"ok": False, "error": f"archive not found: {args.id}"}, args.json)
+        emit({"ok": False, "error": f"archive not found: {args.id}"}, args.json, args.agent)
         return 1
     detail["ok"] = True
-    emit(detail, args.json)
+    emit(detail, args.json, args.agent)
     return 0
 
 
@@ -951,13 +1311,16 @@ def cmd_search(args: argparse.Namespace) -> int:
     limit = args.limit if args.limit is not None else settings.search.max_results
     payload = embeddings.search(open_conn(args), args.query, limit=limit, search_config=settings.search)
     payload["ok"] = True
-    emit(payload, args.json)
+    if args.agent:
+        print(agent_search(payload))
+        return 0
+    emit(payload, args.json, args.agent)
     return 0
 
 
 def cmd_reindex(args: argparse.Namespace) -> int:
     payload = embeddings.reindex(open_conn(args), dry_run=args.dry_run)
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0 if payload.get("ok") else 1
 
 
@@ -971,7 +1334,7 @@ def cmd_searchd_start(args: argparse.Namespace) -> int:
         wait=not args.no_wait,
     )
     payload["config"] = settings.search.as_dict()
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0 if payload.get("ok") else 1
 
 
@@ -979,7 +1342,7 @@ def cmd_searchd_status(args: argparse.Namespace) -> int:
     settings = load_config(args)
     payload = searchd.status(settings.search, socket_path=args.socket, timeout_ms=args.timeout_ms)
     payload["config"] = settings.search.as_dict()
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0
 
 
@@ -987,7 +1350,7 @@ def cmd_searchd_stop(args: argparse.Namespace) -> int:
     settings = load_config(args)
     payload = searchd.stop(settings.search, socket_path=args.socket, timeout_ms=args.timeout_ms)
     payload["config"] = settings.search.as_dict()
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0 if payload.get("ok") else 1
 
 
@@ -998,7 +1361,7 @@ def cmd_searchd_run(args: argparse.Namespace) -> int:
         socket_path=args.socket,
         model_idle_timeout_seconds=args.idle_timeout,
     )
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0 if payload.get("ok") else 1
 
 
@@ -1009,7 +1372,7 @@ def cmd_import_md(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         migrate_existing=args.migrate_existing,
     )
-    emit(payload, args.json)
+    emit(payload, args.json, args.agent)
     return 0 if payload.get("ok") else 1
 
 
@@ -1037,13 +1400,16 @@ def cmd_hook_event(args: argparse.Namespace) -> int:
         tapl_settings=settings,
         plan_task_settings=settings.plan_task_execute,
     )
-    emit_hook_outcome(outcome, args.json)
+    emit_hook_outcome(outcome, args.json, args.agent)
     return 2 if outcome.get("block") else 0
 
 
-def emit_hook_outcome(outcome: dict[str, Any], as_json: bool) -> None:
+def emit_hook_outcome(outcome: dict[str, Any], as_json: bool, as_agent: bool = False) -> None:
     if as_json:
         print_json(outcome)
+        return
+    if as_agent:
+        print(agent_output(outcome, "tapl_hook_event"))
         return
 
     if outcome.get("event") == "Stop":
@@ -1068,9 +1434,12 @@ def payload_cwd(payload: dict[str, Any]) -> Path | None:
     return None
 
 
-def emit(payload: dict[str, Any], as_json: bool) -> None:
+def emit(payload: dict[str, Any], as_json: bool, as_agent: bool = False) -> None:
     if as_json:
         print_json(payload)
+        return
+    if as_agent:
+        print(agent_output(payload))
         return
     print(humanize(payload))
 

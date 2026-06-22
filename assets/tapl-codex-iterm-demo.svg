@@ -36,11 +36,11 @@
     <text x="204" y="372" fill="#94a3b8">uses the same CLI state before editing</text>
 
     <text x="152" y="420" fill="#38bdf8">1.</text>
-    <text x="194" y="420" fill="#e6edf3">taplctl status --json</text>
+    <text x="194" y="420" fill="#e6edf3">taplctl status --agent</text>
     <text x="518" y="420" fill="#94a3b8"># active run, counts, approvals, validation</text>
 
     <text x="152" y="455" fill="#38bdf8">2.</text>
-    <text x="194" y="455" fill="#e6edf3">taplctl search 'README self PR codex cli screenshot' --json</text>
+    <text x="194" y="455" fill="#e6edf3">taplctl search 'README self PR codex cli screenshot' --agent</text>
     <text x="990" y="455" fill="#94a3b8"># prior work</text>
 
     <text x="152" y="490" fill="#38bdf8">3.</text>
