@@ -133,6 +133,7 @@ type HostWebviewMessage =
 
 const COMMAND_PREFIX = "taplWorkflow";
 const TAPL_DB_WATCH_DEBOUNCE_MS = 2000;
+const TAPLCTL_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 const TAPLCTL_PATH_SETTING = "taplctlPath";
 const COMMON_TAPLCTL_COMMANDS = [
   "taplctl",
@@ -1664,7 +1665,7 @@ function taplctlExecutionEnv(): Record<string, string | undefined> {
 
 function execFile(command: string, args: string[], cwd: string): Promise<{ ok: true; value: ExecResult } | { ok: false; error: string; commandNotFound: boolean }> {
   return new Promise((resolve) => {
-    childProcess.execFile(command, args, { cwd, timeout: 10000, env: taplctlExecutionEnv() }, (error, stdout, stderr) => {
+    childProcess.execFile(command, args, { cwd, timeout: 10000, maxBuffer: TAPLCTL_MAX_BUFFER_BYTES, env: taplctlExecutionEnv() }, (error, stdout, stderr) => {
       if (error) {
         resolve({ ok: false, error: stderr || error.message, commandNotFound: isCommandNotFound(error) });
         return;

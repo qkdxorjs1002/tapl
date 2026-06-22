@@ -178,6 +178,7 @@ declare module 'child_process' {
   export interface ExecFileOptions {
     cwd?: string;
     timeout?: number;
+    maxBuffer?: number;
     env?: Record<string, string | undefined>;
   }
 

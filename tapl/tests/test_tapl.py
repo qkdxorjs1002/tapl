@@ -2477,6 +2477,7 @@ task_granularity = "very_granular"
                 [("plan", "SPEC-001"), ("task", "TASK-001"), ("finding", "FINDING-001")],
             )
             self.assertEqual(payload["events"][0]["event_type"], "PreToolUse")
+            self.assertNotIn("payload_json", payload["events"][0])
 
     def test_import_md_restructures_legacy_archive_as_tapl_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

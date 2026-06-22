@@ -786,7 +786,12 @@ def archive_detail(conn: sqlite3.Connection, archive_id_or_slug: str) -> dict[st
     events = [
         row_to_dict(row)
         for row in conn.execute(
-            "SELECT * FROM events WHERE run_id = ? ORDER BY id",
+            """
+            SELECT id, run_id, event_type, tool_name, mode, message, created_at
+            FROM events
+            WHERE run_id = ?
+            ORDER BY id
+            """,
             (run_id,),
         )
     ]
