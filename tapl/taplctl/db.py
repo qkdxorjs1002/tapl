@@ -381,15 +381,15 @@ def upsert_task(
     if status not in TASK_STATUSES:
         raise ValueError(f"invalid task status: {status}")
 
-    body = "\n".join(
+    body = "\n\n".join(
         part
         for part in [
-            f"Goal: {goal}" if goal else "",
-            f"Action: {action}" if action else "",
-            f"Verification: {verification}" if verification else "",
-            f"Result: {result}" if result else "",
-            f"Blocker: {blocker}" if blocker else "",
-            f"Next action: {next_action}" if next_action else "",
+            f"### Goal\n{goal}" if goal else "",
+            f"### Action\n{action}" if action else "",
+            f"### Verification\n{verification}" if verification else "",
+            f"### Result\n{result}" if result else "",
+            f"### Blocker\n{blocker}" if blocker else "",
+            f"### Next action\n{next_action}" if next_action else "",
         ]
         if part
     )
