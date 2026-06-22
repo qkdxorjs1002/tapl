@@ -38,7 +38,7 @@ def taplctl_help_guidance() -> str:
 def external_findings_guidance() -> str:
     return (
         "Findings: if external search/docs changes requirements/plan/tasks/verification, "
-        "add decision-relevant facts with `taplctl finding add`; Markdown form for details/impact."
+        "add decision-relevant facts with `taplctl finding add`; Use markdown for details/impact."
     )
 
 
@@ -190,7 +190,7 @@ def should_suggest_prior_search(state: dict[str, Any], prompt: str) -> bool:
 
 def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
     guidance = [
-        "Records: Markdown form for multi-line content; Use numeric stable ids only: "
+        "Records: Use markdown; Use numeric stable ids only: "
         "PLAN-001/SPEC-001, TASK-001; no word suffixes.",
         "Order: Phase order: plan with user -> `taplctl plan set`; derive tasks from stored plan -> "
         "`taplctl task set`.",
