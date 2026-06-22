@@ -531,20 +531,23 @@ def plan_detail_guidance(value: str) -> str:
 
 
 def planning_approval_guidance(value: str) -> str:
-    guidance = {
+    guidance = guidance = {
         "less": (
             "Before `taplctl plan set`, use request_user_input Tool only for blocking or "
-            "high-risk material scope/risk/API/UX/data/compat choices; otherwise state assumptions."
+            "high-risk material scope/risk/API/UX/data/compat choices. Ask follow-up questions "
+            "only when the answer remains blocking; otherwise state assumptions."
         ),
         "auto": (
             "Before `taplctl plan set`, use request_user_input Tool for ambiguous material "
-            "scope/risk/API/UX/data/compat decisions; prefer one short question with 2-3 "
-            "mutually exclusive options."
+            "scope/risk/API/UX/data/compat decisions. Prefer one short question with 2-3 "
+            "mutually exclusive options; ask additional questions only when needed to resolve "
+            "material ambiguity."
         ),
         "more": (
             "Before `taplctl plan set`, use request_user_input Tool early for unclear planning "
-            "methods, material scope/risk/API/UX/data/compat, or tradeoffs; prefer one short "
-            "question with 2-3 mutually exclusive options."
+            "methods, material scope/risk/API/UX/data/compat, or tradeoffs. Ask short, focused "
+            "questions with 2-3 mutually exclusive options, and continue with follow-ups until "
+            "the plan is materially clear."
         ),
     }[value]
     return (
