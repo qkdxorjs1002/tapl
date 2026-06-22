@@ -405,6 +405,7 @@ pre {
 
 .tapl-focus-row:first-child {
   border-top-width: 1px;
+  padding-top: 0.75rem;
 }
 
 .tapl-readable.markdown-body {
