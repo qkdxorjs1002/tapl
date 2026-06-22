@@ -127,6 +127,8 @@ history를 추측하지 않고 저장된 state에서 이어갈 수 있습니다.
 ### 2. 도구가 읽을 수 있는 plan과 task
 
 Plan과 task는 흩어진 Markdown 메모가 아니라 first-class record입니다.
+Agent는 plan/task 내용을 CLI 필드 인자로 넘기고, tapl은 record 병합 시 안정적인
+템플릿으로 저장용 Markdown body를 렌더링합니다.
 Plan과 task를 설정한 뒤에는 task 실행을 시작하거나 이어가기 전에 execution
 approval을 설정합니다.
 
@@ -135,6 +137,13 @@ taplctl plan set \
   --id PLAN-001 \
   --title "Example implementation plan" \
   --summary "REQ-001: approach, files, order, risks, validation" \
+  --objective "Make the requested behavior work" \
+  --requirements-trace "REQ-001: implement the requested behavior" \
+  --selected-approach "Use the existing module boundaries" \
+  --affected-files "tapl/taplctl/db.py and tapl/taplctl/cli.py" \
+  --execution-order "1. Update storage. 2. Update CLI. 3. Run tests." \
+  --risks "Keep existing records readable during migration" \
+  --validation "Run focused checks" \
   --status Finalized \
   --json
 

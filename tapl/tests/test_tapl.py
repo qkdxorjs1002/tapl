@@ -111,6 +111,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertNotIn("archives", full_payload)
             self.assertIn("body", full_payload["tasks"][0])
             self.assertEqual(full_payload["tasks"][0]["goal"], "Create DB-backed workflow state")
+            self.assertIn("### Goal\nCreate DB-backed workflow state", full_payload["tasks"][0]["body"])
 
             event = self.run_cli(
                 db_path,
@@ -147,6 +148,112 @@ class TaplCliTests(unittest.TestCase):
             item = json.loads(detail.stdout)["item"]
             self.assertEqual(item["stable_id"], "TASK-001")
             self.assertEqual(item["goal"], "Create DB-backed workflow state")
+
+    def test_plan_set_uses_structured_fields_and_partial_updates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            created = self.run_cli(
+                db_path,
+                "plan",
+                "set",
+                "--id",
+                "PLAN-001",
+                "--title",
+                "Structured plan",
+                "--status",
+                "Draft",
+                "--summary",
+                "REQ-001: structured plan records, rendered markdown, focused validation.",
+                "--objective",
+                "Store plan fields separately from rendered markdown.",
+                "--requirements-trace",
+                "REQ-001: plan fields use CLI arguments.",
+                "--selected-approach",
+                "Render `items.body` from the plan template.",
+                "--affected-files",
+                "tapl/taplctl/db.py and tapl/taplctl/cli.py",
+                "--execution-order",
+                "1. Add schema. 2. Update CLI. 3. Run tests.",
+                "--risks",
+                "Existing body-only plans need a migration fallback.",
+                "--validation",
+                "Run `uv run pytest`.",
+                "--approval-needs",
+                "Execution approval before durable edits.",
+                "--json",
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+
+            status = self.run_cli(db_path, "status", "--json", "--full")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            plan = json.loads(status.stdout)["plans"][0]
+            self.assertEqual(plan["summary"], "REQ-001: structured plan records, rendered markdown, focused validation.")
+            self.assertEqual(plan["objective"], "Store plan fields separately from rendered markdown.")
+            self.assertEqual(plan["requirements_trace"], "REQ-001: plan fields use CLI arguments.")
+            self.assertIn("### Objective\nStore plan fields separately from rendered markdown.", plan["body"])
+            self.assertIn("### Requirements trace\nREQ-001: plan fields use CLI arguments.", plan["body"])
+            self.assertIn("### Validation\nRun `uv run pytest`.", plan["body"])
+
+            conn = sqlite3.connect(db_path)
+            row = conn.execute(
+                "SELECT plan_id, objective, validation FROM plans WHERE plan_id = 'PLAN-001'",
+            ).fetchone()
+            conn.close()
+            self.assertEqual(row, ("PLAN-001", "Store plan fields separately from rendered markdown.", "Run `uv run pytest`."))
+
+            updated = self.run_cli(
+                db_path,
+                "plan",
+                "set",
+                "--id",
+                "PLAN-001",
+                "--status",
+                "Finalized",
+                "--validation",
+                "Run focused CLI and unit tests.",
+                "--json",
+            )
+            self.assertEqual(updated.returncode, 0, updated.stderr)
+
+            status = self.run_cli(db_path, "status", "--json", "--full")
+            plan = json.loads(status.stdout)["plans"][0]
+            self.assertEqual(plan["title"], "Structured plan")
+            self.assertEqual(plan["status"], "Finalized")
+            self.assertEqual(plan["objective"], "Store plan fields separately from rendered markdown.")
+            self.assertEqual(plan["validation"], "Run focused CLI and unit tests.")
+            self.assertIn("### Validation\nRun focused CLI and unit tests.", plan["body"])
+
+    def test_plan_migration_backfills_existing_body_only_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            init = self.run_cli(db_path, "init", "--json")
+            self.assertEqual(init.returncode, 0, init.stderr)
+
+            conn = sqlite3.connect(db_path)
+            now = "2026-06-22T00:00:00+00:00"
+            run_id = "legacy-active-run"
+            conn.execute(
+                """
+                INSERT INTO workflow_runs(id, slug, status, request_summary, created_at, updated_at)
+                VALUES(?, 'active', 'active', 'Legacy plan migration', ?, ?)
+                """,
+                (run_id, now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO items(run_id, stable_id, kind, title, body, raw_text, status, created_at, updated_at)
+                VALUES(?, 'PLAN-001', 'plan', 'Legacy body plan', 'Legacy body-only plan text', '', 'Draft', ?, ?)
+                """,
+                (run_id, now, now),
+            )
+            conn.commit()
+            conn.close()
+
+            status = self.run_cli(db_path, "status", "--json", "--full")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            plan = json.loads(status.stdout)["plans"][0]
+            self.assertEqual(plan["plan_id"], "PLAN-001")
+            self.assertEqual(plan["notes"], "Legacy body-only plan text")
 
     def test_task_set_allows_partial_update_for_existing_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1240,7 +1347,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("@senior-worker", prompt_guidance)
             self.assertIn("set execution approval", prompt_guidance)
             self.assertIn("taplctl finding add", prompt_guidance)
-            self.assertIn("Markdown form", prompt_guidance)
+            self.assertIn("structured CLI fields", prompt_guidance)
             self.assertNotIn("quote every argument", prompt_instructions)
             self.assertNotIn("Do not use level names such as `level2`", prompt_guidance)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
@@ -1390,7 +1497,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("do not claim delegation occurred", prompt_text.stdout)
             self.assertIn("taplctl finding add", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
-            self.assertIn("Markdown form", prompt_text.stdout)
+            self.assertIn("structured CLI fields", prompt_text.stdout)
             self.assertIn("Use numeric stable ids only", prompt_text.stdout)
             self.assertNotIn("quote every argument", prompt_text.stdout)
 
@@ -1405,7 +1512,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Phase order", root_help.stdout)
             self.assertIn("taplctl plan set", root_help.stdout)
             self.assertIn("Execute planned tasks one at a time", root_help.stdout)
-            self.assertIn("Markdown form", root_help.stdout)
+            self.assertIn("structured CLI field arguments", root_help.stdout)
 
             run_help = self.run_cli(db_path, "run", "set", "--help")
             self.assertEqual(run_help.returncode, 0, run_help.stderr)
@@ -1421,10 +1528,14 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Affected files/interfaces", plan_help.stdout)
             self.assertIn("Approval needs", plan_help.stdout)
             self.assertIn("before task records", plan_help.stdout)
-            self.assertIn("Markdown form", plan_help.stdout)
+            self.assertIn("structured CLI field arguments", plan_help.stdout)
             self.assertIn("Use numeric stable ids only", plan_help.stdout)
             self.assertIn("PLAN-001", plan_help.stdout)
-            self.assertIn("--body", plan_help.stdout)
+            self.assertIn("--objective", plan_help.stdout)
+            self.assertIn("--requirements-trace", plan_help.stdout)
+            self.assertIn("--selected-approach", plan_help.stdout)
+            self.assertIn("--notes", plan_help.stdout)
+            self.assertNotIn("--body", plan_help.stdout)
 
             task_help = self.run_cli(db_path, "task", "set", "--help")
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
@@ -1442,7 +1553,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("do not claim", task_help.stdout)
             self.assertIn("@senior-worker", task_help.stdout)
             self.assertIn("source plan/spec exists", task_help.stdout)
-            self.assertIn("Markdown form", task_help.stdout)
+            self.assertIn("structured CLI field arguments", task_help.stdout)
             self.assertIn("--blocker/--next-action", task_help.stdout)
 
             approval_help = self.run_cli(db_path, "approval", "set", "--help")
@@ -1947,7 +2058,7 @@ task_granularity = "very_granular"
             self.assertIn("Keep plan section labels in English", event.stdout)
             self.assertIn("Requirements trace", event.stdout)
             self.assertIn("taplctl finding add", event.stdout)
-            self.assertIn("Markdown form", event.stdout)
+            self.assertIn("structured CLI fields", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
 
             event_json = self.run_cli(
@@ -1983,7 +2094,7 @@ task_granularity = "very_granular"
             self.assertEqual(event.returncode, 0, event.stderr)
             self.assertIn("taplctl finding add", event.stdout)
             self.assertIn("decision-relevant", event.stdout)
-            self.assertIn("Markdown form", event.stdout)
+            self.assertIn("Use markdown for details/impact", event.stdout)
 
     def test_session_start_hook_does_not_create_active_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2122,8 +2233,14 @@ task_granularity = "very_granular"
                 "Auto archive completed run",
                 "--summary",
                 "Plan a completed request from planning to task execution and archive it automatically.",
-                "--body",
-                "Requirements trace, execution order, risks, and validation are documented so the completed run is eligible for Stop hook archive.",
+                "--requirements-trace",
+                "REQ-001: completed run has enough plan detail for Stop hook archive.",
+                "--execution-order",
+                "Plan, execute task, then archive on Stop.",
+                "--risks",
+                "Sparse plans should not pass detailed validation.",
+                "--validation",
+                "Stop hook archives the run.",
                 "--json",
             )
             self.assertEqual(plan.returncode, 0, plan.stderr)
@@ -2231,11 +2348,14 @@ task_granularity = "very_granular"
                 "Plan only run",
                 "--summary",
                 "Prepare a plan without executing implementation tasks.",
-                "--body",
-                "Requirements trace: REQ-001 documents that only planning happened. "
-                "Execution order: create plan and wait for explicit user approval before work. "
-                "Risks: archiving now would hide work that still needs execution. "
-                "Validation: Stop hook leaves the run active because no task completed.",
+                "--requirements-trace",
+                "REQ-001 documents that only planning happened.",
+                "--execution-order",
+                "Create plan and wait for explicit user approval before work.",
+                "--risks",
+                "Archiving now would hide work that still needs execution.",
+                "--validation",
+                "Stop hook leaves the run active because no task completed.",
                 "--json",
             )
             self.assertEqual(plan.returncode, 0, plan.stderr)
@@ -2564,10 +2684,16 @@ VSCode 확장을 추가하고 markdown preview를 연결한다.
                 [(item["kind"], item["stable_id"]) for item in payload["items"]],
                 [("plan", "SPEC-001"), ("task", "TASK-001"), ("task", "TASK-002"), ("finding", "FINDING-001")],
             )
+            plan = next(item for item in payload["items"] if item["stable_id"] == "SPEC-001")
+            self.assertEqual(plan["requirements_trace"], "REQ-001")
+            self.assertEqual(plan["objective"], "확장 기본 구조를 만든다.")
+            self.assertEqual(plan["validation"], "`npm run compile`")
+            self.assertIn("### Objective\n확장 기본 구조를 만든다.", plan["body"])
             task = next(item for item in payload["items"] if item["stable_id"] == "TASK-001")
             self.assertEqual(task["status"], "Completed")
             self.assertEqual(task["spec_id"], "SPEC-001")
             self.assertEqual(task["required_subagent"], "@senior-worker")
+            self.assertIn("### Action\nTypeScript extension scaffold를 추가한다.", task["body"])
             self.assertNotIn("Phase 2", task["result"])
 
     def test_import_md_migrates_existing_raw_legacy_imports(self) -> None:

@@ -128,6 +128,8 @@ resume from the stored state instead of guessing from chat history.
 ### 2. Plans and tasks that tools can read
 
 Plans and tasks are first-class records, not loose Markdown notes.
+Agents pass plan/task content as CLI fields; tapl renders the stored Markdown
+body from stable templates when records are merged.
 After setting the plan and tasks, set execution approval before starting or
 continuing task execution.
 
@@ -136,6 +138,13 @@ taplctl plan set \
   --id PLAN-001 \
   --title "Example implementation plan" \
   --summary "REQ-001: approach, files, order, risks, validation" \
+  --objective "Make the requested behavior work" \
+  --requirements-trace "REQ-001: implement the requested behavior" \
+  --selected-approach "Use the existing module boundaries" \
+  --affected-files "tapl/taplctl/db.py and tapl/taplctl/cli.py" \
+  --execution-order "1. Update storage. 2. Update CLI. 3. Run tests." \
+  --risks "Keep existing records readable during migration" \
+  --validation "Run focused checks" \
   --status Finalized \
   --json
 

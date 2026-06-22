@@ -63,7 +63,16 @@ class ParsedFinding:
 class ParsedPlan:
     plan_id: str
     title: str
-    body: str
+    summary: str
+    objective: str
+    requirements_trace: str
+    selected_approach: str
+    affected_files: str
+    execution_order: str
+    risks: str
+    validation: str
+    approval_needs: str
+    notes: str
     raw_text: str
 
 
@@ -270,12 +279,20 @@ def import_group(conn: sqlite3.Connection, group: MarkdownGroup) -> dict[str, in
 
     counts = {"plan_items": 0, "task_items": 0, "finding_items": 0}
     for plan in parse_plans(group.files.get("plan.md")):
-        db.upsert_item(
+        db.upsert_plan(
             conn,
-            kind="plan",
-            stable_id=plan.plan_id,
+            plan_id=plan.plan_id,
             title=plan.title,
-            body=plan.body,
+            summary=plan.summary,
+            objective=plan.objective,
+            requirements_trace=plan.requirements_trace,
+            selected_approach=plan.selected_approach,
+            affected_files=plan.affected_files,
+            execution_order=plan.execution_order,
+            risks=plan.risks,
+            validation=plan.validation,
+            approval_needs=plan.approval_needs,
+            notes=plan.notes,
             raw_text=plan.raw_text,
             source=group.files["plan.md"].source,
             run_id=run_id,
@@ -319,16 +336,22 @@ def parse_plans(source: MarkdownSource | None) -> list[ParsedPlan]:
             index += 1
 
         title, trace = split_title_trace(match.group(2))
-        body_parts = []
-        if trace:
-            body_parts.append(f"Trace: {trace}")
-        body_parts.append(clean_block("\n".join(block[1:])))
-        body = "\n".join(part for part in body_parts if part).strip()
+        fields = parse_bullet_fields(block[1:])
+        notes = clean_block("\n".join(block[1:]))
         plans.append(
             ParsedPlan(
                 plan_id=match.group(1),
                 title=title,
-                body=body,
+                summary="",
+                objective=fields.get("Objective") or fields.get("Goal", ""),
+                requirements_trace=trace or fields.get("Requirements trace", ""),
+                selected_approach=fields.get("Selected approach") or fields.get("Approach", ""),
+                affected_files=fields.get("Affected files/interfaces") or fields.get("Affected files", ""),
+                execution_order=fields.get("Execution order", ""),
+                risks=fields.get("Risks", ""),
+                validation=fields.get("Validation") or fields.get("Verification", ""),
+                approval_needs=fields.get("Approval needs", ""),
+                notes=notes,
                 raw_text="\n".join(block).strip(),
             )
         )
@@ -343,7 +366,16 @@ def parse_plans(source: MarkdownSource | None) -> list[ParsedPlan]:
         ParsedPlan(
             plan_id="PLAN-001",
             title=first_heading(source.text) or "Plan",
-            body=body,
+            summary="",
+            objective="",
+            requirements_trace="",
+            selected_approach="",
+            affected_files="",
+            execution_order="",
+            risks="",
+            validation="",
+            approval_needs="",
+            notes=body,
             raw_text=source.text,
         )
     ]
@@ -432,17 +464,13 @@ def parse_findings(source: MarkdownSource | None) -> list[ParsedFinding]:
 
 
 def upsert_imported_task(conn: sqlite3.Connection, *, task: ParsedTask, source: str, run_id: str) -> None:
-    body = "\n".join(
-        part
-        for part in [
-            f"Goal: {task.goal}" if task.goal else "",
-            f"Action: {task.action}" if task.action else "",
-            f"Verification: {task.verification}" if task.verification else "",
-            f"Result: {task.result}" if task.result else "",
-            f"Blocker: {task.blocker}" if task.blocker else "",
-            f"Next action: {task.next_action}" if task.next_action else "",
-        ]
-        if part
+    body = db.render_task_body(
+        goal=task.goal,
+        action=task.action,
+        verification=task.verification,
+        result=task.result,
+        blocker=task.blocker,
+        next_action=task.next_action,
     )
     item = db.upsert_item(
         conn,

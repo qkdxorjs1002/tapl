@@ -474,7 +474,7 @@ def has_any(text: str, needles: tuple[str, ...]) -> bool:
 def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
     return {
         "allowed_level_subagents": list(LEVEL_SUBAGENTS),
-        "record_format": markdown_record_guidance(),
+        "record_format": structured_record_guidance(),
         "stable_ids": stable_id_guidance(),
         "workflow_order": workflow_order_guidance(),
         "task_dependency": task_plan_dependency_guidance(),
@@ -575,6 +575,13 @@ def markdown_record_guidance(subject: str = "plan, task, and finding content") -
     return (
         f"Write {subject} in Markdown form; use headings, bullets, or concise labeled "
         "sections for multi-line fields."
+    )
+
+
+def structured_record_guidance(subject: str = "plan and task content") -> str:
+    return (
+        f"Pass {subject} through structured CLI field arguments; tapl renders the stored "
+        "Markdown body from templates during record merge."
     )
 
 

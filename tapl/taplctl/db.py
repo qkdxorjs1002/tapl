@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -20,6 +20,26 @@ TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
 DEFAULT_APPROVAL_KIND = "execution"
 APPROVAL_DECISIONS = ("approved", "rejected")
 DEFAULT_REQUEST_SUMMARY = "New request"
+PLAN_TEMPLATE_FIELDS = (
+    ("Summary", "summary"),
+    ("Objective", "objective"),
+    ("Requirements trace", "requirements_trace"),
+    ("Selected approach", "selected_approach"),
+    ("Affected files/interfaces", "affected_files"),
+    ("Execution order", "execution_order"),
+    ("Risks", "risks"),
+    ("Validation", "validation"),
+    ("Approval needs", "approval_needs"),
+    ("Notes", "notes"),
+)
+TASK_TEMPLATE_FIELDS = (
+    ("Goal", "goal"),
+    ("Action", "action"),
+    ("Verification", "verification"),
+    ("Result", "result"),
+    ("Blocker", "blocker"),
+    ("Next action", "next_action"),
+)
 
 
 def utc_now() -> str:
@@ -106,6 +126,21 @@ def migrate(conn: sqlite3.Connection) -> None:
           next_action TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS plans (
+          item_id INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+          plan_id TEXT NOT NULL,
+          summary TEXT NOT NULL DEFAULT '',
+          objective TEXT NOT NULL DEFAULT '',
+          requirements_trace TEXT NOT NULL DEFAULT '',
+          selected_approach TEXT NOT NULL DEFAULT '',
+          affected_files TEXT NOT NULL DEFAULT '',
+          execution_order TEXT NOT NULL DEFAULT '',
+          risks TEXT NOT NULL DEFAULT '',
+          validation TEXT NOT NULL DEFAULT '',
+          approval_needs TEXT NOT NULL DEFAULT '',
+          notes TEXT NOT NULL DEFAULT ''
+        );
+
         CREATE TABLE IF NOT EXISTS findings (
           item_id INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
           related_ids TEXT NOT NULL DEFAULT '',
@@ -158,6 +193,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     )
 
     ensure_column(conn, "workflow_runs", "result_summary", "TEXT NOT NULL DEFAULT ''")
+    backfill_plan_rows(conn)
     dedupe_active_runs(conn)
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_single_active_run ON workflow_runs(status) WHERE status = 'active'"
@@ -172,6 +208,19 @@ def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition:
     existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
     if column not in existing:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def backfill_plan_rows(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        INSERT INTO plans(item_id, plan_id, notes)
+        SELECT i.id, i.stable_id, i.body
+        FROM items i
+        LEFT JOIN plans p ON p.item_id = i.id
+        WHERE i.kind = 'plan'
+          AND p.item_id IS NULL
+        """
+    )
 
 
 def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
@@ -363,6 +412,185 @@ def get_active_task(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | Non
     ).fetchone()
 
 
+def get_active_plan(conn: sqlite3.Connection, plan_id: str) -> sqlite3.Row | None:
+    run = active_run(conn)
+    if not run:
+        return None
+    return conn.execute(
+        """
+        SELECT
+          i.*,
+          p.plan_id,
+          p.summary,
+          p.objective,
+          p.requirements_trace,
+          p.selected_approach,
+          p.affected_files,
+          p.execution_order,
+          p.risks,
+          p.validation,
+          p.approval_needs,
+          p.notes
+        FROM items i
+        LEFT JOIN plans p ON p.item_id = i.id
+        WHERE i.run_id = ? AND i.kind = 'plan' AND i.stable_id = ?
+        LIMIT 1
+        """,
+        (run["id"], plan_id),
+    ).fetchone()
+
+
+def render_markdown_sections(fields: Iterable[tuple[str, str]]) -> str:
+    parts = []
+    for label, value in fields:
+        text = str(value or "").strip()
+        if text:
+            parts.append(f"### {label}\n{text}")
+    return "\n\n".join(parts)
+
+
+def render_plan_body(
+    *,
+    summary: str = "",
+    objective: str = "",
+    requirements_trace: str = "",
+    selected_approach: str = "",
+    affected_files: str = "",
+    execution_order: str = "",
+    risks: str = "",
+    validation: str = "",
+    approval_needs: str = "",
+    notes: str = "",
+) -> str:
+    values = {
+        "summary": summary,
+        "objective": objective,
+        "requirements_trace": requirements_trace,
+        "selected_approach": selected_approach,
+        "affected_files": affected_files,
+        "execution_order": execution_order,
+        "risks": risks,
+        "validation": validation,
+        "approval_needs": approval_needs,
+        "notes": notes,
+    }
+    return render_markdown_sections((label, values[key]) for label, key in PLAN_TEMPLATE_FIELDS)
+
+
+def render_task_body(
+    *,
+    goal: str = "",
+    action: str = "",
+    verification: str = "",
+    result: str = "",
+    blocker: str = "",
+    next_action: str = "",
+) -> str:
+    values = {
+        "goal": goal,
+        "action": action,
+        "verification": verification,
+        "result": result,
+        "blocker": blocker,
+        "next_action": next_action,
+    }
+    return render_markdown_sections((label, values[key]) for label, key in TASK_TEMPLATE_FIELDS)
+
+
+def upsert_plan(
+    conn: sqlite3.Connection,
+    *,
+    plan_id: str,
+    title: str,
+    status: str,
+    summary: str = "",
+    objective: str = "",
+    requirements_trace: str = "",
+    selected_approach: str = "",
+    affected_files: str = "",
+    execution_order: str = "",
+    risks: str = "",
+    validation: str = "",
+    approval_needs: str = "",
+    notes: str = "",
+    raw_text: str = "",
+    source: str | None = None,
+    run_id: str | None = None,
+    archived: bool = False,
+) -> sqlite3.Row:
+    body = render_plan_body(
+        summary=summary,
+        objective=objective,
+        requirements_trace=requirements_trace,
+        selected_approach=selected_approach,
+        affected_files=affected_files,
+        execution_order=execution_order,
+        risks=risks,
+        validation=validation,
+        approval_needs=approval_needs,
+        notes=notes,
+    )
+    item = upsert_item(
+        conn,
+        kind="plan",
+        stable_id=plan_id,
+        title=title,
+        body=body,
+        raw_text=raw_text,
+        status=status,
+        source=source,
+        run_id=run_id,
+        archived=archived,
+    )
+    conn.execute(
+        """
+        INSERT INTO plans(
+          item_id,
+          plan_id,
+          summary,
+          objective,
+          requirements_trace,
+          selected_approach,
+          affected_files,
+          execution_order,
+          risks,
+          validation,
+          approval_needs,
+          notes
+        )
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(item_id) DO UPDATE SET
+          plan_id = excluded.plan_id,
+          summary = excluded.summary,
+          objective = excluded.objective,
+          requirements_trace = excluded.requirements_trace,
+          selected_approach = excluded.selected_approach,
+          affected_files = excluded.affected_files,
+          execution_order = excluded.execution_order,
+          risks = excluded.risks,
+          validation = excluded.validation,
+          approval_needs = excluded.approval_needs,
+          notes = excluded.notes
+        """,
+        (
+            item["id"],
+            plan_id,
+            summary,
+            objective,
+            requirements_trace,
+            selected_approach,
+            affected_files,
+            execution_order,
+            risks,
+            validation,
+            approval_needs,
+            notes,
+        ),
+    )
+    conn.commit()
+    return item
+
+
 def upsert_task(
     conn: sqlite3.Connection,
     *,
@@ -381,17 +609,13 @@ def upsert_task(
     if status not in TASK_STATUSES:
         raise ValueError(f"invalid task status: {status}")
 
-    body = "\n\n".join(
-        part
-        for part in [
-            f"### Goal\n{goal}" if goal else "",
-            f"### Action\n{action}" if action else "",
-            f"### Verification\n{verification}" if verification else "",
-            f"### Result\n{result}" if result else "",
-            f"### Blocker\n{blocker}" if blocker else "",
-            f"### Next action\n{next_action}" if next_action else "",
-        ]
-        if part
+    body = render_task_body(
+        goal=goal,
+        action=action,
+        verification=verification,
+        result=result,
+        blocker=blocker,
+        next_action=next_action,
     )
     item = upsert_item(
         conn,
@@ -671,7 +895,25 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
         plans = [
             row_to_dict(row)
             for row in conn.execute(
-                "SELECT * FROM items WHERE run_id = ? AND kind = 'plan' ORDER BY stable_id",
+                """
+                SELECT
+                  i.*,
+                  p.plan_id,
+                  p.summary,
+                  p.objective,
+                  p.requirements_trace,
+                  p.selected_approach,
+                  p.affected_files,
+                  p.execution_order,
+                  p.risks,
+                  p.validation,
+                  p.approval_needs,
+                  p.notes
+                FROM items i
+                LEFT JOIN plans p ON p.item_id = i.id
+                WHERE i.run_id = ? AND i.kind = 'plan'
+                ORDER BY i.stable_id
+                """,
                 (run_id,),
             )
         ]
@@ -765,10 +1007,22 @@ def archive_detail(conn: sqlite3.Connection, archive_id_or_slug: str) -> dict[st
               t.result,
               t.blocker,
               t.next_action,
+              p.plan_id,
+              p.summary,
+              p.objective,
+              p.requirements_trace,
+              p.selected_approach,
+              p.affected_files,
+              p.execution_order,
+              p.risks,
+              p.validation,
+              p.approval_needs,
+              p.notes,
               f.related_ids,
               f.impact
             FROM items i
             LEFT JOIN tasks t ON t.item_id = i.id
+            LEFT JOIN plans p ON p.item_id = i.id
             LEFT JOIN findings f ON f.item_id = i.id
             WHERE i.run_id = ?
             ORDER BY
@@ -821,12 +1075,24 @@ def item_detail(conn: sqlite3.Connection, item_id: int) -> dict[str, Any] | None
           t.result,
           t.blocker,
           t.next_action,
+          p.plan_id,
+          p.summary,
+          p.objective,
+          p.requirements_trace,
+          p.selected_approach,
+          p.affected_files,
+          p.execution_order,
+          p.risks,
+          p.validation,
+          p.approval_needs,
+          p.notes,
           f.related_ids,
           f.impact
         FROM items i
         JOIN workflow_runs r ON r.id = i.run_id
         LEFT JOIN archives a ON a.run_id = i.run_id
         LEFT JOIN tasks t ON t.item_id = i.id
+        LEFT JOIN plans p ON p.item_id = i.id
         LEFT JOIN findings f ON f.item_id = i.id
         WHERE i.id = ?
         LIMIT 1

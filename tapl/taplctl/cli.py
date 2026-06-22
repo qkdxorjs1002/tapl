@@ -35,7 +35,7 @@ def command_help_epilog() -> str:
         f"  {validation.workflow_order_guidance()}\n"
         f"  {validation.task_execution_order_guidance()}\n"
         "  Use `taplctl <command> <subcommand> --help` for field-writing rules.\n"
-        f"  {validation.markdown_record_guidance()}\n"
+        f"  {validation.structured_record_guidance()}\n"
         "  Use `taplctl validate --json` after updates to catch missing plan/task details."
     )
 
@@ -43,19 +43,22 @@ def command_help_epilog() -> str:
 def plan_set_epilog() -> str:
     return (
         "Plan writing rules:\n"
-        f"  {validation.markdown_record_guidance()}\n"
+        f"  {validation.structured_record_guidance()}\n"
         f"  {validation.stable_id_guidance()}\n"
         "  Write or update the plan before task records; downstream tasks should derive from this record.\n"
         f"  {validation.plan_format_guidance()}\n"
         f"  {validation.plan_key_label_guidance()}\n"
+        "  Pass plan content through field arguments; tapl renders the durable Markdown body from a template.\n"
         "  Summary should be a compact trace such as `REQ-001: approach, files, risks, validation`.\n"
-        "  Body is for the durable plan; use the English section labels from the plan guidance.\n"
+        "  Existing plan updates are partial: omitted fields keep the stored values.\n"
         "  Status is free-form; common values are Draft, Finalized, Imported, and Superseded.\n"
         "\n"
         "Example:\n"
         "  taplctl plan set --id PLAN-001 --title 'Plan title' \\\n"
         "    --summary 'REQ-001: approach, affected files, risks, validation' \\\n"
-        "    --body 'Objective: ...\\nValidation: ...' --status Finalized --json"
+        "    --objective 'Implement requested behavior' \\\n"
+        "    --requirements-trace 'REQ-001: field-based plan records' \\\n"
+        "    --validation 'Run focused tests' --status Finalized --json"
     )
 
 
@@ -64,7 +67,7 @@ def task_set_epilog() -> str:
     subagents = ", ".join(validation.LEVEL_SUBAGENTS)
     return (
         "Task writing rules:\n"
-        f"  {validation.markdown_record_guidance()}\n"
+        f"  {validation.structured_record_guidance('task content')}\n"
         f"  {validation.stable_id_guidance()}\n"
         f"  {validation.task_plan_dependency_guidance()}\n"
         f"  {validation.task_execution_order_guidance()}\n"
@@ -141,10 +144,24 @@ def add_run_set_args(parser: argparse.ArgumentParser) -> None:
 
 def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--id", default="PLAN-001", help="Numeric plan id, e.g. PLAN-001 or SPEC-001.")
-    parser.add_argument("--title", default="Plan", help="Short human-readable plan title.")
-    parser.add_argument("--summary", default="", help="Compact requirements trace and approach summary.")
-    parser.add_argument("--body", default="", help="Detailed plan body; use newlines for sections.")
-    parser.add_argument("--status", default="Draft", help="Plan lifecycle label, e.g. Draft or Finalized.")
+    parser.add_argument("--title", default=None, help="Short human-readable plan title.")
+    parser.add_argument("--summary", default=None, help="Compact requirements trace and approach summary.")
+    parser.add_argument("--objective", default=None, help="Plan objective.")
+    parser.add_argument("--requirements-trace", default=None, help="REQ-* trace or requirement mapping.")
+    parser.add_argument("--selected-approach", default=None, help="Selected implementation approach.")
+    parser.add_argument(
+        "--affected-files",
+        "--affected-files-interfaces",
+        dest="affected_files",
+        default=None,
+        help="Affected files, modules, or interfaces.",
+    )
+    parser.add_argument("--execution-order", default=None, help="Ordered execution steps.")
+    parser.add_argument("--risks", default=None, help="Risks, compatibility notes, or tradeoffs.")
+    parser.add_argument("--validation", default=None, help="Validation strategy or commands.")
+    parser.add_argument("--approval-needs", default=None, help="Approval requirements before execution.")
+    parser.add_argument("--notes", default=None, help="Additional notes rendered after standard plan fields.")
+    parser.add_argument("--status", default=None, help="Plan lifecycle label, e.g. Draft or Finalized.")
     add_json_arg(parser)
 
 
@@ -699,6 +716,7 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
 def cmd_plan_set(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     settings = load_config(args)
+    existing = db.get_active_plan(conn, args.id)
     input_check = validation.validate_plan_input(
         plan_id=args.id,
         settings=settings.plan_task_execute,
@@ -707,13 +725,33 @@ def cmd_plan_set(args: argparse.Namespace) -> int:
         emit({"ok": False, "plan_task_execute": input_check}, args.json)
         return 1
 
-    item = db.upsert_item(
+    def merged_field(name: str, value: str | None = None, *, default: str = "") -> str:
+        candidate = getattr(args, name) if value is None else value
+        if candidate is not None:
+            return candidate
+        if existing is None:
+            return default
+        stored = existing[name]
+        return "" if stored is None else str(stored)
+
+    title = merged_field("title", default="Plan")
+    status = merged_field("status", default="Draft")
+
+    item = db.upsert_plan(
         conn,
-        kind="plan",
-        stable_id=args.id,
-        title=args.title,
-        body="\n".join(part for part in [args.summary, args.body] if part),
-        status=args.status,
+        plan_id=args.id,
+        title=title,
+        status=status,
+        summary=merged_field("summary"),
+        objective=merged_field("objective"),
+        requirements_trace=merged_field("requirements_trace"),
+        selected_approach=merged_field("selected_approach"),
+        affected_files=merged_field("affected_files"),
+        execution_order=merged_field("execution_order"),
+        risks=merged_field("risks"),
+        validation=merged_field("validation"),
+        approval_needs=merged_field("approval_needs"),
+        notes=merged_field("notes"),
     )
     emit(
         {

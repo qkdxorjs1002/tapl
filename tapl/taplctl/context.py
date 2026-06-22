@@ -190,8 +190,8 @@ def should_suggest_prior_search(state: dict[str, Any], prompt: str) -> bool:
 
 def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
     guidance = [
-        "Records: Use markdown; Use numeric stable ids only: "
-        "PLAN-001/SPEC-001, TASK-001; no word suffixes.",
+        "Records: Pass plan/task content via structured CLI fields; tapl renders Markdown from templates. "
+        "Use numeric stable ids only: PLAN-001/SPEC-001, TASK-001; no word suffixes.",
         "Order: Phase order: plan with user -> `taplctl plan set`; derive tasks from stored plan -> "
         "`taplctl task set`.",
         plan_context_guidance(settings),
