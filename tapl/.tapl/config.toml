@@ -3,7 +3,7 @@
 mode = "hybrid"
 
 # Default maximum number of search results returned by taplctl search.
-max_results = 7
+max_results = 12
 
 # Hybrid search blends semantic rank and BM25 rank.
 # 0.65 keeps concept search dominant while preserving exact keyword matches.
@@ -23,13 +23,13 @@ use_level_subagent = true
 level_subagent_aggressiveness = "auto"
 
 # Plan detail: minimal, less_detailed, detailed, or very_detailed.
-plan_detail = "detailed"
+plan_detail = "very_detailed"
 
 # Planning approval: less, auto, or more.
-planning_approval_level = "auto"
+planning_approval_level = "more"
 
 # Task split granularity: minimal, less_granular, granular, or very_granular.
-task_granularity = "granular"
+task_granularity = "very_granular"
 
 # When true, executable tasks require recorded user approval before durable edits.
 require_execution_approval = true
