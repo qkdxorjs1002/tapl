@@ -1404,7 +1404,8 @@ level_subagent_aggressiveness = "minimal"
             context_payload = json.loads(context.stdout)
             guidance = "\n".join(context_payload["workflow_guidance"])
             self.assertIn("Use required_subagent only for explicit subagent routing", guidance)
-            self.assertNotIn("fields: spec_id, goal, action, required_subagent", guidance)
+            self.assertIn("fields: executable=spec_id, goal, action, verification", guidance)
+            self.assertNotIn("fields: executable=spec_id, goal, action, required_subagent", guidance)
 
     def test_validate_reports_plan_task_execute_issues(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1619,11 +1620,17 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Before `taplctl plan set`", prompt_guidance)
             self.assertIn("request_user_input", prompt_guidance)
             self.assertIn("material scope/risk/API/UX/data/compat", prompt_guidance)
-            self.assertIn("Prefer one short question", prompt_guidance)
+            self.assertIn("Ask short, focused questions", prompt_guidance)
             self.assertIn("2-3 mutually exclusive options", prompt_guidance)
             self.assertIn("Tool is available in the current mode", prompt_guidance)
             self.assertIn("one concise plain-text question only when blocked", prompt_guidance)
-            self.assertIn("meaningful implementation", prompt_guidance)
+            self.assertIn("Split every independent edit, migration, and verification step", prompt_guidance)
+            self.assertIn(
+                "fields: executable=spec_id, goal, action, required_subagent, verification",
+                prompt_guidance,
+            )
+            self.assertIn("completed=verification, result", prompt_guidance)
+            self.assertIn("blocked=blocker, next_action", prompt_guidance)
             self.assertIn("Agent contract", prompt_guidance)
             self.assertIn("Choose required_subagent by task risk/config", prompt_guidance)
             self.assertIn("same command that creates each executable task", prompt_guidance)

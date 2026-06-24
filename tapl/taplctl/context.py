@@ -221,19 +221,26 @@ def plan_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
 
 
 def task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    fields = "spec_id, goal, action, "
-    if settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal":
-        fields += "required_subagent, "
-    fields += "verification, result"
     subagent_note = ""
     if settings.use_level_subagent and settings.level_subagent_aggressiveness == "minimal":
         subagent_note = " Use required_subagent only for explicit subagent routing."
     return (
-        "Tasks: after source plan exists, set --spec-id PLAN-001/SPEC-001; split by meaningful "
-        "implementation/verification; Execute planned tasks one at a time in order: In Progress "
-        f"before work, then Completed/Blocked/Skipped; fields: {fields}; "
-        "blocked: blocker, next_action; updates are partial."
+        "Tasks: after source plan exists, set --spec-id PLAN-001/SPEC-001; "
+        f"{validation.task_granularity_guidance(settings.task_granularity)} "
+        "Execute planned tasks one at a time in order: In Progress before work, "
+        f"then Completed/Blocked/Skipped; {task_fields_context_guidance(settings)}"
         f"{subagent_note}"
+    )
+
+
+def task_fields_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    executable_fields = ["spec_id", "goal", "action"]
+    if settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal":
+        executable_fields.append("required_subagent")
+    executable_fields.append("verification")
+    return (
+        f"fields: executable={', '.join(executable_fields)}; "
+        "completed=verification, result; blocked=blocker, next_action; updates are partial."
     )
 
 
