@@ -18,6 +18,14 @@ from . import __version__, config, db
 
 DEFAULT_HOOK_MODE = "observe"
 VERSION_RELATIVE = Path(".tapl") / "version"
+TAPL_CONFIG_POLICY_PROMPT = "prompt"
+TAPL_CONFIG_POLICY_OVERWRITE = "overwrite"
+TAPL_CONFIG_POLICY_MERGE = "merge"
+TAPL_CONFIG_POLICIES = (
+    TAPL_CONFIG_POLICY_PROMPT,
+    TAPL_CONFIG_POLICY_OVERWRITE,
+    TAPL_CONFIG_POLICY_MERGE,
+)
 HOOK_EVENTS: tuple[dict[str, str | None], ...] = (
     {"event": "UserPromptSubmit", "matcher": None},
     {"event": "PreToolUse", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit"},
@@ -40,16 +48,25 @@ def install_user(
     mode: str = DEFAULT_HOOK_MODE,
     force: bool = False,
     dry_run: bool = False,
+    tapl_config_policy: str = TAPL_CONFIG_POLICY_PROMPT,
 ) -> dict[str, Any]:
     target = (codex_home or Path.home() / ".codex").expanduser()
     tapl_config_path = config.user_config_path(target.parent)
     command = resolved_taplctl_command(taplctl_command)
     hooks_path = target / "hooks.json"
     version_path = tapl_config_path.parent / "version"
+    previous_version = installed_version(version_path)
     files = [
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
         *install_static_codex_templates(target, force=force, dry_run=dry_run),
-        write_text_if_needed(tapl_config_path, default_config_text(), force=force, dry_run=dry_run),
+        write_tapl_config(
+            tapl_config_path,
+            default_config_text(),
+            force=force,
+            dry_run=dry_run,
+            previous_version=previous_version,
+            tapl_config_policy=tapl_config_policy,
+        ),
         write_version_marker(version_path, dry_run=dry_run),
     ]
     return {
@@ -61,6 +78,7 @@ def install_user(
         "mode": mode,
         "force": force,
         "dry_run": dry_run,
+        "previous_version": previous_version,
         "files": files,
     }
 
@@ -72,6 +90,7 @@ def install_repo(
     mode: str = DEFAULT_HOOK_MODE,
     force: bool = False,
     dry_run: bool = False,
+    tapl_config_policy: str = TAPL_CONFIG_POLICY_PROMPT,
 ) -> dict[str, Any]:
     root = db.find_repo_root(repo)
     command = resolved_taplctl_command(taplctl_command)
@@ -79,11 +98,19 @@ def install_repo(
     config_path = root / config.CONFIG_RELATIVE
     db_path = root / db.DEFAULT_DB_RELATIVE
     version_path = root / VERSION_RELATIVE
+    previous_version = installed_version(version_path)
 
     files = [
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
         *install_static_codex_templates(root / ".codex", force=force, dry_run=dry_run),
-        write_text_if_needed(config_path, default_config_text(), force=force, dry_run=dry_run),
+        write_tapl_config(
+            config_path,
+            default_config_text(),
+            force=force,
+            dry_run=dry_run,
+            previous_version=previous_version,
+            tapl_config_policy=tapl_config_policy,
+        ),
         write_version_marker(version_path, dry_run=dry_run),
         initialize_db(db_path, dry_run=dry_run),
     ]
@@ -95,6 +122,7 @@ def install_repo(
         "mode": mode,
         "force": force,
         "dry_run": dry_run,
+        "previous_version": previous_version,
         "files": files,
     }
 
@@ -105,6 +133,7 @@ def auto_install_if_needed(
     taplctl_command: str | None = None,
     mode: str = DEFAULT_HOOK_MODE,
     home: Path | None = None,
+    tapl_config_policy: str = TAPL_CONFIG_POLICY_PROMPT,
 ) -> list[dict[str, Any]]:
     """Refresh existing tapl installs whose version marker is stale."""
     results: list[dict[str, Any]] = []
@@ -116,6 +145,7 @@ def auto_install_if_needed(
                 codex_home=home_path / ".codex",
                 taplctl_command=taplctl_command,
                 mode=mode,
+                tapl_config_policy=tapl_config_policy,
             )
         )
 
@@ -126,6 +156,7 @@ def auto_install_if_needed(
                 repo=root,
                 taplctl_command=taplctl_command,
                 mode=mode,
+                tapl_config_policy=tapl_config_policy,
             )
         )
 
@@ -362,6 +393,105 @@ def initialize_db(path: Path, *, dry_run: bool) -> dict[str, str]:
     conn = db.connect(path)
     conn.close()
     return {"path": str(path), "action": "unchanged" if existed else "created"}
+
+
+def write_tapl_config(
+    path: Path,
+    template: str,
+    *,
+    force: bool,
+    dry_run: bool,
+    previous_version: str | None,
+    tapl_config_policy: str,
+) -> dict[str, str]:
+    if force:
+        result = write_text_if_needed(path, template, force=True, dry_run=dry_run)
+        result["policy"] = TAPL_CONFIG_POLICY_OVERWRITE
+        return result
+
+    if not path.exists():
+        return write_text_if_needed(path, template, force=False, dry_run=dry_run)
+
+    if path.read_text(encoding="utf-8") == template:
+        return {"path": str(path), "action": "unchanged"}
+
+    if previous_version == __version__:
+        return write_text_if_needed(path, template, force=False, dry_run=dry_run)
+
+    policy = resolve_tapl_config_policy(
+        path,
+        requested=tapl_config_policy,
+        previous_version=previous_version,
+    )
+    if policy == TAPL_CONFIG_POLICY_OVERWRITE:
+        result = write_text_if_needed(path, template, force=True, dry_run=dry_run)
+    else:
+        result = merge_tapl_config(path, template, dry_run=dry_run)
+    result["policy"] = policy
+    return result
+
+
+def resolve_tapl_config_policy(path: Path, *, requested: str, previous_version: str | None) -> str:
+    if requested not in TAPL_CONFIG_POLICIES:
+        choices = ", ".join(TAPL_CONFIG_POLICIES)
+        raise ValueError(f"tapl_config_policy must be one of: {choices}")
+    if requested != TAPL_CONFIG_POLICY_PROMPT:
+        return requested
+    return prompt_tapl_config_policy(path, previous_version=previous_version)
+
+
+def prompt_tapl_config_policy(path: Path, *, previous_version: str | None) -> str:
+    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+        return TAPL_CONFIG_POLICY_MERGE
+
+    old_version = previous_version or "unknown"
+    while True:
+        sys.stderr.write(
+            "\n"
+            f"tapl config.toml exists at {path}\n"
+            f"Installed tapl version: {old_version}; current taplctl version: {__version__}.\n"
+            "Choose how to update tapl config.toml:\n"
+            "  [m] keep existing values and add new defaults\n"
+            "  [o] overwrite with updated defaults\n"
+            "Select [m/o] (default: m): "
+        )
+        sys.stderr.flush()
+        answer = sys.stdin.readline()
+        if answer == "":
+            sys.stderr.write("\n")
+            return TAPL_CONFIG_POLICY_MERGE
+        normalized = answer.strip().lower()
+        if normalized in {"", "m", "merge", "keep", "preserve"}:
+            return TAPL_CONFIG_POLICY_MERGE
+        if normalized in {"o", "overwrite", "replace"}:
+            return TAPL_CONFIG_POLICY_OVERWRITE
+        sys.stderr.write("Please enter 'm' to merge or 'o' to overwrite.\n")
+
+
+def merge_tapl_config(path: Path, template: str, *, dry_run: bool) -> dict[str, str]:
+    existing_text = path.read_text(encoding="utf-8")
+    if existing_text == template:
+        return {"path": str(path), "action": "unchanged"}
+
+    try:
+        existing = tomllib.loads(existing_text)
+        managed = tomllib.loads(template)
+    except tomllib.TOMLDecodeError:
+        return {"path": str(path), "action": "skipped", "reason": "invalid_toml"}
+
+    missing = missing_toml_values(existing, managed)
+    if not missing:
+        return {"path": str(path), "action": "unchanged"}
+
+    merged_text = insert_missing_toml_values(existing_text, existing, missing)
+    action = "merged" if existing_text != merged_text else "unchanged"
+    if dry_run:
+        action = f"would_{action}" if action != "unchanged" else "unchanged"
+    elif action == "merged":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(merged_text, encoding="utf-8")
+
+    return {"path": str(path), "action": action}
 
 
 def default_config_text() -> str:

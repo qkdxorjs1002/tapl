@@ -195,10 +195,17 @@ taplctl validate
 
 - `hooks.json`은 managed merge를 합니다. 기존 non-tapl hook은 보존하고, tapl이
   관리하는 hook만 교체합니다.
-- `config.toml`은 TOML 병합을 합니다. 기존 사용자 값이 우선하고, tapl
-  template에만 있는 누락 key를 추가합니다.
+- `.codex/config.toml`은 TOML 병합을 합니다. 기존 사용자 값이 우선하고,
+  tapl template에만 있는 누락 key를 추가합니다.
+- tapl runtime `config.toml`(`.tapl/config.toml` 또는 `~/.tapl/config.toml`)은
+  최초 설치 때 생성합니다. 설치된 tapl version이 바뀌면 updated default로
+  덮어쓸지, 기존 값을 유지하면서 누락된 default key만 추가할지 묻습니다.
+  hook/JSON 같은 non-interactive refresh에서는 기존 값을 유지하고 누락 key만
+  추가합니다.
 - `--force`는 managed key에 대해 tapl template 값을 우선하게 하되, 관련 없는
-  사용자 key는 보존합니다.
+  Codex config key는 보존하고 tapl runtime `config.toml`은 덮어씁니다.
+- `--tapl-config-policy {prompt,overwrite,merge}`로 tapl runtime config upgrade
+  동작을 명시할 수 있습니다.
 - Agent template은 기본적으로 create-or-skip이며, `--force`를 주면 덮어씁니다.
 
 ### Source

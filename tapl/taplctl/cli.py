@@ -493,9 +493,15 @@ def add_install_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--taplctl-command", default=None, help="Command used by generated Codex hooks.")
     parser.add_argument("--mode", choices=("observe", "enforce"), default=tapl_install.DEFAULT_HOOK_MODE, help="Hook handling mode.")
     parser.add_argument(
+        "--tapl-config-policy",
+        choices=tapl_install.TAPL_CONFIG_POLICIES,
+        default=tapl_install.TAPL_CONFIG_POLICY_PROMPT,
+        help="How to handle existing tapl config.toml when the installed tapl version changes.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite static templates and make managed Codex config keys use tapl defaults.",
+        help="Overwrite static templates and tapl config; make managed Codex config keys use tapl defaults.",
     )
     add_dry_run_arg(parser)
     add_agent_output_args(parser)
@@ -1096,6 +1102,7 @@ def cmd_install_user(args: argparse.Namespace) -> int:
         mode=args.mode,
         force=args.force,
         dry_run=args.dry_run,
+        tapl_config_policy=args.tapl_config_policy,
     )
     emit(payload, args.json, args.agent)
     return 0
@@ -1108,6 +1115,7 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
         mode=args.mode,
         force=args.force,
         dry_run=args.dry_run,
+        tapl_config_policy=args.tapl_config_policy,
     )
     emit(payload, args.json, args.agent)
     return 0

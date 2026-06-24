@@ -200,10 +200,17 @@ Install merge policy:
 
 - `hooks.json` is managed-merged. Existing non-tapl hooks are preserved; tapl
   managed hooks are replaced.
-- `config.toml` is TOML-merged. Existing user values win, and missing tapl
-  template keys are added.
+- `.codex/config.toml` is TOML-merged. Existing user values win, and missing
+  tapl template keys are added.
+- tapl runtime `config.toml` (`.tapl/config.toml` or `~/.tapl/config.toml`) is
+  created on first install. When the installed tapl version changes, tapl asks
+  whether to overwrite it with updated defaults or keep existing values and add
+  missing default keys. Non-interactive hook/JSON refreshes keep existing
+  values and add missing keys.
 - `--force` makes tapl template values win for managed keys while preserving
-  unrelated user keys.
+  unrelated Codex config keys, and overwrites tapl runtime `config.toml`.
+- `--tapl-config-policy {prompt,overwrite,merge}` selects the tapl runtime
+  config upgrade behavior explicitly.
 - Agent templates are create-or-skip by default and are overwritten with
   `--force`.
 

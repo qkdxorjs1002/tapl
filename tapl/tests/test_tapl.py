@@ -2115,6 +2115,137 @@ experimental = true
             self.assertFalse((repo / ".codex" / "tapl" / "tapl.toml").exists())
             self.assertTrue((repo / ".tapl" / "tapl.db").exists())
 
+    def test_install_repo_version_upgrade_prompt_can_overwrite_tapl_config(self) -> None:
+        class TtyInput(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        class TtyOutput(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            repo.mkdir()
+            tapl_dir = repo / ".tapl"
+            tapl_dir.mkdir()
+            config_path = tapl_dir / "config.toml"
+            config_path.write_text(
+                """
+[search]
+max_results = 3
+
+[user]
+keep = true
+""".lstrip(),
+                encoding="utf-8",
+            )
+            (tapl_dir / "version").write_text("0.0.0\n", encoding="utf-8")
+
+            original_stdin = sys.stdin
+            original_stderr = sys.stderr
+            prompt_output = TtyOutput()
+            try:
+                sys.stdin = TtyInput("o\n")
+                sys.stderr = prompt_output
+                payload = tapl_install.install_repo(
+                    repo=repo,
+                    taplctl_command="taplctl",
+                )
+            finally:
+                sys.stdin = original_stdin
+                sys.stderr = original_stderr
+
+            config_result = next(
+                file for file in payload["files"] if file["path"] == str(config_path.resolve())
+            )
+            self.assertEqual(config_result["action"], "updated")
+            self.assertEqual(config_result["policy"], "overwrite")
+            self.assertIn("overwrite with updated defaults", prompt_output.getvalue())
+
+            parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(parsed["search"]["max_results"], tapl_config.DEFAULT_SEARCH_MAX_RESULTS)
+            self.assertNotIn("user", parsed)
+            self.assertEqual((tapl_dir / "version").read_text(encoding="utf-8").strip(), __version__)
+
+    def test_install_repo_version_upgrade_can_merge_tapl_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            repo.mkdir()
+            tapl_dir = repo / ".tapl"
+            tapl_dir.mkdir()
+            config_path = tapl_dir / "config.toml"
+            config_path.write_text(
+                """
+[search]
+max_results = 3
+
+[user]
+keep = true
+""".lstrip(),
+                encoding="utf-8",
+            )
+            (tapl_dir / "version").write_text("0.0.0\n", encoding="utf-8")
+            db_path = base / "tapl.db"
+
+            installed = self.run_cli(
+                db_path,
+                "install",
+                "repo",
+                "--repo",
+                str(repo),
+                "--taplctl-command",
+                "taplctl",
+                "--tapl-config-policy",
+                "merge",
+                "--json",
+            )
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            payload = json.loads(installed.stdout)
+            config_result = next(
+                file for file in payload["files"] if file["path"] == str(config_path.resolve())
+            )
+            self.assertEqual(config_result["action"], "merged")
+            self.assertEqual(config_result["policy"], "merge")
+
+            parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(parsed["search"]["max_results"], 3)
+            self.assertEqual(parsed["user"]["keep"], True)
+            self.assertEqual(parsed["search"]["mode"], tapl_config.DEFAULT_SEARCH_MODE)
+            self.assertEqual(
+                parsed["plan-task-execute"]["task_granularity"],
+                tapl_config.DEFAULT_TASK_GRANULARITY,
+            )
+            self.assertEqual((tapl_dir / "version").read_text(encoding="utf-8").strip(), __version__)
+
+    def test_install_repo_version_upgrade_merge_skips_invalid_tapl_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            repo.mkdir()
+            tapl_dir = repo / ".tapl"
+            tapl_dir.mkdir()
+            config_path = tapl_dir / "config.toml"
+            config_path.write_text("[search\n", encoding="utf-8")
+            (tapl_dir / "version").write_text("0.0.0\n", encoding="utf-8")
+
+            payload = tapl_install.install_repo(
+                repo=repo,
+                taplctl_command="taplctl",
+                tapl_config_policy="merge",
+            )
+
+            config_result = next(
+                file for file in payload["files"] if file["path"] == str(config_path.resolve())
+            )
+            self.assertEqual(config_result["action"], "skipped")
+            self.assertEqual(config_result["policy"], "merge")
+            self.assertEqual(config_result["reason"], "invalid_toml")
+            self.assertEqual(config_path.read_text(encoding="utf-8"), "[search\n")
+            self.assertEqual((tapl_dir / "version").read_text(encoding="utf-8").strip(), __version__)
+
     def test_auto_install_refreshes_stale_user_and_repo_scopes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -2123,14 +2254,21 @@ experimental = true
             repo.mkdir()
             (home / ".tapl").mkdir(parents=True)
             (repo / ".tapl").mkdir(parents=True)
+            (home / ".tapl" / "config.toml").write_text("[search]\nmax_results = 4\n", encoding="utf-8")
+            (repo / ".tapl" / "config.toml").write_text("[search]\nmax_results = 5\n", encoding="utf-8")
             (home / ".tapl" / "version").write_text("0.0.0\n", encoding="utf-8")
             (repo / ".tapl" / "version").write_text("0.0.0\n", encoding="utf-8")
 
-            results = tapl_install.auto_install_if_needed(
-                start=repo,
-                home=home,
-                taplctl_command="taplctl",
-            )
+            original_stdin = sys.stdin
+            try:
+                sys.stdin = io.StringIO("")
+                results = tapl_install.auto_install_if_needed(
+                    start=repo,
+                    home=home,
+                    taplctl_command="taplctl",
+                )
+            finally:
+                sys.stdin = original_stdin
 
             self.assertEqual([result["install"] for result in results], ["user", "repo"])
             self.assertEqual(
@@ -2143,6 +2281,18 @@ experimental = true
             )
             self.assertTrue((home / ".codex" / "hooks.json").exists())
             self.assertTrue((repo / ".codex" / "hooks.json").exists())
+            user_config = tomllib.loads((home / ".tapl" / "config.toml").read_text(encoding="utf-8"))
+            repo_config = tomllib.loads((repo / ".tapl" / "config.toml").read_text(encoding="utf-8"))
+            self.assertEqual(user_config["search"]["max_results"], 4)
+            self.assertEqual(repo_config["search"]["max_results"], 5)
+            self.assertEqual(
+                user_config["plan-task-execute"]["task_granularity"],
+                tapl_config.DEFAULT_TASK_GRANULARITY,
+            )
+            self.assertEqual(
+                repo_config["plan-task-execute"]["task_granularity"],
+                tapl_config.DEFAULT_TASK_GRANULARITY,
+            )
 
     def test_auto_install_does_not_treat_repo_db_as_install_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
