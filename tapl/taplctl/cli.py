@@ -19,6 +19,7 @@ from . import (
     hooks,
     importer,
     install as tapl_install,
+    prompt as tapl_prompt,
     searchd,
     validation,
 )
@@ -31,104 +32,26 @@ DRY_RUN_HELP = "Preview changes without writing files."
 
 
 def command_help_epilog() -> str:
-    return (
-        "Workflow guidance:\n"
-        "  Use `taplctl status --agent` to inspect state before non-trivial work.\n"
-        f"  {validation.workflow_order_guidance()}\n"
-        f"  {validation.task_execution_order_guidance()}\n"
-        "  Use `taplctl <command> <subcommand> --help` for field-writing rules.\n"
-        f"  {validation.structured_record_guidance()}\n"
-        "  Use `taplctl validate --agent` after updates to catch missing plan/task details."
-    )
+    return tapl_prompt.command_help_epilog()
 
 
 def plan_set_epilog() -> str:
-    return (
-        "Plan writing rules:\n"
-        f"  {validation.structured_record_guidance()}\n"
-        f"  {validation.stable_id_guidance()}\n"
-        "  Write or update the plan before executable task records; downstream tasks should derive from this record.\n"
-        f"  {validation.plan_format_guidance()}\n"
-        f"  {validation.plan_key_label_guidance()}\n"
-        "  Pass plan content through field arguments; tapl renders the durable Markdown body from a template.\n"
-        "  Summary should be a compact trace such as `REQ-001: approach, files, risks, validation`.\n"
-        "  Existing plan updates are partial: omitted fields keep the stored values.\n"
-        "  Status is free-form; common values are Draft, Finalized, Imported, and Superseded.\n"
-        "\n"
-        "Example:\n"
-        "  taplctl plan set --id PLAN-001 --title 'Plan title' \\\n"
-        "    --summary 'REQ-001: approach, affected files, risks, validation' \\\n"
-        "    --objective 'Implement requested behavior' \\\n"
-        "    --requirements-trace 'REQ-001: field-based plan records' \\\n"
-        "    --validation 'Run focused tests' --status Finalized --agent"
-    )
+    return tapl_prompt.plan_set_epilog()
 
 
 def task_set_epilog() -> str:
-    statuses = ", ".join(db.TASK_STATUSES)
-    subagents = ", ".join(validation.LEVEL_SUBAGENTS)
-    return (
-        "Task writing rules:\n"
-        f"  {validation.structured_record_guidance('task content')}\n"
-        f"  {validation.stable_id_guidance()}\n"
-        f"  {validation.task_plan_dependency_guidance()}\n"
-        f"  {validation.task_execution_order_guidance()}\n"
-        "  Existing task updates are partial: pass --id plus only changed fields;\n"
-        "  omitted fields keep their stored values. New task creation requires --title and --status.\n"
-        "  Executable implementation/verification tasks should include source spec_id, goal, action, verification,\n"
-        "  and result when completed; blocked tasks should include blocker and next_action.\n"
-        "  When level subagent routing is enabled, set required_subagent in the same command\n"
-        "  that creates each executable task; treat it as routing metadata.\n"
-        "  Before execution set In Progress; spawn that exact subagent only when a subagent\n"
-        "  tool is available and user/session policy allows delegation. Otherwise do not claim\n"
-        "  delegation occurred; the main agent records direct execution and result/status.\n"
-        "  Split tasks by meaningful implementation or verification step.\n"
-        f"  Status values: {statuses}. Quote multi-word statuses, e.g. --status 'In Progress'.\n"
-        f"  Allowed required_subagent values when enabled: {subagents}. Do not use level names such as `level2`.\n"
-        "  Keep task text in the user's language unless asked otherwise.\n"
-        "\n"
-        "Field guidance:\n"
-        "  --spec-id: numeric stable id of the source plan/spec, e.g. PLAN-001 or SPEC-001.\n"
-        "  --goal: outcome the task must achieve.\n"
-        "  --action: concrete work to perform.\n"
-        "  --verification: command, check, or review that proves the task is done.\n"
-        "  --result: concise completion note; use with Completed tasks.\n"
-        "  --blocker/--next-action: why a Blocked task cannot proceed and what unblocks it.\n"
-        "\n"
-        "Example:\n"
-        "  taplctl task set --id TASK-001 --title 'Implement change' \\\n"
-        "    --status 'In Progress' --spec-id PLAN-001 --goal 'Make requested behavior work' \\\n"
-        "    --action 'Edit the relevant files' --required-subagent '@senior-worker' \\\n"
-        "    --verification 'Run focused tests' --agent\n"
-        "  taplctl task set --id TASK-001 --status Completed --result 'Focused tests passed' --agent"
+    return tapl_prompt.task_set_epilog(
+        statuses=db.TASK_STATUSES,
+        subagents=validation.LEVEL_SUBAGENTS,
     )
 
 
 def finding_add_epilog() -> str:
-    return (
-        "Finding writing rules:\n"
-        f"  {validation.markdown_record_guidance('finding details and impact')}\n"
-        "  Add only decision-relevant facts; include source and impact when they affect\n"
-        "  requirements, plan, tasks, or verification.\n"
-        "\n"
-        "Example:\n"
-        "  taplctl finding add --title 'Finding title' --source 'Source' \\\n"
-        "    --finding 'What was learned' --impact 'Why it matters' --agent"
-    )
+    return tapl_prompt.finding_add_epilog()
 
 
 def approval_set_epilog() -> str:
-    return (
-        "Approval writing rules:\n"
-        "  Record explicit user decisions for residual-run handling, planning clarification,\n"
-        "  or execution scope. Execution approval is normally set after task design/task set\n"
-        "  and before starting or continuing task execution. The prompt should describe the\n"
-        "  approved decision/scope, not just `yes`.\n"
-        "\n"
-        "Example:\n"
-        "  taplctl approval set --decision approved \\\n"
-        "    --prompt 'Execute TASK-001 from PLAN-001' --agent"
-    )
+    return tapl_prompt.approval_set_epilog()
 
 
 def add_agent_output_args(parser: argparse.ArgumentParser) -> None:
