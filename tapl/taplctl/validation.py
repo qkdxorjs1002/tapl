@@ -449,7 +449,7 @@ def validate_execution_approval(
             severity,
             "execution_approval_missing",
             "Executable tasks exist but execution approval is not recorded.",
-            "Before starting or continuing tasks, set approval with `taplctl approval set --decision approved --prompt '<approved scope>' --agent`.",
+            "Before starting or continuing task execution, set execution approval with `taplctl approval set --decision approved --prompt '<approved scope>' --agent`.",
         )
     ]
 
@@ -594,15 +594,18 @@ def stable_id_guidance() -> str:
 
 def workflow_order_guidance() -> str:
     return (
-        "Phase order: plan with the user -> `taplctl plan set` -> design tasks "
-        "from the stored plan -> `taplctl task set`."
+        "Lifecycle order: inspect status -> resolve residual run direction with user approval -> "
+        "analyze/search and clarify until unblocked -> `taplctl plan set` -> design executable tasks "
+        "from the stored plan -> `taplctl task set` -> set execution approval -> execute/update tasks -> "
+        "report result/status and allow eligible auto-archive."
     )
 
 
 def task_plan_dependency_guidance() -> str:
     return (
-        "Create or update task records only after the source plan/spec exists; set "
-        "--spec-id to the stored numeric plan/spec id, e.g. `PLAN-001` or `SPEC-001`."
+        "Create or update executable task records only after the source plan/spec exists; "
+        "tasks derive from the stored plan/spec and should not represent planning or task-design work; "
+        "set --spec-id to the stored numeric plan/spec id, e.g. `PLAN-001` or `SPEC-001`."
     )
 
 
@@ -638,7 +641,7 @@ def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     if settings.use_level_subagent and settings.level_subagent_aggressiveness == "minimal":
         optional_subagent = " Set required_subagent only for explicit subagent routing."
     return (
-        f"Executable tasks should include source spec_id, goal, action, {subagent}verification, "
+        f"Executable implementation/verification tasks should include source spec_id, goal, action, {subagent}verification, "
         "and result when completed; blocked tasks should include blocker and next_action. "
         "When updating an existing task, pass only changed fields; omitted fields keep stored values."
         f"{optional_subagent}"
@@ -647,11 +650,11 @@ def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
 
 def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     base = (
-        "After task design and before starting or continuing task execution, set approval with "
+        "After task design/task set and before starting or continuing task execution, set execution approval with "
         "`taplctl approval set --decision approved --prompt '<approved scope>' --agent`."
     )
     if settings.require_execution_approval:
-        return base + " Missing execution approval is a validation error."
+        return base + " Missing execution approval is a validation error when require_execution_approval is true."
     return base + " Missing execution approval is a warning, and enforce-mode hooks block on it."
 
 

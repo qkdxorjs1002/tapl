@@ -20,6 +20,16 @@ TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
 DEFAULT_APPROVAL_KIND = "execution"
 APPROVAL_DECISIONS = ("approved", "rejected")
 DEFAULT_REQUEST_SUMMARY = "New request"
+WORKFLOW_RUN_OUTPUT_FIELDS = (
+    "id",
+    "slug",
+    "status",
+    "request_summary",
+    "result_summary",
+    "created_at",
+    "updated_at",
+    "archived_at",
+)
 PLAN_TEMPLATE_FIELDS = (
     ("Summary", "summary"),
     ("Objective", "objective"),
@@ -937,7 +947,7 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
 
     return {
         "schema": get_meta(conn),
-        "active_run": row_to_dict(run) if run else None,
+        "active_run": workflow_run_to_dict(run),
         "approvals": {
             DEFAULT_APPROVAL_KIND: approval_status(conn, kind=DEFAULT_APPROVAL_KIND, run_id=run_id),
         },
@@ -1203,3 +1213,10 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return {key: row[key] for key in row.keys()}
+
+
+def workflow_run_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    data = row_to_dict(row)
+    if data is None:
+        return None
+    return {field: data.get(field) for field in WORKFLOW_RUN_OUTPUT_FIELDS if field in data}

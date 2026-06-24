@@ -159,14 +159,14 @@ def workflow_guidance(
     prompt: str = "",
 ) -> list[str]:
     lines = [
-        "Flow: search relevant prior work -> summarize request -> plan set -> plan-based task design -> task set -> approval set -> execute/update -> result/archive.",
+        "Flow: status -> resolve residual run with user approval -> analyze/search/clarify loop -> plan set -> plan-based task design -> task set -> execution approval -> execute/update tasks with subagents per config -> result/status briefing -> auto-archive when eligible.",
     ]
 
     if event == "SessionStart":
         return lines
 
     if event == "Stop":
-        lines.append("Stop: set result, leave no actionable task unmarked, then archive completed work.")
+        lines.append("Stop: set result/current status briefing, leave no actionable task unmarked, then let eligible completed work auto-archive.")
         return lines
 
     if event == "UserPromptSubmit":
@@ -192,8 +192,9 @@ def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> l
     guidance = [
         "Records: Pass plan/task content via structured CLI fields; tapl renders Markdown from templates. "
         "Use numeric stable ids only: PLAN-001/SPEC-001, TASK-001; no word suffixes.",
-        "Order: Phase order: plan with user -> `taplctl plan set`; derive tasks from stored plan -> "
-        "`taplctl task set`.",
+        "Order: Lifecycle order: inspect status -> resolve residual run direction with user approval -> "
+        "analyze/search/clarify until unblocked -> `taplctl plan set` -> design executable tasks from the stored plan -> "
+        "`taplctl task set` -> set execution approval -> execute/update tasks -> report result/status.",
         plan_context_guidance(settings),
         task_context_guidance(settings),
         "Agent contract: main agent writes plan/task records and final status; subagents may draft/execute only.",
@@ -201,9 +202,14 @@ def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> l
     if settings.use_level_subagent:
         guidance.append(f"Subagents: {subagent_context_guidance(settings)}")
     if settings.require_execution_approval:
-        guidance.append("Approval: set execution approval before durable edits: `taplctl approval set --decision approved --prompt '<approved scope>' --agent`.")
+        guidance.append(
+            "Approval: planning clarifications follow planning_approval_level before plan set; after task set, "
+            "set execution approval before task execution/durable edits: `taplctl approval set --decision approved --prompt '<approved scope>' --agent`."
+        )
     else:
-        guidance.append("Approval: set execution approval for material risk/scope; missing approval is a warning.")
+        guidance.append(
+            "Approval: planning clarifications follow planning_approval_level before plan set; execution approval is optional for material risk/scope; missing approval is a warning."
+        )
     return guidance
 
 
@@ -226,6 +232,7 @@ def task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
         subagent_note = " Use required_subagent only for explicit subagent routing."
     return (
         "Tasks: after source plan exists, set --spec-id PLAN-001/SPEC-001; "
+        "tasks are executable implementation/verification work derived from the stored plan, not planning or task-design work; "
         f"{validation.task_granularity_guidance(settings.task_granularity)} "
         "Execute planned tasks one at a time in order: In Progress before work, "
         f"then Completed/Blocked/Skipped; {task_fields_context_guidance(settings)}"
@@ -290,11 +297,10 @@ def next_actions(
         actions.append(
             "Summarize request: `taplctl run set --summary '<request summary>' --agent`."
         )
-    if event == "UserPromptSubmit" and should_request_active_run_direction(state, prompt):
-        actions.append(
-            "If this request is different from the open run, get user approval before durable edits: "
-            "finish existing work first, defer the existing run, or merge the work into one plan."
-        )
+    if event == "UserPromptSubmit":
+        direction_action = active_run_direction_next_action(state, prompt)
+        if direction_action:
+            actions.append(direction_action)
     has_plans = bool(state.get("plans"))
     has_tasks = bool(state.get("tasks"))
     if not has_plans:
@@ -324,18 +330,41 @@ def next_actions(
     return actions
 
 
-def should_request_active_run_direction(state: dict[str, Any], prompt: str) -> bool:
-    if state.get("incomplete_tasks", 0):
-        return True
+def active_run_direction_next_action(state: dict[str, Any], prompt: str) -> str:
+    tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
+    in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
+    if in_progress:
+        label = task_label(in_progress[0])
+        return (
+            f"Run stopped during task execution at {label}; get user approval before durable edits: "
+            f"continue execution from {label} and finish existing work first, defer the existing run and archive it, "
+            "or merge the work into one plan with the new request."
+        )
 
+    if state.get("incomplete_tasks", 0):
+        return (
+            "Open run has incomplete tasks; get user approval before durable edits: "
+            "finish existing work first, defer the existing run and archive it, or merge the work into one plan."
+        )
+
+    if request_differs_from_active_run(state, prompt):
+        return (
+            "This request appears different from the open run; get user approval before durable edits: "
+            "finish existing work first, defer the existing run and archive it, or merge the work into one plan."
+        )
+
+    return ""
+
+
+def request_differs_from_active_run(state: dict[str, Any], prompt: str) -> bool:
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
     request_summary = str(run.get("request_summary") or "").strip()
     if not prompt.strip():
         return False
 
     has_records = bool(state.get("plans") or state.get("tasks") or state.get("findings"))
-    if has_records:
-        return True
+    if not has_records:
+        return False
 
     if not request_summary or request_summary == db.DEFAULT_REQUEST_SUMMARY:
         return False

@@ -196,6 +196,53 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(search_conflict.returncode, 2)
             self.assertIn("not allowed with argument", search_conflict.stderr)
 
+    def test_active_run_output_filters_legacy_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            config_path = Path(tmp) / "config.toml"
+            config_path.write_text("[plan-task-execute]\nplan-detail = \"minimal\"\n", encoding="utf-8")
+            init = self.run_cli(db_path, "init", "--json")
+            self.assertEqual(init.returncode, 0, init.stderr)
+
+            plan = self.run_cli(
+                db_path,
+                "--config",
+                str(config_path),
+                "plan",
+                "set",
+                "--id",
+                "PLAN-001",
+                "--title",
+                "Legacy run field filter",
+                "--status",
+                "Finalized",
+                "--summary",
+                "REQ-001: filter active run output",
+                "--objective",
+                "Keep status and validate output stable when old DB columns exist.",
+                "--validation",
+                "Run status and validate agent output checks.",
+                "--json",
+            )
+            self.assertEqual(plan.returncode, 0, plan.stderr)
+
+            legacy_column = "auto" + "_archive_policy"
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(f"ALTER TABLE workflow_runs ADD COLUMN {legacy_column} TEXT DEFAULT 'auto'")
+                conn.execute(f"UPDATE workflow_runs SET {legacy_column} = 'manual'")
+
+            status_json = self.run_cli(db_path, "status", "--json")
+            self.assertEqual(status_json.returncode, 0, status_json.stderr)
+            self.assertNotIn(legacy_column, json.dumps(json.loads(status_json.stdout)))
+
+            status_agent = self.run_cli(db_path, "status", "--agent")
+            self.assertEqual(status_agent.returncode, 0, status_agent.stderr)
+            self.assertNotIn(legacy_column, status_agent.stdout)
+
+            validate_agent = self.run_cli(db_path, "--config", str(config_path), "validate", "--agent")
+            self.assertEqual(validate_agent.returncode, 0, validate_agent.stderr)
+            self.assertNotIn(legacy_column, validate_agent.stdout)
+
     def test_agent_output_for_workflow_commands_keeps_json_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
@@ -1595,7 +1642,10 @@ level_subagent_aggressiveness = "force"
             self.assertIn("taplctl status --agent", "\n".join(payload["instructions"]))
             self.assertIn("taplctl search '<query>' --agent", "\n".join(payload["instructions"]))
             self.assertIn("taplctl item show --id <id> --agent", "\n".join(payload["instructions"]))
-            self.assertIn("search relevant prior work", "\n".join(payload["workflow_guidance"]))
+            session_guidance = "\n".join(payload["workflow_guidance"])
+            self.assertIn("Flow: status -> resolve residual run with user approval", session_guidance)
+            self.assertIn("analyze/search/clarify loop", session_guidance)
+            self.assertIn("result/status briefing", session_guidance)
             self.assertEqual(payload["next_actions"], [])
 
             status = self.run_cli(db_path, "status", "--json")
@@ -1609,7 +1659,9 @@ level_subagent_aggressiveness = "force"
             self.assertIn("taplctl <command> <subcommand> --help", prompt_instructions)
             prompt_guidance = "\n".join(prompt_payload["workflow_guidance"])
             self.assertIn("plan-based task design", prompt_guidance)
-            self.assertIn("Phase order", prompt_guidance)
+            self.assertIn("Lifecycle order", prompt_guidance)
+            self.assertIn("resolve residual run direction", prompt_guidance)
+            self.assertIn("clarify until unblocked", prompt_guidance)
             self.assertIn("stored plan", prompt_guidance)
             self.assertIn("Execute planned tasks one at a time", prompt_guidance)
             self.assertIn("requirements trace", prompt_guidance)
@@ -1640,9 +1692,12 @@ level_subagent_aggressiveness = "force"
             self.assertIn("do not claim delegation occurred", prompt_guidance)
             self.assertIn("main records result/status", prompt_guidance)
             self.assertIn("@senior-worker", prompt_guidance)
+            self.assertIn("planning clarifications follow planning_approval_level", prompt_guidance)
             self.assertIn("set execution approval", prompt_guidance)
             self.assertIn("taplctl finding add", prompt_guidance)
             self.assertIn("structured CLI fields", prompt_guidance)
+            self.assertIn("derived from the stored plan", prompt_guidance)
+            self.assertIn("not planning or task-design work", prompt_guidance)
             self.assertNotIn("quote every argument", prompt_instructions)
             self.assertNotIn("Do not use level names such as `level2`", prompt_guidance)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
@@ -1785,8 +1840,12 @@ level_subagent_aggressiveness = "force"
             prompt_text = self.run_cli(db_path, "context", "--event", "UserPromptSubmit")
             self.assertEqual(prompt_text.returncode, 0, prompt_text.stderr)
             self.assertIn("tapl context:", prompt_text.stdout)
-            self.assertIn("Flow: search relevant prior work", prompt_text.stdout)
+            self.assertIn("Flow: status -> resolve residual run with user approval", prompt_text.stdout)
+            self.assertIn("analyze/search/clarify loop", prompt_text.stdout)
+            self.assertIn("execution approval", prompt_text.stdout)
             self.assertIn("plan-based task design", prompt_text.stdout)
+            self.assertIn("result/status briefing", prompt_text.stdout)
+            self.assertIn("auto-archive when eligible", prompt_text.stdout)
             self.assertIn("Execute planned tasks one at a time", prompt_text.stdout)
             self.assertIn("only when the subagent tool is available", prompt_text.stdout)
             self.assertIn("do not claim delegation occurred", prompt_text.stdout)
@@ -1805,7 +1864,9 @@ level_subagent_aggressiveness = "force"
             self.assertIn("taplctl <command> <subcommand> --help", root_help.stdout)
             self.assertIn("taplctl validate --agent", root_help.stdout)
             self.assertNotIn("taplctl validate --json", root_help.stdout)
-            self.assertIn("Phase order", root_help.stdout)
+            self.assertIn("Lifecycle order", root_help.stdout)
+            self.assertIn("resolve residual run direction", root_help.stdout)
+            self.assertIn("clarify until unblocked", root_help.stdout)
             self.assertIn("taplctl plan set", root_help.stdout)
             self.assertIn("Execute planned tasks one at a time", root_help.stdout)
             self.assertIn("structured CLI field arguments", root_help.stdout)
@@ -1824,7 +1885,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Keep plan section labels in English", plan_help.stdout)
             self.assertIn("Affected files/interfaces", plan_help.stdout)
             self.assertIn("Approval needs", plan_help.stdout)
-            self.assertIn("before task records", plan_help.stdout)
+            self.assertIn("before executable task records", plan_help.stdout)
             self.assertIn("structured CLI field arguments", plan_help.stdout)
             self.assertIn("Use numeric stable ids only", plan_help.stdout)
             self.assertIn("PLAN-001", plan_help.stdout)
@@ -1852,14 +1913,20 @@ level_subagent_aggressiveness = "force"
             self.assertIn("do not claim", task_help.stdout)
             self.assertIn("@senior-worker", task_help.stdout)
             self.assertIn("source plan/spec exists", task_help.stdout)
+            self.assertIn("not represent planning or task-design work", task_help.stdout)
+            self.assertIn("Executable implementation/verification tasks", task_help.stdout)
             self.assertIn("structured CLI field arguments", task_help.stdout)
             self.assertIn("--blocker/--next-action", task_help.stdout)
 
             approval_help = self.run_cli(db_path, "approval", "set", "--help")
             self.assertEqual(approval_help.returncode, 0, approval_help.stderr)
             self.assertIn("Approval writing rules", approval_help.stdout)
+            self.assertIn("residual-run handling", approval_help.stdout)
+            self.assertIn("planning clarification", approval_help.stdout)
+            self.assertIn("execution scope", approval_help.stdout)
             self.assertIn("before starting or", approval_help.stdout)
             self.assertIn("continuing task execution", approval_help.stdout)
+            self.assertIn("approved decision/scope", approval_help.stdout)
             self.assertIn("--decision", approval_help.stdout)
             self.assertIn("--prompt", approval_help.stdout)
 
@@ -2512,9 +2579,12 @@ task_granularity = "very_granular"
             self.assertIn("taplctl item show --id <id> --agent", event.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", event.stdout)
             self.assertNotIn("Do not use level names such as `level2`", event.stdout)
-            self.assertIn("Flow: search relevant prior work", event.stdout)
+            self.assertIn("Flow: status -> resolve residual run with user approval", event.stdout)
+            self.assertIn("analyze/search/clarify loop", event.stdout)
+            self.assertIn("execution approval", event.stdout)
             self.assertIn("plan-based task design", event.stdout)
-            self.assertIn("Phase order", event.stdout)
+            self.assertIn("Lifecycle order", event.stdout)
+            self.assertIn("resolve residual run direction", event.stdout)
             self.assertIn("Search: before planning non-trivial work", event.stdout)
             self.assertIn("snippet is insufficient", event.stdout)
             self.assertIn("before relying on full details", event.stdout)
@@ -2731,6 +2801,28 @@ task_granularity = "very_granular"
             )
             self.assertEqual(task.returncode, 0, task.stderr)
 
+            verification_task = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-002",
+                "--title",
+                "Verify implementation",
+                "--status",
+                "Completed",
+                "--spec-id",
+                "SPEC-001",
+                "--goal",
+                "Verify the requested implementation.",
+                "--verification",
+                "Stop hook archives the run.",
+                "--result",
+                "Verification is complete.",
+                "--json",
+            )
+            self.assertEqual(verification_task.returncode, 0, verification_task.stderr)
+
             stopped = self.run_cli(
                 db_path,
                 "hook-event",
@@ -2771,7 +2863,7 @@ task_granularity = "very_granular"
             self.assertEqual(detail_payload["archive"]["request_summary"], "Ship auto archive")
             self.assertEqual(
                 [(item["kind"], item["stable_id"], item["archived"]) for item in detail_payload["items"]],
-                [("plan", "SPEC-001", 1), ("task", "TASK-001", 1)],
+                [("plan", "SPEC-001", 1), ("task", "TASK-001", 1), ("task", "TASK-002", 1)],
             )
             self.assertEqual(detail_payload["events"][-1]["event_type"], "Stop")
 
@@ -2844,6 +2936,7 @@ task_granularity = "very_granular"
             status_payload = json.loads(status.stdout)
             self.assertIsNotNone(status_payload["active_run"])
             self.assertEqual(status_payload["active_run"]["request_summary"], "Plan only work")
+            self.assertEqual(status_payload["counts"]["tasks"], 0)
             self.assertEqual(status_payload["counts"]["archives"], 0)
 
             next_prompt = self.run_cli(
@@ -2863,6 +2956,95 @@ task_granularity = "very_granular"
             self.assertIn("finish existing work first", next_actions)
             self.assertIn("defer the existing run", next_actions)
             self.assertIn("merge the work into one plan", next_actions)
+
+    def test_user_prompt_context_asks_direction_for_stopped_in_progress_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            prompt = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Original implementation"}',
+            )
+            self.assertEqual(prompt.returncode, 0, prompt.stderr)
+
+            summary = self.run_cli(db_path, "run", "set", "--summary", "Original implementation", "--json")
+            self.assertEqual(summary.returncode, 0, summary.stderr)
+
+            plan = self.run_cli(
+                db_path,
+                "plan",
+                "set",
+                "--id",
+                "SPEC-001",
+                "--title",
+                "Original plan",
+                "--summary",
+                "REQ-001: original implementation plan.",
+                "--objective",
+                "Finish the original implementation.",
+                "--requirements-trace",
+                "REQ-001: user asked for the original implementation.",
+                "--selected-approach",
+                "Execute one implementation task.",
+                "--affected-files",
+                "tapl/taplctl/context.py",
+                "--execution-order",
+                "Start and finish TASK-001.",
+                "--risks",
+                "A later prompt may be unrelated to the active run.",
+                "--validation",
+                "Context asks for direction.",
+                "--json",
+            )
+            self.assertEqual(plan.returncode, 0, plan.stderr)
+
+            task = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Implement original task",
+                "--status",
+                "In Progress",
+                "--spec-id",
+                "SPEC-001",
+                "--goal",
+                "Finish the original implementation task.",
+                "--action",
+                "Continue implementation from the active task.",
+                "--required-subagent",
+                "@senior-worker",
+                "--verification",
+                "Context asks for direction before new durable edits.",
+                "--json",
+            )
+            self.assertEqual(task.returncode, 0, task.stderr)
+
+            next_prompt = self.run_cli(
+                db_path,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Implement a different feature"}',
+            )
+            self.assertEqual(next_prompt.returncode, 0, next_prompt.stderr)
+            next_payload = json.loads(next_prompt.stdout)
+            next_actions = "\n".join(next_payload["context"]["next_actions"])
+            self.assertIn("Run stopped during task execution", next_actions)
+            self.assertIn("continue execution from TASK-001", next_actions)
+            self.assertIn("defer the existing run and archive it", next_actions)
+            self.assertIn("merge the work into one plan", next_actions)
+            self.assertIn("get user approval", next_actions)
 
     def test_stop_hook_auto_archives_simple_result_run_without_items(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

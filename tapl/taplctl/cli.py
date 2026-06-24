@@ -47,7 +47,7 @@ def plan_set_epilog() -> str:
         "Plan writing rules:\n"
         f"  {validation.structured_record_guidance()}\n"
         f"  {validation.stable_id_guidance()}\n"
-        "  Write or update the plan before task records; downstream tasks should derive from this record.\n"
+        "  Write or update the plan before executable task records; downstream tasks should derive from this record.\n"
         f"  {validation.plan_format_guidance()}\n"
         f"  {validation.plan_key_label_guidance()}\n"
         "  Pass plan content through field arguments; tapl renders the durable Markdown body from a template.\n"
@@ -75,7 +75,7 @@ def task_set_epilog() -> str:
         f"  {validation.task_execution_order_guidance()}\n"
         "  Existing task updates are partial: pass --id plus only changed fields;\n"
         "  omitted fields keep their stored values. New task creation requires --title and --status.\n"
-        "  Executable tasks should include source spec_id, goal, action, verification,\n"
+        "  Executable implementation/verification tasks should include source spec_id, goal, action, verification,\n"
         "  and result when completed; blocked tasks should include blocker and next_action.\n"
         "  When level subagent routing is enabled, set required_subagent in the same command\n"
         "  that creates each executable task; treat it as routing metadata.\n"
@@ -120,9 +120,10 @@ def finding_add_epilog() -> str:
 def approval_set_epilog() -> str:
     return (
         "Approval writing rules:\n"
-        "  Set explicit execution approval after task design and before starting or\n"
-        "  continuing task execution. The prompt should describe the approved scope,\n"
-        "  not just `yes`.\n"
+        "  Record explicit user decisions for residual-run handling, planning clarification,\n"
+        "  or execution scope. Execution approval is normally set after task design/task set\n"
+        "  and before starting or continuing task execution. The prompt should describe the\n"
+        "  approved decision/scope, not just `yes`.\n"
         "\n"
         "Example:\n"
         "  taplctl approval set --decision approved \\\n"
@@ -1042,7 +1043,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     payload = {
         "ok": meta.get("schema_version") == str(db.SCHEMA_VERSION) and plan_task_execute["ok"],
         "schema_version": meta.get("schema_version"),
-        "active_run": db.row_to_dict(db.active_run(conn)),
+        "active_run": db.workflow_run_to_dict(db.active_run(conn)),
         "incomplete_tasks": db.incomplete_task_count(conn),
         "config": settings.as_dict(),
         "plan_task_execute": plan_task_execute,
@@ -1091,7 +1092,7 @@ def cmd_run_set(args: argparse.Namespace) -> int:
         )
         print(agent_write_receipt("run_set", active_run=run, updated_fields=updated_fields))
         return 0
-    emit({"ok": True, "active_run": db.row_to_dict(run)}, args.json, args.agent)
+    emit({"ok": True, "active_run": db.workflow_run_to_dict(run)}, args.json, args.agent)
     return 0
 
 
