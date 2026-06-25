@@ -337,25 +337,9 @@ def validate_task_content(
 
         stable_id = str(task.get("stable_id") or task.get("task_id") or "task")
         missing: list[str] = []
-        if status in EXECUTABLE_STATUSES:
-            required_fields = ("spec_id", "goal", "action", "verification")
-            for field in required_fields:
-                if not str(task.get(field) or "").strip():
-                    missing.append(field)
-            if (
-                settings.use_level_subagent
-                and settings.level_subagent_aggressiveness != "minimal"
-                and not str(task.get("required_subagent") or "").strip()
-            ):
-                missing.append("required_subagent")
-            if status == "Blocked":
-                for field in ("blocker", "next_action"):
-                    if not str(task.get(field) or "").strip():
-                        missing.append(field)
-        elif status == "Completed":
-            for field in ("verification", "result"):
-                if not str(task.get(field) or "").strip():
-                    missing.append(field)
+        for field in tapl_prompt.task_required_field_names(settings, status):
+            if not str(task.get(field) or "").strip():
+                missing.append(field)
 
         if missing:
             issues.append(

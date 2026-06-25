@@ -65,58 +65,58 @@ def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
 
 
 def add_run_set_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--summary", default=None, help="Short description of the current request.")
-    parser.add_argument("--result", default=None, help="Short description of the completed result.")
+    parser.add_argument("--summary", default=None, help=tapl_prompt.field_help("run", "summary"))
+    parser.add_argument("--result", default=None, help=tapl_prompt.field_help("run", "result"))
     add_agent_output_args(parser)
 
 
 def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--id", default="PLAN-001", help="Numeric plan id, e.g. PLAN-001 or SPEC-001.")
-    parser.add_argument("--title", default=None, help="Short human-readable plan title.")
-    parser.add_argument("--summary", default=None, help="Compact requirements trace and approach summary.")
-    parser.add_argument("--objective", default=None, help="Plan objective.")
-    parser.add_argument("--requirements-trace", default=None, help="REQ-* trace or requirement mapping.")
-    parser.add_argument("--selected-approach", default=None, help="Selected implementation approach.")
+    parser.add_argument("--id", default="PLAN-001", help=tapl_prompt.field_help("plan", "id"))
+    parser.add_argument("--title", default=None, help=tapl_prompt.field_help("plan", "title"))
+    parser.add_argument("--summary", default=None, help=tapl_prompt.field_help("plan", "summary"))
+    parser.add_argument("--objective", default=None, help=tapl_prompt.field_help("plan", "objective"))
+    parser.add_argument("--requirements-trace", default=None, help=tapl_prompt.field_help("plan", "requirements_trace"))
+    parser.add_argument("--selected-approach", default=None, help=tapl_prompt.field_help("plan", "selected_approach"))
     parser.add_argument(
         "--affected-files",
         "--affected-files-interfaces",
         dest="affected_files",
         default=None,
-        help="Affected files, modules, or interfaces.",
+        help=tapl_prompt.field_help("plan", "affected_files"),
     )
-    parser.add_argument("--execution-order", default=None, help="Ordered execution steps.")
-    parser.add_argument("--risks", default=None, help="Risks, compatibility notes, or tradeoffs.")
-    parser.add_argument("--validation", default=None, help="Validation strategy or commands.")
-    parser.add_argument("--approval-needs", default=None, help="Approval requirements before execution.")
-    parser.add_argument("--notes", default=None, help="Additional notes rendered after standard plan fields.")
-    parser.add_argument("--status", default=None, help="Plan lifecycle label, e.g. Draft or Finalized.")
+    parser.add_argument("--execution-order", default=None, help=tapl_prompt.field_help("plan", "execution_order"))
+    parser.add_argument("--risks", default=None, help=tapl_prompt.field_help("plan", "risks"))
+    parser.add_argument("--validation", default=None, help=tapl_prompt.field_help("plan", "validation"))
+    parser.add_argument("--approval-needs", default=None, help=tapl_prompt.field_help("plan", "approval_needs"))
+    parser.add_argument("--notes", default=None, help=tapl_prompt.field_help("plan", "notes"))
+    parser.add_argument("--status", default=None, help=tapl_prompt.field_help("plan", "status"))
     add_agent_output_args(parser)
 
 
 def add_task_write_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--id", required=True, help="Numeric task id, e.g. TASK-001.")
-    parser.add_argument("--title", default=None, help="Short human-readable task title. Required when creating a task.")
+    parser.add_argument("--id", required=True, help=tapl_prompt.field_help("task", "id"))
+    parser.add_argument("--title", default=None, help=tapl_prompt.field_help("task", "title"))
     parser.add_argument(
         "--status",
         default=None,
         choices=db.TASK_STATUSES,
-        help="Task lifecycle status. Required when creating a task; omitted updates keep the stored status.",
+        help=tapl_prompt.field_help("task", "status"),
     )
-    parser.add_argument("--spec-id", default=None, help="Numeric source plan/spec id, e.g. PLAN-001 or SPEC-001.")
-    parser.add_argument("--goal", default=None, help="Outcome this task must achieve.")
-    parser.add_argument("--action", default=None, help="Concrete work to perform.")
-    parser.add_argument("--required-subagent", default=None, help="One of the configured @*-worker values.")
-    parser.add_argument("--verification", default=None, help="Command, check, or review proving completion.")
-    parser.add_argument("--result", default=None, help="Completion note for Completed tasks.")
-    parser.add_argument("--blocker", default=None, help="Reason a Blocked task cannot proceed.")
-    parser.add_argument("--next-action", default=None, help="Specific action that would unblock a Blocked task.")
+    parser.add_argument("--spec-id", default=None, help=tapl_prompt.field_help("task", "spec_id"))
+    parser.add_argument("--goal", default=None, help=tapl_prompt.field_help("task", "goal"))
+    parser.add_argument("--action", default=None, help=tapl_prompt.field_help("task", "action"))
+    parser.add_argument("--required-subagent", default=None, help=tapl_prompt.field_help("task", "required_subagent"))
+    parser.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
+    parser.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
+    parser.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
+    parser.add_argument("--next-action", default=None, help=tapl_prompt.field_help("task", "next_action"))
     add_agent_output_args(parser)
 
 
 def add_approval_write_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help="Approval kind.")
-    parser.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS, help="Approval decision.")
-    parser.add_argument("--prompt", default="", help="Approved or rejected execution scope.")
+    parser.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help=tapl_prompt.field_help("approval", "kind"))
+    parser.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS, help=tapl_prompt.field_help("approval", "decision"))
+    parser.add_argument("--prompt", default="", help=tapl_prompt.field_help("approval", "prompt"))
     add_agent_output_args(parser)
 
 
@@ -256,11 +256,11 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=finding_add_epilog(),
         formatter_class=HELP_FORMATTER,
     )
-    finding_add.add_argument("--title", required=True, help="Short finding title.")
-    finding_add.add_argument("--source", default="", help="Where the finding came from.")
-    finding_add.add_argument("--finding", default="", help="Finding details.")
-    finding_add.add_argument("--impact", default="", help="Why the finding matters.")
-    finding_add.add_argument("--related-ids", default="", help="Related plan, task, or item ids.")
+    finding_add.add_argument("--title", required=True, help=tapl_prompt.field_help("finding", "title"))
+    finding_add.add_argument("--source", default="", help=tapl_prompt.field_help("finding", "source"))
+    finding_add.add_argument("--finding", default="", help=tapl_prompt.field_help("finding", "finding"))
+    finding_add.add_argument("--impact", default="", help=tapl_prompt.field_help("finding", "impact"))
+    finding_add.add_argument("--related-ids", default="", help=tapl_prompt.field_help("finding", "related_ids"))
     add_agent_output_args(finding_add)
     finding_add.set_defaults(handler=cmd_finding_add)
 

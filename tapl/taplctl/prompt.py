@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from string import Template
 from typing import Iterable, Any
 
@@ -20,6 +21,68 @@ PLAN_KEY_LABELS = (
     "Approval needs",
 )
 TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
+EXECUTABLE_TASK_STATUSES = ("Pending", "In Progress", "Blocked")
+
+
+@dataclass(frozen=True)
+class FieldSpec:
+    name: str
+    flag: str
+    help: str
+    required: str = ""
+
+
+RUN_FIELDS = (
+    FieldSpec("summary", "--summary", "Short description of the current request."),
+    FieldSpec("result", "--result", "Short description of the completed result."),
+)
+PLAN_FIELDS = (
+    FieldSpec("id", "--id", "Numeric plan/spec id, e.g. PLAN-001 or SPEC-001.", "defaults to PLAN-001"),
+    FieldSpec("title", "--title", "Short human-readable plan title.", "recommended when creating"),
+    FieldSpec("summary", "--summary", "Compact requirements trace and approach summary.", "recommended"),
+    FieldSpec("objective", "--objective", "Plan objective.", "required for detailed plans"),
+    FieldSpec("requirements_trace", "--requirements-trace", "REQ-* trace or requirement mapping.", "required for detailed plans"),
+    FieldSpec("selected_approach", "--selected-approach", "Selected implementation approach.", "required for detailed plans"),
+    FieldSpec("affected_files", "--affected-files", "Affected files, modules, or interfaces.", "required for detailed plans"),
+    FieldSpec("execution_order", "--execution-order", "Ordered execution steps.", "required for detailed plans"),
+    FieldSpec("risks", "--risks", "Risks, compatibility notes, or tradeoffs.", "required for detailed plans"),
+    FieldSpec("validation", "--validation", "Validation strategy or commands.", "required for detailed plans"),
+    FieldSpec("approval_needs", "--approval-needs", "Approval requirements before execution."),
+    FieldSpec("notes", "--notes", "Additional notes rendered after standard plan fields."),
+    FieldSpec("status", "--status", "Plan lifecycle label, e.g. Draft or Finalized."),
+)
+TASK_FIELDS = (
+    FieldSpec("id", "--id", "Numeric task id, e.g. TASK-001.", "CLI required"),
+    FieldSpec("title", "--title", "Short human-readable task title.", "required when creating"),
+    FieldSpec("status", "--status", "Task lifecycle status.", "required when creating"),
+    FieldSpec("spec_id", "--spec-id", "Numeric source plan/spec id, e.g. PLAN-001 or SPEC-001.", "required for executable tasks"),
+    FieldSpec("goal", "--goal", "Outcome this task must achieve.", "required for executable tasks"),
+    FieldSpec("action", "--action", "Concrete work to perform.", "required for executable tasks"),
+    FieldSpec("required_subagent", "--required-subagent", "One of the configured @*-worker values.", "required for executable tasks when routing is enabled"),
+    FieldSpec("verification", "--verification", "Command, check, or review proving completion.", "required for executable and completed tasks"),
+    FieldSpec("result", "--result", "Completion note for Completed tasks.", "required for completed tasks"),
+    FieldSpec("blocker", "--blocker", "Reason a Blocked task cannot proceed.", "required for blocked tasks"),
+    FieldSpec("next_action", "--next-action", "Specific action that would unblock a Blocked task.", "required for blocked tasks"),
+)
+FINDING_FIELDS = (
+    FieldSpec("title", "--title", "Short finding title.", "CLI required"),
+    FieldSpec("source", "--source", "Where the finding came from."),
+    FieldSpec("finding", "--finding", "Finding details.", "required for decision-relevant facts"),
+    FieldSpec("impact", "--impact", "Why the finding matters.", "required when it affects requirements, plan, tasks, or verification"),
+    FieldSpec("related_ids", "--related-ids", "Related plan, task, or item ids."),
+)
+APPROVAL_FIELDS = (
+    FieldSpec("kind", "--kind", "Approval kind."),
+    FieldSpec("decision", "--decision", "Approval decision.", "CLI required"),
+    FieldSpec("prompt", "--prompt", "Approved or rejected execution scope.", "required for meaningful approvals"),
+)
+FIELD_SPECS = {
+    "run": RUN_FIELDS,
+    "plan": PLAN_FIELDS,
+    "task": TASK_FIELDS,
+    "finding": FINDING_FIELDS,
+    "approval": APPROVAL_FIELDS,
+}
 
 WORKFLOW_INTRO = """# Workflow
 
@@ -187,6 +250,7 @@ def template_variables(
         "task_granularity_guidance": task_granularity_guidance(config.task_granularity),
         "task_required_fields": task_required_fields(config),
         "task_fields_guidance": task_format_guidance(config),
+        "task_required_field_summary": task_required_field_summary(config),
         "subagent_routing_guidance": subagent_routing_guidance(config),
         "subagent_execution_guidance": subagent_execution_guidance(config),
         "execution_approval_guidance": execution_approval_guidance(config),
@@ -196,6 +260,80 @@ def template_variables(
     }
     values.update({key: str(value) for key, value in overrides.items()})
     return values
+
+
+def field_specs(record: str) -> tuple[FieldSpec, ...]:
+    return FIELD_SPECS[record]
+
+
+def field_spec(record: str, name: str) -> FieldSpec:
+    for spec in field_specs(record):
+        if spec.name == name:
+            return spec
+    raise KeyError(f"unknown {record} field: {name}")
+
+
+def field_help(record: str, name: str) -> str:
+    spec = field_spec(record, name)
+    return spec.help
+
+
+def field_flag(record: str, name: str) -> str:
+    return field_spec(record, name).flag
+
+
+def field_contract_lines(record: str) -> list[str]:
+    lines: list[str] = []
+    for spec in field_specs(record):
+        required = f" ({spec.required})" if spec.required else ""
+        lines.append(f"{spec.flag}{required}: {spec.help}")
+    return lines
+
+
+def field_contract_section(record: str, *, indent: str = "  ") -> str:
+    return "\n".join(f"{indent}{line}" for line in field_contract_lines(record))
+
+
+def field_contract_compact(record: str, names: Iterable[str] | None = None) -> str:
+    selected = field_specs(record)
+    if names is not None:
+        selected = tuple(field_spec(record, name) for name in names)
+    return "; ".join(
+        f"{spec.flag}{f' ({spec.required})' if spec.required else ''}" for spec in selected
+    )
+
+
+def task_required_field_names(
+    settings: tapl_config.PlanTaskExecuteConfig,
+    status: str,
+) -> tuple[str, ...]:
+    if status in EXECUTABLE_TASK_STATUSES:
+        fields = ["spec_id", "goal", "action", "verification"]
+        if settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal":
+            fields.append("required_subagent")
+        if status == "Blocked":
+            fields.extend(("blocker", "next_action"))
+        return tuple(fields)
+    if status == "Completed":
+        return ("verification", "result")
+    return ()
+
+
+def task_required_field_flags(
+    settings: tapl_config.PlanTaskExecuteConfig,
+    status: str,
+) -> tuple[str, ...]:
+    return tuple(field_flag("task", field) for field in task_required_field_names(settings, status))
+
+
+def task_required_field_summary(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    executable = ", ".join(task_required_field_flags(settings, "Pending"))
+    completed = ", ".join(task_required_field_flags(settings, "Completed"))
+    blocked = ", ".join(task_required_field_flags(settings, "Blocked"))
+    return (
+        f"new task: --id, --title, --status; executable task: {executable}; "
+        f"completed task: {completed}; blocked task: {blocked}."
+    )
 
 
 def full_workflow_prompt(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> str:
@@ -284,6 +422,22 @@ def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> l
         + plan_key_label_guidance()
         + " "
         + planning_approval_guidance(settings.planning_approval_level),
+        "Plan fields: "
+        + field_contract_compact(
+            "plan",
+            (
+                "id",
+                "title",
+                "summary",
+                "objective",
+                "requirements_trace",
+                "selected_approach",
+                "affected_files",
+                "execution_order",
+                "risks",
+                "validation",
+            ),
+        ),
         "Tasks: after source plan exists, set --spec-id PLAN-001/SPEC-001; "
         "tasks are executable implementation/verification work derived from the stored plan, not planning or task-design work; "
         + task_granularity_guidance(settings.task_granularity)
@@ -291,6 +445,7 @@ def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> l
         + task_execution_order_guidance()
         + " "
         + task_fields_context_guidance(settings),
+        "Task required fields: " + task_required_field_summary(settings),
         "Agent contract: main agent writes plan/task records and final status; subagents may draft/execute only.",
     ]
     subagent = subagent_context_guidance(settings)
@@ -528,35 +683,30 @@ def task_granularity_guidance(value: str) -> str:
 
 
 def task_required_fields(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    fields = "`spec_id`, goal, action"
-    if settings.use_level_subagent:
-        fields += ", required subagent"
-    fields += ", and verification"
-    return f"Each task must include {fields} when applicable."
+    fields = ", ".join(task_required_field_flags(settings, "Pending"))
+    return f"Each executable task must include {fields} when applicable."
 
 
 def task_fields_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    executable_fields = ["spec_id", "goal", "action"]
-    if settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal":
-        executable_fields.append("required_subagent")
-    executable_fields.append("verification")
+    executable_fields = task_required_field_flags(settings, "Pending")
+    completed_fields = task_required_field_flags(settings, "Completed")
+    blocked_fields = task_required_field_flags(settings, "Blocked")
     return (
         f"fields: executable={', '.join(executable_fields)}; "
-        "completed=verification, result; blocked=blocker, next_action; updates are partial."
+        f"completed={', '.join(completed_fields)}; "
+        f"blocked={', '.join(blocked_fields)}; updates are partial."
     )
 
 
 def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    fields = ["source spec_id", "goal", "action"]
-    if settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal":
-        fields.append("required_subagent")
-    fields.append("verification")
+    fields = task_required_field_flags(settings, "Pending")
     optional_subagent = ""
     if settings.use_level_subagent and settings.level_subagent_aggressiveness == "minimal":
-        optional_subagent = " Set required_subagent only for explicit subagent routing."
+        optional_subagent = " Set --required-subagent only for explicit subagent routing."
     return (
         f"Executable implementation/verification tasks should include {', '.join(fields)}, "
-        "and result when completed; blocked tasks should include blocker and next_action. "
+        f"completed tasks should include {', '.join(task_required_field_flags(settings, 'Completed'))}; "
+        f"blocked tasks should include {', '.join(task_required_field_flags(settings, 'Blocked'))}. "
         "When updating an existing task, pass only changed fields; omitted fields keep stored values."
         f"{optional_subagent}"
     )
@@ -610,6 +760,9 @@ def plan_set_epilog() -> str:
         "  Existing plan updates are partial: omitted fields keep the stored values.\n"
         "  Status is free-form; common values are Draft, Finalized, Imported, and Superseded.\n"
         "\n"
+        "Field contract:\n"
+        f"{field_contract_section('plan')}\n"
+        "\n"
         "Example:\n"
         "  taplctl plan set --id PLAN-001 --title 'Plan title' \\\n"
         "    --summary 'REQ-001: approach, affected files, risks, validation' \\\n"
@@ -646,13 +799,11 @@ def task_set_epilog(
         f"  Allowed required_subagent values when enabled: {subagent_values}. Do not use level names such as `level2`.\n"
         "  Keep task text in the user's language unless asked otherwise.\n"
         "\n"
-        "Field guidance:\n"
-        "  --spec-id: numeric stable id of the source plan/spec, e.g. PLAN-001 or SPEC-001.\n"
-        "  --goal: outcome the task must achieve.\n"
-        "  --action: concrete work to perform.\n"
-        "  --verification: command, check, or review that proves the task is done.\n"
-        "  --result: concise completion note; use with Completed tasks.\n"
-        "  --blocker/--next-action: why a Blocked task cannot proceed and what unblocks it.\n"
+        "Required field sets:\n"
+        f"  {task_required_field_summary(tapl_config.PlanTaskExecuteConfig())}\n"
+        "\n"
+        "Field contract:\n"
+        f"{field_contract_section('task')}\n"
         "\n"
         "Example:\n"
         "  taplctl task set --id TASK-001 --title 'Implement change' \\\n"
@@ -670,6 +821,9 @@ def finding_add_epilog() -> str:
         "  Add only decision-relevant facts; include source and impact when they affect\n"
         "  requirements, plan, tasks, or verification.\n"
         "\n"
+        "Field contract:\n"
+        f"{field_contract_section('finding')}\n"
+        "\n"
         "Example:\n"
         "  taplctl finding add --title 'Finding title' --source 'Source' \\\n"
         "    --finding 'What was learned' --impact 'Why it matters' --agent"
@@ -683,6 +837,9 @@ def approval_set_epilog() -> str:
         "  or execution scope. Execution approval is normally set after task design/task set\n"
         "  and before starting or continuing task execution. The prompt should describe the\n"
         "  approved decision/scope, not just `yes`.\n"
+        "\n"
+        "Field contract:\n"
+        f"{field_contract_section('approval')}\n"
         "\n"
         "Example:\n"
         "  taplctl approval set --decision approved \\\n"

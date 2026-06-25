@@ -1473,7 +1473,8 @@ level_subagent_aggressiveness = "minimal"
             context_payload = json.loads(context.stdout)
             guidance = "\n".join(context_payload["workflow_guidance"])
             self.assertIn("# Workflow", guidance)
-            self.assertIn("fields: executable=spec_id, goal, action, verification", guidance)
+            self.assertIn("fields: executable=--spec-id, --goal, --action, --verification", guidance)
+            self.assertIn("Task required fields: new task: --id, --title, --status", guidance)
             self.assertIn("Set required_subagent only for clear risk/routing", guidance)
 
     def test_validate_reports_plan_task_execute_issues(self) -> None:
@@ -1709,7 +1710,9 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Selected approach", prompt_guidance)
             self.assertIn("Use numeric stable ids only", prompt_guidance)
             self.assertIn("Tasks: after source plan exists", prompt_guidance)
-            self.assertIn("fields: executable=spec_id, goal, action, required_subagent, verification", prompt_guidance)
+            self.assertIn("Plan fields: --id", prompt_guidance)
+            self.assertIn("fields: executable=--spec-id, --goal, --action, --verification, --required-subagent", prompt_guidance)
+            self.assertIn("Task required fields: new task: --id, --title, --status", prompt_guidance)
             self.assertIn("Execute planned tasks one at a time in task order", prompt_guidance)
             self.assertIn("request_user_input", prompt_guidance)
             self.assertIn("Subagents:", prompt_guidance)
@@ -1914,6 +1917,9 @@ level_subagent_aggressiveness = "force"
             self.assertIn("--selected-approach", plan_help.stdout)
             self.assertIn("--notes", plan_help.stdout)
             self.assertIn("--agent", plan_help.stdout)
+            self.assertIn("Field contract", plan_help.stdout)
+            self.assertIn("--objective (required for detailed plans)", plan_help.stdout)
+            self.assertIn("--validation (required for detailed plans)", plan_help.stdout)
             self.assertNotIn("--body", plan_help.stdout)
 
             task_help = self.run_cli(db_path, "task", "set", "--help")
@@ -1936,7 +1942,10 @@ level_subagent_aggressiveness = "force"
             self.assertIn("not represent planning or task-design work", task_help.stdout)
             self.assertIn("Executable implementation/verification tasks", task_help.stdout)
             self.assertIn("structured CLI field arguments", task_help.stdout)
-            self.assertIn("--blocker/--next-action", task_help.stdout)
+            self.assertIn("Required field sets", task_help.stdout)
+            self.assertIn("executable task: --spec-id, --goal, --action, --verification, --required-subagent", task_help.stdout)
+            self.assertIn("--blocker (required for blocked tasks)", task_help.stdout)
+            self.assertIn("--next-action (required for blocked tasks)", task_help.stdout)
 
             approval_help = self.run_cli(db_path, "approval", "set", "--help")
             self.assertEqual(approval_help.returncode, 0, approval_help.stderr)
@@ -1947,6 +1956,8 @@ level_subagent_aggressiveness = "force"
             self.assertIn("before starting or", approval_help.stdout)
             self.assertIn("continuing task execution", approval_help.stdout)
             self.assertIn("approved decision/scope", approval_help.stdout)
+            self.assertIn("Field contract", approval_help.stdout)
+            self.assertIn("--decision (CLI required)", approval_help.stdout)
             self.assertIn("--decision", approval_help.stdout)
             self.assertIn("--prompt", approval_help.stdout)
 
@@ -1955,6 +1966,8 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Add a finding", finding_help.stdout)
             self.assertIn("Why the finding matters", finding_help.stdout)
             self.assertIn("Finding writing rules", finding_help.stdout)
+            self.assertIn("Field contract", finding_help.stdout)
+            self.assertIn("--title (CLI required)", finding_help.stdout)
 
             for args in (
                 ("init", "--help"),
@@ -2656,7 +2669,9 @@ task_granularity = "very_granular"
             self.assertIn("snippet is insufficient", event.stdout)
             self.assertIn("Plan: include requirements trace", event.stdout)
             self.assertIn("Requirements trace", event.stdout)
-            self.assertIn("fields: executable=spec_id, goal, action, required_subagent, verification", event.stdout)
+            self.assertIn("Plan fields: --id", event.stdout)
+            self.assertIn("fields: executable=--spec-id, --goal, --action, --verification, --required-subagent", event.stdout)
+            self.assertIn("Task required fields: new task: --id, --title, --status", event.stdout)
             self.assertIn("taplctl finding add", event.stdout)
             self.assertNotIn("## 9. Command Shapes", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
