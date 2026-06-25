@@ -403,8 +403,10 @@ class TaplCliTests(unittest.TestCase):
             context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--agent")
             self.assertEqual(context.returncode, 0, context.stderr)
             self.assertIn("<tapl_context>", context.stdout)
-            self.assertIn("taplctl status --agent", context.stdout)
-            self.assertIn("taplctl approval set --decision approved", context.stdout)
+            self.assertIn("taplctl &lt;command&gt; &lt;subcommand&gt; --help", context.stdout)
+            self.assertNotIn("taplctl status --agent", context.stdout)
+            self.assertNotIn("taplctl approval set --help", context.stdout)
+            self.assertNotIn("taplctl approval set --decision approved", context.stdout)
             self.assertNotIn("<config>", context.stdout)
 
             validate = self.run_cli(db_path, "validate", "--agent")
@@ -1495,11 +1497,10 @@ level_subagent_aggressiveness = "minimal"
             context_payload = json.loads(context.stdout)
             guidance = "\n".join(context_payload["workflow_guidance"])
             self.assertIn("# Workflow", guidance)
-            self.assertIn(
-                "Task fields: new=--id/--title/--status; executable=--spec-id/--goal/--action/--verification",
-                guidance,
-            )
-            self.assertIn("set required_subagent only for clear risk/routing", guidance)
+            self.assertIn("taplctl <command> <subcommand> --help", guidance)
+            self.assertIn("Subagent routing is task metadata", guidance)
+            self.assertNotIn("Task fields:", guidance)
+            self.assertNotIn("required_subagent", guidance)
 
     def test_validate_reports_plan_task_execute_issues(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1718,51 +1719,54 @@ level_subagent_aggressiveness = "force"
             prompt_payload = json.loads(prompt_context.stdout)
             prompt_instructions = "\n".join(prompt_payload["instructions"])
             self.assertEqual(prompt_payload["instructions"], [])
+            prompt_settings = tapl_config.PlanTaskExecuteConfig(**prompt_payload["config"]["plan_task_execute"])
+            self.assertEqual(
+                prompt_payload["workflow_guidance"],
+                [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE, prompt_settings)],
+            )
+            self.assertIn("${planning_approval_guidance}", tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)
+            self.assertNotIn("## 9. Command Shapes", tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)
             prompt_guidance = "\n".join(prompt_payload["workflow_guidance"])
             self.assertIn("Write workflow records and reports in the user's language", prompt_guidance)
             self.assertIn("Do not add unstated requirements", prompt_guidance)
             self.assertIn("Do not modify source, tests, docs, configs", prompt_guidance)
-            self.assertIn("At the start of every non-trivial user request", prompt_guidance)
-            self.assertIn("If the active run contains remaining actionable work", prompt_guidance)
-            self.assertIn("archive it with `taplctl archive create", prompt_guidance)
-            self.assertIn("Records: Pass plan/task content through structured CLI field arguments", prompt_guidance)
-            self.assertIn("Plan: include requirements trace", prompt_guidance)
-            self.assertIn("## Startup", prompt_guidance)
-            self.assertIn("## Core Rules", prompt_guidance)
-            self.assertIn("## Records", prompt_guidance)
-            self.assertIn("## Approval & Execution", prompt_guidance)
-            self.assertIn("Stage: continue automatically unless the user limits scope", prompt_guidance)
-            self.assertIn("Before `taplctl plan set`", prompt_guidance)
-            self.assertIn("requirements trace", prompt_guidance)
-            self.assertIn("Objective", prompt_guidance)
-            self.assertIn("Requirements trace", prompt_guidance)
-            self.assertIn("Selected approach", prompt_guidance)
-            self.assertIn("Use numeric stable ids only", prompt_guidance)
-            self.assertIn("Tasks: after source plan exists", prompt_guidance)
-            self.assertIn("Plan fields: --id", prompt_guidance)
-            self.assertIn(
-                "Task fields: new=--id/--title/--status; "
-                "executable=--spec-id/--goal/--action/--verification/--required-subagent",
-                prompt_guidance,
-            )
+            self.assertIn("Use the packet's Next Actions section for current-state steps", prompt_guidance)
+            self.assertIn("Use only the records needed for the current task", prompt_guidance)
+            self.assertIn("Planning must happen before implementation", prompt_guidance)
+            self.assertIn("## Role Boundaries", prompt_guidance)
+            self.assertIn("## Planning", prompt_guidance)
+            self.assertIn("## Tasks And Execution", prompt_guidance)
+            self.assertIn("## Records And History", prompt_guidance)
+            self.assertIn("## Completion Report", prompt_guidance)
+            self.assertIn("Before finalizing the plan", prompt_guidance)
+            self.assertIn("Plan detail for the current config", prompt_guidance)
+            self.assertIn("Tasks are executable implementation or verification work", prompt_guidance)
+            self.assertIn("taplctl <command> <subcommand> --help", prompt_guidance)
+            self.assertNotIn("At the start of every non-trivial user request", prompt_guidance)
+            self.assertNotIn("If the active run contains remaining actionable work", prompt_guidance)
+            self.assertNotIn("Set the current request summary", prompt_guidance)
+            self.assertNotIn("taplctl search '<compact prompt query>' --agent", prompt_guidance)
+            self.assertNotIn("taplctl item show --id <id> --agent", prompt_guidance)
+            self.assertNotIn("taplctl plan set --help", prompt_guidance)
+            self.assertNotIn("taplctl task set --help", prompt_guidance)
+            self.assertNotIn("Plan fields: --id", prompt_guidance)
+            self.assertNotIn("Task fields:", prompt_guidance)
+            self.assertNotIn("Use numeric stable ids only", prompt_guidance)
+            self.assertNotIn("required_subagent", prompt_guidance)
             self.assertIn("Execute planned tasks one at a time in task order", prompt_guidance)
             self.assertIn("request_user_input", prompt_guidance)
-            self.assertIn("Subagents:", prompt_guidance)
-            self.assertIn("same command that creates each executable task", prompt_guidance)
-            self.assertIn("Mark In Progress", prompt_guidance)
-            self.assertIn("only when the subagent tool is available", prompt_guidance)
+            self.assertIn("Subagent routing is task metadata", prompt_guidance)
+            self.assertIn("only active work is In Progress", prompt_guidance)
+            self.assertIn("only when a subagent tool is available", prompt_guidance)
             self.assertIn("do not claim delegation occurred", prompt_guidance)
             self.assertIn("@senior-worker", prompt_guidance)
-            self.assertIn("taplctl finding add", prompt_guidance)
+            self.assertNotIn("taplctl finding add --help", prompt_guidance)
             self.assertIn("derived from the stored plan", prompt_guidance)
-            self.assertNotIn("When work finishes, report briefly", prompt_guidance)
+            self.assertIn("When work finishes, report briefly", prompt_guidance)
             self.assertNotIn("## 9. Command Shapes", prompt_guidance)
-            self.assertIn(
-                "taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent",
-                prompt_guidance,
-            )
+            self.assertNotIn("taplctl approval set --decision approved", prompt_guidance)
+            self.assertNotIn("taplctl approval set --help", prompt_guidance)
             self.assertNotIn("quote every argument", prompt_instructions)
-            self.assertNotIn("Do not use level names such as `level2`", prompt_guidance)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
 
             def next_actions_after_plan(request_summary: str) -> str:
@@ -1813,17 +1817,16 @@ level_subagent_aggressiveness = "force"
                 return "\n".join(json.loads(context.stdout)["next_actions"])
 
             plan_only_actions = next_actions_after_plan("계획만 진행해줘")
-            self.assertIn("Plan-only request detected", plan_only_actions)
-            self.assertIn("stop after reporting the plan/status", plan_only_actions)
-            self.assertNotIn("create executable tasks", plan_only_actions)
-
             plan_then_ask_actions = next_actions_after_plan("계획해줘")
-            self.assertIn("use request_user_input to ask whether to continue", plan_then_ask_actions)
-            self.assertIn("--source request_user_input", plan_then_ask_actions)
-
             explicit_execute_actions = next_actions_after_plan("계획하고 구현까지 해줘")
-            self.assertIn("create executable tasks", explicit_execute_actions)
-            self.assertNotIn("use request_user_input to ask whether to continue", explicit_execute_actions)
+            self.assertEqual(plan_only_actions, plan_then_ask_actions)
+            self.assertEqual(plan_then_ask_actions, explicit_execute_actions)
+            self.assertIn("agent must judge the user's requested scope directly", plan_only_actions)
+            self.assertIn("If the user limited work to planning/reporting", plan_only_actions)
+            self.assertIn("If planning was requested without execution", plan_only_actions)
+            self.assertIn("If execution, edits, testing, or verification were explicitly requested", plan_only_actions)
+            self.assertIn("--source explicit_user", plan_only_actions)
+            self.assertNotIn("Plan-only request detected", plan_only_actions)
 
             less_planning_config = Path(tmp) / "less-planning.toml"
             less_planning_config.write_text(
@@ -1882,7 +1885,6 @@ level_subagent_aggressiveness = "force"
             )
             no_subagent_payload = json.loads(no_subagent_context.stdout)
             no_subagent_guidance = "\n".join(no_subagent_payload["workflow_guidance"])
-            self.assertNotIn("Subagents:", no_subagent_guidance)
             self.assertNotIn("required_subagent", no_subagent_guidance)
             self.assertIn("execution approval", no_subagent_guidance)
 
@@ -1962,18 +1964,28 @@ level_subagent_aggressiveness = "force"
             self.assertIn("tapl context:", prompt_text.stdout)
             self.assertIn("# Workflow", prompt_text.stdout)
             self.assertIn("Write workflow records and reports in the user's language", prompt_text.stdout)
-            self.assertIn("taplctl search '<compact prompt query>' --agent", prompt_text.stdout)
+            self.assertIn("review relevant prior TAPL history", prompt_text.stdout)
             self.assertIn("execution approval", prompt_text.stdout)
             self.assertIn("Execute planned tasks one at a time in task order", prompt_text.stdout)
-            self.assertIn("only when the subagent tool is available", prompt_text.stdout)
+            self.assertIn("only when a subagent tool is available", prompt_text.stdout)
             self.assertIn("do not claim delegation occurred", prompt_text.stdout)
-            self.assertIn("taplctl finding add", prompt_text.stdout)
+            self.assertNotIn("taplctl finding add --help", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
-            self.assertIn("Use numeric stable ids only", prompt_text.stdout)
+            self.assertNotIn("Use numeric stable ids only", prompt_text.stdout)
             self.assertNotIn("## 9. Command Shapes", prompt_text.stdout)
             self.assertNotIn("quote every argument", prompt_text.stdout)
 
     def test_command_help_exposes_field_guidance(self) -> None:
+        default_settings = tapl_config.PlanTaskExecuteConfig()
+        self.assertEqual(tapl_prompt.command_help_epilog(), tapl_prompt.render(tapl_prompt.ROOT_HELP_TEMPLATE))
+        self.assertEqual(tapl_prompt.plan_set_epilog(), tapl_prompt.render(tapl_prompt.PLAN_SET_HELP_TEMPLATE))
+        self.assertEqual(tapl_prompt.finding_add_epilog(), tapl_prompt.render(tapl_prompt.FINDING_ADD_HELP_TEMPLATE))
+        self.assertEqual(tapl_prompt.approval_set_epilog(), tapl_prompt.render(tapl_prompt.APPROVAL_SET_HELP_TEMPLATE))
+        self.assertEqual(
+            tapl_prompt.task_set_epilog(settings=default_settings),
+            tapl_prompt.render(tapl_prompt.TASK_SET_HELP_TEMPLATE, default_settings),
+        )
+        self.assertNotIn("usage:", tapl_prompt.ROOT_HELP_TEMPLATE)
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
 
@@ -2826,25 +2838,20 @@ task_granularity = "very_granular"
             self.assertEqual(event.returncode, 0, event.stderr)
             self.assertIn("tapl context:", event.stdout)
             self.assertIn("# Workflow", event.stdout)
-            self.assertIn("taplctl status --agent", event.stdout)
-            self.assertIn("taplctl search '<compact prompt query>' --agent", event.stdout)
-            self.assertIn("taplctl item show --id <id> --agent", event.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", event.stdout)
-            self.assertNotIn("Do not use level names such as `level2`", event.stdout)
             self.assertIn("execution approval", event.stdout)
-            self.assertIn("At the start of every non-trivial user request", event.stdout)
+            self.assertNotIn("taplctl status --agent", event.stdout)
+            self.assertNotIn("taplctl search '<compact prompt query>' --agent", event.stdout)
+            self.assertNotIn("taplctl item show --id <id> --agent", event.stdout)
+            self.assertNotIn("At the start of every non-trivial user request", event.stdout)
             self.assertIn("Before planning non-trivial work", event.stdout)
             self.assertIn("snippet is insufficient", event.stdout)
-            self.assertIn("Plan: include requirements trace", event.stdout)
-            self.assertIn("Requirements trace", event.stdout)
-            self.assertIn("Plan fields: --id", event.stdout)
-            self.assertIn(
-                "Task fields: new=--id/--title/--status; "
-                "executable=--spec-id/--goal/--action/--verification/--required-subagent",
-                event.stdout,
-            )
-            self.assertIn("taplctl finding add", event.stdout)
-            self.assertEqual(event.stdout.count("taplctl search '<compact prompt query>' --agent"), 1)
+            self.assertIn("Planning must happen before implementation", event.stdout)
+            self.assertIn("Plan detail for the current config", event.stdout)
+            self.assertNotIn("taplctl plan set --help", event.stdout)
+            self.assertNotIn("Plan fields: --id", event.stdout)
+            self.assertNotIn("Task fields:", event.stdout)
+            self.assertNotIn("taplctl finding add --help", event.stdout)
             self.assertIn("## Next Actions", event.stdout)
             self.assertNotIn("## 9. Command Shapes", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)

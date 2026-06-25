@@ -135,7 +135,6 @@ def next_actions(
 ) -> list[str]:
     actions: list[str] = []
     covered_issue_codes: set[str] = set()
-    stage_intent = workflow_stage_intent(state, prompt)
     if event == "SessionStart":
         if state.get("incomplete_tasks", 0):
             actions.append(tapl_prompt.session_start_incomplete_next_action())
@@ -158,12 +157,7 @@ def next_actions(
         actions.append(tapl_prompt.create_plan_next_action())
         covered_issue_codes.add("missing_plan")
     elif not has_tasks:
-        if stage_intent == "plan_only":
-            actions.append(tapl_prompt.plan_only_next_action())
-        elif stage_intent == "plan_then_ask":
-            actions.append(tapl_prompt.ask_after_plan_next_action())
-        else:
-            actions.append(tapl_prompt.create_tasks_next_action())
+        actions.append(tapl_prompt.decide_after_plan_next_action())
     if state.get("incomplete_tasks", 0):
         approval_action = approval_next_action(plan_task)
         if approval_action:
@@ -198,62 +192,6 @@ def active_run_direction_next_action(state: dict[str, Any], prompt: str) -> str:
         return tapl_prompt.different_request_next_action()
 
     return ""
-
-
-def workflow_stage_intent(state: dict[str, Any], prompt: str) -> str:
-    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
-    text = prompt.strip() or str(run.get("request_summary") or "").strip()
-    if not text or text == db.DEFAULT_REQUEST_SUMMARY:
-        return "auto"
-
-    normalized = normalized_prompt(text)
-    has_plan_term = contains_any(normalized, ("계획", "플랜", "설계", "plan", "planning"))
-    if not has_plan_term:
-        return "auto"
-
-    plan_only_markers = (
-        "계획만",
-        "계획 까지만",
-        "계획까지만",
-        "플랜만",
-        "설계만",
-        "plan only",
-        "planning only",
-        "only plan",
-        "only planning",
-    )
-    if contains_any(normalized, plan_only_markers):
-        return "plan_only"
-
-    execution_markers = (
-        "구현",
-        "수정",
-        "반영",
-        "적용",
-        "고쳐",
-        "고치",
-        "테스트",
-        "검증",
-        "실행",
-        "실제 동작",
-        "implement",
-        "implementation",
-        "fix",
-        "edit",
-        "modify",
-        "test",
-        "verify",
-        "execute",
-        "execution",
-    )
-    if contains_any(normalized, execution_markers):
-        return "explicit_execution"
-
-    return "plan_then_ask"
-
-
-def contains_any(value: str, needles: tuple[str, ...]) -> bool:
-    return any(needle in value for needle in needles)
 
 
 def request_differs_from_active_run(state: dict[str, Any], prompt: str) -> bool:
