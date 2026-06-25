@@ -15,6 +15,7 @@ export interface TaplItem {
   title: string;
   body?: string;
   status?: string;
+  required_subagent?: string;
   source?: string;
   updated_at?: string;
 }

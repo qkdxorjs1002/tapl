@@ -518,11 +518,17 @@ function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
 
 function TaskCard({ task }: { task: TaplItem }): JSX.Element {
   const summary = conciseText(task.body || task.title, 150);
+  const hasBadges = Boolean(task.required_subagent || task.status);
   return (
     <article className="tapl-item tapl-task-card">
       <div className="mb-2 flex items-start justify-between gap-2">
         <span className="kbd kbd-xs">{task.stable_id}</span>
-        {task.status ? <Badge label={task.status} tone={statusClass(task.status)} /> : null}
+        {hasBadges ? (
+          <div className="flex min-w-0 flex-wrap justify-end gap-1">
+            {task.required_subagent ? <Badge label={task.required_subagent} tone="info" /> : null}
+            {task.status ? <Badge label={task.status} tone={statusClass(task.status)} /> : null}
+          </div>
+        ) : null}
       </div>
       <h4 className="m-0 text-sm font-semibold">{task.title}</h4>
       {summary && summary !== task.title ? <p className="tapl-muted mt-2 text-xs">{summary}</p> : null}
@@ -543,11 +549,17 @@ function ItemList({ items, empty }: { items: TaplItem[]; empty: string }): JSX.E
 }
 
 function ItemCard({ item }: { item: TaplItem }): JSX.Element {
+  const hasBadges = Boolean((item.kind === 'task' && item.required_subagent) || item.status);
   return (
     <article className="tapl-item tapl-record-card">
       <div className="mb-2 flex items-start justify-between gap-2">
         <span className="kbd kbd-xs">{item.stable_id}</span>
-        {item.status ? <Badge label={item.status} tone={statusClass(item.status)} /> : null}
+        {hasBadges ? (
+          <div className="flex min-w-0 flex-wrap justify-end gap-1">
+            {item.kind === 'task' && item.required_subagent ? <Badge label={item.required_subagent} tone="info" /> : null}
+            {item.status ? <Badge label={item.status} tone={statusClass(item.status)} /> : null}
+          </div>
+        ) : null}
       </div>
       <h3 className="m-0 text-sm font-semibold">{item.title}</h3>
       {item.body ? <ReadableBlock content={item.body} /> : null}

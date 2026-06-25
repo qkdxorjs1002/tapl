@@ -21,6 +21,7 @@ interface TaplItem {
   title: string;
   body?: string;
   status?: string;
+  required_subagent?: string;
   source?: string;
   updated_at?: string;
 }
@@ -324,11 +325,14 @@ class ActiveProvider implements vscode.TreeDataProvider<WorkflowNode> {
       })
     ];
     for (const task of status.tasks) {
+      const description = [task.status, task.required_subagent].filter(Boolean).join(' / ') || undefined;
       nodes.push(new WorkflowNode({
         label: `${task.stable_id} ${task.title}`,
         kind: 'task',
-        description: task.status,
-        tooltip: task.body || task.title,
+        description,
+        tooltip: [task.body || task.title, task.required_subagent ? `Subagent: ${task.required_subagent}` : '']
+          .filter(Boolean)
+          .join('\n\n'),
         icon: iconForStatus(task.status)
       }));
     }
@@ -1000,12 +1004,16 @@ function renderTaskCard(task: TaplItem): string {
     formatTimestamp(task.updated_at),
     task.source
   ].filter(Boolean).join(' / ');
+  const badges = [
+    task.required_subagent ? `<span class="badge info">${escapeHtml(task.required_subagent)}</span>` : '',
+    task.status ? `<span class="badge ${statusClass(task.status)}">${escapeHtml(task.status)}</span>` : ''
+  ].filter(Boolean).join('');
 
   return `
     <article class="work-item-card">
       <div class="work-item-top">
         <span class="item-id">${escapeHtml(task.stable_id)}</span>
-        ${task.status ? `<span class="badge ${statusClass(task.status)}">${escapeHtml(task.status)}</span>` : ''}
+        ${badges ? `<span class="item-badges">${badges}</span>` : ''}
       </div>
       <h3 class="work-item-title">${escapeHtml(task.title)}</h3>
       ${summary && summary !== task.title ? `<p class="work-item-summary">${escapeHtml(summary)}</p>` : ''}
@@ -1050,11 +1058,16 @@ function renderFocusRow(label: string, value: string, detail?: string): string {
 }
 
 function renderItem(item: TaplItem): string {
+  const badges = [
+    item.kind === 'task' && item.required_subagent ? `<span class="badge info">${escapeHtml(item.required_subagent)}</span>` : '',
+    item.status ? `<span class="badge ${statusClass(item.status)}">${escapeHtml(item.status)}</span>` : ''
+  ].filter(Boolean).join('');
+
   return `
     <article class="item">
       <div class="item-head">
         <span class="item-id">${escapeHtml(item.stable_id)}</span>
-        ${item.status ? `<span class="badge ${statusClass(item.status)}">${escapeHtml(item.status)}</span>` : ''}
+        ${badges ? `<span class="item-badges">${badges}</span>` : ''}
       </div>
       <h3 class="item-title">${escapeHtml(item.title)}</h3>
       ${item.body ? renderReadableBlock(item.body, 'item-body') : ''}
@@ -1895,9 +1908,16 @@ function renderPage(webview: vscode.Webview, body: string, viewKey: string): str
     }
     .completed { color: var(--success); }
     .blocked, .error { color: var(--error); }
-    .in-progress { color: var(--accent); }
+    .in-progress, .info { color: var(--accent); }
     .pending { color: var(--warning); }
     .skipped { color: var(--muted); }
+    .item-badges {
+      display: inline-flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 4px;
+      min-width: 0;
+    }
     .dashboard-grid {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
