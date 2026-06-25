@@ -719,16 +719,7 @@ def context_workflow_guidance(
         return [stop_guidance()]
 
     if event == "UserPromptSubmit":
-        guidance = [
-            WORKFLOW_INTRO,
-            core_context_guidance(),
-            REQUEST_STARTUP,
-        ]
-        if should_suggest_prior_search(state, prompt):
-            guidance.append(prior_search_guidance())
-        guidance.extend(plan_task_context_guidance(settings))
-        guidance.append(external_findings_guidance())
-        return guidance
+        return [user_prompt_submit_guidance(settings)]
 
     guidance = [core_context_guidance()]
     guidance.extend(plan_task_context_guidance(settings))
@@ -748,6 +739,183 @@ def session_start_guidance() -> str:
 
 def stop_guidance() -> str:
     return "\n\n".join((taplctl_command_guidance(), COMPLETION_REPORT, ARCHIVING))
+
+
+def user_prompt_submit_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    sections = [
+        WORKFLOW_INTRO,
+        startup_context_guidance(),
+        core_rules_context_guidance(),
+        records_context_guidance(),
+        plan_context_guidance(settings),
+        tasks_context_guidance(settings),
+        approval_execution_context_guidance(settings),
+        findings_context_guidance(),
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
+def startup_context_guidance() -> str:
+    return "\n".join(
+        (
+            "## Startup",
+            "At the start of every non-trivial user request:",
+            "1. Run `taplctl status --agent`.",
+            "2. If the active run contains remaining actionable work, use `request_user_input`: finish first, "
+            "combine, defer/archive, or discard and start fresh.",
+            "3. If no actionable work remains but the run is stale, archive it with "
+            "`taplctl archive create --slug '<timestamp-task-slug>' --summary '<summary>' --agent`.",
+            "4. Set the request summary: `taplctl run set --summary '<request summary>' --agent`.",
+            "5. Before planning non-trivial work, run `taplctl search '<compact prompt query>' --agent`; "
+            "use relevant results only, and `taplctl item show --id <id> --agent` when a snippet is insufficient.",
+        )
+    )
+
+
+def core_rules_context_guidance() -> str:
+    return "\n".join(
+        (
+            "## Core Rules",
+            "- "
+            + taplctl_execution_guidance()
+            + " "
+            + taplctl_command_guidance(),
+            "- Do not modify source, tests, docs, configs, migrations, generated files, or other durable project "
+            "artifacts before execution approval; TAPL run/plan/task/finding/approval/archive records may be "
+            "written before approval.",
+            "- Main agent writes TAPL records and final status; subagents may draft/execute only and must not modify records.",
+        )
+    )
+
+
+def records_context_guidance() -> str:
+    return "\n".join(
+        (
+            "## Records",
+            "- Records: "
+            + structured_record_guidance("plan/task content")
+            + " "
+            + stable_id_guidance(),
+            "- Order: status -> residual-run user approval -> analyze/search/clarify -> `taplctl plan set` -> "
+            "plan-based task design -> `taplctl task set` -> execution approval -> execute/update tasks -> report/archive.",
+            "- Stage: continue automatically unless the user limits scope; plan-only stops after plan; "
+            "plan without explicit execution asks via `request_user_input`; explicit edit/test/implement means "
+            "`explicit_user` execution approval source.",
+        )
+    )
+
+
+def plan_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    return "\n".join(
+        (
+            "## Plan",
+            "- Plan: include "
+            + plan_detail_context(settings.plan_detail)
+            + "; "
+            + plan_key_label_guidance(),
+            "- " + planning_approval_context_compact(settings.planning_approval_level),
+            "- Plan fields: --id (defaults to PLAN-001); --title (recommended when creating); "
+            "--summary (recommended); detailed plans require --objective, --requirements-trace, "
+            "--selected-approach, --affected-files, --execution-order, --risks, --validation.",
+        )
+    )
+
+
+def tasks_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    return "\n".join(
+        (
+            "## Tasks",
+            "- Tasks: after source plan exists, set --spec-id PLAN-001/SPEC-001; tasks are executable "
+            "implementation/verification work derived from the stored plan, not planning or task-design work.",
+            "- "
+            + task_granularity_guidance(settings.task_granularity)
+            + " "
+            + task_execution_order_guidance(),
+            "- Task fields: " + task_required_field_summary_compact(settings) + " Updates are partial.",
+        )
+    )
+
+
+def approval_execution_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    lines = [
+        "## Approval & Execution",
+        "- Approval: " + execution_approval_context_compact(settings),
+    ]
+    subagent = subagent_context_compact(settings)
+    if subagent:
+        lines.append("- Subagents: " + subagent)
+    return "\n".join(lines)
+
+
+def findings_context_guidance() -> str:
+    return "\n".join(
+        (
+            "## Findings",
+            "When external search/docs affect the task, store only decision-relevant findings with "
+            "`taplctl finding add --title '<title>' --source '<source>' --finding '<finding>' "
+            "--impact '<impact>' --related-ids '<ids>' --agent`; no raw dumps, long lists, or stale findings.",
+        )
+    )
+
+
+def planning_approval_context_compact(value: str) -> str:
+    if value == "less":
+        return (
+            "Before `taplctl plan set`, use `request_user_input` only for blocking or high-risk material "
+            "scope/risk/API/UX/data/compat choices; otherwise state assumptions; if unavailable, ask one "
+            "concise blocking question at most."
+        )
+    if value == "auto":
+        return (
+            "Before `taplctl plan set`, use `request_user_input` for ambiguous material "
+            "scope/risk/API/UX/data/compat decisions; prefer one short 2-3 option question. "
+            "If unavailable, state assumptions or ask one concise blocking question."
+        )
+    return (
+        "Before `taplctl plan set`, use `request_user_input` early for unclear methods, material "
+        "scope/risk/API/UX/data/compat, or tradeoffs; ask short 2-3 option questions until clear. "
+        "If unavailable, state assumptions or ask one concise blocking question."
+    )
+
+
+def task_required_field_summary_compact(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    executable = "/".join(task_required_field_flags(settings, "Pending"))
+    completed = "/".join(task_required_field_flags(settings, "Completed"))
+    blocked = "/".join(task_required_field_flags(settings, "Blocked"))
+    return (
+        f"new=--id/--title/--status; executable={executable}; "
+        f"completed={completed}; blocked={blocked}."
+    )
+
+
+def execution_approval_context_compact(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    if settings.require_execution_approval:
+        return (
+            "planning clarifications follow planning_approval_level; after task set and before durable edits, "
+            "set `taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent` "
+            "for explicit execution, or `--source request_user_input` for tool-confirmed continuation."
+        )
+    return (
+        "planning clarifications follow planning_approval_level; execution approval is optional for material "
+        "risk/scope, and missing approval is a warning."
+    )
+
+
+def subagent_context_compact(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    allowed = ", ".join(LEVEL_SUBAGENTS)
+    if not settings.use_level_subagent:
+        return ""
+    if settings.level_subagent_aggressiveness == "minimal":
+        required = "set required_subagent only for clear risk/routing"
+    elif settings.level_subagent_aggressiveness == "force":
+        required = "every executable task needs required_subagent"
+    else:
+        required = "choose required_subagent by task risk/config in the same command that creates each executable task"
+    return (
+        f"{required}; routing metadata only. Mark In Progress before work; spawn the exact subagent only "
+        "when the subagent tool is available and policy allows; otherwise do not claim delegation occurred. "
+        f"Allowed: {allowed}."
+    )
 
 
 def core_context_guidance() -> str:

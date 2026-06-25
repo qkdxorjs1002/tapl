@@ -1495,9 +1495,11 @@ level_subagent_aggressiveness = "minimal"
             context_payload = json.loads(context.stdout)
             guidance = "\n".join(context_payload["workflow_guidance"])
             self.assertIn("# Workflow", guidance)
-            self.assertIn("fields: executable=--spec-id, --goal, --action, --verification", guidance)
-            self.assertIn("Task required fields: new task: --id, --title, --status", guidance)
-            self.assertIn("Set required_subagent only for clear risk/routing", guidance)
+            self.assertIn(
+                "Task fields: new=--id/--title/--status; executable=--spec-id/--goal/--action/--verification",
+                guidance,
+            )
+            self.assertIn("set required_subagent only for clear risk/routing", guidance)
 
     def test_validate_reports_plan_task_execute_issues(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1725,7 +1727,11 @@ level_subagent_aggressiveness = "force"
             self.assertIn("archive it with `taplctl archive create", prompt_guidance)
             self.assertIn("Records: Pass plan/task content through structured CLI field arguments", prompt_guidance)
             self.assertIn("Plan: include requirements trace", prompt_guidance)
-            self.assertIn("Stage progression: unless the user explicitly limits the workflow", prompt_guidance)
+            self.assertIn("## Startup", prompt_guidance)
+            self.assertIn("## Core Rules", prompt_guidance)
+            self.assertIn("## Records", prompt_guidance)
+            self.assertIn("## Approval & Execution", prompt_guidance)
+            self.assertIn("Stage: continue automatically unless the user limits scope", prompt_guidance)
             self.assertIn("Before `taplctl plan set`", prompt_guidance)
             self.assertIn("requirements trace", prompt_guidance)
             self.assertIn("Objective", prompt_guidance)
@@ -1734,13 +1740,16 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Use numeric stable ids only", prompt_guidance)
             self.assertIn("Tasks: after source plan exists", prompt_guidance)
             self.assertIn("Plan fields: --id", prompt_guidance)
-            self.assertIn("fields: executable=--spec-id, --goal, --action, --verification, --required-subagent", prompt_guidance)
-            self.assertIn("Task required fields: new task: --id, --title, --status", prompt_guidance)
+            self.assertIn(
+                "Task fields: new=--id/--title/--status; "
+                "executable=--spec-id/--goal/--action/--verification/--required-subagent",
+                prompt_guidance,
+            )
             self.assertIn("Execute planned tasks one at a time in task order", prompt_guidance)
             self.assertIn("request_user_input", prompt_guidance)
             self.assertIn("Subagents:", prompt_guidance)
             self.assertIn("same command that creates each executable task", prompt_guidance)
-            self.assertIn("mark In Progress", prompt_guidance)
+            self.assertIn("Mark In Progress", prompt_guidance)
             self.assertIn("only when the subagent tool is available", prompt_guidance)
             self.assertIn("do not claim delegation occurred", prompt_guidance)
             self.assertIn("@senior-worker", prompt_guidance)
@@ -2829,9 +2838,14 @@ task_granularity = "very_granular"
             self.assertIn("Plan: include requirements trace", event.stdout)
             self.assertIn("Requirements trace", event.stdout)
             self.assertIn("Plan fields: --id", event.stdout)
-            self.assertIn("fields: executable=--spec-id, --goal, --action, --verification, --required-subagent", event.stdout)
-            self.assertIn("Task required fields: new task: --id, --title, --status", event.stdout)
+            self.assertIn(
+                "Task fields: new=--id/--title/--status; "
+                "executable=--spec-id/--goal/--action/--verification/--required-subagent",
+                event.stdout,
+            )
             self.assertIn("taplctl finding add", event.stdout)
+            self.assertEqual(event.stdout.count("taplctl search '<compact prompt query>' --agent"), 1)
+            self.assertIn("## Next Actions", event.stdout)
             self.assertNotIn("## 9. Command Shapes", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
 

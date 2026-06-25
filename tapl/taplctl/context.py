@@ -70,14 +70,29 @@ def format_context(packet: dict[str, Any]) -> str:
 
     for item in packet.get("instructions", []):
         lines.append(f"- {item}")
-    for item in packet.get("workflow_guidance", []):
-        if "\n" in str(item):
-            lines.append(str(item))
+    guidance = [str(item).strip() for item in packet.get("workflow_guidance", []) if str(item).strip()]
+    if guidance:
+        lines.append("")
+        lines.extend(guidance_lines(guidance))
+    next_actions = [str(item).strip() for item in packet["next_actions"] if str(item).strip()]
+    if next_actions:
+        lines.append("")
+        lines.append("## Next Actions")
+        for item in next_actions:
+            lines.append(f"- {item}")
+    return "\n".join(lines)
+
+
+def guidance_lines(items: list[str]) -> list[str]:
+    lines: list[str] = []
+    for index, item in enumerate(items):
+        if index:
+            lines.append("")
+        if "\n" in item or item.lstrip().startswith("#"):
+            lines.append(item)
         else:
             lines.append(f"- {item}")
-    for item in packet["next_actions"]:
-        lines.append(f"- Next: {item}")
-    return "\n".join(lines)
+    return lines
 
 
 def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
