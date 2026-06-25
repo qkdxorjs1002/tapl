@@ -521,10 +521,10 @@ function TaskCard({ task }: { task: TaplItem }): JSX.Element {
   const hasBadges = Boolean(task.required_subagent || task.status);
   return (
     <article className="tapl-item tapl-task-card">
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <span className="kbd kbd-xs">{task.stable_id}</span>
+      <div className="tapl-task-meta">
+        <span className="tapl-task-id kbd kbd-xs">{task.stable_id}</span>
         {hasBadges ? (
-          <div className="flex min-w-0 flex-wrap justify-end gap-1">
+          <div className="tapl-task-badges">
             {task.required_subagent ? <Badge label={task.required_subagent} tone="info" /> : null}
             {task.status ? <Badge label={task.status} tone={statusClass(task.status)} /> : null}
           </div>

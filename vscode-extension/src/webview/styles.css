@@ -358,6 +358,22 @@ pre {
   @apply grid gap-1;
 }
 
+.tapl-task-meta {
+  @apply mb-2 grid min-w-0 justify-items-start gap-1.5;
+}
+
+.tapl-task-id {
+  @apply max-w-full flex-none whitespace-nowrap;
+}
+
+.tapl-task-badges {
+  @apply flex min-w-0 max-w-full flex-wrap items-center gap-1;
+}
+
+.tapl-task-badges .badge {
+  @apply max-w-full truncate;
+}
+
 .tapl-archive-button {
   @apply grid gap-1;
 }
