@@ -115,14 +115,12 @@ def validate_new_task_routing(
         return []
     if required_subagent.strip():
         return []
-    allowed = ", ".join(LEVEL_SUBAGENTS)
     return [
         issue(
             "error",
             "missing_required_subagent",
             f"{task_id} is executable and new task creation requires required_subagent.",
-            "Pass --required-subagent in the same `taplctl task set` command "
-            f"using one of: {allowed}. Use minimal routing config only for intentionally direct tasks.",
+            tapl_prompt.new_task_required_subagent_remediation(settings),
             stable_id=task_id,
         )
     ]
@@ -142,7 +140,7 @@ def validate_stable_ids(plans: list[dict[str, Any]], tasks: list[dict[str, Any]]
                     "error",
                     "invalid_plan_id",
                     f"Plan id `{stable_id or 'plan'}` must use a numeric stable id.",
-                    "Use `PLAN-001` or `SPEC-001`; do not use word suffixes such as `PLAN-MEANINGS`.",
+                    tapl_prompt.invalid_plan_id_remediation(),
                     stable_id=stable_id or None,
                 )
             )
@@ -155,7 +153,7 @@ def validate_stable_ids(plans: list[dict[str, Any]], tasks: list[dict[str, Any]]
                     "error",
                     "invalid_task_id",
                     f"Task id `{stable_id or 'task'}` must use a numeric stable id.",
-                    "Use `TASK-001`; do not use word suffixes such as `TASK-MEANINGS`.",
+                    tapl_prompt.invalid_task_id_remediation(),
                     stable_id=stable_id or None,
                 )
             )
@@ -167,7 +165,7 @@ def validate_stable_ids(plans: list[dict[str, Any]], tasks: list[dict[str, Any]]
                     "error",
                     "invalid_task_spec_id",
                     f"Task source spec id `{spec_id}` must use a numeric plan/spec stable id.",
-                    "Set --spec-id to a stored numeric plan/spec id such as `PLAN-001` or `SPEC-001`.",
+                    tapl_prompt.invalid_task_spec_id_remediation(),
                     stable_id=stable_id or None,
                 )
             )
@@ -199,7 +197,7 @@ def validate_level_subagents(
                     "error",
                     "invalid_required_subagent",
                     f"{stable_id} has invalid required_subagent `{required}`.",
-                    f"Use one of: {', '.join(LEVEL_SUBAGENTS)}.",
+                    tapl_prompt.required_subagent_remediation(settings),
                     stable_id=stable_id,
                 )
             )
@@ -218,7 +216,7 @@ def validate_level_subagents(
                 severity,
                 "missing_required_subagent",
                 f"{stable_id} is executable but has no required_subagent.",
-                f"Set --required-subagent to one of: {', '.join(LEVEL_SUBAGENTS)}.",
+                tapl_prompt.required_subagent_remediation(settings),
                 stable_id=stable_id,
             )
         )
@@ -240,7 +238,7 @@ def validate_plan_detail(
                 severity,
                 "missing_plan",
                 f"plan_detail is `{settings.plan_detail}`, but the active run has no plan record.",
-                "Create or update a plan with `taplctl plan set` before durable edits.",
+                tapl_prompt.missing_plan_remediation(),
             )
         ]
 
@@ -256,7 +254,7 @@ def validate_plan_detail(
                 "warning",
                 "plan_detail_too_sparse",
                 f"plan_detail is `{settings.plan_detail}`, but plan text is sparse.",
-                "Expand the plan enough to cover objective, approach, affected files, risks, and validation.",
+                tapl_prompt.sparse_plan_remediation(),
             )
         ]
     return []
@@ -320,7 +318,7 @@ def validate_plan_content(
             "warning",
             "plan_content_missing_guidance",
             f"Plan content is missing: {', '.join(missing)}.",
-            "Include objective, REQ trace, selected approach, affected files/interfaces, execution order, risks, and validation.",
+            tapl_prompt.plan_content_remediation(),
         )
     ]
 
@@ -347,7 +345,7 @@ def validate_task_content(
                     "warning",
                     "task_content_missing_fields",
                     f"{stable_id} is missing task field(s): {', '.join(missing)}.",
-                    "Set task goal, numeric source plan/spec id, action, required subagent, verification, and result or blocker details as applicable.",
+                    tapl_prompt.task_content_remediation(settings),
                     stable_id=stable_id,
                 )
             )
@@ -368,7 +366,7 @@ def validate_task_execution_order(tasks: list[dict[str, Any]]) -> list[dict[str,
                 "warning",
                 "multiple_tasks_in_progress",
                 f"Multiple tasks are In Progress: {labels}.",
-                "Execute planned tasks one at a time; complete, block, or skip the current task before starting another.",
+                tapl_prompt.multiple_tasks_in_progress_remediation(),
             )
         )
 
@@ -388,7 +386,7 @@ def validate_task_execution_order(tasks: list[dict[str, Any]]) -> list[dict[str,
                 "warning",
                 "task_started_out_of_order",
                 f"{task_label(first_task)} is In Progress while earlier task(s) remain incomplete: {labels}.",
-                "Run tasks in task order; finish, resolve, skip, or replan earlier tasks before continuing the later task.",
+                tapl_prompt.task_started_out_of_order_remediation(),
                 stable_id=task_label(first_task),
             )
         )
@@ -414,7 +412,7 @@ def validate_execution_approval(
                 "error",
                 "execution_approval_rejected",
                 "Execution approval was explicitly rejected for the active run.",
-                "Resolve scope with the user, then set approval before starting or continuing task execution.",
+                tapl_prompt.execution_approval_rejected_remediation(),
             )
         ]
 
@@ -424,7 +422,7 @@ def validate_execution_approval(
             severity,
             "execution_approval_missing",
             "Executable tasks exist but execution approval is not recorded.",
-            "Before starting or continuing task execution, set execution approval with `taplctl approval set --decision approved --prompt '<approved scope>' --agent`.",
+            tapl_prompt.execution_approval_missing_remediation(),
         )
     ]
 
@@ -531,11 +529,7 @@ def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> 
 
 
 def task_granularity_remediation(value: str) -> str:
-    if value == "less_granular":
-        return "Split the work into major phases or owner boundaries."
-    if value == "very_granular":
-        return "Split the work so independent edits, migrations, docs, and verification each have tasks."
-    return "Split the work into meaningful implementation and verification tasks."
+    return tapl_prompt.task_granularity_remediation(value)
 
 
 def format_issues(result: dict[str, Any], *, max_items: int = 6) -> str:

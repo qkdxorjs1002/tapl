@@ -30,51 +30,113 @@ class FieldSpec:
     flag: str
     help: str
     required: str = ""
+    label: str = ""
 
 
 RUN_FIELDS = (
-    FieldSpec("summary", "--summary", "Short description of the current request."),
-    FieldSpec("result", "--result", "Short description of the completed result."),
+    FieldSpec("summary", "--summary", "Short description of the current request.", label="Summary"),
+    FieldSpec("result", "--result", "Short description of the completed result.", label="Result"),
 )
 PLAN_FIELDS = (
-    FieldSpec("id", "--id", "Numeric plan/spec id, e.g. PLAN-001 or SPEC-001.", "defaults to PLAN-001"),
-    FieldSpec("title", "--title", "Short human-readable plan title.", "recommended when creating"),
-    FieldSpec("summary", "--summary", "Compact requirements trace and approach summary.", "recommended"),
-    FieldSpec("objective", "--objective", "Plan objective.", "required for detailed plans"),
-    FieldSpec("requirements_trace", "--requirements-trace", "REQ-* trace or requirement mapping.", "required for detailed plans"),
-    FieldSpec("selected_approach", "--selected-approach", "Selected implementation approach.", "required for detailed plans"),
-    FieldSpec("affected_files", "--affected-files", "Affected files, modules, or interfaces.", "required for detailed plans"),
-    FieldSpec("execution_order", "--execution-order", "Ordered execution steps.", "required for detailed plans"),
-    FieldSpec("risks", "--risks", "Risks, compatibility notes, or tradeoffs.", "required for detailed plans"),
-    FieldSpec("validation", "--validation", "Validation strategy or commands.", "required for detailed plans"),
-    FieldSpec("approval_needs", "--approval-needs", "Approval requirements before execution."),
-    FieldSpec("notes", "--notes", "Additional notes rendered after standard plan fields."),
-    FieldSpec("status", "--status", "Plan lifecycle label, e.g. Draft or Finalized."),
+    FieldSpec("id", "--id", "Numeric plan/spec id, e.g. PLAN-001 or SPEC-001.", "defaults to PLAN-001", "Plan id"),
+    FieldSpec("title", "--title", "Short human-readable plan title.", "recommended when creating", "Title"),
+    FieldSpec("summary", "--summary", "Compact requirements trace and approach summary.", "recommended", "Summary"),
+    FieldSpec("objective", "--objective", "Plan objective.", "required for detailed plans", "Objective"),
+    FieldSpec(
+        "requirements_trace",
+        "--requirements-trace",
+        "REQ-* trace or requirement mapping.",
+        "required for detailed plans",
+        "Requirements trace",
+    ),
+    FieldSpec(
+        "selected_approach",
+        "--selected-approach",
+        "Selected implementation approach.",
+        "required for detailed plans",
+        "Selected approach",
+    ),
+    FieldSpec(
+        "affected_files",
+        "--affected-files",
+        "Affected files, modules, or interfaces.",
+        "required for detailed plans",
+        "Affected files/interfaces",
+    ),
+    FieldSpec(
+        "execution_order",
+        "--execution-order",
+        "Ordered execution steps.",
+        "required for detailed plans",
+        "Execution order",
+    ),
+    FieldSpec("risks", "--risks", "Risks, compatibility notes, or tradeoffs.", "required for detailed plans", "Risks"),
+    FieldSpec("validation", "--validation", "Validation strategy or commands.", "required for detailed plans", "Validation"),
+    FieldSpec("approval_needs", "--approval-needs", "Approval requirements before execution.", label="Approval needs"),
+    FieldSpec("notes", "--notes", "Additional notes rendered after standard plan fields.", label="Notes"),
+    FieldSpec("status", "--status", "Plan lifecycle label, e.g. Draft or Finalized.", label="Status"),
 )
 TASK_FIELDS = (
-    FieldSpec("id", "--id", "Numeric task id, e.g. TASK-001.", "CLI required"),
-    FieldSpec("title", "--title", "Short human-readable task title.", "required when creating"),
-    FieldSpec("status", "--status", "Task lifecycle status.", "required when creating"),
-    FieldSpec("spec_id", "--spec-id", "Numeric source plan/spec id, e.g. PLAN-001 or SPEC-001.", "required for executable tasks"),
-    FieldSpec("goal", "--goal", "Outcome this task must achieve.", "required for executable tasks"),
-    FieldSpec("action", "--action", "Concrete work to perform.", "required for executable tasks"),
-    FieldSpec("required_subagent", "--required-subagent", "One of the configured @*-worker values.", "required for executable tasks when routing is enabled"),
-    FieldSpec("verification", "--verification", "Command, check, or review proving completion.", "required for executable and completed tasks"),
-    FieldSpec("result", "--result", "Completion note for Completed tasks.", "required for completed tasks"),
-    FieldSpec("blocker", "--blocker", "Reason a Blocked task cannot proceed.", "required for blocked tasks"),
-    FieldSpec("next_action", "--next-action", "Specific action that would unblock a Blocked task.", "required for blocked tasks"),
+    FieldSpec("id", "--id", "Numeric task id, e.g. TASK-001.", "CLI required", "Task id"),
+    FieldSpec("title", "--title", "Short human-readable task title.", "required when creating", "Title"),
+    FieldSpec("status", "--status", "Task lifecycle status.", "required when creating", "Status"),
+    FieldSpec(
+        "spec_id",
+        "--spec-id",
+        "Numeric source plan/spec id, e.g. PLAN-001 or SPEC-001.",
+        "required for executable tasks",
+        "Source plan/spec",
+    ),
+    FieldSpec("goal", "--goal", "Outcome this task must achieve.", "required for executable tasks", "Goal"),
+    FieldSpec("action", "--action", "Concrete work to perform.", "required for executable tasks", "Action"),
+    FieldSpec(
+        "required_subagent",
+        "--required-subagent",
+        "One of the configured @*-worker values.",
+        "required for executable tasks when routing is enabled",
+        "Required subagent",
+    ),
+    FieldSpec(
+        "verification",
+        "--verification",
+        "Command, check, or review proving completion.",
+        "required for executable and completed tasks",
+        "Verification",
+    ),
+    FieldSpec("result", "--result", "Completion note for Completed tasks.", "required for completed tasks", "Result"),
+    FieldSpec("blocker", "--blocker", "Reason a Blocked task cannot proceed.", "required for blocked tasks", "Blocker"),
+    FieldSpec(
+        "next_action",
+        "--next-action",
+        "Specific action that would unblock a Blocked task.",
+        "required for blocked tasks",
+        "Next action",
+    ),
 )
 FINDING_FIELDS = (
-    FieldSpec("title", "--title", "Short finding title.", "CLI required"),
-    FieldSpec("source", "--source", "Where the finding came from."),
-    FieldSpec("finding", "--finding", "Finding details.", "required for decision-relevant facts"),
-    FieldSpec("impact", "--impact", "Why the finding matters.", "required when it affects requirements, plan, tasks, or verification"),
-    FieldSpec("related_ids", "--related-ids", "Related plan, task, or item ids."),
+    FieldSpec("title", "--title", "Short finding title.", "CLI required", "Title"),
+    FieldSpec("source", "--source", "Where the finding came from.", label="Source"),
+    FieldSpec("finding", "--finding", "Finding details.", "required for decision-relevant facts", "Finding"),
+    FieldSpec(
+        "impact",
+        "--impact",
+        "Why the finding matters.",
+        "required when it affects requirements, plan, tasks, or verification",
+        "Impact",
+    ),
+    FieldSpec("related_ids", "--related-ids", "Related plan, task, or item ids.", label="Related ids"),
 )
 APPROVAL_FIELDS = (
-    FieldSpec("kind", "--kind", "Approval kind."),
-    FieldSpec("decision", "--decision", "Approval decision.", "CLI required"),
-    FieldSpec("prompt", "--prompt", "Approved or rejected execution scope.", "required for meaningful approvals"),
+    FieldSpec("kind", "--kind", "Approval kind.", label="Kind"),
+    FieldSpec("decision", "--decision", "Approval decision.", "CLI required", "Decision"),
+    FieldSpec("prompt", "--prompt", "Approved or rejected execution scope.", "required for meaningful approvals", "Prompt"),
+    FieldSpec(
+        "source",
+        "--source",
+        "Approval origin: explicit_user, request_user_input, or unspecified.",
+        "defaults to explicit_user for new approvals",
+        "Source",
+    ),
 )
 FIELD_SPECS = {
     "run": RUN_FIELDS,
@@ -82,6 +144,42 @@ FIELD_SPECS = {
     "task": TASK_FIELDS,
     "finding": FINDING_FIELDS,
     "approval": APPROVAL_FIELDS,
+}
+PLAN_BODY_FIELDS = (
+    "summary",
+    "objective",
+    "requirements_trace",
+    "selected_approach",
+    "affected_files",
+    "execution_order",
+    "risks",
+    "validation",
+    "approval_needs",
+    "notes",
+)
+TASK_BODY_FIELDS = ("goal", "action", "verification", "result", "blocker", "next_action")
+AGENT_STATUS_FIELDS = {
+    "plan": ("id", "stable_id", "title", "status", "summary"),
+    "task": (
+        "id",
+        "stable_id",
+        "title",
+        "status",
+        "spec_id",
+        "goal",
+        "action",
+        "required_subagent",
+        "verification",
+        "result",
+        "blocker",
+        "next_action",
+    ),
+    "finding": ("id", "stable_id", "title", "source"),
+}
+AGENT_ITEM_FIELDS = {
+    "plan": ("plan_id", *PLAN_BODY_FIELDS),
+    "task": ("spec_id", "goal", "action", "required_subagent", "verification", "result", "blocker", "next_action"),
+    "finding": ("body", "impact", "related_ids"),
 }
 
 WORKFLOW_INTRO = """# Workflow
@@ -162,7 +260,7 @@ After the source plan exists, create or update tasks with `taplctl task set`.
 - Use explicit states: `${task_statuses}`.
 - Keep tasks focused on the current execution window and next useful step.
 - Do not create tasks for planning or task design; tasks are executable work derived from the stored plan.
-- Before implementation starts, ask whether to execute the prepared tasks and record approval with `taplctl approval set --decision approved --prompt '<approved scope>' --agent`.
+- Before implementation starts, record approval with `taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent` when the user explicitly requested execution, or `--source request_user_input` when the user approved continuing through request_user_input.
 
 Task granularity for the current config: ${task_granularity_guidance}
 Task fields: ${task_fields_guidance}
@@ -215,7 +313,7 @@ COMMAND_SHAPES = """## 9. Command Shapes
 taplctl run set --summary '<request summary>' --agent
 taplctl plan set --id PLAN-001 --title '<title>' --summary '<summary>' --objective '<objective>' --requirements-trace '<REQ trace>' --selected-approach '<approach>' --affected-files '<files/interfaces>' --execution-order '<steps>' --risks '<risks>' --validation '<checks>' --approval-needs '<approval needs>' --notes '<assumptions/questions/out-of-scope/references>' --status Draft --agent
 taplctl task set --id TASK-001 --title '<task>' --status Pending --spec-id PLAN-001 --goal '<goal>' --action '<action>'${command_required_subagent} --verification '<check>' --agent
-taplctl approval set --decision approved --prompt '<approved scope>' --agent
+taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent
 taplctl task set --id TASK-001 --status Completed --verification '<check result>' --result '<result>' --agent
 taplctl archive create --slug '<timestamp-task-slug>' --summary '<summary>' --agent
 ```"""
@@ -282,25 +380,70 @@ def field_flag(record: str, name: str) -> str:
     return field_spec(record, name).flag
 
 
-def field_contract_lines(record: str) -> list[str]:
+def field_label(record: str, name: str) -> str:
+    spec = field_spec(record, name)
+    return spec.label or spec.name.replace("_", " ").title()
+
+
+def field_required_note(
+    record: str,
+    spec: FieldSpec,
+    settings: tapl_config.PlanTaskExecuteConfig | None = None,
+) -> str:
+    if record == "task" and spec.name == "required_subagent" and settings is not None:
+        if not settings.use_level_subagent:
+            return "optional; routing disabled"
+        if settings.level_subagent_aggressiveness == "minimal":
+            return "optional for explicit subagent routing"
+    return spec.required
+
+
+def field_contract_lines(
+    record: str,
+    settings: tapl_config.PlanTaskExecuteConfig | None = None,
+) -> list[str]:
     lines: list[str] = []
     for spec in field_specs(record):
-        required = f" ({spec.required})" if spec.required else ""
+        note = field_required_note(record, spec, settings)
+        required = f" ({note})" if note else ""
         lines.append(f"{spec.flag}{required}: {spec.help}")
     return lines
 
 
-def field_contract_section(record: str, *, indent: str = "  ") -> str:
-    return "\n".join(f"{indent}{line}" for line in field_contract_lines(record))
+def field_contract_section(
+    record: str,
+    *,
+    indent: str = "  ",
+    settings: tapl_config.PlanTaskExecuteConfig | None = None,
+) -> str:
+    return "\n".join(f"{indent}{line}" for line in field_contract_lines(record, settings))
 
 
-def field_contract_compact(record: str, names: Iterable[str] | None = None) -> str:
+def field_contract_compact(
+    record: str,
+    names: Iterable[str] | None = None,
+    settings: tapl_config.PlanTaskExecuteConfig | None = None,
+) -> str:
     selected = field_specs(record)
     if names is not None:
         selected = tuple(field_spec(record, name) for name in names)
     return "; ".join(
-        f"{spec.flag}{f' ({spec.required})' if spec.required else ''}" for spec in selected
+        f"{spec.flag}{f' ({note})' if (note := field_required_note(record, spec, settings)) else ''}"
+        for spec in selected
     )
+
+
+def markdown_body_fields(record: str) -> tuple[tuple[str, str], ...]:
+    names = PLAN_BODY_FIELDS if record == "plan" else TASK_BODY_FIELDS
+    return tuple((field_label(record, name), name) for name in names)
+
+
+def agent_status_fields(record: str) -> tuple[str, ...]:
+    return AGENT_STATUS_FIELDS[record]
+
+
+def agent_item_fields(record: str) -> tuple[str, ...]:
+    return AGENT_ITEM_FIELDS[record]
 
 
 def task_required_field_names(
@@ -334,6 +477,216 @@ def task_required_field_summary(settings: tapl_config.PlanTaskExecuteConfig) -> 
         f"new task: --id, --title, --status; executable task: {executable}; "
         f"completed task: {completed}; blocked task: {blocked}."
     )
+
+
+def allowed_subagents_text() -> str:
+    return ", ".join(LEVEL_SUBAGENTS)
+
+
+def invalid_plan_id_remediation() -> str:
+    return "Use `PLAN-001` or `SPEC-001`; do not use word suffixes such as `PLAN-MEANINGS`."
+
+
+def invalid_task_id_remediation() -> str:
+    return "Use `TASK-001`; do not use word suffixes such as `TASK-MEANINGS`."
+
+
+def invalid_task_spec_id_remediation() -> str:
+    return "Set --spec-id to a stored numeric plan/spec id such as `PLAN-001` or `SPEC-001`."
+
+
+def required_subagent_remediation(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> str:
+    if settings is not None and settings.level_subagent_aggressiveness == "minimal":
+        return "Use --required-subagent only for intentionally delegated tasks."
+    return f"Set --required-subagent to one of: {allowed_subagents_text()}."
+
+
+def new_task_required_subagent_remediation(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    return (
+        "Pass --required-subagent in the same `taplctl task set` command "
+        f"using one of: {allowed_subagents_text()}. "
+        "Use minimal routing config only for intentionally direct tasks."
+    )
+
+
+def missing_plan_remediation() -> str:
+    return "Create or update a plan with `taplctl plan set` before durable edits."
+
+
+def sparse_plan_remediation() -> str:
+    return "Expand the plan enough to cover objective, approach, affected files, risks, and validation."
+
+
+def plan_content_remediation() -> str:
+    return "Include objective, REQ trace, selected approach, affected files/interfaces, execution order, risks, and validation."
+
+
+def task_content_remediation(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    required = task_required_field_summary(settings)
+    return f"Set missing task fields according to the configured field contract: {required}"
+
+
+def multiple_tasks_in_progress_remediation() -> str:
+    return "Execute planned tasks one at a time; complete, block, or skip the current task before starting another."
+
+
+def task_started_out_of_order_remediation() -> str:
+    return "Run tasks in task order; finish, resolve, skip, or replan earlier tasks before continuing the later task."
+
+
+def execution_approval_rejected_remediation() -> str:
+    return "Resolve scope with the user, then set approval before starting or continuing task execution."
+
+
+def execution_approval_missing_remediation() -> str:
+    return (
+        "Before starting or continuing task execution, set execution approval with "
+        "`taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent` "
+        "for explicit execution requests, or `--source request_user_input` for tool-confirmed continuation."
+    )
+
+
+def task_granularity_remediation(value: str) -> str:
+    if value == "less_granular":
+        return "Split the work into major phases or owner boundaries."
+    if value == "very_granular":
+        return "Split the work so independent edits, migrations, docs, and verification each have tasks."
+    return "Split the work into meaningful implementation and verification tasks."
+
+
+def summarize_request_next_action() -> str:
+    return "Summarize request: `taplctl run set --summary '<request summary>' --agent`."
+
+
+def create_plan_next_action() -> str:
+    return "Create or update plan state with `taplctl plan set` before task design."
+
+
+def create_tasks_next_action() -> str:
+    return "Using the stored plan, create executable tasks with `taplctl task set` before durable edits."
+
+
+def approval_rejected_next_action() -> str:
+    return (
+        "Approval rejected; resolve scope, then set `taplctl approval set --decision approved "
+        "--prompt '<approved scope>' --source explicit_user --agent` before continuing, or use "
+        "`--source request_user_input` if approval came from request_user_input."
+    )
+
+
+def approval_missing_next_action() -> str:
+    return (
+        "Before task execution, set execution approval: `taplctl approval set --decision approved "
+        "--prompt '<approved scope>' --source explicit_user --agent` when the user explicitly requested execution, "
+        "or use `--source request_user_input` when the user approved continuing through request_user_input."
+    )
+
+
+def plan_only_next_action() -> str:
+    return (
+        "Plan-only request detected; stop after reporting the plan/status. Do not create tasks, "
+        "record execution approval, or make durable edits unless the user asks to continue."
+    )
+
+
+def ask_after_plan_next_action() -> str:
+    return (
+        "Plan is ready but execution was not explicitly requested; use request_user_input to ask whether to continue. "
+        "If the user approves, create tasks and record execution approval with "
+        "`taplctl approval set --decision approved --prompt '<approved scope>' --source request_user_input --agent`."
+    )
+
+
+def session_start_incomplete_next_action() -> str:
+    return "After the user request, resume or update the incomplete task state before new durable edits."
+
+
+def stop_incomplete_tasks_next_action() -> str:
+    return "Complete, block, or skip remaining tasks before Stop auto-archives."
+
+
+def run_stopped_during_task_next_action(label: str) -> str:
+    return (
+        f"Run stopped during task execution at {label}; get user approval before durable edits: "
+        f"continue execution from {label} and finish existing work first, defer the existing run and archive it, "
+        "or merge the work into one plan with the new request."
+    )
+
+
+def incomplete_run_next_action() -> str:
+    return (
+        "Open run has incomplete tasks; get user approval before durable edits: "
+        "finish existing work first, defer the existing run and archive it, or merge the work into one plan."
+    )
+
+
+def different_request_next_action() -> str:
+    return (
+        "This request appears different from the open run; get user approval before durable edits: "
+        "finish existing work first, defer the existing run and archive it, or merge the work into one plan."
+    )
+
+
+def multiple_in_progress_next_action(labels: str) -> str:
+    return f"Only one task may be In Progress; finish/block/skip all but earliest: {labels}."
+
+
+def continue_task_next_action(label: str, assignment: str = "") -> str:
+    route = f" {assignment};" if assignment else ""
+    return f"Continue only {label};{route} set Completed, Blocked, or Skipped before another task."
+
+
+def start_task_next_action(label: str, assignment: str = "") -> str:
+    route = f"; {assignment}" if assignment else ""
+    return f"Start next task {label}: set In Progress immediately before execution{route}."
+
+
+def resolve_blocked_task_next_action(label: str) -> str:
+    return f"Resolve, replan, or skip blocked task {label} before later tasks."
+
+
+def subagent_assignment_next_action(required_subagent: str) -> str:
+    return (
+        f"if subagent delegation is available and allowed, spawn {required_subagent} for only this task; "
+        "otherwise do not claim delegation occurred"
+    )
+
+
+def durable_edit_requires_plan_message() -> str:
+    return (
+        "tapl: durable edit requires an active tapl run with planned tasks. "
+        f"{taplctl_execution_guidance()} "
+        f"{taplctl_command_guidance()} "
+        "Create/update plan and task state, then retry."
+    )
+
+
+def stop_remaining_tasks_message(remaining: int) -> str:
+    return f"tapl: {remaining} task(s) remain incomplete; update task state or archive before stopping."
+
+
+def archived_completed_run_message(slug: str) -> str:
+    return f"tapl: archived completed run as {slug}."
+
+
+def archive_summary(
+    *,
+    request: str,
+    result: str,
+    selected_plan: str,
+    completed_tasks: str,
+    verification: str,
+    remaining: int,
+) -> str:
+    parts = [
+        f"Original request: {request or 'archived workflow'}",
+        f"Result: {result}" if result else "",
+        f"Selected plan: {selected_plan}",
+        f"Completed tasks: {completed_tasks}",
+        f"Verification: {verification}",
+        f"Remaining work: {'None' if remaining == 0 else str(remaining)}",
+    ]
+    return "; ".join(part for part in parts if part)
 
 
 def full_workflow_prompt(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> str:
@@ -416,6 +769,7 @@ def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> l
         + " "
         + stable_id_guidance(),
         "Order: " + workflow_order_guidance(),
+        "Stage progression: " + workflow_stage_progression_guidance(),
         "Plan: include "
         + plan_detail_context(settings.plan_detail)
         + "; "
@@ -650,6 +1004,16 @@ def workflow_order_guidance() -> str:
     )
 
 
+def workflow_stage_progression_guidance() -> str:
+    return (
+        "unless the user explicitly limits the workflow to a specific stage, continue to the next "
+        "lifecycle step automatically. If the user asks for planning only, stop after the plan and report status. "
+        "If the user asks to plan but does not explicitly ask for implementation/execution, ask with request_user_input "
+        "whether to continue after the plan. If the user explicitly asks for implementation, edits, verification, or "
+        "testing, treat that as explicit_user execution approval and record approval source accordingly before execution."
+    )
+
+
 def task_plan_dependency_guidance() -> str:
     return (
         "Create or update executable task records only after the source plan/spec exists; "
@@ -715,7 +1079,9 @@ def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
 def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     base = (
         "After task design/task set and before starting or continuing task execution, set execution approval with "
-        "`taplctl approval set --decision approved --prompt '<approved scope>' --agent`."
+        "`taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent` "
+        "when the user explicitly requested execution; use `--source request_user_input` when approval came from "
+        "request_user_input."
     )
     if settings.require_execution_approval:
         return base + " Missing execution approval is a validation error when require_execution_approval is true."
@@ -727,7 +1093,8 @@ def execution_approval_context_guidance(settings: tapl_config.PlanTaskExecuteCon
         return (
             "planning clarifications follow planning_approval_level before plan set; after task set, "
             "set execution approval before task execution/durable edits: "
-            "`taplctl approval set --decision approved --prompt '<approved scope>' --agent`."
+            "`taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent` "
+            "for explicit user execution requests, or `--source request_user_input` for tool-confirmed continuation."
         )
     return (
         "planning clarifications follow planning_approval_level before plan set; execution approval is "
@@ -740,6 +1107,7 @@ def command_help_epilog() -> str:
         "Workflow guidance:\n"
         "  Use `taplctl status --agent` to inspect state before non-trivial work.\n"
         f"  {workflow_order_guidance()}\n"
+        f"  Stage progression: {workflow_stage_progression_guidance()}\n"
         f"  {task_execution_order_guidance()}\n"
         "  Use `taplctl <command> <subcommand> --help` for field-writing rules.\n"
         f"  {structured_record_guidance()}\n"
@@ -774,11 +1142,15 @@ def plan_set_epilog() -> str:
 
 def task_set_epilog(
     *,
+    settings: tapl_config.PlanTaskExecuteConfig | None = None,
     statuses: Iterable[str] = TASK_STATUSES,
     subagents: Iterable[str] = LEVEL_SUBAGENTS,
 ) -> str:
+    config = settings or tapl_config.PlanTaskExecuteConfig()
     status_values = ", ".join(statuses)
     subagent_values = ", ".join(subagents)
+    subagent_lines = task_help_subagent_lines(config, subagent_values)
+    example_subagent = " --required-subagent '@senior-worker'" if requires_required_subagent(config) else ""
     return (
         "Task writing rules:\n"
         f"  {structured_record_guidance('task content')}\n"
@@ -787,30 +1159,49 @@ def task_set_epilog(
         f"  {task_execution_order_guidance()}\n"
         "  Existing task updates are partial: pass --id plus only changed fields;\n"
         "  omitted fields keep their stored values. New task creation requires --title and --status.\n"
-        "  Executable implementation/verification tasks should include source spec_id, goal, action, verification,\n"
-        "  and result when completed; blocked tasks should include blocker and next_action.\n"
+        f"  {task_format_guidance(config)}\n"
+        f"{subagent_lines}"
+        "  Split tasks by meaningful implementation or verification step.\n"
+        f"  Status values: {status_values}. Quote multi-word statuses, e.g. --status 'In Progress'.\n"
+        "  Keep task text in the user's language unless asked otherwise.\n"
+        "\n"
+        "Required field sets:\n"
+        f"  {task_required_field_summary(config)}\n"
+        "\n"
+        "Field contract:\n"
+        f"{field_contract_section('task', settings=config)}\n"
+        "\n"
+        "Example:\n"
+        "  taplctl task set --id TASK-001 --title 'Implement change' \\\n"
+        "    --status 'In Progress' --spec-id PLAN-001 --goal 'Make requested behavior work' \\\n"
+        f"    --action 'Edit the relevant files'{example_subagent} \\\n"
+        "    --verification 'Run focused tests' --agent\n"
+        "  taplctl task set --id TASK-001 --status Completed --result 'Focused tests passed' --agent"
+    )
+
+
+def requires_required_subagent(settings: tapl_config.PlanTaskExecuteConfig) -> bool:
+    return bool(settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal")
+
+
+def task_help_subagent_lines(settings: tapl_config.PlanTaskExecuteConfig, subagent_values: str) -> str:
+    if not settings.use_level_subagent:
+        return "  Subagent routing is disabled; --required-subagent is optional metadata and not required.\n"
+    if settings.level_subagent_aggressiveness == "minimal":
+        return (
+            "  Set --required-subagent only for explicit subagent routing; direct tasks may omit it.\n"
+            "  Before execution set In Progress; spawn that exact subagent only when a subagent\n"
+            "  tool is available and user/session policy allows delegation. Otherwise do not claim\n"
+            "  delegation occurred; the main agent records direct execution and result/status.\n"
+            f"  Allowed required_subagent values when used: {subagent_values}. Do not use level names such as `level2`.\n"
+        )
+    return (
         "  When level subagent routing is enabled, set required_subagent in the same command\n"
         "  that creates each executable task; treat it as routing metadata.\n"
         "  Before execution set In Progress; spawn that exact subagent only when a subagent\n"
         "  tool is available and user/session policy allows delegation. Otherwise do not claim\n"
         "  delegation occurred; the main agent records direct execution and result/status.\n"
-        "  Split tasks by meaningful implementation or verification step.\n"
-        f"  Status values: {status_values}. Quote multi-word statuses, e.g. --status 'In Progress'.\n"
         f"  Allowed required_subagent values when enabled: {subagent_values}. Do not use level names such as `level2`.\n"
-        "  Keep task text in the user's language unless asked otherwise.\n"
-        "\n"
-        "Required field sets:\n"
-        f"  {task_required_field_summary(tapl_config.PlanTaskExecuteConfig())}\n"
-        "\n"
-        "Field contract:\n"
-        f"{field_contract_section('task')}\n"
-        "\n"
-        "Example:\n"
-        "  taplctl task set --id TASK-001 --title 'Implement change' \\\n"
-        "    --status 'In Progress' --spec-id PLAN-001 --goal 'Make requested behavior work' \\\n"
-        "    --action 'Edit the relevant files' --required-subagent '@senior-worker' \\\n"
-        "    --verification 'Run focused tests' --agent\n"
-        "  taplctl task set --id TASK-001 --status Completed --result 'Focused tests passed' --agent"
     )
 
 
@@ -835,13 +1226,15 @@ def approval_set_epilog() -> str:
         "Approval writing rules:\n"
         "  Record explicit user decisions for residual-run handling, planning clarification,\n"
         "  or execution scope. Execution approval is normally set after task design/task set\n"
-        "  and before starting or continuing task execution. The prompt should describe the\n"
-        "  approved decision/scope, not just `yes`.\n"
+        "  and before starting or continuing task execution. Set --source explicit_user when\n"
+        "  the request itself explicitly allowed execution, or --source request_user_input when\n"
+        "  continuing was approved through the request_user_input tool. The prompt should\n"
+        "  describe the approved decision/scope, not just `yes`.\n"
         "\n"
         "Field contract:\n"
         f"{field_contract_section('approval')}\n"
         "\n"
         "Example:\n"
         "  taplctl approval set --decision approved \\\n"
-        "    --prompt 'Execute TASK-001 from PLAN-001' --agent"
+        "    --prompt 'Execute TASK-001 from PLAN-001' --source explicit_user --agent"
     )

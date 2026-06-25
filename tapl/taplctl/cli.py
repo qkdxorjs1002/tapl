@@ -39,8 +39,9 @@ def plan_set_epilog() -> str:
     return tapl_prompt.plan_set_epilog()
 
 
-def task_set_epilog() -> str:
+def task_set_epilog(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> str:
     return tapl_prompt.task_set_epilog(
+        settings=settings,
         statuses=db.TASK_STATUSES,
         subagents=validation.LEVEL_SUBAGENTS,
     )
@@ -117,12 +118,19 @@ def add_approval_write_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help=tapl_prompt.field_help("approval", "kind"))
     parser.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS, help=tapl_prompt.field_help("approval", "decision"))
     parser.add_argument("--prompt", default="", help=tapl_prompt.field_help("approval", "prompt"))
+    parser.add_argument(
+        "--source",
+        default=db.DEFAULT_APPROVAL_SOURCE,
+        choices=db.APPROVAL_SOURCES,
+        help=tapl_prompt.field_help("approval", "source"),
+    )
     add_agent_output_args(parser)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    argv_list = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser(settings=preload_plan_task_settings(argv_list))
+    args = parser.parse_args(argv_list)
     if not hasattr(args, "handler"):
         parser.print_help()
         return 2
@@ -154,7 +162,25 @@ def should_skip_auto_install(args: argparse.Namespace) -> bool:
     return command == "searchd" and getattr(args, "searchd_command", None) == "run"
 
 
-def build_parser() -> argparse.ArgumentParser:
+def preload_plan_task_settings(argv: list[str]) -> tapl_config.PlanTaskExecuteConfig:
+    config_path = preparse_config_path(argv)
+    try:
+        return tapl_config.load(Path(config_path) if config_path else None).plan_task_execute
+    except Exception:
+        return tapl_config.PlanTaskExecuteConfig()
+
+
+def preparse_config_path(argv: list[str]) -> str | None:
+    for index, arg in enumerate(argv):
+        if arg == "--config" and index + 1 < len(argv):
+            return argv[index + 1]
+        if arg.startswith("--config="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> argparse.ArgumentParser:
+    plan_task_settings = settings or tapl_config.PlanTaskExecuteConfig()
     parser = argparse.ArgumentParser(
         prog="taplctl",
         description="Manage tapl workflow state for agent planning, execution, and validation.",
@@ -241,7 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
         "set",
         help="Create or update a task.",
         description="Create or update an executable task record.",
-        epilog=task_set_epilog(),
+        epilog=task_set_epilog(plan_task_settings),
         formatter_class=HELP_FORMATTER,
     )
     add_task_write_args(task_set)
@@ -575,35 +601,9 @@ def compact_status_event(event: dict[str, Any]) -> dict[str, Any]:
     return {key: event[key] for key in STATUS_EVENT_SUMMARY_FIELDS if key in event}
 
 
-AGENT_STATUS_PLAN_FIELDS = (
-    "id",
-    "stable_id",
-    "title",
-    "status",
-    "summary",
-)
-
-AGENT_STATUS_TASK_FIELDS = (
-    "id",
-    "stable_id",
-    "title",
-    "status",
-    "spec_id",
-    "goal",
-    "action",
-    "required_subagent",
-    "verification",
-    "result",
-    "blocker",
-    "next_action",
-)
-
-AGENT_STATUS_FINDING_FIELDS = (
-    "id",
-    "stable_id",
-    "title",
-    "source",
-)
+AGENT_STATUS_PLAN_FIELDS = tapl_prompt.agent_status_fields("plan")
+AGENT_STATUS_TASK_FIELDS = tapl_prompt.agent_status_fields("task")
+AGENT_STATUS_FINDING_FIELDS = tapl_prompt.agent_status_fields("finding")
 
 AGENT_STATUS_EVENT_FIELDS = (
     "event_type",
@@ -635,36 +635,9 @@ AGENT_ITEM_BASE_FIELDS = (
     "archive_slug",
 )
 
-AGENT_ITEM_PLAN_FIELDS = (
-    "plan_id",
-    "summary",
-    "objective",
-    "requirements_trace",
-    "selected_approach",
-    "affected_files",
-    "execution_order",
-    "risks",
-    "validation",
-    "approval_needs",
-    "notes",
-)
-
-AGENT_ITEM_TASK_FIELDS = (
-    "spec_id",
-    "goal",
-    "action",
-    "required_subagent",
-    "verification",
-    "result",
-    "blocker",
-    "next_action",
-)
-
-AGENT_ITEM_FINDING_FIELDS = (
-    "body",
-    "impact",
-    "related_ids",
-)
+AGENT_ITEM_PLAN_FIELDS = tapl_prompt.agent_item_fields("plan")
+AGENT_ITEM_TASK_FIELDS = tapl_prompt.agent_item_fields("task")
+AGENT_ITEM_FINDING_FIELDS = tapl_prompt.agent_item_fields("finding")
 
 AGENT_SKIP_KEYS = {
     "archived",
@@ -722,7 +695,7 @@ def agent_status(payload: dict[str, Any]) -> str:
     append_agent_task_counts(lines, payload.get("task_counts"))
     approvals = payload.get("approvals") if isinstance(payload.get("approvals"), dict) else {}
     approval = approvals.get(db.DEFAULT_APPROVAL_KIND) if isinstance(approvals, dict) else None
-    append_agent_mapping(lines, 1, "execution_approval", approval or {}, ("state", "decision", "prompt"))
+    append_agent_mapping(lines, 1, "execution_approval", approval or {}, ("state", "decision", "prompt", "source"))
     append_agent_issues(lines, payload.get("plan_task_execute"))
     append_agent_items(lines, 1, "plans", "plan", payload.get("plans"), AGENT_STATUS_PLAN_FIELDS)
     append_agent_items(lines, 1, "tasks", "task", payload.get("tasks"), AGENT_STATUS_TASK_FIELDS)
@@ -794,7 +767,7 @@ def agent_write_receipt(
         payload["updated_fields"] = list(updated_fields)
     active_run_fields = agent_select_fields(active_run, ("id", "slug", "status"))
     item_fields = agent_select_fields(item, ("id", "stable_id", "kind", "status"))
-    approval_fields = agent_select_fields(approval, ("id", "kind", "decision"))
+    approval_fields = agent_select_fields(approval, ("id", "kind", "decision", "source"))
     archive_fields = agent_select_fields(archive, ("id", "slug"))
     if active_run_fields:
         payload["active_run"] = active_run_fields
@@ -1303,9 +1276,10 @@ def cmd_approval_set(args: argparse.Namespace) -> int:
         kind=args.kind,
         decision=args.decision,
         prompt=args.prompt,
+        source=args.source,
     )
     if args.agent:
-        print(agent_write_receipt("approval_set", approval=approval, updated_fields=("decision",)))
+        print(agent_write_receipt("approval_set", approval=approval, updated_fields=("decision", "source")))
         return 0
     emit({"ok": True, "approval": db.row_to_dict(approval)}, args.json, args.agent)
     return 0
@@ -1531,11 +1505,14 @@ def humanize(payload: dict[str, Any]) -> str:
         return f"{item['kind']} {item['stable_id']} {item['title']}"
     if "approval" in payload:
         approval = payload["approval"]
-        return f"approval {approval.get('kind', '')}: {approval.get('state') or approval.get('decision')}"
+        source = approval.get("source")
+        source_text = f" ({source})" if source else ""
+        return f"approval {approval.get('kind', '')}: {approval.get('state') or approval.get('decision')}{source_text}"
     if "approvals" in payload:
         approvals = payload["approvals"]
         return "\n".join(
-            f"{item['decided_at']} {item['kind']} {item['decision']}: {item['prompt']}" for item in approvals
+            f"{item['decided_at']} {item['kind']} {item['decision']} [{item.get('source', '')}]: {item['prompt']}"
+            for item in approvals
         ) or "no approvals"
     if "archives" in payload:
         return "\n".join(f"{item['created_at']} {item['slug']}: {item['summary']}" for item in payload["archives"]) or "no archives"

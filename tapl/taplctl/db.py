@@ -12,13 +12,15 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
 TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
 DEFAULT_APPROVAL_KIND = "execution"
 APPROVAL_DECISIONS = ("approved", "rejected")
+APPROVAL_SOURCES = ("explicit_user", "request_user_input", "unspecified")
+DEFAULT_APPROVAL_SOURCE = "explicit_user"
 DEFAULT_REQUEST_SUMMARY = "New request"
 WORKFLOW_RUN_OUTPUT_FIELDS = (
     "id",
@@ -30,28 +32,6 @@ WORKFLOW_RUN_OUTPUT_FIELDS = (
     "updated_at",
     "archived_at",
 )
-PLAN_TEMPLATE_FIELDS = (
-    ("Summary", "summary"),
-    ("Objective", "objective"),
-    ("Requirements trace", "requirements_trace"),
-    ("Selected approach", "selected_approach"),
-    ("Affected files/interfaces", "affected_files"),
-    ("Execution order", "execution_order"),
-    ("Risks", "risks"),
-    ("Validation", "validation"),
-    ("Approval needs", "approval_needs"),
-    ("Notes", "notes"),
-)
-TASK_TEMPLATE_FIELDS = (
-    ("Goal", "goal"),
-    ("Action", "action"),
-    ("Verification", "verification"),
-    ("Result", "result"),
-    ("Blocker", "blocker"),
-    ("Next action", "next_action"),
-)
-
-
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -163,6 +143,7 @@ def migrate(conn: sqlite3.Connection) -> None:
           kind TEXT NOT NULL,
           prompt TEXT NOT NULL DEFAULT '',
           decision TEXT NOT NULL DEFAULT '',
+          source TEXT NOT NULL DEFAULT 'unspecified',
           decided_at TEXT NOT NULL
         );
 
@@ -203,6 +184,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     )
 
     ensure_column(conn, "workflow_runs", "result_summary", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "approvals", "source", "TEXT NOT NULL DEFAULT 'unspecified'")
     backfill_plan_rows(conn)
     dedupe_active_runs(conn)
     conn.execute(
@@ -217,7 +199,11 @@ def migrate(conn: sqlite3.Connection) -> None:
 def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
     existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
     if column not in existing:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
 
 
 def backfill_plan_rows(conn: sqlite3.Connection) -> None:
@@ -459,6 +445,12 @@ def render_markdown_sections(fields: Iterable[tuple[str, str]]) -> str:
     return "\n\n".join(parts)
 
 
+def markdown_body_fields(record: str) -> tuple[tuple[str, str], ...]:
+    from . import prompt as tapl_prompt
+
+    return tapl_prompt.markdown_body_fields(record)
+
+
 def render_plan_body(
     *,
     summary: str = "",
@@ -484,7 +476,7 @@ def render_plan_body(
         "approval_needs": approval_needs,
         "notes": notes,
     }
-    return render_markdown_sections((label, values[key]) for label, key in PLAN_TEMPLATE_FIELDS)
+    return render_markdown_sections((label, values[key]) for label, key in markdown_body_fields("plan"))
 
 
 def render_task_body(
@@ -504,7 +496,7 @@ def render_task_body(
         "blocker": blocker,
         "next_action": next_action,
     }
-    return render_markdown_sections((label, values[key]) for label, key in TASK_TEMPLATE_FIELDS)
+    return render_markdown_sections((label, values[key]) for label, key in markdown_body_fields("task"))
 
 
 def upsert_plan(
@@ -694,10 +686,13 @@ def record_approval(
     kind: str = DEFAULT_APPROVAL_KIND,
     decision: str,
     prompt: str = "",
+    source: str = DEFAULT_APPROVAL_SOURCE,
     run_id: str | None = None,
 ) -> sqlite3.Row:
     if decision not in APPROVAL_DECISIONS:
         raise ValueError(f"invalid approval decision: {decision}")
+    if source not in APPROVAL_SOURCES:
+        raise ValueError(f"invalid approval source: {source}")
 
     run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() if run_id else active_run(conn)
     if not run:
@@ -706,10 +701,10 @@ def record_approval(
     now = utc_now()
     conn.execute(
         """
-        INSERT INTO approvals(run_id, kind, prompt, decision, decided_at)
-        VALUES(?, ?, ?, ?, ?)
+        INSERT INTO approvals(run_id, kind, prompt, decision, source, decided_at)
+        VALUES(?, ?, ?, ?, ?, ?)
         """,
-        (run["id"], kind, prompt, decision, now),
+        (run["id"], kind, prompt, decision, source, now),
     )
     conn.commit()
     return conn.execute("SELECT * FROM approvals WHERE id = last_insert_rowid()").fetchone()
@@ -750,6 +745,7 @@ def approval_status(
             "approved": False,
             "decision": "",
             "prompt": "",
+            "source": "",
             "decided_at": "",
         }
 
@@ -761,6 +757,7 @@ def approval_status(
             "approved": False,
             "decision": "",
             "prompt": "",
+            "source": "",
             "decided_at": "",
         }
 
@@ -772,6 +769,7 @@ def approval_status(
         "approved": decision == "approved",
         "decision": decision,
         "prompt": row["prompt"],
+        "source": row["source"],
         "decided_at": row["decided_at"],
     }
 

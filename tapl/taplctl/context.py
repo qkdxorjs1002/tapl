@@ -120,9 +120,10 @@ def next_actions(
 ) -> list[str]:
     actions: list[str] = []
     covered_issue_codes: set[str] = set()
+    stage_intent = workflow_stage_intent(state, prompt)
     if event == "SessionStart":
         if state.get("incomplete_tasks", 0):
-            actions.append("After the user request, resume or update the incomplete task state before new durable edits.")
+            actions.append(tapl_prompt.session_start_incomplete_next_action())
         return actions
 
     if not state.get("active_run"):
@@ -131,9 +132,7 @@ def next_actions(
 
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
     if run.get("request_summary") == db.DEFAULT_REQUEST_SUMMARY:
-        actions.append(
-            "Summarize request: `taplctl run set --summary '<request summary>' --agent`."
-        )
+        actions.append(tapl_prompt.summarize_request_next_action())
     if event == "UserPromptSubmit":
         direction_action = active_run_direction_next_action(state, prompt)
         if direction_action:
@@ -141,12 +140,15 @@ def next_actions(
     has_plans = bool(state.get("plans"))
     has_tasks = bool(state.get("tasks"))
     if not has_plans:
-        actions.append("Create or update plan state with `taplctl plan set` before task design.")
+        actions.append(tapl_prompt.create_plan_next_action())
         covered_issue_codes.add("missing_plan")
     elif not has_tasks:
-        actions.append(
-            "Using the stored plan, create executable tasks with `taplctl task set` before durable edits."
-        )
+        if stage_intent == "plan_only":
+            actions.append(tapl_prompt.plan_only_next_action())
+        elif stage_intent == "plan_then_ask":
+            actions.append(tapl_prompt.ask_after_plan_next_action())
+        else:
+            actions.append(tapl_prompt.create_tasks_next_action())
     if state.get("incomplete_tasks", 0):
         approval_action = approval_next_action(plan_task)
         if approval_action:
@@ -158,7 +160,7 @@ def next_actions(
         )
         if execution_action:
             actions.append(execution_action)
-        actions.append("Complete, block, or skip remaining tasks before Stop auto-archives.")
+        actions.append(tapl_prompt.stop_incomplete_tasks_next_action())
 
     for issue in (plan_task.get("issues") or [])[:3]:
         if issue.get("code") in covered_issue_codes:
@@ -172,25 +174,71 @@ def active_run_direction_next_action(state: dict[str, Any], prompt: str) -> str:
     in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
     if in_progress:
         label = task_label(in_progress[0])
-        return (
-            f"Run stopped during task execution at {label}; get user approval before durable edits: "
-            f"continue execution from {label} and finish existing work first, defer the existing run and archive it, "
-            "or merge the work into one plan with the new request."
-        )
+        return tapl_prompt.run_stopped_during_task_next_action(label)
 
     if state.get("incomplete_tasks", 0):
-        return (
-            "Open run has incomplete tasks; get user approval before durable edits: "
-            "finish existing work first, defer the existing run and archive it, or merge the work into one plan."
-        )
+        return tapl_prompt.incomplete_run_next_action()
 
     if request_differs_from_active_run(state, prompt):
-        return (
-            "This request appears different from the open run; get user approval before durable edits: "
-            "finish existing work first, defer the existing run and archive it, or merge the work into one plan."
-        )
+        return tapl_prompt.different_request_next_action()
 
     return ""
+
+
+def workflow_stage_intent(state: dict[str, Any], prompt: str) -> str:
+    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
+    text = prompt.strip() or str(run.get("request_summary") or "").strip()
+    if not text or text == db.DEFAULT_REQUEST_SUMMARY:
+        return "auto"
+
+    normalized = normalized_prompt(text)
+    has_plan_term = contains_any(normalized, ("계획", "플랜", "설계", "plan", "planning"))
+    if not has_plan_term:
+        return "auto"
+
+    plan_only_markers = (
+        "계획만",
+        "계획 까지만",
+        "계획까지만",
+        "플랜만",
+        "설계만",
+        "plan only",
+        "planning only",
+        "only plan",
+        "only planning",
+    )
+    if contains_any(normalized, plan_only_markers):
+        return "plan_only"
+
+    execution_markers = (
+        "구현",
+        "수정",
+        "반영",
+        "적용",
+        "고쳐",
+        "고치",
+        "테스트",
+        "검증",
+        "실행",
+        "실제 동작",
+        "implement",
+        "implementation",
+        "fix",
+        "edit",
+        "modify",
+        "test",
+        "verify",
+        "execute",
+        "execution",
+    )
+    if contains_any(normalized, execution_markers):
+        return "explicit_execution"
+
+    return "plan_then_ask"
+
+
+def contains_any(value: str, needles: tuple[str, ...]) -> bool:
+    return any(needle in value for needle in needles)
 
 
 def request_differs_from_active_run(state: dict[str, Any], prompt: str) -> bool:
@@ -217,15 +265,9 @@ def approval_next_action(plan_task: dict[str, Any]) -> str:
     issues = plan_task.get("issues") if isinstance(plan_task.get("issues"), list) else []
     codes = {str(issue.get("code") or "") for issue in issues if isinstance(issue, dict)}
     if "execution_approval_rejected" in codes:
-        return (
-            "Approval rejected; resolve scope, then set `taplctl approval set --decision approved "
-            "--prompt '<approved scope>' --agent` before continuing."
-        )
+        return tapl_prompt.approval_rejected_next_action()
     if "execution_approval_missing" in codes:
-        return (
-            "Before task execution, set execution approval: `taplctl approval set --decision approved "
-            "--prompt '<approved scope>' --agent`."
-        )
+        return tapl_prompt.approval_missing_next_action()
     return ""
 
 
@@ -240,23 +282,21 @@ def task_execution_next_action(
     in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
     if len(in_progress) > 1:
         labels = ", ".join(task_label(task) for task in in_progress)
-        return f"Only one task may be In Progress; finish/block/skip all but earliest: {labels}."
+        return tapl_prompt.multiple_in_progress_next_action(labels)
     if in_progress:
         task = in_progress[0]
         label = task_label(task)
         assignment = subagent_assignment_guidance(task, settings)
-        route = f" {assignment};" if assignment else ""
-        return f"Continue only {label};{route} set Completed, Blocked, or Skipped before another task."
+        return tapl_prompt.continue_task_next_action(label, assignment)
 
     for task in tasks:
         status = str(task.get("status") or "")
         label = task_label(task)
         if status == "Pending":
             assignment = subagent_assignment_guidance(task, settings)
-            route = f"; {assignment}" if assignment else ""
-            return f"Start next task {label}: set In Progress immediately before execution{route}."
+            return tapl_prompt.start_task_next_action(label, assignment)
         if status == "Blocked":
-            return f"Resolve, replan, or skip blocked task {label} before later tasks."
+            return tapl_prompt.resolve_blocked_task_next_action(label)
     return ""
 
 
@@ -269,10 +309,7 @@ def subagent_assignment_guidance(
     required = str(task.get("required_subagent") or "").strip()
     if not required:
         return ""
-    return (
-        f"if subagent delegation is available and allowed, spawn {required} for only this task; "
-        "otherwise do not claim delegation occurred"
-    )
+    return tapl_prompt.subagent_assignment_next_action(required)
 
 
 def task_label(task: dict[str, Any]) -> str:

@@ -84,7 +84,9 @@ records.
 
 For normal use, ask Codex to do the work and let the installed hooks keep the
 records current. If you are debugging or manually repairing workflow state, the
-field rules are available in command help:
+field rules and required field sets are available in command help. The task
+help reflects `[plan-task-execute]` settings such as subagent routing when
+`--config` is passed:
 
 ```sh
 taplctl plan set --help
@@ -255,7 +257,8 @@ Plan/task validation is controlled by `[plan-task-execute]` in the same config
 files. Settings such as `plan_detail`, `task_granularity`,
 `planning_approval_level`, `level_subagent_aggressiveness`, and
 `require_execution_approval` are reflected in lifecycle context and validation
-issues.
+issues. `taplctl task set --help` also uses the selected config to show the
+effective required task field sets.
 
 ## Source Layout
 

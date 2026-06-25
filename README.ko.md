@@ -82,7 +82,9 @@ Codex는 `tapl` lifecycle guidance를 받고, structured CLI field로 plan/task
 
 일반적인 사용에서는 Codex에게 작업을 요청하고, 설치된 hook이 record를 최신
 상태로 유지하게 두면 됩니다. Workflow state를 디버깅하거나 수동으로 보정해야
-할 때는 command help에서 필드 규칙을 확인할 수 있습니다.
+할 때는 command help에서 필드 규칙과 required field set을 확인할 수 있습니다.
+`--config`를 넘기면 `task set --help`도 subagent routing 같은
+`[plan-task-execute]` 설정을 반영합니다.
 
 ```sh
 taplctl plan set --help
@@ -248,7 +250,8 @@ taplctl archive create --help
 Plan/task validation은 같은 config 파일의 `[plan-task-execute]`로 제어합니다.
 `plan_detail`, `task_granularity`, `planning_approval_level`,
 `level_subagent_aggressiveness`, `require_execution_approval` 같은 설정은 lifecycle
-context와 validation issue에 반영됩니다.
+context와 validation issue에 반영됩니다. `taplctl task set --help`도 선택된
+config 기준의 effective required task field set을 보여줍니다.
 
 ## 소스 구조
 

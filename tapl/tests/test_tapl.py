@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from taplctl import __version__, cli as tapl_cli, config as tapl_config, install as tapl_install
+from taplctl import __version__, cli as tapl_cli, config as tapl_config, install as tapl_install, prompt as tapl_prompt
 
 
 class TaplCliTests(unittest.TestCase):
@@ -849,20 +849,42 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(recorded.returncode, 0, recorded.stderr)
             recorded_payload = json.loads(recorded.stdout)
             self.assertEqual(recorded_payload["approval"]["decision"], "approved")
+            self.assertEqual(recorded_payload["approval"]["source"], "explicit_user")
+
+            prompted = self.run_cli(
+                db_path,
+                "approval",
+                "set",
+                "--decision",
+                "approved",
+                "--prompt",
+                "Continue after plan confirmation",
+                "--source",
+                "request_user_input",
+                "--json",
+            )
+            self.assertEqual(prompted.returncode, 0, prompted.stderr)
+            prompted_payload = json.loads(prompted.stdout)
+            self.assertEqual(prompted_payload["approval"]["source"], "request_user_input")
 
             status = self.run_cli(db_path, "approval", "status", "--json")
             status_payload = json.loads(status.stdout)
             self.assertEqual(status_payload["approval"]["state"], "approved")
             self.assertTrue(status_payload["approval"]["approved"])
+            self.assertEqual(status_payload["approval"]["source"], "request_user_input")
 
             workflow_status = self.run_cli(db_path, "status", "--json")
             workflow_payload = json.loads(workflow_status.stdout)
             self.assertEqual(workflow_payload["approvals"]["execution"]["state"], "approved")
+            self.assertEqual(workflow_payload["approvals"]["execution"]["source"], "request_user_input")
 
             listed = self.run_cli(db_path, "approval", "list", "--json")
             listed_payload = json.loads(listed.stdout)
-            self.assertEqual(len(listed_payload["approvals"]), 1)
-            self.assertEqual(listed_payload["approvals"][0]["prompt"], "Execute prepared TASK-001")
+            self.assertEqual(len(listed_payload["approvals"]), 2)
+            self.assertEqual(listed_payload["approvals"][0]["prompt"], "Continue after plan confirmation")
+            self.assertEqual(listed_payload["approvals"][0]["source"], "request_user_input")
+            self.assertEqual(listed_payload["approvals"][1]["prompt"], "Execute prepared TASK-001")
+            self.assertEqual(listed_payload["approvals"][1]["source"], "explicit_user")
 
     def test_config_loads_user_global_when_repo_config_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1703,6 +1725,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("archive it with `taplctl archive create", prompt_guidance)
             self.assertIn("Records: Pass plan/task content through structured CLI field arguments", prompt_guidance)
             self.assertIn("Plan: include requirements trace", prompt_guidance)
+            self.assertIn("Stage progression: unless the user explicitly limits the workflow", prompt_guidance)
             self.assertIn("Before `taplctl plan set`", prompt_guidance)
             self.assertIn("requirements trace", prompt_guidance)
             self.assertIn("Objective", prompt_guidance)
@@ -1725,10 +1748,73 @@ level_subagent_aggressiveness = "force"
             self.assertIn("derived from the stored plan", prompt_guidance)
             self.assertNotIn("When work finishes, report briefly", prompt_guidance)
             self.assertNotIn("## 9. Command Shapes", prompt_guidance)
-            self.assertIn("taplctl approval set --decision approved --prompt '<approved scope>' --agent", prompt_guidance)
+            self.assertIn(
+                "taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent",
+                prompt_guidance,
+            )
             self.assertNotIn("quote every argument", prompt_instructions)
             self.assertNotIn("Do not use level names such as `level2`", prompt_guidance)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
+
+            def next_actions_after_plan(request_summary: str) -> str:
+                stage_db_path = Path(tmp) / f"{abs(hash(request_summary))}.db"
+                prompt_payload_text = json.dumps({"prompt": request_summary}, ensure_ascii=False)
+                self.run_cli(
+                    stage_db_path,
+                    "hook-event",
+                    "--event",
+                    "UserPromptSubmit",
+                    "--mode",
+                    "observe",
+                    "--json",
+                    input_text=prompt_payload_text,
+                )
+                self.run_cli(stage_db_path, "run", "set", "--summary", request_summary, "--json")
+                plan = self.run_cli(
+                    stage_db_path,
+                    "plan",
+                    "set",
+                    "--id",
+                    "PLAN-001",
+                    "--title",
+                    "Stage policy plan",
+                    "--status",
+                    "Finalized",
+                    "--summary",
+                    "REQ-001: stage policy.",
+                    "--objective",
+                    "Record stage policy.",
+                    "--requirements-trace",
+                    "REQ-001: stage policy.",
+                    "--selected-approach",
+                    "Use context next_actions.",
+                    "--affected-files",
+                    "context.py",
+                    "--execution-order",
+                    "Plan then choose next stage.",
+                    "--risks",
+                    "Prompt intent is heuristic.",
+                    "--validation",
+                    "Inspect next_actions.",
+                    "--json",
+                )
+                self.assertEqual(plan.returncode, 0, plan.stderr)
+                context = self.run_cli(stage_db_path, "context", "--event", "UserPromptSubmit", "--json")
+                self.assertEqual(context.returncode, 0, context.stderr)
+                return "\n".join(json.loads(context.stdout)["next_actions"])
+
+            plan_only_actions = next_actions_after_plan("계획만 진행해줘")
+            self.assertIn("Plan-only request detected", plan_only_actions)
+            self.assertIn("stop after reporting the plan/status", plan_only_actions)
+            self.assertNotIn("create executable tasks", plan_only_actions)
+
+            plan_then_ask_actions = next_actions_after_plan("계획해줘")
+            self.assertIn("use request_user_input to ask whether to continue", plan_then_ask_actions)
+            self.assertIn("--source request_user_input", plan_then_ask_actions)
+
+            explicit_execute_actions = next_actions_after_plan("계획하고 구현까지 해줘")
+            self.assertIn("create executable tasks", explicit_execute_actions)
+            self.assertNotIn("use request_user_input to ask whether to continue", explicit_execute_actions)
 
             less_planning_config = Path(tmp) / "less-planning.toml"
             less_planning_config.write_text(
@@ -1960,6 +2046,9 @@ level_subagent_aggressiveness = "force"
             self.assertIn("--decision (CLI required)", approval_help.stdout)
             self.assertIn("--decision", approval_help.stdout)
             self.assertIn("--prompt", approval_help.stdout)
+            self.assertIn("--source", approval_help.stdout)
+            self.assertIn("explicit_user", approval_help.stdout)
+            self.assertIn("request_user_input", approval_help.stdout)
 
             finding_help = self.run_cli(db_path, "finding", "add", "--help")
             self.assertEqual(finding_help.returncode, 0, finding_help.stderr)
@@ -1989,6 +2078,76 @@ level_subagent_aggressiveness = "force"
             self.assertEqual(hook_help.returncode, 0, hook_help.stderr)
             self.assertIn("Hook handling mode", hook_help.stdout)
             self.assertIn("Print JSON output", hook_help.stdout)
+
+    def test_task_help_reflects_configured_required_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            config_path = Path(tmp) / "tapl.toml"
+            config_path.write_text(
+                """
+[plan-task-execute]
+use_level_subagent = false
+level_subagent_aggressiveness = "minimal"
+plan_detail = "minimal"
+task_granularity = "minimal"
+require_execution_approval = false
+""",
+                encoding="utf-8",
+            )
+
+            task_help = self.run_cli(db_path, "--config", str(config_path), "task", "set", "--help")
+            self.assertEqual(task_help.returncode, 0, task_help.stderr)
+            self.assertIn(
+                "executable task: --spec-id, --goal, --action, --verification; completed task",
+                task_help.stdout,
+            )
+            self.assertNotIn(
+                "executable task: --spec-id, --goal, --action, --verification, --required-subagent",
+                task_help.stdout,
+            )
+            self.assertIn("Subagent routing is disabled", task_help.stdout)
+            self.assertIn("--required-subagent (optional; routing disabled)", task_help.stdout)
+            self.assertNotIn("Allowed required_subagent values when enabled", task_help.stdout)
+            self.assertNotIn("--required-subagent '@senior-worker'", task_help.stdout)
+
+    def test_prompt_field_contract_helpers_are_config_aware(self) -> None:
+        default_settings = tapl_config.PlanTaskExecuteConfig()
+        no_subagent_settings = tapl_config.PlanTaskExecuteConfig(
+            use_level_subagent=False,
+            level_subagent_aggressiveness="minimal",
+        )
+
+        self.assertEqual(
+            tapl_prompt.markdown_body_fields("plan")[:3],
+            (
+                ("Summary", "summary"),
+                ("Objective", "objective"),
+                ("Requirements trace", "requirements_trace"),
+            ),
+        )
+        self.assertEqual(
+            tapl_prompt.agent_item_fields("task"),
+            (
+                "spec_id",
+                "goal",
+                "action",
+                "required_subagent",
+                "verification",
+                "result",
+                "blocker",
+                "next_action",
+            ),
+        )
+        self.assertIn("--required-subagent", tapl_prompt.task_required_field_summary(default_settings))
+        self.assertNotIn("--required-subagent", tapl_prompt.task_required_field_summary(no_subagent_settings))
+        self.assertIn(
+            "--required-subagent (optional; routing disabled)",
+            tapl_prompt.field_contract_section("task", settings=no_subagent_settings),
+        )
+        self.assertEqual(
+            tapl_prompt.task_granularity_remediation("very_granular"),
+            "Split the work so independent edits, migrations, docs, and verification each have tasks.",
+        )
 
     def test_parser_actions_have_help_text(self) -> None:
         parser = tapl_cli.build_parser()

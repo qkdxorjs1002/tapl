@@ -44,15 +44,15 @@
     <text x="990" y="455" fill="#94a3b8"># prior work</text>
 
     <text x="152" y="490" fill="#38bdf8">3.</text>
-    <text x="194" y="490" fill="#e6edf3">taplctl plan upsert SPEC-README-SELF-PR</text>
+    <text x="194" y="490" fill="#e6edf3">taplctl plan set --id SPEC-README-SELF-PR</text>
     <text x="790" y="490" fill="#94a3b8"># requirements, order, risks</text>
 
     <text x="152" y="525" fill="#38bdf8">4.</text>
-    <text x="194" y="525" fill="#e6edf3">taplctl task upsert TASK-README-001..004</text>
+    <text x="194" y="525" fill="#e6edf3">taplctl task set --id TASK-README-001</text>
     <text x="810" y="525" fill="#94a3b8"># executable work items</text>
 
     <text x="152" y="560" fill="#38bdf8">5.</text>
-    <text x="194" y="560" fill="#e6edf3">taplctl approval record --decision approved</text>
+    <text x="194" y="560" fill="#e6edf3">taplctl approval set --decision approved</text>
     <text x="818" y="560" fill="#94a3b8"># durable edit boundary</text>
 
     <text x="152" y="595" fill="#38bdf8">6.</text>

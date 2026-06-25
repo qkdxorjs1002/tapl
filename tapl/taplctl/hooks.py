@@ -6,7 +6,7 @@ import re
 import sqlite3
 from typing import Any
 
-from . import config as tapl_config, context as tapl_context, db, validation
+from . import config as tapl_config, context as tapl_context, db, prompt as tapl_prompt, validation
 
 
 DURABLE_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit"}
@@ -80,12 +80,7 @@ def handle_event(
         active = db.active_run(conn)
         task_count = db.active_task_count(conn)
         if not active or task_count == 0:
-            message = (
-                "tapl: durable edit requires an active tapl run with planned tasks. "
-                f"{tapl_context.taplctl_execution_guidance()} "
-                f"{tapl_context.taplctl_command_guidance()} "
-                "Create/update plan and task state, then retry."
-            )
+            message = tapl_prompt.durable_edit_requires_plan_message()
             block = mode == "enforce"
         else:
             check = validation.validate_plan_task_execute(conn, settings)
@@ -105,7 +100,7 @@ def handle_event(
             record_run_id = active["id"]
         remaining = state.get("incomplete_tasks", 0)
         if remaining:
-            message = f"tapl: {remaining} task(s) remain incomplete; update task state or archive before stopping."
+            message = tapl_prompt.stop_remaining_tasks_message(remaining)
             block = mode == "enforce"
         check = validation.validate_plan_task_execute(conn, settings)
         issue_message = validation.format_issues(check)
@@ -121,7 +116,7 @@ def handle_event(
             )
             message = combine_messages(
                 message,
-                f"tapl: archived completed run as {archive['slug']}.",
+                tapl_prompt.archived_completed_run_message(str(archive["slug"])),
             )
 
     db.record_event(
@@ -204,15 +199,17 @@ def auto_archive_summary(state: dict[str, Any], *, final_result: str = "") -> st
     completed_tasks = [task for task in tasks if task.get("status") == "Completed"]
     remaining = int(state.get("incomplete_tasks") or 0)
 
-    parts = [
-        f"Original request: {request or 'archived workflow'}",
-        f"Result: {result}" if result else "",
-        f"Selected plan: {summarize_items(plans, fallback='None')}",
-        f"Completed tasks: {summarize_items(completed_tasks, fallback='None', include_result=True)}",
-        f"Verification: {summarize_verification(completed_tasks)}",
-        f"Remaining work: {'None' if remaining == 0 else str(remaining)}",
-    ]
-    return compact_text("; ".join(part for part in parts if part), limit=1000)
+    return compact_text(
+        tapl_prompt.archive_summary(
+            request=request,
+            result=result,
+            selected_plan=summarize_items(plans, fallback="None"),
+            completed_tasks=summarize_items(completed_tasks, fallback="None", include_result=True),
+            verification=summarize_verification(completed_tasks),
+            remaining=remaining,
+        ),
+        limit=1000,
+    )
 
 
 def summarize_items(items: list[dict[str, Any]], *, fallback: str, include_result: bool = False) -> str:
