@@ -5,6 +5,7 @@ import io
 import argparse
 import json
 import os
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -680,6 +681,13 @@ class TaplCliTests(unittest.TestCase):
             payload = json.loads(missing.stdout)
             self.assertFalse(payload["ok"])
             self.assertEqual(payload["plan_task_execute"]["errors"][0]["code"], "task_create_missing_fields")
+            guidance = payload["plan_task_execute"]["guidance"]
+            self.assertIn("field_contract_source", guidance)
+            self.assertIn("stable_ids", guidance)
+            self.assertIn("task_required_fields", guidance)
+            self.assertNotIn("workflow_order", guidance)
+            self.assertNotIn("task_format", guidance)
+            self.assertNotIn("record_format", guidance)
             self.assertIn("--title", payload["error"])
             self.assertIn("--status", payload["error"])
 
@@ -1606,6 +1614,16 @@ level_subagent_aggressiveness = "force"
             self.assertIn("task_content_missing_fields", codes)
             self.assertNotIn("guidance", payload["plan_task_execute"])
 
+            context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
+            self.assertEqual(context.returncode, 0, context.stderr)
+            context_payload = json.loads(context.stdout)
+            validation_text = "\n".join(context_payload["validation_issues"])
+            next_action_text = "\n".join(context_payload["next_actions"])
+            self.assertIn("Plan content is missing", validation_text)
+            self.assertIn("TASK-001 is missing task field", validation_text)
+            self.assertNotIn("Plan content is missing", next_action_text)
+            self.assertNotIn("TASK-001 is missing task field", next_action_text)
+
     def test_validate_warns_for_non_sequential_task_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
@@ -1702,6 +1720,7 @@ level_subagent_aggressiveness = "force"
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["event"], "SessionStart")
             self.assertEqual(payload["instructions"], [])
+            self.assertEqual(payload["validation_issues"], [])
             session_guidance = "\n".join(payload["workflow_guidance"])
             self.assertIn("# Workflow", session_guidance)
             self.assertIn("Workflow state lives in the repo-local TAPL database", session_guidance)
@@ -1715,10 +1734,26 @@ level_subagent_aggressiveness = "force"
             status_payload = json.loads(status.stdout)
             self.assertNotIn("guidance", status_payload["plan_task_execute"])
 
+            manual_context = self.run_cli(db_path, "context", "--json")
+            self.assertEqual(manual_context.returncode, 0, manual_context.stderr)
+            manual_payload = json.loads(manual_context.stdout)
+            manual_settings = tapl_config.PlanTaskExecuteConfig(**manual_payload["config"]["plan_task_execute"])
+            self.assertEqual(manual_payload["event"], "Manual")
+            self.assertEqual(
+                manual_payload["workflow_guidance"],
+                [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE, manual_settings)],
+            )
+            manual_guidance = "\n".join(manual_payload["workflow_guidance"])
+            self.assertIn("## Role Boundaries", manual_guidance)
+            self.assertNotIn("Plan fields:", manual_guidance)
+            self.assertNotIn("Task required fields:", manual_guidance)
+            self.assertNotIn("Use numeric stable ids only", manual_guidance)
+
             prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             prompt_payload = json.loads(prompt_context.stdout)
             prompt_instructions = "\n".join(prompt_payload["instructions"])
             self.assertEqual(prompt_payload["instructions"], [])
+            self.assertEqual(prompt_payload["validation_issues"], [])
             prompt_settings = tapl_config.PlanTaskExecuteConfig(**prompt_payload["config"]["plan_task_execute"])
             self.assertEqual(
                 prompt_payload["workflow_guidance"],
@@ -2871,6 +2906,182 @@ task_granularity = "very_granular"
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["context"]["prompt_summary"], "Implement lifecycle context")
             self.assertIn("workflow_guidance", payload["context"])
+
+    def test_isolated_hook_config_can_use_repo_taplctl_workflow_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            workspace = base / "workspace"
+            codex_home = base / "home" / ".codex"
+            workspace.mkdir()
+            codex_home.mkdir(parents=True)
+            repo_taplctl = f"{shlex.quote(sys.executable)} -m taplctl"
+            prompt_command = f"{repo_taplctl} hook-event --event UserPromptSubmit --mode observe --json"
+            pre_tool_command = f"{repo_taplctl} hook-event --event PreToolUse --mode enforce --json"
+            hooks = {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": prompt_command,
+                                }
+                            ]
+                        }
+                    ],
+                    "PreToolUse": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": pre_tool_command,
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+            hooks_path = codex_home / "hooks.json"
+            hooks_path.write_text(json.dumps(hooks, indent=2), encoding="utf-8")
+            hook_data = json.loads(hooks_path.read_text(encoding="utf-8"))
+            hook_command = hook_data["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+            pre_tool_hook_command = hook_data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            self.assertIn("-m taplctl", hook_command)
+            self.assertIn("-m taplctl", pre_tool_hook_command)
+            self.assertNotIn("/opt/homebrew/bin/taplctl", hook_command)
+            self.assertNotIn("/opt/homebrew/bin/taplctl", pre_tool_hook_command)
+
+            env = self.tapl_env()
+            env["HOME"] = str(base / "home")
+
+            def run_repo_taplctl(*args: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [sys.executable, "-m", "taplctl", *args],
+                    input=input_text,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    cwd=str(workspace),
+                    env=env,
+                )
+
+            event = subprocess.run(
+                hook_command,
+                shell=True,
+                input=json.dumps({"cwd": str(workspace), "prompt": "Implement isolated workflow"}),
+                text=True,
+                capture_output=True,
+                check=False,
+                cwd=str(workspace),
+                env=env,
+            )
+            self.assertEqual(event.returncode, 0, event.stderr)
+            payload = json.loads(event.stdout)
+            guidance = "\n".join(payload["context"]["workflow_guidance"])
+            next_actions = "\n".join(payload["context"]["next_actions"])
+            self.assertEqual(payload["context"]["prompt_summary"], "Implement isolated workflow")
+            self.assertIn("## Role Boundaries", guidance)
+            self.assertIn("Use the packet's Next Actions section", guidance)
+            self.assertNotIn("At the start of every non-trivial user request", guidance)
+            self.assertNotIn("Plan fields:", guidance)
+            self.assertIn("Summarize request", next_actions)
+            self.assertIn("Create or update plan state", next_actions)
+            self.assertEqual(payload["context"]["validation_issues"], [])
+            self.assertTrue((workspace / ".tapl" / "tapl.db").exists())
+
+            run = run_repo_taplctl("run", "set", "--summary", "Implement isolated workflow", "--agent")
+            self.assertEqual(run.returncode, 0, run.stderr)
+            plan = run_repo_taplctl(
+                "plan",
+                "set",
+                "--id",
+                "PLAN-001",
+                "--title",
+                "Isolated workflow plan",
+                "--summary",
+                "REQ-001: isolated repo taplctl workflow.",
+                "--objective",
+                "Verify the isolated hook prompt can be followed with the repo-local taplctl.",
+                "--requirements-trace",
+                "REQ-001: use repo taplctl from isolated hook config.",
+                "--selected-approach",
+                "Run hook prompt, record plan and tasks, approve execution, then allow durable hook.",
+                "--affected-files",
+                "isolated workspace",
+                "--execution-order",
+                "Prompt, summarize run, write plan, write tasks, approve, then run PreToolUse.",
+                "--risks",
+                "Hook config could accidentally call a globally installed taplctl.",
+                "--validation",
+                "PreToolUse enforce returns 0 after records and approval.",
+                "--agent",
+            )
+            self.assertEqual(plan.returncode, 0, plan.stderr)
+            task = run_repo_taplctl(
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Isolated implementation",
+                "--status",
+                "In Progress",
+                "--spec-id",
+                "PLAN-001",
+                "--goal",
+                "Execute the isolated workflow.",
+                "--action",
+                "Use repo-local taplctl commands from the isolated workspace.",
+                "--required-subagent",
+                "@senior-worker",
+                "--verification",
+                "PreToolUse enforce allows durable work after approval.",
+                "--agent",
+            )
+            self.assertEqual(task.returncode, 0, task.stderr)
+            companion = run_repo_taplctl(
+                "task",
+                "set",
+                "--id",
+                "TASK-002",
+                "--title",
+                "Isolated verification",
+                "--status",
+                "Completed",
+                "--spec-id",
+                "PLAN-001",
+                "--verification",
+                "Companion task satisfies strict granularity.",
+                "--result",
+                "Verification recorded.",
+                "--agent",
+            )
+            self.assertEqual(companion.returncode, 0, companion.stderr)
+            approval = run_repo_taplctl(
+                "approval",
+                "set",
+                "--decision",
+                "approved",
+                "--prompt",
+                "Execute isolated workflow task.",
+                "--source",
+                "explicit_user",
+                "--agent",
+            )
+            self.assertEqual(approval.returncode, 0, approval.stderr)
+            allowed = subprocess.run(
+                pre_tool_hook_command,
+                shell=True,
+                input=json.dumps({"cwd": str(workspace), "tool_name": "apply_patch"}),
+                text=True,
+                capture_output=True,
+                check=False,
+                cwd=str(workspace),
+                env=env,
+            )
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            allowed_payload = json.loads(allowed.stdout)
+            self.assertFalse(allowed_payload["block"])
 
     def test_post_tool_use_external_search_outputs_finding_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -445,87 +445,40 @@ def has_any(text: str, needles: tuple[str, ...]) -> bool:
 
 
 def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
-    return {
-        "allowed_level_subagents": list(LEVEL_SUBAGENTS),
-        "record_format": structured_record_guidance(),
+    payload: dict[str, Any] = {
+        "field_contract_source": "Use `taplctl <command> <subcommand> --help` for exact field contracts and examples.",
         "stable_ids": stable_id_guidance(),
-        "workflow_order": workflow_order_guidance(),
-        "task_dependency": task_plan_dependency_guidance(),
-        "agent_writer_contract": agent_writer_contract_guidance(),
-        "level_subagent": level_subagent_guidance(settings),
-        "subagent_execution": subagent_execution_guidance(settings),
         "plan_detail": plan_detail_guidance(settings.plan_detail),
-        "planning_approval": planning_approval_guidance(settings.planning_approval_level),
-        "plan_format": plan_format_guidance(),
         "task_granularity": task_granularity_guidance(settings.task_granularity),
-        "task_execution_order": task_execution_order_guidance(),
-        "task_format": task_format_guidance(settings),
-        "execution_approval": execution_approval_guidance(settings),
+        "task_required_fields": tapl_prompt.task_required_field_summary(settings),
+        "execution_approval": execution_approval_validation_guidance(settings),
     }
+    if settings.use_level_subagent:
+        payload["allowed_level_subagents"] = list(LEVEL_SUBAGENTS)
+        payload["required_subagent"] = level_subagent_guidance(settings)
+    return payload
 
 
 def level_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     return tapl_prompt.level_subagent_guidance(settings)
 
 
-def subagent_execution_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    return tapl_prompt.subagent_execution_guidance(settings)
-
-
 def plan_detail_guidance(value: str) -> str:
     return tapl_prompt.plan_detail_guidance(value)
-
-
-def planning_approval_guidance(value: str) -> str:
-    return tapl_prompt.planning_approval_guidance(value)
-
-
-def plan_format_guidance() -> str:
-    return tapl_prompt.plan_format_guidance()
-
-
-def plan_key_label_guidance() -> str:
-    return tapl_prompt.plan_key_label_guidance()
-
-
-def markdown_record_guidance(subject: str = "plan, task, and finding content") -> str:
-    return tapl_prompt.markdown_record_guidance(subject)
-
-
-def structured_record_guidance(subject: str = "plan and task content") -> str:
-    return tapl_prompt.structured_record_guidance(subject)
 
 
 def stable_id_guidance() -> str:
     return tapl_prompt.stable_id_guidance()
 
 
-def workflow_order_guidance() -> str:
-    return tapl_prompt.workflow_order_guidance()
-
-
-def task_plan_dependency_guidance() -> str:
-    return tapl_prompt.task_plan_dependency_guidance()
-
-
-def task_execution_order_guidance() -> str:
-    return tapl_prompt.task_execution_order_guidance()
-
-
-def agent_writer_contract_guidance() -> str:
-    return tapl_prompt.agent_writer_contract_guidance()
-
-
 def task_granularity_guidance(value: str) -> str:
     return tapl_prompt.task_granularity_guidance(value)
 
 
-def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    return tapl_prompt.task_format_guidance(settings)
-
-
-def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    return tapl_prompt.execution_approval_guidance(settings)
+def execution_approval_validation_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+    if settings.require_execution_approval:
+        return "Missing execution approval is a validation error; use `taplctl approval set --help` for fields."
+    return "Missing execution approval is a validation warning; use `taplctl approval set --help` when approval is needed."
 
 
 def task_granularity_remediation(value: str) -> str:

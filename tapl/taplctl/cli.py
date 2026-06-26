@@ -670,6 +670,7 @@ AGENT_LIST_ITEM_TAGS = {
     "results": "result",
     "tasks": "task",
     "updated_fields": "field",
+    "validation_issues": "validation_issue",
     "workflow_guidance": "guidance",
 }
 

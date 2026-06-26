@@ -30,6 +30,7 @@ def build_context(
     state = db.status_payload(conn)
     plan_task = validation.validate_plan_task_execute(conn, settings.plan_task_execute)
     prompt = prompt_summary(payload or {})
+    covered_issue_codes = covered_validation_issue_codes(state, plan_task)
     return {
         "ok": True,
         "event": event,
@@ -49,6 +50,7 @@ def build_context(
             prompt=prompt,
         ),
         "next_actions": next_actions(state, plan_task, event, prompt, settings.plan_task_execute),
+        "validation_issues": validation_issues(plan_task, covered_issue_codes),
         "prompt_summary": prompt,
     }
 
@@ -79,6 +81,14 @@ def format_context(packet: dict[str, Any]) -> str:
         lines.append("")
         lines.append("## Next Actions")
         for item in next_actions:
+            lines.append(f"- {item}")
+    validation_items = [
+        str(item).strip() for item in packet.get("validation_issues", []) if str(item).strip()
+    ]
+    if validation_items:
+        lines.append("")
+        lines.append("## Validation Issues")
+        for item in validation_items:
             lines.append(f"- {item}")
     return "\n".join(lines)
 
@@ -134,7 +144,6 @@ def next_actions(
     settings: tapl_config.PlanTaskExecuteConfig | None = None,
 ) -> list[str]:
     actions: list[str] = []
-    covered_issue_codes: set[str] = set()
     if event == "SessionStart":
         if state.get("incomplete_tasks", 0):
             actions.append(tapl_prompt.session_start_incomplete_next_action())
@@ -155,14 +164,12 @@ def next_actions(
     has_tasks = bool(state.get("tasks"))
     if not has_plans:
         actions.append(tapl_prompt.create_plan_next_action())
-        covered_issue_codes.add("missing_plan")
     elif not has_tasks:
         actions.append(tapl_prompt.decide_after_plan_next_action())
     if state.get("incomplete_tasks", 0):
         approval_action = approval_next_action(plan_task)
         if approval_action:
             actions.append(approval_action)
-            covered_issue_codes.update({"execution_approval_missing", "execution_approval_rejected"})
         execution_action = task_execution_next_action(
             state,
             settings or tapl_config.PlanTaskExecuteConfig(),
@@ -170,12 +177,45 @@ def next_actions(
         if execution_action:
             actions.append(execution_action)
         actions.append(tapl_prompt.stop_incomplete_tasks_next_action())
+    return actions
 
-    for issue in (plan_task.get("issues") or [])[:3]:
+
+def covered_validation_issue_codes(state: dict[str, Any], plan_task: dict[str, Any]) -> set[str]:
+    codes: set[str] = set()
+    if not state.get("active_run"):
+        return codes
+    if not state.get("plans"):
+        codes.add("missing_plan")
+    if state.get("incomplete_tasks", 0):
+        if approval_next_action(plan_task):
+            codes.update({"execution_approval_missing", "execution_approval_rejected"})
+        tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
+        in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
+        if len(in_progress) > 1:
+            codes.add("multiple_tasks_in_progress")
+    return codes
+
+
+def validation_issues(
+    plan_task: dict[str, Any],
+    covered_issue_codes: set[str],
+    *,
+    max_items: int = 3,
+) -> list[str]:
+    items: list[str] = []
+    for issue in plan_task.get("issues") or []:
+        if not isinstance(issue, dict):
+            continue
         if issue.get("code") in covered_issue_codes:
             continue
-        actions.append(f"{issue['message']} {issue['remediation']}")
-    return actions
+        message = str(issue.get("message") or "").strip()
+        remediation = str(issue.get("remediation") or "").strip()
+        if not message and not remediation:
+            continue
+        items.append(f"{message} {remediation}".strip())
+        if len(items) >= max_items:
+            break
+    return items
 
 
 def active_run_direction_next_action(state: dict[str, Any], prompt: str) -> str:

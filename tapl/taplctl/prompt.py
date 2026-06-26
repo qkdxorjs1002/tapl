@@ -525,7 +525,6 @@ def template_variables(
         "task_required_fields": task_required_fields(config),
         "task_fields_guidance": task_format_guidance(config),
         "task_required_field_summary": task_required_field_summary(config),
-        "task_required_field_summary_compact": task_required_field_summary_compact(config),
         "subagent_routing_guidance": subagent_routing_guidance(config),
         "subagent_execution_guidance": subagent_execution_guidance(config),
         "execution_approval_guidance": execution_approval_guidance(config),
@@ -543,11 +542,7 @@ def template_variables(
         "task_execution_order_guidance": task_execution_order_guidance(),
         "plan_key_label_guidance": plan_key_label_guidance(),
         "plan_format_guidance": plan_format_guidance(),
-        "plan_detail_context": plan_detail_context(config.plan_detail),
-        "planning_approval_context": planning_approval_context_compact(config.planning_approval_level),
         "task_plan_dependency_guidance": task_plan_dependency_guidance(),
-        "execution_approval_context": execution_approval_context_compact(config),
-        "subagent_context_section": subagent_context_section(config),
         "context_execution_approval_guidance": context_execution_approval_guidance(config),
         "context_subagent_guidance": context_subagent_guidance(config),
         "status_values": ", ".join(TASK_STATUSES),
@@ -622,20 +617,6 @@ def field_contract_section(
     settings: tapl_config.PlanTaskExecuteConfig | None = None,
 ) -> str:
     return "\n".join(f"{indent}{line}" for line in field_contract_lines(record, settings))
-
-
-def field_contract_compact(
-    record: str,
-    names: Iterable[str] | None = None,
-    settings: tapl_config.PlanTaskExecuteConfig | None = None,
-) -> str:
-    selected = field_specs(record)
-    if names is not None:
-        selected = tuple(field_spec(record, name) for name in names)
-    return "; ".join(
-        f"{spec.flag}{f' ({note})' if (note := field_required_note(record, spec, settings)) else ''}"
-        for spec in selected
-    )
 
 
 def markdown_body_fields(record: str) -> tuple[tuple[str, str], ...]:
@@ -903,12 +884,7 @@ def context_workflow_guidance(
     if event == "Stop":
         return [stop_guidance()]
 
-    if event == "UserPromptSubmit":
-        return [user_prompt_submit_guidance(settings)]
-
-    guidance = [core_context_guidance()]
-    guidance.extend(plan_task_context_guidance(settings))
-    return guidance
+    return [user_prompt_submit_guidance(settings)]
 
 
 def session_start_guidance() -> str:
@@ -921,71 +897,6 @@ def stop_guidance() -> str:
 
 def user_prompt_submit_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     return render(CONTEXT_INJECTION_PROMPT_TEMPLATE, settings)
-
-
-def planning_approval_context_compact(value: str) -> str:
-    if value == "less":
-        return (
-            "Before `taplctl plan set`, use `request_user_input` only for blocking or high-risk material "
-            "scope/risk/API/UX/data/compat choices; otherwise state assumptions; if unavailable, ask one "
-            "concise blocking question at most."
-        )
-    if value == "auto":
-        return (
-            "Before `taplctl plan set`, use `request_user_input` for ambiguous material "
-            "scope/risk/API/UX/data/compat decisions; prefer one short 2-3 option question. "
-            "If unavailable, state assumptions or ask one concise blocking question."
-        )
-    return (
-        "Before `taplctl plan set`, use `request_user_input` early for unclear methods, material "
-        "scope/risk/API/UX/data/compat, or tradeoffs; ask short 2-3 option questions until clear. "
-        "If unavailable, state assumptions or ask one concise blocking question."
-    )
-
-
-def task_required_field_summary_compact(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    executable = "/".join(task_required_field_flags(settings, "Pending"))
-    completed = "/".join(task_required_field_flags(settings, "Completed"))
-    blocked = "/".join(task_required_field_flags(settings, "Blocked"))
-    return (
-        f"new=--id/--title/--status; executable={executable}; "
-        f"completed={completed}; blocked={blocked}."
-    )
-
-
-def execution_approval_context_compact(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    if settings.require_execution_approval:
-        return (
-            "planning clarifications follow planning_approval_level; after task set and before durable edits, "
-            "set `taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent` "
-            "for explicit execution, or `--source request_user_input` for tool-confirmed continuation."
-        )
-    return (
-        "planning clarifications follow planning_approval_level; execution approval is optional for material "
-        "risk/scope, and missing approval is a warning."
-    )
-
-
-def subagent_context_compact(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    allowed = ", ".join(LEVEL_SUBAGENTS)
-    if not settings.use_level_subagent:
-        return ""
-    if settings.level_subagent_aggressiveness == "minimal":
-        required = "set required_subagent only for clear risk/routing"
-    elif settings.level_subagent_aggressiveness == "force":
-        required = "every executable task needs required_subagent"
-    else:
-        required = "choose required_subagent by task risk/config in the same command that creates each executable task"
-    return (
-        f"{required}; routing metadata only. Mark In Progress before work; spawn the exact subagent only "
-        "when the subagent tool is available and policy allows; otherwise do not claim delegation occurred. "
-        f"Allowed: {allowed}."
-    )
-
-
-def subagent_context_section(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    subagent = subagent_context_compact(settings)
-    return f"- Subagents: {subagent}" if subagent else ""
 
 
 def context_execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
@@ -1007,82 +918,6 @@ def context_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> st
         "mark the task In Progress before work, spawn the exact worker only when a subagent tool is available and "
         "policy allows delegation, and otherwise do not claim delegation occurred. "
         f"Configured worker levels: {allowed}."
-    )
-
-
-def core_context_guidance() -> str:
-    return "\n".join(
-        (
-            taplctl_execution_guidance(),
-            taplctl_command_guidance(),
-            "Do not modify source, tests, docs, configs, migrations, generated files, or other durable project artifacts before execution approval.",
-            "TAPL run, plan, task, finding, approval, and archive records may be created or updated before execution approval.",
-            "The main agent writes TAPL records and final status. Subagents may draft or execute only and must not modify TAPL records.",
-        )
-    )
-
-
-def plan_task_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> list[str]:
-    guidance = [
-        "Records: "
-        + structured_record_guidance("plan/task content")
-        + " "
-        + stable_id_guidance(),
-        "Order: " + workflow_order_guidance(),
-        "Stage progression: " + workflow_stage_progression_guidance(),
-        "Plan: include "
-        + plan_detail_context(settings.plan_detail)
-        + "; "
-        + plan_key_label_guidance()
-        + " "
-        + planning_approval_guidance(settings.planning_approval_level),
-        "Plan fields: "
-        + field_contract_compact(
-            "plan",
-            (
-                "id",
-                "title",
-                "summary",
-                "objective",
-                "requirements_trace",
-                "selected_approach",
-                "affected_files",
-                "execution_order",
-                "risks",
-                "validation",
-            ),
-        ),
-        "Tasks: after source plan exists, set --spec-id PLAN-001/SPEC-001; "
-        "tasks are executable implementation/verification work derived from the stored plan, not planning or task-design work; "
-        + task_granularity_guidance(settings.task_granularity)
-        + " "
-        + task_execution_order_guidance()
-        + " "
-        + task_fields_context_guidance(settings),
-        "Task required fields: " + task_required_field_summary(settings),
-        "Agent contract: main agent writes plan/task records and final status; subagents may draft/execute only.",
-    ]
-    subagent = subagent_context_guidance(settings)
-    if subagent:
-        guidance.append("Subagents: " + subagent)
-    guidance.append("Approval: " + execution_approval_context_guidance(settings))
-    return guidance
-
-
-def should_suggest_prior_search(state: dict[str, Any], prompt: str) -> bool:
-    if not prompt.strip():
-        return False
-    if state.get("plans") or state.get("tasks"):
-        return False
-    return True
-
-
-def prior_search_guidance() -> str:
-    return (
-        "Search: before planning non-trivial work, run "
-        "`taplctl search '<compact prompt query>' --agent` and use only relevant results; "
-        "for results you judge relevant where the snippet is insufficient, run "
-        "`taplctl item show --id <id> --agent` before relying on full details."
     )
 
 
@@ -1181,15 +1016,6 @@ def plan_detail_guidance(value: str) -> str:
         "less_detailed": "Add constraints and risks only when they affect execution.",
         "detailed": "Include requirements trace, execution order, risks, and validation.",
         "very_detailed": "Expand edge cases, alternatives considered, and per-spec validation.",
-    }[value]
-
-
-def plan_detail_context(value: str) -> str:
-    return {
-        "minimal": "objective, approach, affected files, validation",
-        "less_detailed": "objective, approach, constraints, affected files, risks, validation",
-        "detailed": "requirements trace, execution order, risks, validation",
-        "very_detailed": "requirements trace, execution order, risks, edge cases, alternatives, per-spec validation",
     }[value]
 
 
@@ -1310,17 +1136,6 @@ def task_required_fields(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     return f"Each executable task must include {fields} when applicable."
 
 
-def task_fields_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    executable_fields = task_required_field_flags(settings, "Pending")
-    completed_fields = task_required_field_flags(settings, "Completed")
-    blocked_fields = task_required_field_flags(settings, "Blocked")
-    return (
-        f"fields: executable={', '.join(executable_fields)}; "
-        f"completed={', '.join(completed_fields)}; "
-        f"blocked={', '.join(blocked_fields)}; updates are partial."
-    )
-
-
 def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     fields = task_required_field_flags(settings, "Pending")
     optional_subagent = ""
@@ -1345,20 +1160,6 @@ def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> 
     if settings.require_execution_approval:
         return base + " Missing execution approval is a validation error when require_execution_approval is true."
     return base + " Missing execution approval is a warning, and enforce-mode hooks block on it."
-
-
-def execution_approval_context_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    if settings.require_execution_approval:
-        return (
-            "planning clarifications follow planning_approval_level before plan set; after task set, "
-            "set execution approval before task execution/durable edits: "
-            "`taplctl approval set --decision approved --prompt '<approved scope>' --source explicit_user --agent` "
-            "for explicit user execution requests, or `--source request_user_input` for tool-confirmed continuation."
-        )
-    return (
-        "planning clarifications follow planning_approval_level before plan set; execution approval is "
-        "optional for material risk/scope; missing approval is a warning."
-    )
 
 
 def command_help_epilog() -> str:
