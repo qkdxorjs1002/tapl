@@ -430,23 +430,8 @@ class WorkflowWebviewManager {
     await this.render(this.titleForView(previous), { reveal: false });
   }
 
-  private titleForView(view: PanelView): string {
-    if (view.type === 'archive') {
-      return view.archive.slug;
-    }
-    if (view.type === 'archiveEvents') {
-      return `${view.archive.slug} Events`;
-    }
-    if (view.type === 'debug') {
-      return 'tapl Debug';
-    }
-    if (view.type === 'search') {
-      return 'tapl Search';
-    }
-    if (view.type === 'searchItem') {
-      return view.result.title;
-    }
-    return 'tapl Workflow';
+  private titleForView(_view: PanelView): string {
+    return workspaceTaplTitle();
   }
 
   private async render(title: string, options: { reveal?: boolean } = {}): Promise<void> {
@@ -1694,6 +1679,11 @@ function isCommandNotFound(error: Error): boolean {
 
 function getWorkspaceRoot(): vscode.WorkspaceFolder | undefined {
   return vscode.workspace.workspaceFolders?.[0];
+}
+
+function workspaceTaplTitle(): string {
+  const rootName = getWorkspaceRoot()?.name.trim();
+  return rootName ? `${rootName} tapl` : 'tapl';
 }
 
 function emptyNode(label: string): WorkflowNode {

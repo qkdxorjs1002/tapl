@@ -287,23 +287,8 @@ class WorkflowWebviewManager {
         this.currentView = previous;
         await this.render(this.titleForView(previous), { reveal: false });
     }
-    titleForView(view) {
-        if (view.type === 'archive') {
-            return view.archive.slug;
-        }
-        if (view.type === 'archiveEvents') {
-            return `${view.archive.slug} Events`;
-        }
-        if (view.type === 'debug') {
-            return 'tapl Debug';
-        }
-        if (view.type === 'search') {
-            return 'tapl Search';
-        }
-        if (view.type === 'searchItem') {
-            return view.result.title;
-        }
-        return 'tapl Workflow';
+    titleForView(_view) {
+        return workspaceTaplTitle();
     }
     async render(title, options = {}) {
         const panel = this.ensurePanel(title, options.reveal ?? true);
@@ -1437,6 +1422,10 @@ function isCommandNotFound(error) {
 }
 function getWorkspaceRoot() {
     return vscode.workspace.workspaceFolders?.[0];
+}
+function workspaceTaplTitle() {
+    const rootName = getWorkspaceRoot()?.name.trim();
+    return rootName ? `${rootName} tapl` : 'tapl';
 }
 function emptyNode(label) {
     return new WorkflowNode({
