@@ -29,10 +29,24 @@ HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 JSON_HELP = "Print JSON output."
 AGENT_HELP = "Print agent-optimized XML-like output."
 DRY_RUN_HELP = "Preview changes without writing files."
+JSON_FILE_HELP = "Read command fields from a JSON object file. CLI flags override JSON fields."
+STDIN_JSON_HELP = "Read command fields from a JSON object on stdin. CLI flags override JSON fields."
+
+
+class TaplArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        suggestion = command_error_suggestion(message, getattr(self, "tapl_argv", sys.argv[1:]))
+        if suggestion:
+            message = f"{message}\n\nDid you mean: {suggestion}"
+        super().error(message)
 
 
 def command_help_epilog() -> str:
     return tapl_prompt.command_help_epilog()
+
+
+def search_epilog() -> str:
+    return tapl_prompt.search_epilog()
 
 
 def plan_set_epilog() -> str:
@@ -65,13 +79,19 @@ def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dry-run", action="store_true", help=DRY_RUN_HELP)
 
 
+def add_json_input_args(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--stdin-json", action="store_true", help=STDIN_JSON_HELP)
+    group.add_argument("--json-file", type=Path, default=None, help=JSON_FILE_HELP)
+
+
 def add_run_set_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--summary", default=None, help=tapl_prompt.field_help("run", "summary"))
     parser.add_argument("--result", default=None, help=tapl_prompt.field_help("run", "result"))
     add_agent_output_args(parser)
 
 
-def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
+def add_plan_write_args(parser: argparse.ArgumentParser, *, include_json_input: bool = False) -> None:
     parser.add_argument("--id", default="PLAN-001", help=tapl_prompt.field_help("plan", "id"))
     parser.add_argument("--title", default=None, help=tapl_prompt.field_help("plan", "title"))
     parser.add_argument("--summary", default=None, help=tapl_prompt.field_help("plan", "summary"))
@@ -91,11 +111,18 @@ def add_plan_write_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--approval-needs", default=None, help=tapl_prompt.field_help("plan", "approval_needs"))
     parser.add_argument("--notes", default=None, help=tapl_prompt.field_help("plan", "notes"))
     parser.add_argument("--status", default=None, help=tapl_prompt.field_help("plan", "status"))
+    if include_json_input:
+        add_json_input_args(parser)
     add_agent_output_args(parser)
 
 
-def add_task_write_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--id", required=True, help=tapl_prompt.field_help("task", "id"))
+def add_task_write_args(
+    parser: argparse.ArgumentParser,
+    *,
+    required_id: bool = True,
+    include_json_input: bool = False,
+) -> None:
+    parser.add_argument("--id", required=required_id, default=None, help=tapl_prompt.field_help("task", "id"))
     parser.add_argument("--title", default=None, help=tapl_prompt.field_help("task", "title"))
     parser.add_argument(
         "--status",
@@ -111,6 +138,8 @@ def add_task_write_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
     parser.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
     parser.add_argument("--next-action", default=None, help=tapl_prompt.field_help("task", "next_action"))
+    if include_json_input:
+        add_json_input_args(parser)
     add_agent_output_args(parser)
 
 
@@ -130,6 +159,7 @@ def add_approval_write_args(parser: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> int:
     argv_list = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser(settings=preload_plan_task_settings(argv_list))
+    parser.tapl_argv = argv_list
     args = parser.parse_args(argv_list)
     if not hasattr(args, "handler"):
         parser.print_help()
@@ -179,9 +209,99 @@ def preparse_config_path(argv: list[str]) -> str | None:
     return None
 
 
+def command_error_suggestion(message: str, argv: list[str]) -> str:
+    joined = " ".join(argv)
+    if "--status" in argv and "Progress" in argv:
+        return "quote multi-word statuses, e.g. --status 'In Progress', or use `taplctl task start TASK-001 --agent`."
+    if "invalid choice" in message and "In" in message and "--status" in argv:
+        return "use `taplctl task start TASK-001 --agent` instead of setting --status manually."
+    if "unrecognized arguments: Progress" in message:
+        return "quote multi-word statuses, e.g. --status 'In Progress', or use `taplctl task start TASK-001 --agent`."
+    if "invalid choice" in message and "upsert" in joined:
+        return "use high-level lifecycle commands such as `taplctl plan apply --stdin-json --agent` or `taplctl task create --stdin-json --agent`; upsert aliases are intentionally not supported."
+    if "unrecognized arguments" in message and "task set" in joined and "--status Completed" in joined:
+        return "use `taplctl task complete TASK-001 --verification '<check>' --result '<result>' --agent`."
+    return ""
+
+
+def read_json_object_input(args: argparse.Namespace) -> dict[str, Any]:
+    raw = ""
+    if getattr(args, "stdin_json", False):
+        raw = sys.stdin.read()
+    elif getattr(args, "json_file", None) is not None:
+        raw = Path(args.json_file).read_text(encoding="utf-8")
+    if not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid JSON input: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("JSON input must be an object")
+    return {normalize_payload_key(key): value for key, value in payload.items()}
+
+
+def normalize_payload_key(value: Any) -> str:
+    return str(value).strip().replace("-", "_")
+
+
+def payload_text(payload: dict[str, Any], *names: str) -> str | None:
+    for name in names:
+        key = normalize_payload_key(name)
+        value = payload.get(key)
+        if value is None:
+            continue
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        return str(value)
+    return None
+
+
+def merge_json_fields(
+    args: argparse.Namespace,
+    fields: tuple[str, ...],
+    *,
+    aliases: dict[str, tuple[str, ...]] | None = None,
+    cli_defaults: dict[str, Any] | None = None,
+) -> tuple[str, ...]:
+    payload = read_json_object_input(args)
+    if not payload:
+        return ()
+    aliases = aliases or {}
+    cli_defaults = cli_defaults or {}
+    updated: list[str] = []
+    for field in fields:
+        current = getattr(args, field, None)
+        default = cli_defaults.get(field)
+        cli_provided = current is not None and (field not in cli_defaults or current != default)
+        if cli_provided:
+            continue
+        value = payload_text(payload, field, *aliases.get(field, ()))
+        if value is None:
+            continue
+        setattr(args, field, value)
+        updated.append(field)
+    return tuple(updated)
+
+
+def require_arg(args: argparse.Namespace, field: str, flag: str, *, command: str) -> bool:
+    if str(getattr(args, field, "") or "").strip():
+        return True
+    emit(
+        {
+            "ok": False,
+            "error": f"{command} requires {flag}; pass it as a flag or provide it in --stdin-json/--json-file.",
+            "suggestion": f"taplctl recipe {command.replace(' ', '-')} --agent",
+        },
+        getattr(args, "json", False),
+        getattr(args, "agent", False),
+    )
+    return False
+
+
 def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> argparse.ArgumentParser:
     plan_task_settings = settings or tapl_config.PlanTaskExecuteConfig()
-    parser = argparse.ArgumentParser(
+    parser = TaplArgumentParser(
         prog="taplctl",
         description="Manage tapl workflow state for agent planning, execution, and validation.",
         epilog=command_help_epilog(),
@@ -229,6 +349,24 @@ def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> a
     )
     add_run_set_args(run_set)
     run_set.set_defaults(handler=cmd_run_set)
+    run_summarize = run_sub.add_parser(
+        "summarize",
+        help="Set the current request summary.",
+        description="Set the current request summary.",
+    )
+    run_summarize.add_argument("--summary", default=None, help=tapl_prompt.field_help("run", "summary"))
+    add_json_input_args(run_summarize)
+    add_agent_output_args(run_summarize)
+    run_summarize.set_defaults(handler=cmd_run_summarize)
+    run_finish = run_sub.add_parser(
+        "finish",
+        help="Record the completed result summary.",
+        description="Record the completed result summary.",
+    )
+    run_finish.add_argument("--result", default=None, help=tapl_prompt.field_help("run", "result"))
+    add_json_input_args(run_finish)
+    add_agent_output_args(run_finish)
+    run_finish.set_defaults(handler=cmd_run_finish)
 
     install = sub.add_parser("install", help="Install tapl workflow hooks and repo-local state.")
     install_sub = install.add_subparsers(dest="install_command")
@@ -260,6 +398,15 @@ def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> a
     )
     add_plan_write_args(plan_set)
     plan_set.set_defaults(handler=cmd_plan_set)
+    plan_apply = plan_sub.add_parser(
+        "apply",
+        help="Apply a plan record from safe fields or JSON.",
+        description="Apply a plan record from safe fields or JSON.",
+        epilog=plan_set_epilog(),
+        formatter_class=HELP_FORMATTER,
+    )
+    add_plan_write_args(plan_apply, include_json_input=True)
+    plan_apply.set_defaults(handler=cmd_plan_apply)
 
     task = sub.add_parser("task", help="Manage tasks.", formatter_class=HELP_FORMATTER)
     task_sub = task.add_subparsers(dest="task_command")
@@ -272,6 +419,40 @@ def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> a
     )
     add_task_write_args(task_set)
     task_set.set_defaults(handler=cmd_task_set)
+    task_create = task_sub.add_parser(
+        "create",
+        help="Create a pending executable task.",
+        description="Create a pending executable task.",
+        epilog=task_set_epilog(plan_task_settings),
+        formatter_class=HELP_FORMATTER,
+    )
+    add_task_write_args(task_create, required_id=False, include_json_input=True)
+    task_create.set_defaults(handler=cmd_task_create)
+    task_start = task_sub.add_parser("start", help="Mark one task In Progress.", description="Mark one task In Progress.")
+    task_start.add_argument("id", help=tapl_prompt.field_help("task", "id"))
+    add_agent_output_args(task_start)
+    task_start.set_defaults(handler=cmd_task_start)
+    task_complete = task_sub.add_parser("complete", help="Mark one task Completed.", description="Mark one task Completed.")
+    task_complete.add_argument("id", help=tapl_prompt.field_help("task", "id"))
+    task_complete.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
+    task_complete.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
+    add_json_input_args(task_complete)
+    add_agent_output_args(task_complete)
+    task_complete.set_defaults(handler=cmd_task_complete)
+    task_block = task_sub.add_parser("block", help="Mark one task Blocked.", description="Mark one task Blocked.")
+    task_block.add_argument("id", help=tapl_prompt.field_help("task", "id"))
+    task_block.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
+    task_block.add_argument("--next-action", default=None, help=tapl_prompt.field_help("task", "next_action"))
+    task_block.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
+    add_json_input_args(task_block)
+    add_agent_output_args(task_block)
+    task_block.set_defaults(handler=cmd_task_block)
+    task_skip = task_sub.add_parser("skip", help="Mark one task Skipped.", description="Mark one task Skipped.")
+    task_skip.add_argument("id", help=tapl_prompt.field_help("task", "id"))
+    task_skip.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
+    add_json_input_args(task_skip)
+    add_agent_output_args(task_skip)
+    task_skip.set_defaults(handler=cmd_task_skip)
 
     finding = sub.add_parser("finding", help="Manage findings.")
     finding_sub = finding.add_subparsers(dest="finding_command")
@@ -301,6 +482,28 @@ def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> a
     )
     add_approval_write_args(approval_set)
     approval_set.set_defaults(handler=cmd_approval_set)
+    approval_approve = approval_sub.add_parser(
+        "approve",
+        help="Approve workflow execution.",
+        description="Approve workflow execution.",
+    )
+    approval_approve.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help=tapl_prompt.field_help("approval", "kind"))
+    approval_approve.add_argument("--prompt", default="", help=tapl_prompt.field_help("approval", "prompt"))
+    approval_approve.add_argument("--source", default=db.DEFAULT_APPROVAL_SOURCE, choices=db.APPROVAL_SOURCES, help=tapl_prompt.field_help("approval", "source"))
+    add_json_input_args(approval_approve)
+    add_agent_output_args(approval_approve)
+    approval_approve.set_defaults(handler=cmd_approval_approve)
+    approval_reject = approval_sub.add_parser(
+        "reject",
+        help="Reject workflow execution.",
+        description="Reject workflow execution.",
+    )
+    approval_reject.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help=tapl_prompt.field_help("approval", "kind"))
+    approval_reject.add_argument("--prompt", default="", help=tapl_prompt.field_help("approval", "prompt"))
+    approval_reject.add_argument("--source", default=db.DEFAULT_APPROVAL_SOURCE, choices=db.APPROVAL_SOURCES, help=tapl_prompt.field_help("approval", "source"))
+    add_json_input_args(approval_reject)
+    add_agent_output_args(approval_reject)
+    approval_reject.set_defaults(handler=cmd_approval_reject)
     approval_status = approval_sub.add_parser(
         "status",
         help="Show current approval state.",
@@ -329,6 +532,12 @@ def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> a
     archive_create.add_argument("--summary", default="", help="Archive summary text.")
     add_agent_output_args(archive_create)
     archive_create.set_defaults(handler=cmd_archive_create)
+    archive_finish = archive_sub.add_parser("finish", help="Archive the completed active run.", description="Archive the completed active run.")
+    archive_finish.add_argument("--slug", default=None, help="Stable archive slug.")
+    archive_finish.add_argument("--summary", default="", help="Archive summary text.")
+    add_json_input_args(archive_finish)
+    add_agent_output_args(archive_finish)
+    archive_finish.set_defaults(handler=cmd_archive_finish)
     archive_list = archive_sub.add_parser("list", help="List archives.", description="List archives.")
     archive_list.add_argument("--limit", type=int, default=None, help="Maximum archives to return.")
     add_agent_output_args(archive_list)
@@ -338,7 +547,12 @@ def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> a
     add_agent_output_args(archive_show)
     archive_show.set_defaults(handler=cmd_archive_show)
 
-    search = sub.add_parser("search", help="Search workflow state and archive history.")
+    search = sub.add_parser(
+        "search",
+        help="Search workflow state and archive history.",
+        epilog=search_epilog(),
+        formatter_class=HELP_FORMATTER,
+    )
     search.add_argument("query", help="Search query string.")
     search.add_argument(
         "--limit",
@@ -348,6 +562,15 @@ def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> a
     )
     add_agent_output_args(search)
     search.set_defaults(handler=cmd_search)
+
+    next_cmd = sub.add_parser("next", help="Show the safest next lifecycle command.", description="Show the safest next lifecycle command.")
+    add_agent_output_args(next_cmd)
+    next_cmd.set_defaults(handler=cmd_next)
+
+    recipe = sub.add_parser("recipe", help="Show agent command recipes.", description="Show agent command recipes.")
+    recipe.add_argument("name", nargs="?", default="all", help="Recipe name, e.g. plan-apply, task-create, task-complete, approval-approve, archive-finish.")
+    add_agent_output_args(recipe)
+    recipe.set_defaults(handler=cmd_recipe)
 
     reindex = sub.add_parser("reindex", help="Build semantic index when optional deps are installed.")
     add_dry_run_arg(reindex)
@@ -667,6 +890,8 @@ AGENT_LIST_ITEM_TAGS = {
     "items": "item",
     "next_actions": "next_action",
     "plans": "plan",
+    "recipes": "recipe",
+    "recommendations": "recommendation",
     "results": "result",
     "tasks": "task",
     "updated_fields": "field",
@@ -965,6 +1190,11 @@ def cmd_context(args: argparse.Namespace) -> int:
 
 
 def cmd_run_set(args: argparse.Namespace) -> int:
+    merge_json_fields(
+        args,
+        ("summary", "result"),
+        aliases={"summary": ("request_summary",), "result": ("result_summary",)},
+    )
     if args.summary is None and args.result is None:
         emit(
             {
@@ -976,21 +1206,42 @@ def cmd_run_set(args: argparse.Namespace) -> int:
         )
         return 1
     conn = open_conn(args)
+    if db.active_run(conn) is None:
+        db.ensure_active_run(conn, request_summary=args.summary or db.DEFAULT_REQUEST_SUMMARY)
     run = db.update_active_run_summary(
         conn,
         request_summary=args.summary,
         result_summary=args.result,
     )
     if args.agent:
+        operation = getattr(args, "operation", "run_set")
         updated_fields = tuple(
             field
             for field, value in (("request_summary", args.summary), ("result_summary", args.result))
             if value is not None
         )
-        print(agent_write_receipt("run_set", active_run=run, updated_fields=updated_fields))
+        print(agent_write_receipt(operation, active_run=run, updated_fields=updated_fields))
         return 0
     emit({"ok": True, "active_run": db.workflow_run_to_dict(run)}, args.json, args.agent)
     return 0
+
+
+def cmd_run_summarize(args: argparse.Namespace) -> int:
+    merge_json_fields(args, ("summary",), aliases={"summary": ("request_summary",)})
+    if not require_arg(args, "summary", "--summary", command="run summarize"):
+        return 1
+    args.result = None
+    args.operation = "run_summarize"
+    return cmd_run_set(args)
+
+
+def cmd_run_finish(args: argparse.Namespace) -> int:
+    merge_json_fields(args, ("result",), aliases={"result": ("result_summary",)})
+    if not require_arg(args, "result", "--result", command="run finish"):
+        return 1
+    args.summary = None
+    args.operation = "run_finish"
+    return cmd_run_set(args)
 
 
 def cmd_install_user(args: argparse.Namespace) -> int:
@@ -1019,7 +1270,82 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
     return 0
 
 
+PLAN_WRITE_FIELDS = (
+    "id",
+    "title",
+    "status",
+    "summary",
+    "objective",
+    "requirements_trace",
+    "selected_approach",
+    "affected_files",
+    "execution_order",
+    "risks",
+    "validation",
+    "approval_needs",
+    "notes",
+)
+
+TASK_WRITE_FIELDS = (
+    "id",
+    "title",
+    "status",
+    "spec_id",
+    "goal",
+    "action",
+    "required_subagent",
+    "verification",
+    "result",
+    "blocker",
+    "next_action",
+)
+
+
+def merge_plan_payload(args: argparse.Namespace) -> tuple[str, ...]:
+    return merge_json_fields(
+        args,
+        PLAN_WRITE_FIELDS,
+        aliases={
+            "id": ("plan_id", "stable_id"),
+            "requirements_trace": ("requirements-trace",),
+            "selected_approach": ("selected-approach",),
+            "affected_files": ("affected-files", "affected_files_interfaces", "affected-files-interfaces"),
+            "execution_order": ("execution-order",),
+            "approval_needs": ("approval-needs",),
+        },
+        cli_defaults={"id": "PLAN-001"},
+    )
+
+
+def merge_task_payload(args: argparse.Namespace) -> tuple[str, ...]:
+    return merge_json_fields(
+        args,
+        TASK_WRITE_FIELDS,
+        aliases={
+            "id": ("task_id", "stable_id"),
+            "spec_id": ("spec-id", "source_plan", "source_spec"),
+            "required_subagent": ("required-subagent",),
+            "next_action": ("next-action",),
+        },
+    )
+
+
+def ensure_attrs(args: argparse.Namespace, fields: tuple[str, ...], default: Any = None) -> None:
+    for field in fields:
+        if not hasattr(args, field):
+            setattr(args, field, default)
+
+
 def cmd_plan_set(args: argparse.Namespace) -> int:
+    return write_plan(args, operation="plan_set")
+
+
+def cmd_plan_apply(args: argparse.Namespace) -> int:
+    return write_plan(args, operation="plan_apply")
+
+
+def write_plan(args: argparse.Namespace, *, operation: str) -> int:
+    merge_plan_payload(args)
     conn = open_conn(args)
     settings = load_config(args)
     existing = db.get_active_plan(conn, args.id)
@@ -1066,7 +1392,7 @@ def cmd_plan_set(args: argparse.Namespace) -> int:
     if args.agent:
         print(
             agent_write_receipt(
-                "plan_set",
+                operation,
                 item=item,
                 updated_fields=provided_arg_fields(
                     args,
@@ -1102,6 +1428,54 @@ def cmd_plan_set(args: argparse.Namespace) -> int:
 
 
 def cmd_task_set(args: argparse.Namespace) -> int:
+    return write_task(args, operation="task_set")
+
+
+def cmd_task_create(args: argparse.Namespace) -> int:
+    merge_task_payload(args)
+    if args.status is None:
+        args.status = "Pending"
+    if not require_arg(args, "id", "--id", command="task create"):
+        return 1
+    if not require_arg(args, "title", "--title", command="task create"):
+        return 1
+    return write_task(args, operation="task_create")
+
+
+def cmd_task_start(args: argparse.Namespace) -> int:
+    args.status = "In Progress"
+    return write_task(args, operation="task_start")
+
+
+def cmd_task_complete(args: argparse.Namespace) -> int:
+    merge_task_payload(args)
+    args.status = "Completed"
+    if not require_arg(args, "verification", "--verification", command="task complete"):
+        return 1
+    if not require_arg(args, "result", "--result", command="task complete"):
+        return 1
+    return write_task(args, operation="task_complete")
+
+
+def cmd_task_block(args: argparse.Namespace) -> int:
+    merge_task_payload(args)
+    args.status = "Blocked"
+    if not require_arg(args, "blocker", "--blocker", command="task block"):
+        return 1
+    if not require_arg(args, "next_action", "--next-action", command="task block"):
+        return 1
+    return write_task(args, operation="task_block")
+
+
+def cmd_task_skip(args: argparse.Namespace) -> int:
+    merge_task_payload(args)
+    args.status = "Skipped"
+    return write_task(args, operation="task_skip")
+
+
+def write_task(args: argparse.Namespace, *, operation: str) -> int:
+    ensure_attrs(args, TASK_WRITE_FIELDS)
+    merge_task_payload(args)
     conn = open_conn(args)
     settings = load_config(args)
     existing = db.get_active_task(conn, args.id)
@@ -1205,7 +1579,7 @@ def cmd_task_set(args: argparse.Namespace) -> int:
     if args.agent:
         print(
             agent_write_receipt(
-                "task_set",
+                operation,
                 item=item,
                 updated_fields=provided_arg_fields(
                     args,
@@ -1272,6 +1646,11 @@ def cmd_finding_add(args: argparse.Namespace) -> int:
 
 
 def cmd_approval_set(args: argparse.Namespace) -> int:
+    merge_json_fields(
+        args,
+        ("kind", "decision", "prompt", "source"),
+        aliases={"prompt": ("scope", "approval_prompt")},
+    )
     approval = db.record_approval(
         open_conn(args),
         kind=args.kind,
@@ -1280,10 +1659,28 @@ def cmd_approval_set(args: argparse.Namespace) -> int:
         source=args.source,
     )
     if args.agent:
-        print(agent_write_receipt("approval_set", approval=approval, updated_fields=("decision", "source")))
+        print(agent_write_receipt(getattr(args, "operation", "approval_set"), approval=approval, updated_fields=("decision", "source")))
         return 0
     emit({"ok": True, "approval": db.row_to_dict(approval)}, args.json, args.agent)
     return 0
+
+
+def cmd_approval_approve(args: argparse.Namespace) -> int:
+    merge_json_fields(args, ("kind", "prompt", "source"), aliases={"prompt": ("scope", "approval_prompt")})
+    args.decision = "approved"
+    if not require_arg(args, "prompt", "--prompt", command="approval approve"):
+        return 1
+    args.operation = "approval_approve"
+    return cmd_approval_set(args)
+
+
+def cmd_approval_reject(args: argparse.Namespace) -> int:
+    merge_json_fields(args, ("kind", "prompt", "source"), aliases={"prompt": ("scope", "approval_prompt")})
+    args.decision = "rejected"
+    if not require_arg(args, "prompt", "--prompt", command="approval reject"):
+        return 1
+    args.operation = "approval_reject"
+    return cmd_approval_set(args)
 
 
 def cmd_approval_status(args: argparse.Namespace) -> int:
@@ -1316,13 +1713,24 @@ def cmd_item_show(args: argparse.Namespace) -> int:
 
 
 def cmd_archive_create(args: argparse.Namespace) -> int:
+    merge_json_fields(args, ("slug", "summary"), aliases={"summary": ("archive_summary",)})
     archive = db.archive_active_run(open_conn(args), slug=args.slug, summary=args.summary)
     if args.agent:
         updated_fields = ("summary",) if args.summary else ()
-        print(agent_write_receipt("archive_create", archive=archive, updated_fields=updated_fields))
+        print(agent_write_receipt(getattr(args, "operation", "archive_create"), archive=archive, updated_fields=updated_fields))
         return 0
     emit({"ok": True, "archive": db.row_to_dict(archive)}, args.json, args.agent)
     return 0
+
+
+def cmd_archive_finish(args: argparse.Namespace) -> int:
+    merge_json_fields(args, ("slug", "summary"), aliases={"summary": ("archive_summary",)})
+    if not require_arg(args, "slug", "--slug", command="archive finish"):
+        return 1
+    if args.summary is None:
+        args.summary = ""
+    args.operation = "archive_finish"
+    return cmd_archive_create(args)
 
 
 def cmd_archive_list(args: argparse.Namespace) -> int:
@@ -1351,6 +1759,176 @@ def cmd_search(args: argparse.Namespace) -> int:
         return 0
     emit(payload, args.json, args.agent)
     return 0
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    conn = open_conn(args)
+    settings = load_config(args)
+    state = db.status_payload(conn)
+    plan_task_execute = validation.validate_plan_task_execute(conn, settings.plan_task_execute)
+    payload = {
+        "ok": True,
+        "recommendations": next_recommendations(state, plan_task_execute),
+    }
+    emit(payload, args.json, args.agent)
+    return 0
+
+
+def cmd_recipe(args: argparse.Namespace) -> int:
+    name = str(args.name or "all").strip()
+    recipes = lifecycle_recipes()
+    selected = recipes if name == "all" else [item for item in recipes if item["name"] == name]
+    if not selected:
+        emit(
+            {
+                "ok": False,
+                "error": f"unknown recipe: {name}",
+                "available": ", ".join(item["name"] for item in recipes),
+                "suggestion": "taplctl recipe all --agent",
+            },
+            args.json,
+            args.agent,
+        )
+        return 1
+    emit({"ok": True, "recipes": selected}, args.json, args.agent)
+    return 0
+
+
+def next_recommendations(state: dict[str, Any], plan_task_execute: dict[str, Any]) -> list[dict[str, str]]:
+    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else None
+    if not run:
+        return [
+            recommendation(
+                "summarize-request",
+                "taplctl run summarize --summary '<request summary>' --agent",
+                "Create or update the active request summary before durable workflow work.",
+            )
+        ]
+
+    if str(run.get("request_summary") or "") == db.DEFAULT_REQUEST_SUMMARY:
+        return [
+            recommendation(
+                "summarize-request",
+                "taplctl run summarize --summary '<request summary>' --agent",
+                "The active run still has the default request summary.",
+            )
+        ]
+
+    plans = state.get("plans") if isinstance(state.get("plans"), list) else []
+    tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
+    if not plans:
+        return [
+            recommendation(
+                "apply-plan",
+                "taplctl plan apply --stdin-json --agent",
+                "No plan exists for the active run; feed the plan JSON object on stdin.",
+            )
+        ]
+    if not tasks:
+        return [
+            recommendation(
+                "create-task",
+                "taplctl task create --stdin-json --agent",
+                "No executable tasks exist; create the first task from a JSON object.",
+            )
+        ]
+
+    approval = (state.get("approvals") or {}).get(db.DEFAULT_APPROVAL_KIND) or {}
+    if state.get("incomplete_tasks", 0) and approval.get("state") != "approved":
+        first = first_task_with_status(tasks, ("Pending", "In Progress", "Blocked"))
+        label = task_id_for_recipe(first)
+        return [
+            recommendation(
+                "approve-execution",
+                f"taplctl approval approve --prompt 'Execute {label} from PLAN-001' --source explicit_user --agent",
+                "Executable tasks exist but execution approval is not recorded.",
+            )
+        ]
+
+    in_progress = first_task_with_status(tasks, ("In Progress",))
+    if in_progress:
+        label = task_id_for_recipe(in_progress)
+        return [
+            recommendation(
+                "complete-or-block-task",
+                f"taplctl task complete {label} --verification '<check>' --result '<result>' --agent",
+                "A task is in progress; complete it or use `taplctl task block` before starting another.",
+            ),
+            recommendation(
+                "block-task",
+                f"taplctl task block {label} --blocker '<blocker>' --next-action '<next action>' --agent",
+                "Use this if the current task cannot proceed.",
+            ),
+        ]
+
+    pending = first_task_with_status(tasks, ("Pending",))
+    if pending:
+        label = task_id_for_recipe(pending)
+        return [
+            recommendation(
+                "start-task",
+                f"taplctl task start {label} --agent",
+                "Start the next pending task with the high-level lifecycle command.",
+            )
+        ]
+
+    if int(state.get("incomplete_tasks") or 0) == 0:
+        return [
+            recommendation(
+                "finish-run",
+                "taplctl run finish --result '<result summary>' --agent",
+                "All tasks are complete; record the final result before archiving.",
+            ),
+            recommendation(
+                "archive-run",
+                "taplctl archive finish --slug '<timestamp-task-slug>' --summary '<archive summary>' --agent",
+                "Archive when no actionable tasks remain.",
+            ),
+        ]
+
+    return [
+        recommendation(
+            "inspect-status",
+            "taplctl status --agent",
+            "No single safe lifecycle command was inferred; inspect current state.",
+        )
+    ]
+
+
+def lifecycle_recipes() -> list[dict[str, str]]:
+    return [
+        recipe("run-summarize", "taplctl run summarize --summary '<request summary>' --agent", "Set the current request summary."),
+        recipe("plan-apply", "taplctl plan apply --stdin-json --agent", "Create or update the plan from a JSON object."),
+        recipe("task-create", "taplctl task create --stdin-json --agent", "Create a pending executable task from a JSON object."),
+        recipe("approval-approve", "taplctl approval approve --prompt 'Execute TASK-001 from PLAN-001' --source explicit_user --agent", "Record execution approval."),
+        recipe("task-start", "taplctl task start TASK-001 --agent", "Mark one task In Progress without quoting a status value."),
+        recipe("task-complete", "taplctl task complete TASK-001 --verification '<check>' --result '<result>' --agent", "Mark one task Completed."),
+        recipe("task-block", "taplctl task block TASK-001 --blocker '<blocker>' --next-action '<next action>' --agent", "Mark one task Blocked."),
+        recipe("task-skip", "taplctl task skip TASK-001 --result '<skip reason>' --agent", "Mark one task Skipped."),
+        recipe("run-finish", "taplctl run finish --result '<result summary>' --agent", "Record the completed result summary."),
+        recipe("archive-finish", "taplctl archive finish --slug '<timestamp-task-slug>' --summary '<archive summary>' --agent", "Archive the active run."),
+    ]
+
+
+def recipe(name: str, command: str, purpose: str) -> dict[str, str]:
+    return {"name": name, "command": command, "purpose": purpose}
+
+
+def recommendation(name: str, command: str, reason: str) -> dict[str, str]:
+    return {"name": name, "command": command, "reason": reason}
+
+
+def first_task_with_status(tasks: list[dict[str, Any]], statuses: tuple[str, ...]) -> dict[str, Any] | None:
+    for task in tasks:
+        if str(task.get("status") or "") in statuses:
+            return task
+    return None
+
+
+def task_id_for_recipe(task: dict[str, Any] | None) -> str:
+    if not task:
+        return "TASK-001"
+    return str(task.get("stable_id") or task.get("task_id") or "TASK-001")
 
 
 def cmd_reindex(args: argparse.Namespace) -> int:
@@ -1517,6 +2095,12 @@ def humanize(payload: dict[str, Any]) -> str:
         ) or "no approvals"
     if "archives" in payload:
         return "\n".join(f"{item['created_at']} {item['slug']}: {item['summary']}" for item in payload["archives"]) or "no archives"
+    if "recommendations" in payload:
+        return "\n".join(
+            f"{item['name']}: {item['command']} # {item['reason']}" for item in payload["recommendations"]
+        ) or "no recommendations"
+    if "recipes" in payload:
+        return "\n".join(f"{item['name']}: {item['command']} # {item['purpose']}" for item in payload["recipes"]) or "no recipes"
     if "results" in payload:
         return "\n".join(f"{item['stable_id']} {item['title']}" for item in payload["results"]) or "no results"
     if "active_run" in payload:

@@ -477,8 +477,8 @@ def task_granularity_guidance(value: str) -> str:
 
 def execution_approval_validation_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
     if settings.require_execution_approval:
-        return "Missing execution approval is a validation error; use `taplctl approval set --help` for fields."
-    return "Missing execution approval is a validation warning; use `taplctl approval set --help` when approval is needed."
+        return "Missing execution approval is a validation error; use `taplctl approval approve --help` for the high-level command."
+    return "Missing execution approval is a validation warning; use `taplctl approval approve --help` when approval is needed."
 
 
 def task_granularity_remediation(value: str) -> str:

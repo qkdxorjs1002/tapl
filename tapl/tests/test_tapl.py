@@ -354,7 +354,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(missing_approval.returncode, 1)
             self.assertIn("<tapl_output>", missing_approval.stdout)
             self.assertIn("<code>execution_approval_missing</code>", missing_approval.stdout)
-            self.assertIn("taplctl approval set --decision approved", missing_approval.stdout)
+            self.assertIn("taplctl approval approve", missing_approval.stdout)
             self.assertIn("--agent", missing_approval.stdout)
             self.assertNotIn("<config>", missing_approval.stdout)
 
@@ -1780,8 +1780,10 @@ level_subagent_aggressiveness = "force"
             self.assertNotIn("At the start of every non-trivial user request", prompt_guidance)
             self.assertNotIn("If the active run contains remaining actionable work", prompt_guidance)
             self.assertNotIn("Set the current request summary", prompt_guidance)
-            self.assertNotIn("taplctl search '<compact prompt query>' --agent", prompt_guidance)
-            self.assertNotIn("taplctl item show --id <id> --agent", prompt_guidance)
+            self.assertIn("taplctl search '<compact request query>' --agent", prompt_guidance)
+            self.assertIn("taplctl item show --id <id> --agent", prompt_guidance)
+            self.assertIn("ignore unrelated matches", prompt_guidance)
+            self.assertIn("During execution, search again", prompt_guidance)
             self.assertNotIn("taplctl plan set --help", prompt_guidance)
             self.assertNotIn("taplctl task set --help", prompt_guidance)
             self.assertNotIn("Plan fields: --id", prompt_guidance)
@@ -1956,7 +1958,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Continue only TASK-001", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("spawn @senior-worker for only this task", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("do not claim delegation occurred", "\n".join(active_prompt_payload["next_actions"]))
-            approval_index = next(index for index, action in enumerate(active_actions) if "approval set" in action)
+            approval_index = next(index for index, action in enumerate(active_actions) if "approval approve" in action)
             continue_index = next(index for index, action in enumerate(active_actions) if "Continue only TASK-001" in action)
             self.assertLess(approval_index, continue_index)
 
@@ -1992,7 +1994,7 @@ level_subagent_aggressiveness = "force"
             stop_instructions = "\n".join(stop_payload["instructions"])
             self.assertEqual(stop_payload["instructions"], [])
             self.assertIn("Record the final result", "\n".join(stop_payload["workflow_guidance"]))
-            self.assertIn("archive create", "\n".join(stop_payload["workflow_guidance"]))
+            self.assertIn("archive finish", "\n".join(stop_payload["workflow_guidance"]))
             self.assertNotIn("At the start of every non-trivial user request", "\n".join(stop_payload["workflow_guidance"]))
             self.assertNotIn("Completion reports should", stop_instructions)
             self.assertNotIn("Archive summaries should", stop_instructions)
@@ -2002,7 +2004,8 @@ level_subagent_aggressiveness = "force"
             self.assertIn("tapl context:", prompt_text.stdout)
             self.assertIn("# Workflow", prompt_text.stdout)
             self.assertIn("Write workflow records and reports in the user's language", prompt_text.stdout)
-            self.assertIn("review relevant prior TAPL history", prompt_text.stdout)
+            self.assertIn("search relevant prior TAPL history", prompt_text.stdout)
+            self.assertIn("taplctl search '<compact request query>' --agent", prompt_text.stdout)
             self.assertIn("execution approval", prompt_text.stdout)
             self.assertIn("Execute planned tasks one at a time in task order", prompt_text.stdout)
             self.assertIn("only when a subagent tool is available", prompt_text.stdout)
@@ -2016,6 +2019,7 @@ level_subagent_aggressiveness = "force"
     def test_command_help_exposes_field_guidance(self) -> None:
         default_settings = tapl_config.PlanTaskExecuteConfig()
         self.assertEqual(tapl_prompt.command_help_epilog(), tapl_prompt.render(tapl_prompt.ROOT_HELP_TEMPLATE))
+        self.assertEqual(tapl_prompt.search_epilog(), tapl_prompt.render(tapl_prompt.SEARCH_HELP_TEMPLATE))
         self.assertEqual(tapl_prompt.plan_set_epilog(), tapl_prompt.render(tapl_prompt.PLAN_SET_HELP_TEMPLATE))
         self.assertEqual(tapl_prompt.finding_add_epilog(), tapl_prompt.render(tapl_prompt.FINDING_ADD_HELP_TEMPLATE))
         self.assertEqual(tapl_prompt.approval_set_epilog(), tapl_prompt.render(tapl_prompt.APPROVAL_SET_HELP_TEMPLATE))
@@ -2035,9 +2039,25 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Lifecycle order", root_help.stdout)
             self.assertIn("resolve residual run direction", root_help.stdout)
             self.assertIn("clarify until unblocked", root_help.stdout)
-            self.assertIn("taplctl plan set", root_help.stdout)
+            self.assertIn("taplctl search '<compact request query>' --agent", root_help.stdout)
+            self.assertIn("taplctl item show --id <id> --agent", root_help.stdout)
+            self.assertIn("taplctl next --agent", root_help.stdout)
+            self.assertIn("taplctl recipe all --agent", root_help.stdout)
+            self.assertIn("taplctl plan apply --stdin-json --agent", root_help.stdout)
+            self.assertIn("taplctl task create --stdin-json --agent", root_help.stdout)
+            self.assertIn("taplctl approval approve", root_help.stdout)
             self.assertIn("Execute planned tasks one at a time", root_help.stdout)
-            self.assertIn("structured CLI field arguments", root_help.stdout)
+            self.assertIn("high-level lifecycle commands", root_help.stdout)
+            self.assertIn("--stdin-json", root_help.stdout)
+
+            search_help = self.run_cli(db_path, "search", "--help")
+            self.assertEqual(search_help.returncode, 0, search_help.stderr)
+            self.assertIn("History search rules", search_help.stdout)
+            self.assertIn("taplctl search '<compact request query>' --agent", search_help.stdout)
+            self.assertIn("ignore unrelated matches", search_help.stdout)
+            self.assertIn("During execution, search again", search_help.stdout)
+            self.assertIn("taplctl item show --id <id> --agent", search_help.stdout)
+            self.assertIn("taplctl search 'workflow dashboard search page' --agent", search_help.stdout)
 
             run_help = self.run_cli(db_path, "run", "set", "--help")
             self.assertEqual(run_help.returncode, 0, run_help.stderr)
@@ -2049,12 +2069,13 @@ level_subagent_aggressiveness = "force"
             plan_help = self.run_cli(db_path, "plan", "set", "--help")
             self.assertEqual(plan_help.returncode, 0, plan_help.stderr)
             self.assertIn("Plan writing rules", plan_help.stdout)
+            self.assertIn("taplctl plan apply --stdin-json --agent", plan_help.stdout)
             self.assertIn("Plan records should include objective", plan_help.stdout)
             self.assertIn("Keep plan section labels in English", plan_help.stdout)
             self.assertIn("Affected files/interfaces", plan_help.stdout)
             self.assertIn("Approval needs", plan_help.stdout)
             self.assertIn("before executable task records", plan_help.stdout)
-            self.assertIn("structured CLI field arguments", plan_help.stdout)
+            self.assertIn("high-level lifecycle commands", plan_help.stdout)
             self.assertIn("Use numeric stable ids only", plan_help.stdout)
             self.assertIn("PLAN-001", plan_help.stdout)
             self.assertIn("--objective", plan_help.stdout)
@@ -2071,6 +2092,8 @@ level_subagent_aggressiveness = "force"
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
             self.assertIn("--agent", task_help.stdout)
             self.assertIn("Task writing rules", task_help.stdout)
+            self.assertIn("taplctl task create --stdin-json --agent", task_help.stdout)
+            self.assertIn("taplctl task start TASK-001 --agent", task_help.stdout)
             self.assertIn("Use numeric stable ids only", task_help.stdout)
             self.assertIn("Existing task updates are partial", task_help.stdout)
             self.assertIn("New task creation requires --title and --status", task_help.stdout)
@@ -2086,7 +2109,7 @@ level_subagent_aggressiveness = "force"
             self.assertIn("source plan/spec exists", task_help.stdout)
             self.assertIn("not represent planning or task-design work", task_help.stdout)
             self.assertIn("Executable implementation/verification tasks", task_help.stdout)
-            self.assertIn("structured CLI field arguments", task_help.stdout)
+            self.assertIn("high-level lifecycle commands", task_help.stdout)
             self.assertIn("Required field sets", task_help.stdout)
             self.assertIn("executable task: --spec-id, --goal, --action, --verification, --required-subagent", task_help.stdout)
             self.assertIn("--blocker (required for blocked tasks)", task_help.stdout)
@@ -2095,6 +2118,7 @@ level_subagent_aggressiveness = "force"
             approval_help = self.run_cli(db_path, "approval", "set", "--help")
             self.assertEqual(approval_help.returncode, 0, approval_help.stderr)
             self.assertIn("Approval writing rules", approval_help.stdout)
+            self.assertIn("taplctl approval approve --prompt", approval_help.stdout)
             self.assertIn("residual-run handling", approval_help.stdout)
             self.assertIn("planning clarification", approval_help.stdout)
             self.assertIn("execution scope", approval_help.stdout)
@@ -2137,6 +2161,129 @@ level_subagent_aggressiveness = "force"
             self.assertEqual(hook_help.returncode, 0, hook_help.stderr)
             self.assertIn("Hook handling mode", hook_help.stdout)
             self.assertIn("Print JSON output", hook_help.stdout)
+
+    def test_high_level_lifecycle_commands_json_next_recipe_and_error_suggestion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            self.run_cli(db_path, "init", "--json")
+
+            summary = self.run_cli(
+                db_path,
+                "run",
+                "summarize",
+                "--summary",
+                "High level lifecycle",
+                "--agent",
+            )
+            self.assertEqual(summary.returncode, 0, summary.stderr)
+            self.assertIn("<operation>run_summarize</operation>", summary.stdout)
+
+            initial_next = self.run_cli(db_path, "next", "--agent")
+            self.assertEqual(initial_next.returncode, 0, initial_next.stderr)
+            self.assertIn("<name>apply-plan</name>", initial_next.stdout)
+            self.assertIn("taplctl plan apply --stdin-json --agent", initial_next.stdout)
+
+            plan_payload = {
+                "id": "PLAN-001",
+                "title": "Lifecycle plan",
+                "summary": "REQ-001: high-level lifecycle commands",
+                "objective": "Verify high-level lifecycle commands",
+                "requirements_trace": "REQ-001: JSON stdin plan apply",
+                "selected_approach": "Use high-level commands",
+                "affected_files": "tapl/taplctl/cli.py",
+                "execution_order": "Plan, create task, approve, start, complete",
+                "risks": "Low-level set remains for repair only",
+                "validation": "Focused lifecycle test",
+            }
+            plan = self.run_cli(
+                db_path,
+                "plan",
+                "apply",
+                "--stdin-json",
+                "--agent",
+                input_text=json.dumps(plan_payload),
+            )
+            self.assertEqual(plan.returncode, 0, plan.stderr)
+            self.assertIn("<operation>plan_apply</operation>", plan.stdout)
+            self.assertIn("<stable_id>PLAN-001</stable_id>", plan.stdout)
+
+            after_plan_next = self.run_cli(db_path, "next", "--agent")
+            self.assertEqual(after_plan_next.returncode, 0, after_plan_next.stderr)
+            self.assertIn("<name>create-task</name>", after_plan_next.stdout)
+
+            task_payload = {
+                "id": "TASK-001",
+                "title": "Lifecycle task",
+                "spec_id": "PLAN-001",
+                "goal": "Verify task lifecycle",
+                "action": "Run high-level task commands",
+                "required_subagent": "@senior-worker",
+                "verification": "Focused lifecycle test",
+            }
+            task = self.run_cli(
+                db_path,
+                "task",
+                "create",
+                "--stdin-json",
+                "--agent",
+                input_text=json.dumps(task_payload),
+            )
+            self.assertEqual(task.returncode, 0, task.stderr)
+            self.assertIn("<operation>task_create</operation>", task.stdout)
+            self.assertIn("<status>Pending</status>", task.stdout)
+
+            approval_next = self.run_cli(db_path, "next", "--agent")
+            self.assertEqual(approval_next.returncode, 0, approval_next.stderr)
+            self.assertIn("<name>approve-execution</name>", approval_next.stdout)
+            self.assertIn("taplctl approval approve", approval_next.stdout)
+
+            approved = self.run_cli(
+                db_path,
+                "approval",
+                "approve",
+                "--prompt",
+                "Execute TASK-001 from PLAN-001",
+                "--source",
+                "explicit_user",
+                "--agent",
+            )
+            self.assertEqual(approved.returncode, 0, approved.stderr)
+            self.assertIn("<operation>approval_approve</operation>", approved.stdout)
+
+            started = self.run_cli(db_path, "task", "start", "TASK-001", "--agent")
+            self.assertEqual(started.returncode, 0, started.stderr)
+            self.assertIn("<operation>task_start</operation>", started.stdout)
+            self.assertIn("<status>In Progress</status>", started.stdout)
+
+            completed = self.run_cli(
+                db_path,
+                "task",
+                "complete",
+                "TASK-001",
+                "--verification",
+                "Focused lifecycle test passed",
+                "--result",
+                "Lifecycle commands work",
+                "--agent",
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("<operation>task_complete</operation>", completed.stdout)
+            self.assertIn("<status>Completed</status>", completed.stdout)
+
+            final_next = self.run_cli(db_path, "next", "--agent")
+            self.assertEqual(final_next.returncode, 0, final_next.stderr)
+            self.assertIn("<name>finish-run</name>", final_next.stdout)
+            self.assertIn("taplctl archive finish", final_next.stdout)
+
+            recipe = self.run_cli(db_path, "recipe", "task-complete", "--agent")
+            self.assertEqual(recipe.returncode, 0, recipe.stderr)
+            self.assertIn("<name>task-complete</name>", recipe.stdout)
+            self.assertIn("taplctl task complete TASK-001", recipe.stdout)
+
+            bad_status = self.run_cli(db_path, "task", "set", "--id", "TASK-001", "--status", "In", "Progress")
+            self.assertEqual(bad_status.returncode, 2)
+            self.assertIn("Did you mean", bad_status.stderr)
+            self.assertIn("taplctl task start TASK-001 --agent", bad_status.stderr)
 
     def test_task_help_reflects_configured_required_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2879,8 +3026,10 @@ task_granularity = "very_granular"
             self.assertIn("taplctl <command> <subcommand> --help", event.stdout)
             self.assertIn("execution approval", event.stdout)
             self.assertNotIn("taplctl status --agent", event.stdout)
-            self.assertNotIn("taplctl search '<compact prompt query>' --agent", event.stdout)
-            self.assertNotIn("taplctl item show --id <id> --agent", event.stdout)
+            self.assertIn("taplctl search '<compact request query>' --agent", event.stdout)
+            self.assertIn("taplctl item show --id <id> --agent", event.stdout)
+            self.assertIn("ignore unrelated matches", event.stdout)
+            self.assertIn("During execution, search again", event.stdout)
             self.assertNotIn("At the start of every non-trivial user request", event.stdout)
             self.assertIn("Before planning non-trivial work", event.stdout)
             self.assertIn("snippet is insufficient", event.stdout)
@@ -3146,7 +3295,7 @@ task_granularity = "very_granular"
                 "New request",
             )
             self.assertIn(
-                "taplctl run set --summary",
+                "taplctl run summarize --summary",
                 "\n".join(prompt_payload["context"]["next_actions"]),
             )
 
