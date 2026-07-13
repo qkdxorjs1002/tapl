@@ -28,7 +28,7 @@ def build_context(
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     state = db.status_payload(conn)
-    plan_task = validation.validate_plan_task_execute(conn, settings.plan_task_execute)
+    plan_task = validation.validate_plan_task_execute(conn)
     prompt = prompt_summary(payload or {})
     covered_issue_codes = covered_validation_issue_codes(state, plan_task)
     return {
@@ -42,14 +42,13 @@ def build_context(
         },
         "config": settings.as_dict(),
         "plan_task_execute": plan_task,
-        "instructions": instructions(settings.plan_task_execute, event=event),
+        "instructions": instructions(event=event),
         "workflow_guidance": workflow_guidance(
-            settings.plan_task_execute,
             event=event,
             state=state,
             prompt=prompt,
         ),
-        "next_actions": next_actions(state, plan_task, event, prompt, settings.plan_task_execute),
+        "next_actions": next_actions(state, plan_task, event, prompt),
         "validation_issues": validation_issues(plan_task, covered_issue_codes),
         "prompt_summary": prompt,
     }
@@ -117,19 +116,17 @@ def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def instructions(settings: tapl_config.PlanTaskExecuteConfig, *, event: str) -> list[str]:
+def instructions(*, event: str) -> list[str]:
     return []
 
 
 def workflow_guidance(
-    settings: tapl_config.PlanTaskExecuteConfig,
     *,
     event: str,
     state: dict[str, Any],
     prompt: str = "",
 ) -> list[str]:
     return tapl_prompt.context_workflow_guidance(
-        settings,
         event=event,
         state=state,
         prompt=prompt,
@@ -141,7 +138,6 @@ def next_actions(
     plan_task: dict[str, Any],
     event: str,
     prompt: str = "",
-    settings: tapl_config.PlanTaskExecuteConfig | None = None,
 ) -> list[str]:
     actions: list[str] = []
     if event == "SessionStart":
@@ -170,10 +166,7 @@ def next_actions(
         approval_action = approval_next_action(plan_task)
         if approval_action:
             actions.append(approval_action)
-        execution_action = task_execution_next_action(
-            state,
-            settings or tapl_config.PlanTaskExecuteConfig(),
-        )
+        execution_action = task_execution_next_action(state)
         if execution_action:
             actions.append(execution_action)
         actions.append(tapl_prompt.stop_incomplete_tasks_next_action())
@@ -266,7 +259,6 @@ def approval_next_action(plan_task: dict[str, Any]) -> str:
 
 def task_execution_next_action(
     state: dict[str, Any],
-    settings: tapl_config.PlanTaskExecuteConfig,
 ) -> str:
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
     if not tasks:
@@ -279,31 +271,16 @@ def task_execution_next_action(
     if in_progress:
         task = in_progress[0]
         label = task_label(task)
-        assignment = subagent_assignment_guidance(task, settings)
-        return tapl_prompt.continue_task_next_action(label, assignment)
+        return tapl_prompt.continue_task_next_action(label)
 
     for task in tasks:
         status = str(task.get("status") or "")
         label = task_label(task)
         if status == "Pending":
-            assignment = subagent_assignment_guidance(task, settings)
-            return tapl_prompt.start_task_next_action(label, assignment)
+            return tapl_prompt.start_task_next_action(label)
         if status == "Blocked":
             return tapl_prompt.resolve_blocked_task_next_action(label)
     return ""
-
-
-def subagent_assignment_guidance(
-    task: dict[str, Any],
-    settings: tapl_config.PlanTaskExecuteConfig,
-) -> str:
-    if not settings.use_level_subagent:
-        return ""
-    required = str(task.get("required_subagent") or "").strip()
-    if not required:
-        return ""
-    return tapl_prompt.subagent_assignment_next_action(required)
-
 
 def task_label(task: dict[str, Any]) -> str:
     return str(task.get("stable_id") or task.get("task_id") or "task")

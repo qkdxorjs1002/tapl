@@ -21,7 +21,6 @@ interface TaplItem {
   title: string;
   body?: string;
   status?: string;
-  required_subagent?: string;
   source?: string;
   updated_at?: string;
 }
@@ -83,7 +82,6 @@ interface TaplItemDetail extends TaplItem {
   spec_id?: string;
   goal?: string;
   action?: string;
-  required_subagent?: string;
   verification?: string;
   result?: string;
   blocker?: string;
@@ -171,7 +169,6 @@ const READABLE_BLOCK_KEY_LABELS = new Set([
   'objective',
   'related ids',
   'request',
-  'required subagent',
   'requirements',
   'requirements trace',
   'result',
@@ -325,14 +322,12 @@ class ActiveProvider implements vscode.TreeDataProvider<WorkflowNode> {
       })
     ];
     for (const task of status.tasks) {
-      const description = [task.status, task.required_subagent].filter(Boolean).join(' / ') || undefined;
+      const description = task.status || undefined;
       nodes.push(new WorkflowNode({
         label: `${task.stable_id} ${task.title}`,
         kind: 'task',
         description,
-        tooltip: [task.body || task.title, task.required_subagent ? `Subagent: ${task.required_subagent}` : '']
-          .filter(Boolean)
-          .join('\n\n'),
+        tooltip: task.body || task.title,
         icon: iconForStatus(task.status)
       }));
     }
@@ -990,7 +985,6 @@ function renderTaskCard(task: TaplItem): string {
     task.source
   ].filter(Boolean).join(' / ');
   const badges = [
-    task.required_subagent ? `<span class="badge info">${escapeHtml(task.required_subagent)}</span>` : '',
     task.status ? `<span class="badge ${statusClass(task.status)}">${escapeHtml(task.status)}</span>` : ''
   ].filter(Boolean).join('');
 
@@ -1044,7 +1038,6 @@ function renderFocusRow(label: string, value: string, detail?: string): string {
 
 function renderItem(item: TaplItem): string {
   const badges = [
-    item.kind === 'task' && item.required_subagent ? `<span class="badge info">${escapeHtml(item.required_subagent)}</span>` : '',
     item.status ? `<span class="badge ${statusClass(item.status)}">${escapeHtml(item.status)}</span>` : ''
   ].filter(Boolean).join('');
 
@@ -1179,7 +1172,6 @@ function renderItemMetadata(item: TaplItemDetail): string {
     ['Spec', item.spec_id],
     ['Goal', item.goal],
     ['Action', item.action],
-    ['Required Subagent', item.required_subagent],
     ['Verification', item.verification],
     ['Result', item.result],
     ['Blocker', item.blocker],

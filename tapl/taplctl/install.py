@@ -35,9 +35,31 @@ HOOK_EVENTS: tuple[dict[str, str | None], ...] = (
 )
 CODEX_STATIC_TEMPLATE_FILES: tuple[Path, ...] = (
     Path("config.toml"),
+)
+DEPRECATED_CODEX_TEMPLATE_FILES: tuple[Path, ...] = (
     Path("agents/junior-worker.toml"),
     Path("agents/senior-worker.toml"),
     Path("agents/specialist-worker.toml"),
+)
+DEPRECATED_CODEX_CONFIG_PATHS = (("features", "multi_agent"),)
+DEPRECATED_TAPL_CONFIG_KEYS = (
+    "use_level_subagent",
+    "use-level-subagent",
+    "level_subagent_aggressiveness",
+    "level-subagent-aggressiveness",
+    "plan_detail",
+    "plan-detail",
+    "planning_approval_level",
+    "planning-approval-level",
+    "task_granularity",
+    "task-granularity",
+    "require_execution_approval",
+    "require-execution-approval",
+)
+DEPRECATED_TAPL_CONFIG_PATHS = tuple(
+    (table, key)
+    for table in ("plan-task-execute", "plan_task_execute")
+    for key in DEPRECATED_TAPL_CONFIG_KEYS
 )
 
 
@@ -59,6 +81,7 @@ def install_user(
     files = [
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
         *install_static_codex_templates(target, force=force, dry_run=dry_run),
+        *remove_deprecated_codex_templates(target, dry_run=dry_run),
         write_tapl_config(
             tapl_config_path,
             default_config_text(),
@@ -103,6 +126,7 @@ def install_repo(
     files = [
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
         *install_static_codex_templates(root / ".codex", force=force, dry_run=dry_run),
+        *remove_deprecated_codex_templates(root / ".codex", dry_run=dry_run),
         write_tapl_config(
             config_path,
             default_config_text(),
@@ -412,10 +436,15 @@ def write_tapl_config(
     if not path.exists():
         return write_text_if_needed(path, template, force=False, dry_run=dry_run)
 
-    if path.read_text(encoding="utf-8") == template:
+    existing_text = path.read_text(encoding="utf-8")
+    if existing_text == template:
         return {"path": str(path), "action": "unchanged"}
 
     if previous_version == __version__:
+        if remove_toml_assignments(existing_text, DEPRECATED_TAPL_CONFIG_PATHS) != existing_text:
+            result = merge_tapl_config(path, template, dry_run=dry_run)
+            result["policy"] = TAPL_CONFIG_POLICY_MERGE
+            return result
         return write_text_if_needed(path, template, force=False, dry_run=dry_run)
 
     policy = resolve_tapl_config_policy(
@@ -469,9 +498,12 @@ def prompt_tapl_config_policy(path: Path, *, previous_version: str | None) -> st
 
 
 def merge_tapl_config(path: Path, template: str, *, dry_run: bool) -> dict[str, str]:
-    existing_text = path.read_text(encoding="utf-8")
+    original_text = path.read_text(encoding="utf-8")
+    existing_text = remove_toml_assignments(original_text, DEPRECATED_TAPL_CONFIG_PATHS)
     if existing_text == template:
-        return {"path": str(path), "action": "unchanged"}
+        if original_text == existing_text:
+            return {"path": str(path), "action": "unchanged"}
+        return write_text_if_needed(path, existing_text, force=True, dry_run=dry_run)
 
     try:
         existing = tomllib.loads(existing_text)
@@ -481,10 +513,12 @@ def merge_tapl_config(path: Path, template: str, *, dry_run: bool) -> dict[str, 
 
     missing = missing_toml_values(existing, managed)
     if not missing:
-        return {"path": str(path), "action": "unchanged"}
+        if original_text == existing_text:
+            return {"path": str(path), "action": "unchanged"}
+        return write_text_if_needed(path, existing_text, force=True, dry_run=dry_run)
 
     merged_text = insert_missing_toml_values(existing_text, existing, missing)
-    action = "merged" if existing_text != merged_text else "unchanged"
+    action = "merged" if original_text != merged_text else "unchanged"
     if dry_run:
         action = f"would_{action}" if action != "unchanged" else "unchanged"
     elif action == "merged":
@@ -504,14 +538,6 @@ max_results = {config.DEFAULT_SEARCH_MAX_RESULTS}
 hybrid_semantic_ratio = {config.DEFAULT_HYBRID_SEMANTIC_RATIO}
 semantic_provider = "{config.DEFAULT_SEMANTIC_PROVIDER}"
 searchd_model_idle_timeout_seconds = {config.DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS}
-
-[plan-task-execute]
-use_level_subagent = {str(config.DEFAULT_USE_LEVEL_SUBAGENT).lower()}
-level_subagent_aggressiveness = "{config.DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS}"
-plan_detail = "{config.DEFAULT_PLAN_DETAIL}"
-planning_approval_level = "{config.DEFAULT_PLANNING_APPROVAL_LEVEL}"
-task_granularity = "{config.DEFAULT_TASK_GRANULARITY}"
-require_execution_approval = {str(config.DEFAULT_REQUIRE_EXECUTION_APPROVAL).lower()}
 """
 
 
@@ -529,13 +555,31 @@ def install_static_codex_templates(target: Path, *, force: bool, dry_run: bool) 
     return results
 
 
+def remove_deprecated_codex_templates(target: Path, *, dry_run: bool) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
+    for relative in DEPRECATED_CODEX_TEMPLATE_FILES:
+        path = target / relative
+        if not path.exists():
+            continue
+        if dry_run:
+            action = "would_remove"
+        else:
+            path.unlink()
+            action = "removed"
+        results.append({"path": str(path), "action": action})
+    return results
+
+
 def merge_codex_config(path: Path, template: str, *, force: bool, dry_run: bool) -> dict[str, str]:
     if not path.exists():
         return write_text_if_needed(path, template, force=force, dry_run=dry_run)
 
-    existing_text = path.read_text(encoding="utf-8")
+    original_text = path.read_text(encoding="utf-8")
+    existing_text = remove_toml_assignments(original_text, DEPRECATED_CODEX_CONFIG_PATHS)
     if existing_text == template:
-        return {"path": str(path), "action": "unchanged"}
+        if original_text == existing_text:
+            return {"path": str(path), "action": "unchanged"}
+        return write_text_if_needed(path, existing_text, force=True, dry_run=dry_run)
 
     try:
         existing = tomllib.loads(existing_text)
@@ -547,15 +591,15 @@ def merge_codex_config(path: Path, template: str, *, force: bool, dry_run: bool)
 
     if force:
         merged_text = dump_toml(merge_toml_values(existing, managed, managed_wins=True))
-        action = "updated" if existing_text != merged_text else "unchanged"
+        action = "updated" if original_text != merged_text else "unchanged"
     else:
         missing = missing_toml_values(existing, managed)
         if not missing:
-            action = "unchanged"
+            action = "updated" if original_text != existing_text else "unchanged"
             merged_text = existing_text
         else:
             merged_text = insert_missing_toml_values(existing_text, existing, missing)
-            action = "merged" if existing_text != merged_text else "unchanged"
+            action = "merged" if original_text != merged_text else "unchanged"
 
     if dry_run:
         action = f"would_{action}" if action != "unchanged" else "unchanged"
@@ -686,6 +730,23 @@ def parse_toml_table_header(line: str) -> tuple[str, ...] | None:
     except tomllib.TOMLDecodeError:
         return None
     return find_toml_marker_path(parsed)
+
+
+def remove_toml_assignments(text: str, paths: tuple[tuple[str, ...], ...]) -> str:
+    deprecated = set(paths)
+    table: tuple[str, ...] = ()
+    kept: list[str] = []
+    for line in text.splitlines(keepends=True):
+        header = parse_toml_table_header(line)
+        if header is not None:
+            table = header
+            kept.append(line)
+            continue
+        match = re.match(r"^\s*([A-Za-z0-9_-]+)\s*=", line)
+        if match and (*table, match.group(1)) in deprecated:
+            continue
+        kept.append(line)
+    return "".join(kept)
 
 
 def find_toml_marker_path(data: dict[str, Any], prefix: tuple[str, ...] = ()) -> tuple[str, ...] | None:

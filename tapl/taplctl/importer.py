@@ -40,7 +40,6 @@ class ParsedTask:
     spec_id: str
     goal: str
     action: str
-    required_subagent: str
     verification: str
     result: str
     blocker: str
@@ -414,7 +413,6 @@ def parse_tasks(source: MarkdownSource | None) -> list[ParsedTask]:
                 spec_id=spec_id,
                 goal=fields.get("Goal") or title,
                 action=fields.get("Action", ""),
-                required_subagent=normalize_subagent(fields.get("Required Subagent", "")),
                 verification=fields.get("Verification", ""),
                 result=fields.get("Result", ""),
                 blocker=fields.get("Blocker", ""),
@@ -486,13 +484,12 @@ def upsert_imported_task(conn: sqlite3.Connection, *, task: ParsedTask, source: 
     )
     conn.execute(
         """
-        INSERT INTO tasks(item_id, task_id, spec_id, goal, action, required_subagent, verification, result, blocker, next_action)
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tasks(item_id, task_id, spec_id, goal, action, verification, result, blocker, next_action)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(item_id) DO UPDATE SET
           spec_id = excluded.spec_id,
           goal = excluded.goal,
           action = excluded.action,
-          required_subagent = excluded.required_subagent,
           verification = excluded.verification,
           result = excluded.result,
           blocker = excluded.blocker,
@@ -504,7 +501,6 @@ def upsert_imported_task(conn: sqlite3.Connection, *, task: ParsedTask, source: 
             task.spec_id,
             task.goal,
             task.action,
-            task.required_subagent,
             task.verification,
             task.result,
             task.blocker,
@@ -645,13 +641,6 @@ def split_title_trace(text: str) -> tuple[str, str]:
 def normalize_task_status(status: str) -> str:
     normalized = status.strip()
     return normalized if normalized in db.TASK_STATUSES else "Pending"
-
-
-def normalize_subagent(value: str) -> str:
-    match = re.search(r"\[(@[^\]]+)\]", value)
-    if match:
-        return match.group(1)
-    return value.strip()
 
 
 def clean_block(text: str) -> str:

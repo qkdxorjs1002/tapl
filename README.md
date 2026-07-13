@@ -84,9 +84,9 @@ records.
 
 For normal use, ask Codex to do the work and let the installed hooks keep the
 records current. If you are debugging or manually repairing workflow state, the
-field rules and required field sets are available in command help. The task
-help reflects `[plan-task-execute]` settings such as subagent routing when
-`--config` is passed:
+field rules and required field sets are available in command help. `--config`
+controls search behavior only; task help and validation always use TAPL's fixed
+workflow policy:
 
 ```sh
 taplctl plan set --help
@@ -253,12 +253,11 @@ taplctl archive create --help
 snippet is not enough context, use its numeric `id` with
 `taplctl item show --id <id>` before relying on the full record details.
 
-Plan/task validation is controlled by `[plan-task-execute]` in the same config
-files. Settings such as `plan_detail`, `task_granularity`,
-`planning_approval_level`, `level_subagent_aggressiveness`, and
-`require_execution_approval` are reflected in lifecycle context and validation
-issues. `taplctl task set --help` also uses the selected config to show the
-effective required task field sets.
+Plan/task workflow policy is fixed rather than configurable. TAPL always asks
+for a very detailed plan, explicit user confirmation before plan finalization,
+independently split edit/migration/verification tasks, and recorded execution
+approval before durable edits. `taplctl task set --help` always shows the same
+required task field set.
 
 ## Source Layout
 
@@ -266,7 +265,7 @@ effective required task field sets.
 .
 ├── .codex/                    # Repo-local files produced by taplctl install repo
 ├── .tapl/config.toml          # Repo-local runtime config
-├── tapl/.codex/               # Codex hook and agent templates packaged with taplctl
+├── tapl/.codex/               # Codex config and hook templates packaged with taplctl
 ├── tapl/.tapl/config.toml     # Default tapl config template
 ├── tapl/taplctl/              # Python CLI and workflow harness implementation
 ├── tapl/tests/                # Python tests

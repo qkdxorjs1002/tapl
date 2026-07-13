@@ -15,7 +15,6 @@ export interface TaplItem {
   title: string;
   body?: string;
   status?: string;
-  required_subagent?: string;
   source?: string;
   updated_at?: string;
 }
@@ -77,7 +76,6 @@ export interface TaplItemDetail extends TaplItem {
   spec_id?: string;
   goal?: string;
   action?: string;
-  required_subagent?: string;
   verification?: string;
   result?: string;
   blocker?: string;

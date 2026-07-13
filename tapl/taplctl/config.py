@@ -17,19 +17,9 @@ DEFAULT_HYBRID_SEMANTIC_RATIO = 0.65
 DEFAULT_SEARCH_MAX_RESULTS = 12
 DEFAULT_SEMANTIC_PROVIDER = "auto"
 DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
-DEFAULT_USE_LEVEL_SUBAGENT = True
-DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS = "auto"
-DEFAULT_PLAN_DETAIL = "very_detailed"
-DEFAULT_PLANNING_APPROVAL_LEVEL = "more"
-DEFAULT_TASK_GRANULARITY = "very_granular"
-DEFAULT_REQUIRE_EXECUTION_APPROVAL = True
 
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
-LEVEL_SUBAGENT_AGGRESSIVENESS = ("minimal", "auto", "force")
-PLAN_DETAILS = ("minimal", "less_detailed", "detailed", "very_detailed")
-PLANNING_APPROVAL_LEVELS = ("less", "auto", "more")
-TASK_GRANULARITIES = ("minimal", "less_granular", "granular", "very_granular")
 
 
 @dataclass(frozen=True)
@@ -60,38 +50,16 @@ class SearchConfig:
 
 
 @dataclass(frozen=True)
-class PlanTaskExecuteConfig:
-    use_level_subagent: bool = DEFAULT_USE_LEVEL_SUBAGENT
-    level_subagent_aggressiveness: str = DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS
-    plan_detail: str = DEFAULT_PLAN_DETAIL
-    planning_approval_level: str = DEFAULT_PLANNING_APPROVAL_LEVEL
-    task_granularity: str = DEFAULT_TASK_GRANULARITY
-    require_execution_approval: bool = DEFAULT_REQUIRE_EXECUTION_APPROVAL
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "use_level_subagent": self.use_level_subagent,
-            "level_subagent_aggressiveness": self.level_subagent_aggressiveness,
-            "plan_detail": self.plan_detail,
-            "planning_approval_level": self.planning_approval_level,
-            "task_granularity": self.task_granularity,
-            "require_execution_approval": self.require_execution_approval,
-        }
-
-
-@dataclass(frozen=True)
 class TaplConfig:
     path: str
     exists: bool
     search: SearchConfig = field(default_factory=SearchConfig)
-    plan_task_execute: PlanTaskExecuteConfig = field(default_factory=PlanTaskExecuteConfig)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "path": self.path,
             "exists": self.exists,
             "search": self.search.as_dict(),
-            "plan_task_execute": self.plan_task_execute.as_dict(),
         }
 
 
@@ -143,8 +111,6 @@ def load(
         data = parsed
 
     search_data = table(data, "search")
-    plan_task_data = table(data, "plan-task-execute", "plan_task_execute")
-
     search = SearchConfig(
         mode=choice(
             setting(search_data, "mode", default=DEFAULT_SEARCH_MODE),
@@ -198,61 +164,10 @@ def load(
             "search.searchd_model_idle_timeout_seconds",
         ),
     )
-    plan_task_execute = PlanTaskExecuteConfig(
-        use_level_subagent=boolean(
-            setting(
-                plan_task_data,
-                "use_level_subagent",
-                "use-level-subagent",
-                default=DEFAULT_USE_LEVEL_SUBAGENT,
-            ),
-            "plan_task_execute.use_level_subagent",
-        ),
-        level_subagent_aggressiveness=choice(
-            setting(
-                plan_task_data,
-                "level_subagent_aggressiveness",
-                "level-subagent-aggressiveness",
-                default=DEFAULT_LEVEL_SUBAGENT_AGGRESSIVENESS,
-            ),
-            LEVEL_SUBAGENT_AGGRESSIVENESS,
-            "plan_task_execute.level_subagent_aggressiveness",
-        ),
-        plan_detail=choice(
-            setting(plan_task_data, "plan_detail", "plan-detail", default=DEFAULT_PLAN_DETAIL),
-            PLAN_DETAILS,
-            "plan_task_execute.plan_detail",
-        ),
-        planning_approval_level=choice(
-            setting(
-                plan_task_data,
-                "planning_approval_level",
-                "planning-approval-level",
-                default=DEFAULT_PLANNING_APPROVAL_LEVEL,
-            ),
-            PLANNING_APPROVAL_LEVELS,
-            "plan_task_execute.planning_approval_level",
-        ),
-        task_granularity=choice(
-            setting(plan_task_data, "task_granularity", "task-granularity", default=DEFAULT_TASK_GRANULARITY),
-            TASK_GRANULARITIES,
-            "plan_task_execute.task_granularity",
-        ),
-        require_execution_approval=boolean(
-            setting(
-                plan_task_data,
-                "require_execution_approval",
-                "require-execution-approval",
-                default=DEFAULT_REQUIRE_EXECUTION_APPROVAL,
-            ),
-            "plan_task_execute.require_execution_approval",
-        ),
-    )
     return TaplConfig(
         path=str(config_path),
         exists=exists,
         search=search,
-        plan_task_execute=plan_task_execute,
     )
 
 
@@ -306,10 +221,4 @@ def non_negative_int(value: Any, key: str) -> int:
         raise ValueError(f"{key} must be a non-negative integer")
     if value < 0:
         raise ValueError(f"{key} must be a non-negative integer")
-    return value
-
-
-def boolean(value: Any, key: str) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError(f"{key} must be a boolean")
     return value

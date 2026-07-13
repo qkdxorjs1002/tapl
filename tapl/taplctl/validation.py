@@ -1,4 +1,4 @@
-"""Plan/task validation driven by tapl runtime config."""
+"""Plan/task validation driven by TAPL's fixed workflow policy."""
 
 from __future__ import annotations
 
@@ -6,10 +6,9 @@ import re
 import sqlite3
 from typing import Any
 
-from . import config as tapl_config, db, prompt as tapl_prompt
+from . import db, prompt as tapl_prompt
 
 
-LEVEL_SUBAGENTS = tapl_prompt.LEVEL_SUBAGENTS
 EXECUTABLE_STATUSES = ("Pending", "In Progress", "Blocked")
 PLAN_KEY_LABELS = tapl_prompt.PLAN_KEY_LABELS
 PLAN_ID_PATTERN = re.compile(r"^(?:PLAN|SPEC)-\d{3,}$")
@@ -18,7 +17,6 @@ TASK_ID_PATTERN = re.compile(r"^TASK-\d{3,}$")
 
 def validate_plan_task_execute(
     conn: sqlite3.Connection,
-    settings: tapl_config.PlanTaskExecuteConfig,
     *,
     include_guidance: bool = False,
 ) -> dict[str, Any]:
@@ -31,20 +29,19 @@ def validate_plan_task_execute(
             "issues": [],
         }
         if include_guidance:
-            result["guidance"] = guidance(settings)
+            result["guidance"] = guidance()
         return result
 
     plans = state.get("plans", [])
     tasks = state.get("tasks", [])
     issues: list[dict[str, Any]] = []
     issues.extend(validate_stable_ids(plans, tasks))
-    issues.extend(validate_level_subagents(tasks, settings))
-    issues.extend(validate_plan_detail(plans, settings))
-    issues.extend(validate_plan_content(plans, settings))
-    issues.extend(validate_task_granularity(plans, tasks, settings))
-    issues.extend(validate_task_content(tasks, settings))
+    issues.extend(validate_plan_detail(plans))
+    issues.extend(validate_plan_content(plans))
+    issues.extend(validate_task_granularity(plans, tasks))
+    issues.extend(validate_task_content(tasks))
     issues.extend(validate_task_execution_order(tasks))
-    issues.extend(validate_execution_approval(state, tasks, settings))
+    issues.extend(validate_execution_approval(state, tasks))
     errors = [item for item in issues if item["severity"] == "error"]
     warnings = [item for item in issues if item["severity"] == "warning"]
     result = {
@@ -54,14 +51,13 @@ def validate_plan_task_execute(
         "issues": issues,
     }
     if include_guidance:
-        result["guidance"] = guidance(settings)
+        result["guidance"] = guidance()
     return result
 
 
 def validate_plan_input(
     *,
     plan_id: str,
-    settings: tapl_config.PlanTaskExecuteConfig,
 ) -> dict[str, Any]:
     issues = validate_stable_ids([{"stable_id": plan_id}], [])
     errors = [item for item in issues if item["severity"] == "error"]
@@ -71,7 +67,7 @@ def validate_plan_input(
         "errors": errors,
         "warnings": warnings,
         "issues": issues,
-        "guidance": guidance(settings),
+        "guidance": guidance(),
     }
 
 
@@ -80,17 +76,13 @@ def validate_task_input(
     task_id: str,
     status: str,
     spec_id: str,
-    required_subagent: str,
-    settings: tapl_config.PlanTaskExecuteConfig,
 ) -> dict[str, Any]:
     task = {
         "stable_id": task_id,
         "status": status,
         "spec_id": spec_id,
-        "required_subagent": required_subagent,
     }
     issues = validate_stable_ids([], [task])
-    issues.extend(validate_level_subagents([task], settings))
     errors = [item for item in issues if item["severity"] == "error"]
     warnings = [item for item in issues if item["severity"] == "warning"]
     return {
@@ -98,36 +90,8 @@ def validate_task_input(
         "errors": errors,
         "warnings": warnings,
         "issues": issues,
-        "guidance": guidance(settings),
+        "guidance": guidance(),
     }
-
-
-def validate_new_task_routing(
-    *,
-    task_id: str,
-    status: str,
-    required_subagent: str,
-    settings: tapl_config.PlanTaskExecuteConfig,
-) -> list[dict[str, Any]]:
-    if not requires_required_subagent(settings):
-        return []
-    if status not in EXECUTABLE_STATUSES:
-        return []
-    if required_subagent.strip():
-        return []
-    return [
-        issue(
-            "error",
-            "missing_required_subagent",
-            f"{task_id} is executable and new task creation requires required_subagent.",
-            tapl_prompt.new_task_required_subagent_remediation(settings),
-            stable_id=task_id,
-        )
-    ]
-
-
-def requires_required_subagent(settings: tapl_config.PlanTaskExecuteConfig) -> bool:
-    return bool(settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal")
 
 
 def validate_stable_ids(plans: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -180,80 +144,24 @@ def is_numeric_task_id(stable_id: str) -> bool:
     return bool(TASK_ID_PATTERN.fullmatch(stable_id))
 
 
-def validate_level_subagents(
-    tasks: list[dict[str, Any]],
-    settings: tapl_config.PlanTaskExecuteConfig,
-) -> list[dict[str, Any]]:
-    if not settings.use_level_subagent:
-        return []
-
-    issues: list[dict[str, Any]] = []
-    for task in executable_tasks(tasks):
-        stable_id = str(task.get("stable_id") or task.get("task_id") or "task")
-        required = str(task.get("required_subagent") or "").strip()
-        if required and required not in LEVEL_SUBAGENTS:
-            issues.append(
-                issue(
-                    "error",
-                    "invalid_required_subagent",
-                    f"{stable_id} has invalid required_subagent `{required}`.",
-                    tapl_prompt.required_subagent_remediation(settings),
-                    stable_id=stable_id,
-                )
-            )
-            continue
-        if required:
-            continue
-
-        if settings.level_subagent_aggressiveness == "force":
-            severity = "error"
-        elif settings.level_subagent_aggressiveness == "auto":
-            severity = "warning"
-        else:
-            continue
-        issues.append(
-            issue(
-                severity,
-                "missing_required_subagent",
-                f"{stable_id} is executable but has no required_subagent.",
-                tapl_prompt.required_subagent_remediation(settings),
-                stable_id=stable_id,
-            )
-        )
-    return issues
-
-
-def validate_plan_detail(
-    plans: list[dict[str, Any]],
-    settings: tapl_config.PlanTaskExecuteConfig,
-) -> list[dict[str, Any]]:
-    if settings.plan_detail == "minimal":
-        return []
-
+def validate_plan_detail(plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
     body = "\n".join(str(plan.get("body") or plan.get("title") or "") for plan in plans).strip()
     if not plans:
-        severity = "error" if settings.plan_detail == "very_detailed" else "warning"
         return [
             issue(
-                severity,
+                "error",
                 "missing_plan",
-                f"plan_detail is `{settings.plan_detail}`, but the active run has no plan record.",
+                "The fixed `very_detailed` policy requires a plan record for the active run.",
                 tapl_prompt.missing_plan_remediation(),
             )
         ]
 
-    minimum_lengths = {
-        "less_detailed": 20,
-        "detailed": 80,
-        "very_detailed": 180,
-    }
-    minimum = minimum_lengths.get(settings.plan_detail, 0)
-    if minimum and len(body) < minimum:
+    if len(body) < 180:
         return [
             issue(
                 "warning",
                 "plan_detail_too_sparse",
-                f"plan_detail is `{settings.plan_detail}`, but plan text is sparse.",
+                "The fixed `very_detailed` policy requires a less sparse plan.",
                 tapl_prompt.sparse_plan_remediation(),
             )
         ]
@@ -263,26 +171,14 @@ def validate_plan_detail(
 def validate_task_granularity(
     plans: list[dict[str, Any]],
     tasks: list[dict[str, Any]],
-    settings: tapl_config.PlanTaskExecuteConfig,
 ) -> list[dict[str, Any]]:
-    granularity = settings.task_granularity
-    if granularity == "minimal":
-        return []
-
     task_count = len([task for task in tasks if task_status(task) != "Skipped"])
     if task_count == 0:
         return []
 
     plan_count = len(plans)
-    if granularity == "less_granular":
-        target = 2 if plan_count > 1 else 1
-        severity = "warning"
-    elif granularity == "granular":
-        target = max(1, plan_count)
-        severity = "warning"
-    else:
-        target = max(2, plan_count * 2)
-        severity = "error" if task_count <= 1 else "warning"
+    target = max(2, plan_count * 2)
+    severity = "error" if task_count <= 1 else "warning"
 
     if task_count >= target:
         return []
@@ -291,17 +187,14 @@ def validate_task_granularity(
         issue(
             severity,
             "task_granularity_too_coarse",
-            f"task_granularity is `{granularity}`, but {task_count} task(s) cover {plan_count} plan item(s).",
-            task_granularity_remediation(granularity),
+            f"The fixed `very_granular` policy has {task_count} task(s) for {plan_count} plan item(s).",
+            task_granularity_remediation(),
         )
     ]
 
 
-def validate_plan_content(
-    plans: list[dict[str, Any]],
-    settings: tapl_config.PlanTaskExecuteConfig,
-) -> list[dict[str, Any]]:
-    if settings.plan_detail in {"minimal", "less_detailed"} or not plans:
+def validate_plan_content(plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not plans:
         return []
 
     body = "\n".join(str(plan.get("body") or plan.get("title") or "") for plan in plans).strip()
@@ -323,10 +216,7 @@ def validate_plan_content(
     ]
 
 
-def validate_task_content(
-    tasks: list[dict[str, Any]],
-    settings: tapl_config.PlanTaskExecuteConfig,
-) -> list[dict[str, Any]]:
+def validate_task_content(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     for task in tasks:
         status = task_status(task)
@@ -335,7 +225,7 @@ def validate_task_content(
 
         stable_id = str(task.get("stable_id") or task.get("task_id") or "task")
         missing: list[str] = []
-        for field in tapl_prompt.task_required_field_names(settings, status):
+        for field in tapl_prompt.task_required_field_names(status):
             if not str(task.get(field) or "").strip():
                 missing.append(field)
 
@@ -345,7 +235,7 @@ def validate_task_content(
                     "warning",
                     "task_content_missing_fields",
                     f"{stable_id} is missing task field(s): {', '.join(missing)}.",
-                    tapl_prompt.task_content_remediation(settings),
+                    tapl_prompt.task_content_remediation(),
                     stable_id=stable_id,
                 )
             )
@@ -396,7 +286,6 @@ def validate_task_execution_order(tasks: list[dict[str, Any]]) -> list[dict[str,
 def validate_execution_approval(
     state: dict[str, Any],
     tasks: list[dict[str, Any]],
-    settings: tapl_config.PlanTaskExecuteConfig,
 ) -> list[dict[str, Any]]:
     if not executable_tasks(tasks):
         return []
@@ -416,10 +305,9 @@ def validate_execution_approval(
             )
         ]
 
-    severity = "error" if settings.require_execution_approval else "warning"
     return [
         issue(
-            severity,
+            "error",
             "execution_approval_missing",
             "Executable tasks exist but execution approval is not recorded.",
             tapl_prompt.execution_approval_missing_remediation(),
@@ -444,45 +332,36 @@ def has_any(text: str, needles: tuple[str, ...]) -> bool:
     return any(needle.lower() in lowered for needle in needles) or bool(re.search(r"\bREQ-\d+\b", text))
 
 
-def guidance(settings: tapl_config.PlanTaskExecuteConfig) -> dict[str, Any]:
+def guidance() -> dict[str, Any]:
     payload: dict[str, Any] = {
         "field_contract_source": "Use `taplctl <command> <subcommand> --help` for exact field contracts and examples.",
         "stable_ids": stable_id_guidance(),
-        "plan_detail": plan_detail_guidance(settings.plan_detail),
-        "task_granularity": task_granularity_guidance(settings.task_granularity),
-        "task_required_fields": tapl_prompt.task_required_field_summary(settings),
-        "execution_approval": execution_approval_validation_guidance(settings),
+        "fixed_plan_policy": plan_detail_guidance(),
+        "fixed_task_policy": task_granularity_guidance(),
+        "task_required_fields": tapl_prompt.task_required_field_summary(),
+        "fixed_execution_approval_policy": execution_approval_validation_guidance(),
     }
-    if settings.use_level_subagent:
-        payload["allowed_level_subagents"] = list(LEVEL_SUBAGENTS)
-        payload["required_subagent"] = level_subagent_guidance(settings)
     return payload
 
 
-def level_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    return tapl_prompt.level_subagent_guidance(settings)
-
-
-def plan_detail_guidance(value: str) -> str:
-    return tapl_prompt.plan_detail_guidance(value)
+def plan_detail_guidance() -> str:
+    return tapl_prompt.plan_detail_guidance()
 
 
 def stable_id_guidance() -> str:
     return tapl_prompt.stable_id_guidance()
 
 
-def task_granularity_guidance(value: str) -> str:
-    return tapl_prompt.task_granularity_guidance(value)
+def task_granularity_guidance() -> str:
+    return tapl_prompt.task_granularity_guidance()
 
 
-def execution_approval_validation_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    if settings.require_execution_approval:
-        return "Missing execution approval is a validation error; use `taplctl approval approve --help` for the high-level command."
-    return "Missing execution approval is a validation warning; use `taplctl approval approve --help` when approval is needed."
+def execution_approval_validation_guidance() -> str:
+    return "Missing execution approval is always a validation error; use `taplctl approval approve --help` for the high-level command."
 
 
-def task_granularity_remediation(value: str) -> str:
-    return tapl_prompt.task_granularity_remediation(value)
+def task_granularity_remediation() -> str:
+    return tapl_prompt.task_granularity_remediation()
 
 
 def format_issues(result: dict[str, Any], *, max_items: int = 6) -> str:

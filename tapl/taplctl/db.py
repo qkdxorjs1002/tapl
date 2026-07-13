@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -109,7 +109,6 @@ def migrate(conn: sqlite3.Connection) -> None:
           spec_id TEXT,
           goal TEXT NOT NULL DEFAULT '',
           action TEXT NOT NULL DEFAULT '',
-          required_subagent TEXT NOT NULL DEFAULT '',
           verification TEXT NOT NULL DEFAULT '',
           result TEXT NOT NULL DEFAULT '',
           blocker TEXT NOT NULL DEFAULT '',
@@ -185,6 +184,7 @@ def migrate(conn: sqlite3.Connection) -> None:
 
     ensure_column(conn, "workflow_runs", "result_summary", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "approvals", "source", "TEXT NOT NULL DEFAULT 'unspecified'")
+    drop_column(conn, "tasks", "required_subagent")
     backfill_plan_rows(conn)
     dedupe_active_runs(conn)
     conn.execute(
@@ -204,6 +204,12 @@ def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition:
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+
+
+def drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column in existing:
+        conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
 
 
 def backfill_plan_rows(conn: sqlite3.Connection) -> None:
@@ -398,7 +404,7 @@ def get_active_task(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | Non
         return None
     return conn.execute(
         """
-        SELECT i.*, t.spec_id, t.goal, t.action, t.required_subagent, t.verification, t.result, t.blocker, t.next_action
+        SELECT i.*, t.spec_id, t.goal, t.action, t.verification, t.result, t.blocker, t.next_action
         FROM items i
         LEFT JOIN tasks t ON t.item_id = i.id
         WHERE i.run_id = ? AND i.kind = 'task' AND i.stable_id = ?
@@ -602,7 +608,6 @@ def upsert_task(
     spec_id: str = "",
     goal: str = "",
     action: str = "",
-    required_subagent: str = "",
     verification: str = "",
     result: str = "",
     blocker: str = "",
@@ -629,19 +634,18 @@ def upsert_task(
     )
     conn.execute(
         """
-        INSERT INTO tasks(item_id, task_id, spec_id, goal, action, required_subagent, verification, result, blocker, next_action)
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tasks(item_id, task_id, spec_id, goal, action, verification, result, blocker, next_action)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(item_id) DO UPDATE SET
           spec_id = excluded.spec_id,
           goal = excluded.goal,
           action = excluded.action,
-          required_subagent = excluded.required_subagent,
           verification = excluded.verification,
           result = excluded.result,
           blocker = excluded.blocker,
           next_action = excluded.next_action
         """,
-        (item["id"], task_id, spec_id, goal, action, required_subagent, verification, result, blocker, next_action),
+        (item["id"], task_id, spec_id, goal, action, verification, result, blocker, next_action),
     )
     conn.commit()
     return item
@@ -889,7 +893,7 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
     if run_id:
         for row in conn.execute(
             """
-            SELECT i.*, t.spec_id, t.goal, t.action, t.required_subagent, t.verification, t.result, t.blocker, t.next_action
+            SELECT i.*, t.spec_id, t.goal, t.action, t.verification, t.result, t.blocker, t.next_action
             FROM items i
             LEFT JOIN tasks t ON t.item_id = i.id
             WHERE i.run_id = ? AND i.kind = 'task'
@@ -1010,7 +1014,6 @@ def archive_detail(conn: sqlite3.Connection, archive_id_or_slug: str) -> dict[st
               t.spec_id,
               t.goal,
               t.action,
-              t.required_subagent,
               t.verification,
               t.result,
               t.blocker,
@@ -1078,7 +1081,6 @@ def item_detail(conn: sqlite3.Connection, item_id: int) -> dict[str, Any] | None
           t.spec_id,
           t.goal,
           t.action,
-          t.required_subagent,
           t.verification,
           t.result,
           t.blocker,

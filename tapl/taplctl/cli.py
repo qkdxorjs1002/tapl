@@ -53,11 +53,9 @@ def plan_set_epilog() -> str:
     return tapl_prompt.plan_set_epilog()
 
 
-def task_set_epilog(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> str:
+def task_set_epilog() -> str:
     return tapl_prompt.task_set_epilog(
-        settings=settings,
         statuses=db.TASK_STATUSES,
-        subagents=validation.LEVEL_SUBAGENTS,
     )
 
 
@@ -133,7 +131,6 @@ def add_task_write_args(
     parser.add_argument("--spec-id", default=None, help=tapl_prompt.field_help("task", "spec_id"))
     parser.add_argument("--goal", default=None, help=tapl_prompt.field_help("task", "goal"))
     parser.add_argument("--action", default=None, help=tapl_prompt.field_help("task", "action"))
-    parser.add_argument("--required-subagent", default=None, help=tapl_prompt.field_help("task", "required_subagent"))
     parser.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
     parser.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
     parser.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
@@ -158,7 +155,7 @@ def add_approval_write_args(parser: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv_list = list(sys.argv[1:] if argv is None else argv)
-    parser = build_parser(settings=preload_plan_task_settings(argv_list))
+    parser = build_parser()
     parser.tapl_argv = argv_list
     args = parser.parse_args(argv_list)
     if not hasattr(args, "handler"):
@@ -190,23 +187,6 @@ def should_skip_auto_install(args: argparse.Namespace) -> bool:
     if command in {None, "install", "hook-event"}:
         return True
     return command == "searchd" and getattr(args, "searchd_command", None) == "run"
-
-
-def preload_plan_task_settings(argv: list[str]) -> tapl_config.PlanTaskExecuteConfig:
-    config_path = preparse_config_path(argv)
-    try:
-        return tapl_config.load(Path(config_path) if config_path else None).plan_task_execute
-    except Exception:
-        return tapl_config.PlanTaskExecuteConfig()
-
-
-def preparse_config_path(argv: list[str]) -> str | None:
-    for index, arg in enumerate(argv):
-        if arg == "--config" and index + 1 < len(argv):
-            return argv[index + 1]
-        if arg.startswith("--config="):
-            return arg.split("=", 1)[1]
-    return None
 
 
 def command_error_suggestion(message: str, argv: list[str]) -> str:
@@ -299,8 +279,7 @@ def require_arg(args: argparse.Namespace, field: str, flag: str, *, command: str
     return False
 
 
-def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> argparse.ArgumentParser:
-    plan_task_settings = settings or tapl_config.PlanTaskExecuteConfig()
+def build_parser() -> argparse.ArgumentParser:
     parser = TaplArgumentParser(
         prog="taplctl",
         description="Manage tapl workflow state for agent planning, execution, and validation.",
@@ -414,7 +393,7 @@ def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> a
         "set",
         help="Create or update a task.",
         description="Create or update an executable task record.",
-        epilog=task_set_epilog(plan_task_settings),
+        epilog=task_set_epilog(),
         formatter_class=HELP_FORMATTER,
     )
     add_task_write_args(task_set)
@@ -423,7 +402,7 @@ def build_parser(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> a
         "create",
         help="Create a pending executable task.",
         description="Create a pending executable task.",
-        epilog=task_set_epilog(plan_task_settings),
+        epilog=task_set_epilog(),
         formatter_class=HELP_FORMATTER,
     )
     add_task_write_args(task_create, required_id=False, include_json_input=True)
@@ -740,10 +719,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     settings = load_config(args)
     payload = db.status_payload(conn)
     payload["config"] = settings.as_dict()
-    payload["plan_task_execute"] = validation.validate_plan_task_execute(
-        conn,
-        settings.plan_task_execute,
-    )
+    payload["plan_task_execute"] = validation.validate_plan_task_execute(conn)
     payload = status_output_payload(
         payload,
         full=args.full or args.agent,
@@ -1158,10 +1134,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     settings = load_config(args)
     meta = db.get_meta(conn)
-    plan_task_execute = validation.validate_plan_task_execute(
-        conn,
-        settings.plan_task_execute,
-    )
+    plan_task_execute = validation.validate_plan_task_execute(conn)
     payload = {
         "ok": meta.get("schema_version") == str(db.SCHEMA_VERSION) and plan_task_execute["ok"],
         "schema_version": meta.get("schema_version"),
@@ -1293,7 +1266,6 @@ TASK_WRITE_FIELDS = (
     "spec_id",
     "goal",
     "action",
-    "required_subagent",
     "verification",
     "result",
     "blocker",
@@ -1324,7 +1296,6 @@ def merge_task_payload(args: argparse.Namespace) -> tuple[str, ...]:
         aliases={
             "id": ("task_id", "stable_id"),
             "spec_id": ("spec-id", "source_plan", "source_spec"),
-            "required_subagent": ("required-subagent",),
             "next_action": ("next-action",),
         },
     )
@@ -1349,10 +1320,7 @@ def write_plan(args: argparse.Namespace, *, operation: str) -> int:
     conn = open_conn(args)
     settings = load_config(args)
     existing = db.get_active_plan(conn, args.id)
-    input_check = validation.validate_plan_input(
-        plan_id=args.id,
-        settings=settings.plan_task_execute,
-    )
+    input_check = validation.validate_plan_input(plan_id=args.id)
     if not input_check["ok"]:
         emit({"ok": False, "plan_task_execute": input_check}, args.json, args.agent)
         return 1
@@ -1385,10 +1353,7 @@ def write_plan(args: argparse.Namespace, *, operation: str) -> int:
         approval_needs=merged_field("approval_needs"),
         notes=merged_field("notes"),
     )
-    plan_task_execute = validation.validate_plan_task_execute(
-        conn,
-        settings.plan_task_execute,
-    )
+    plan_task_execute = validation.validate_plan_task_execute(conn)
     if args.agent:
         print(
             agent_write_receipt(
@@ -1499,7 +1464,7 @@ def write_task(args: argparse.Namespace, *, operation: str) -> int:
                         "errors": [issue],
                         "warnings": [],
                         "issues": [issue],
-                        "guidance": validation.guidance(settings.plan_task_execute),
+                        "guidance": validation.guidance(),
                     },
                 },
                 args.json,
@@ -1521,7 +1486,6 @@ def write_task(args: argparse.Namespace, *, operation: str) -> int:
     spec_id = merged_field("spec_id")
     goal = merged_field("goal")
     action = merged_field("action")
-    required_subagent = merged_field("required_subagent")
     verification = merged_field("verification")
     result = merged_field("result")
     blocker = merged_field("blocker")
@@ -1531,29 +1495,7 @@ def write_task(args: argparse.Namespace, *, operation: str) -> int:
         task_id=args.id,
         status=status,
         spec_id=spec_id,
-        required_subagent=required_subagent,
-        settings=settings.plan_task_execute,
     )
-    if existing is None:
-        create_routing_issues = validation.validate_new_task_routing(
-            task_id=args.id,
-            status=status,
-            required_subagent=required_subagent,
-            settings=settings.plan_task_execute,
-        )
-        if create_routing_issues:
-            input_check["issues"] = [
-                issue for issue in input_check["issues"] if issue.get("code") != "missing_required_subagent"
-            ]
-            input_check["warnings"] = [
-                issue for issue in input_check["warnings"] if issue.get("code") != "missing_required_subagent"
-            ]
-            input_check["errors"] = [
-                issue for issue in input_check["errors"] if issue.get("code") != "missing_required_subagent"
-            ]
-            input_check["issues"].extend(create_routing_issues)
-            input_check["errors"].extend(create_routing_issues)
-            input_check["ok"] = False
     if not input_check["ok"]:
         emit({"ok": False, "plan_task_execute": input_check}, args.json, args.agent)
         return 1
@@ -1566,16 +1508,12 @@ def write_task(args: argparse.Namespace, *, operation: str) -> int:
         spec_id=spec_id,
         goal=goal,
         action=action,
-        required_subagent=required_subagent,
         verification=verification,
         result=result,
         blocker=blocker,
         next_action=next_action,
     )
-    plan_task_execute = validation.validate_plan_task_execute(
-        conn,
-        settings.plan_task_execute,
-    )
+    plan_task_execute = validation.validate_plan_task_execute(conn)
     if args.agent:
         print(
             agent_write_receipt(
@@ -1589,7 +1527,6 @@ def write_task(args: argparse.Namespace, *, operation: str) -> int:
                         "spec_id",
                         "goal",
                         "action",
-                        "required_subagent",
                         "verification",
                         "result",
                         "blocker",
@@ -1765,7 +1702,7 @@ def cmd_next(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     settings = load_config(args)
     state = db.status_payload(conn)
-    plan_task_execute = validation.validate_plan_task_execute(conn, settings.plan_task_execute)
+    plan_task_execute = validation.validate_plan_task_execute(conn)
     payload = {
         "ok": True,
         "recommendations": next_recommendations(state, plan_task_execute),
@@ -2011,7 +1948,6 @@ def cmd_hook_event(args: argparse.Namespace) -> int:
         tool=args.tool,
         payload=payload,
         tapl_settings=settings,
-        plan_task_settings=settings.plan_task_execute,
     )
     emit_hook_outcome(outcome, args.json, args.agent)
     return 2 if outcome.get("block") else 0

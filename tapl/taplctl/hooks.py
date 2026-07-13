@@ -47,12 +47,8 @@ def handle_event(
     tool: str | None,
     payload: dict[str, Any],
     tapl_settings: tapl_config.TaplConfig | None = None,
-    plan_task_settings: tapl_config.PlanTaskExecuteConfig | None = None,
 ) -> dict[str, Any]:
     tool_name = tool or infer_tool_name(payload)
-    settings = plan_task_settings or (
-        tapl_settings.plan_task_execute if tapl_settings else tapl_config.PlanTaskExecuteConfig()
-    )
     message = ""
     block = False
     context_packet: dict[str, Any] | None = None
@@ -63,11 +59,7 @@ def handle_event(
         db.ensure_active_run(conn, request_summary=db.DEFAULT_REQUEST_SUMMARY)
 
     if event in {"SessionStart", "UserPromptSubmit"}:
-        resolved_settings = tapl_settings or tapl_config.TaplConfig(
-            path="",
-            exists=False,
-            plan_task_execute=settings,
-        )
+        resolved_settings = tapl_settings or tapl_config.TaplConfig(path="", exists=False)
         context_packet = tapl_context.build_context(
             conn,
             event=event,
@@ -83,7 +75,7 @@ def handle_event(
             message = tapl_prompt.durable_edit_requires_plan_message()
             block = mode == "enforce"
         else:
-            check = validation.validate_plan_task_execute(conn, settings)
+            check = validation.validate_plan_task_execute(conn)
             issue_message = validation.format_issues(check)
             if issue_message:
                 message = combine_messages(message, issue_message)
@@ -102,7 +94,7 @@ def handle_event(
         if remaining:
             message = tapl_prompt.stop_remaining_tasks_message(remaining)
             block = mode == "enforce"
-        check = validation.validate_plan_task_execute(conn, settings)
+        check = validation.validate_plan_task_execute(conn)
         issue_message = validation.format_issues(check)
         if issue_message:
             message = combine_messages(message, issue_message)

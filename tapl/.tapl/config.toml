@@ -15,21 +15,3 @@ semantic_provider = "auto"
 
 # 0 disables model unload. The default keeps the model warm for 30 minutes after the last search.
 searchd_model_idle_timeout_seconds = 1800
-
-[plan-task-execute]
-use_level_subagent = true
-
-# Aggressiveness: minimal, auto, or force.
-level_subagent_aggressiveness = "auto"
-
-# Plan detail: minimal, less_detailed, detailed, or very_detailed.
-plan_detail = "very_detailed"
-
-# Planning approval: less, auto, or more.
-planning_approval_level = "more"
-
-# Task split granularity: minimal, less_granular, granular, or very_granular.
-task_granularity = "very_granular"
-
-# When true, executable tasks require recorded user approval before durable edits.
-require_execution_approval = true

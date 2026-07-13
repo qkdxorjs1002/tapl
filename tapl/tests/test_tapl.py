@@ -20,7 +20,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from taplctl import __version__, cli as tapl_cli, config as tapl_config, install as tapl_install, prompt as tapl_prompt
+from taplctl import (
+    __version__,
+    cli as tapl_cli,
+    config as tapl_config,
+    db as tapl_db,
+    install as tapl_install,
+    prompt as tapl_prompt,
+)
 
 
 class TaplCliTests(unittest.TestCase):
@@ -89,8 +96,6 @@ class TaplCliTests(unittest.TestCase):
                 "In Progress",
                 "--goal",
                 "Create DB-backed workflow state",
-                "--required-subagent",
-                "@senior-worker",
                 "--json",
             )
             self.assertEqual(task.returncode, 0, task.stderr)
@@ -112,7 +117,6 @@ class TaplCliTests(unittest.TestCase):
             self.assertIn("<incomplete_tasks>1</incomplete_tasks>", agent_status.stdout)
             self.assertIn("<in_progress>1</in_progress>", agent_status.stdout)
             self.assertIn("<goal>Create DB-backed workflow state</goal>", agent_status.stdout)
-            self.assertIn("<required_subagent>@senior-worker</required_subagent>", agent_status.stdout)
             self.assertIn("<code>execution_approval_missing</code>", agent_status.stdout)
             self.assertNotIn("<schema>", agent_status.stdout)
             self.assertNotIn("<config>", agent_status.stdout)
@@ -201,7 +205,7 @@ class TaplCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
             config_path = Path(tmp) / "config.toml"
-            config_path.write_text("[plan-task-execute]\nplan-detail = \"minimal\"\n", encoding="utf-8")
+            config_path.write_text("[search]\nmode = \"bm25\"\n", encoding="utf-8")
             init = self.run_cli(db_path, "init", "--json")
             self.assertEqual(init.returncode, 0, init.stderr)
 
@@ -311,8 +315,6 @@ class TaplCliTests(unittest.TestCase):
                 "Use agent output",
                 "--action",
                 "Run workflow commands with --agent",
-                "--required-subagent",
-                "@senior-worker",
                 "--verification",
                 "Agent output includes needed task fields",
                 "--agent",
@@ -324,9 +326,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertIn("<field>goal</field>", task.stdout)
             self.assertNotIn("Use agent output", task.stdout)
             self.assertNotIn("Run workflow commands with --agent", task.stdout)
-            self.assertNotIn("@senior-worker", task.stdout)
             self.assertNotIn("<goal>", task.stdout)
-            self.assertNotIn("<required_subagent>", task.stdout)
             self.assertIn("<code>execution_approval_missing</code>", task.stdout)
             self.assertNotIn("<config>", task.stdout)
 
@@ -632,8 +632,6 @@ class TaplCliTests(unittest.TestCase):
                 "Preserve unchanged fields",
                 "--action",
                 "Merge supplied task fields with stored values",
-                "--required-subagent",
-                "@senior-worker",
                 "--verification",
                 "Run focused tests",
                 "--json",
@@ -662,9 +660,50 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(task["spec_id"], "SPEC-001")
             self.assertEqual(task["goal"], "Preserve unchanged fields")
             self.assertEqual(task["action"], "Merge supplied task fields with stored values")
-            self.assertEqual(task["required_subagent"], "@senior-worker")
             self.assertEqual(task["verification"], "Run focused tests")
             self.assertEqual(task["result"], "Focused tests passed")
+
+    def test_task_schema_migration_removes_legacy_subagent_column_without_data_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            created = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--title",
+                "Preserve task data",
+                "--status",
+                "Completed",
+                "--spec-id",
+                "PLAN-001",
+                "--verification",
+                "Migration smoke",
+                "--result",
+                "Done",
+                "--json",
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("ALTER TABLE tasks ADD COLUMN required_subagent TEXT NOT NULL DEFAULT ''")
+                conn.execute("UPDATE tasks SET required_subagent = '@senior-worker'")
+                conn.execute("UPDATE meta SET value = '4' WHERE key = 'schema_version'")
+
+            status = self.run_cli(db_path, "status", "--json", "--full")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            task = json.loads(status.stdout)["tasks"][0]
+            self.assertEqual(task["stable_id"], "TASK-001")
+            self.assertEqual(task["verification"], "Migration smoke")
+            self.assertEqual(task["result"], "Done")
+            self.assertNotIn("required_subagent", task)
+
+            with sqlite3.connect(db_path) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+                schema_version = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0]
+            self.assertNotIn("required_subagent", columns)
+            self.assertEqual(schema_version, str(tapl_db.SCHEMA_VERSION))
 
     def test_task_set_requires_title_and_status_for_new_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -819,12 +858,8 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(cfg.search.hybrid_bm25_ratio, 0.35)
             self.assertEqual(cfg.search.semantic_provider, "auto")
             self.assertEqual(cfg.search.searchd_model_idle_timeout_seconds, 1800)
-            self.assertTrue(cfg.plan_task_execute.use_level_subagent)
-            self.assertEqual(cfg.plan_task_execute.level_subagent_aggressiveness, "auto")
-            self.assertEqual(cfg.plan_task_execute.plan_detail, "very_detailed")
-            self.assertEqual(cfg.plan_task_execute.planning_approval_level, "more")
-            self.assertEqual(cfg.plan_task_execute.task_granularity, "very_granular")
-            self.assertTrue(cfg.plan_task_execute.require_execution_approval)
+            self.assertNotIn("plan_task_execute", cfg.as_dict())
+            self.assertFalse(hasattr(cfg, "plan_task_execute"))
 
     def test_approval_cli_records_status_and_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -896,7 +931,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(listed_payload["approvals"][1]["prompt"], "Execute prepared TASK-001")
             self.assertEqual(listed_payload["approvals"][1]["source"], "explicit_user")
 
-    def test_config_loads_user_global_when_repo_config_is_missing(self) -> None:
+    def test_config_loads_user_global_and_ignores_legacy_workflow_policy_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             repo = base / "repo"
@@ -920,8 +955,7 @@ planning-approval-level = "more"
             self.assertTrue(cfg.exists)
             self.assertEqual(cfg.path, str(user_config))
             self.assertEqual(cfg.search.mode, "bm25")
-            self.assertEqual(cfg.plan_task_execute.plan_detail, "minimal")
-            self.assertEqual(cfg.plan_task_execute.planning_approval_level, "more")
+            self.assertNotIn("plan_task_execute", cfg.as_dict())
 
     def test_config_prefers_repo_config_over_user_global(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -953,12 +987,6 @@ hybrid_semantic_ratio = 0.25
 semantic-provider = "daemon"
 idle-timeout-seconds = 0
 
-[plan-task-execute]
-use-level-subagent = false
-level-subagent-aggressiveness = "minimal"
-plan-detail = "less-detailed"
-planning-approval-level = "less"
-task-granularity = "less-granular"
 """,
                 encoding="utf-8",
             )
@@ -983,8 +1011,7 @@ task-granularity = "less-granular"
             self.assertEqual(status_payload["config"]["search"]["mode"], "word")
             self.assertEqual(status_payload["config"]["search"]["semantic_provider"], "daemon")
             self.assertEqual(status_payload["config"]["search"]["searchd_model_idle_timeout_seconds"], 0)
-            self.assertFalse(status_payload["config"]["plan_task_execute"]["use_level_subagent"])
-            self.assertEqual(status_payload["config"]["plan_task_execute"]["planning_approval_level"], "less")
+            self.assertNotIn("plan_task_execute", status_payload["config"])
 
             search = self.run_cli(db_path, "--config", str(config_path), "search", "substring", "--json")
             search_payload = json.loads(search.stdout)
@@ -1063,7 +1090,7 @@ max_results = 3
             with self.assertRaises(ValueError):
                 tapl_config.load(config_path)
 
-    def test_config_rejects_unknown_planning_approval_level(self) -> None:
+    def test_config_ignores_legacy_workflow_policy_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "tapl.toml"
             config_path.write_text(
@@ -1071,22 +1098,12 @@ max_results = 3
                 encoding="utf-8",
             )
 
-            with self.assertRaises(ValueError):
-                tapl_config.load(config_path)
+            cfg = tapl_config.load(config_path)
+            self.assertNotIn("plan_task_execute", cfg.as_dict())
 
-    def test_config_can_require_execution_approval(self) -> None:
+    def test_execution_approval_is_required_without_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
-            config_path = Path(tmp) / "tapl.toml"
-            config_path.write_text(
-                """
-[plan-task-execute]
-require_execution_approval = true
-plan_detail = "minimal"
-task_granularity = "minimal"
-""",
-                encoding="utf-8",
-            )
             self.run_cli(
                 db_path,
                 "plan",
@@ -1114,19 +1131,34 @@ task_granularity = "minimal"
                 "Execute approved work",
                 "--action",
                 "Edit files after approval",
-                "--required-subagent",
-                "@senior-worker",
                 "--verification",
                 "taplctl validate",
             )
+            self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-002",
+                "--title",
+                "Independent verification",
+                "--status",
+                "Completed",
+                "--spec-id",
+                "SPEC-001",
+                "--verification",
+                "Check execution approval validation",
+                "--result",
+                "Companion task completed",
+            )
 
-            missing = self.run_cli(db_path, "--config", str(config_path), "validate", "--json")
+            missing = self.run_cli(db_path, "validate", "--json")
             self.assertEqual(missing.returncode, 1)
             missing_payload = json.loads(missing.stdout)
-            self.assertEqual(
-                missing_payload["plan_task_execute"]["errors"][0]["code"],
-                "execution_approval_missing",
-            )
+            missing_codes = {
+                issue["code"] for issue in missing_payload["plan_task_execute"]["errors"]
+            }
+            self.assertIn("execution_approval_missing", missing_codes)
 
             approved = self.run_cli(
                 db_path,
@@ -1140,7 +1172,7 @@ task_granularity = "minimal"
             )
             self.assertEqual(approved.returncode, 0, approved.stderr)
 
-            validated = self.run_cli(db_path, "--config", str(config_path), "validate", "--json")
+            validated = self.run_cli(db_path, "validate", "--json")
             self.assertEqual(validated.returncode, 0, validated.stdout)
 
     def test_config_rejects_unknown_search_mode(self) -> None:
@@ -1379,96 +1411,29 @@ searchd_start_timeout_ms = 1
             self.assertFalse(payload["running"])
             self.assertIn("missing.sock", payload["socket_path"])
 
-    def test_task_upsert_enforces_forced_level_subagent(self) -> None:
+    def test_removed_subagent_task_option_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
-            default_missing = self.run_cli(
+            result = self.run_cli(
                 db_path,
                 "task",
                 "set",
                 "--id",
                 "TASK-001",
-                "--title",
-                "Needs routing",
-                "--status",
-                "In Progress",
-                "--json",
-            )
-            self.assertEqual(default_missing.returncode, 1)
-            default_missing_payload = json.loads(default_missing.stdout)
-            self.assertEqual(
-                default_missing_payload["plan_task_execute"]["errors"][0]["code"],
-                "missing_required_subagent",
-            )
-            self.assertEqual(default_missing_payload["plan_task_execute"]["warnings"], [])
-
-            config_path = Path(tmp) / "tapl.toml"
-            config_path.write_text(
-                """
-[plan-task-execute]
-use_level_subagent = true
-level_subagent_aggressiveness = "force"
-""",
-                encoding="utf-8",
-            )
-
-            missing = self.run_cli(
-                db_path,
-                "--config",
-                str(config_path),
-                "task",
-                "set",
-                "--id",
-                "TASK-001",
-                "--title",
-                "Needs routing",
-                "--status",
-                "In Progress",
-                "--json",
-            )
-            self.assertEqual(missing.returncode, 1)
-            missing_payload = json.loads(missing.stdout)
-            self.assertEqual(
-                missing_payload["plan_task_execute"]["errors"][0]["code"],
-                "missing_required_subagent",
-            )
-
-            invalid = self.run_cli(
-                db_path,
-                "--config",
-                str(config_path),
-                "task",
-                "set",
-                "--id",
-                "TASK-001",
-                "--title",
-                "Bad routing",
-                "--status",
-                "In Progress",
                 "--required-subagent",
-                "@unknown-worker",
-                "--json",
+                "@senior-worker",
             )
-            self.assertEqual(invalid.returncode, 1)
-            invalid_payload = json.loads(invalid.stdout)
-            self.assertEqual(
-                invalid_payload["plan_task_execute"]["errors"][0]["code"],
-                "invalid_required_subagent",
-            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unrecognized arguments: --required-subagent", result.stderr)
 
-    def test_minimal_level_subagent_allows_unrouted_tasks(self) -> None:
+    def test_legacy_workflow_policy_config_keys_are_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
             config_path = Path(tmp) / "tapl.toml"
             config_path.write_text(
-                """
-[plan-task-execute]
-use_level_subagent = true
-level_subagent_aggressiveness = "minimal"
-""",
+                "[plan-task-execute]\nuse_level_subagent = true\nlevel_subagent_aggressiveness = \"force\"\nplan_detail = \"minimal\"\nplanning_approval_level = \"less\"\ntask_granularity = \"minimal\"\nrequire_execution_approval = false\n",
                 encoding="utf-8",
             )
-
             task = self.run_cli(
                 db_path,
                 "--config",
@@ -1484,73 +1449,9 @@ level_subagent_aggressiveness = "minimal"
                 "--json",
             )
             self.assertEqual(task.returncode, 0, task.stderr)
-            task_payload = json.loads(task.stdout)
-            issue_codes = {
-                issue["code"]
-                for issue in task_payload["plan_task_execute"]["errors"]
-                + task_payload["plan_task_execute"]["warnings"]
-            }
+            payload = json.loads(task.stdout)
+            issue_codes = {issue["code"] for issue in payload["plan_task_execute"]["issues"]}
             self.assertNotIn("missing_required_subagent", issue_codes)
-
-            context = self.run_cli(
-                db_path,
-                "--config",
-                str(config_path),
-                "context",
-                "--event",
-                "UserPromptSubmit",
-                "--json",
-            )
-            self.assertEqual(context.returncode, 0, context.stderr)
-            context_payload = json.loads(context.stdout)
-            guidance = "\n".join(context_payload["workflow_guidance"])
-            self.assertIn("# Workflow", guidance)
-            self.assertIn("taplctl <command> <subcommand> --help", guidance)
-            self.assertIn("Subagent routing is task metadata", guidance)
-            self.assertNotIn("Task fields:", guidance)
-            self.assertNotIn("required_subagent", guidance)
-
-    def test_validate_reports_plan_task_execute_issues(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "tapl.db"
-            config_path = Path(tmp) / "tapl.toml"
-            minimal_config_path = Path(tmp) / "minimal.toml"
-            minimal_config_path.write_text(
-                """
-[plan-task-execute]
-use_level_subagent = true
-level_subagent_aggressiveness = "minimal"
-""",
-                encoding="utf-8",
-            )
-            config_path.write_text(
-                """
-[plan-task-execute]
-use_level_subagent = true
-level_subagent_aggressiveness = "force"
-""",
-                encoding="utf-8",
-            )
-            self.run_cli(
-                db_path,
-                "--config",
-                str(minimal_config_path),
-                "task",
-                "set",
-                "--id",
-                "TASK-001",
-                "--title",
-                "Existing unrouted task",
-                "--status",
-                "In Progress",
-            )
-
-            validated = self.run_cli(db_path, "--config", str(config_path), "validate", "--json")
-            self.assertEqual(validated.returncode, 1)
-            payload = json.loads(validated.stdout)
-            self.assertFalse(payload["ok"])
-            self.assertEqual(payload["plan_task_execute"]["errors"][0]["code"], "missing_required_subagent")
-            self.assertNotIn("guidance", payload["plan_task_execute"])
 
     def test_validate_warns_for_sparse_plan_and_task_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1576,8 +1477,6 @@ level_subagent_aggressiveness = "force"
                 "Sparse task",
                 "--status",
                 "In Progress",
-                "--required-subagent",
-                "@senior-worker",
             )
             self.run_cli(
                 db_path,
@@ -1655,8 +1554,6 @@ level_subagent_aggressiveness = "force"
                     f"Complete {task_id}",
                     "--action",
                     f"Run {task_id}",
-                    "--required-subagent",
-                    "@senior-worker",
                     "--verification",
                     f"Check {task_id}",
                 )
@@ -1692,8 +1589,6 @@ level_subagent_aggressiveness = "force"
                 "Complete TASK-001",
                 "--action",
                 "Run TASK-001",
-                "--required-subagent",
-                "@senior-worker",
                 "--verification",
                 "Check TASK-001",
             )
@@ -1737,11 +1632,10 @@ level_subagent_aggressiveness = "force"
             manual_context = self.run_cli(db_path, "context", "--json")
             self.assertEqual(manual_context.returncode, 0, manual_context.stderr)
             manual_payload = json.loads(manual_context.stdout)
-            manual_settings = tapl_config.PlanTaskExecuteConfig(**manual_payload["config"]["plan_task_execute"])
             self.assertEqual(manual_payload["event"], "Manual")
             self.assertEqual(
                 manual_payload["workflow_guidance"],
-                [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE, manual_settings)],
+                [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)],
             )
             manual_guidance = "\n".join(manual_payload["workflow_guidance"])
             self.assertIn("## Role Boundaries", manual_guidance)
@@ -1754,10 +1648,9 @@ level_subagent_aggressiveness = "force"
             prompt_instructions = "\n".join(prompt_payload["instructions"])
             self.assertEqual(prompt_payload["instructions"], [])
             self.assertEqual(prompt_payload["validation_issues"], [])
-            prompt_settings = tapl_config.PlanTaskExecuteConfig(**prompt_payload["config"]["plan_task_execute"])
             self.assertEqual(
                 prompt_payload["workflow_guidance"],
-                [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE, prompt_settings)],
+                [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)],
             )
             self.assertIn("${planning_approval_guidance}", tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)
             self.assertNotIn("## 9. Command Shapes", tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)
@@ -1774,7 +1667,10 @@ level_subagent_aggressiveness = "force"
             self.assertIn("## Records And History", prompt_guidance)
             self.assertIn("## Completion Report", prompt_guidance)
             self.assertIn("Before finalizing the plan", prompt_guidance)
-            self.assertIn("Plan detail for the current config", prompt_guidance)
+            self.assertIn('Fixed plan detail (`plan_detail = "very_detailed"`)', prompt_guidance)
+            self.assertIn('Fixed planning approval (`planning_approval_level = "more"`)', prompt_guidance)
+            self.assertIn('Fixed task granularity (`task_granularity = "very_granular"`)', prompt_guidance)
+            self.assertIn("Fixed execution approval (`require_execution_approval = true`)", prompt_guidance)
             self.assertIn("Tasks are executable implementation or verification work", prompt_guidance)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_guidance)
             self.assertNotIn("At the start of every non-trivial user request", prompt_guidance)
@@ -1789,17 +1685,12 @@ level_subagent_aggressiveness = "force"
             self.assertNotIn("Plan fields: --id", prompt_guidance)
             self.assertNotIn("Task fields:", prompt_guidance)
             self.assertNotIn("Use numeric stable ids only", prompt_guidance)
-            self.assertNotIn("required_subagent", prompt_guidance)
             self.assertIn("Execute planned tasks one at a time in task order", prompt_guidance)
             self.assertIn("request_user_input", prompt_guidance)
             self.assertIn("batch up to three short questions", prompt_guidance)
             self.assertIn("autoResolutionMs=240000", prompt_guidance)
             self.assertIn("omit it only when explicit user input is required", prompt_guidance)
-            self.assertIn("Subagent routing is task metadata", prompt_guidance)
             self.assertIn("only active work is In Progress", prompt_guidance)
-            self.assertIn("only when a subagent tool is available", prompt_guidance)
-            self.assertIn("do not claim delegation occurred", prompt_guidance)
-            self.assertIn("@senior-worker", prompt_guidance)
             self.assertNotIn("taplctl finding add --help", prompt_guidance)
             self.assertIn("derived from the stored plan", prompt_guidance)
             self.assertIn("When work finishes, report briefly", prompt_guidance)
@@ -1868,65 +1759,24 @@ level_subagent_aggressiveness = "force"
             self.assertIn("--source explicit_user", plan_only_actions)
             self.assertNotIn("Plan-only request detected", plan_only_actions)
 
-            less_planning_config = Path(tmp) / "less-planning.toml"
-            less_planning_config.write_text(
+            legacy_planning_config = Path(tmp) / "legacy-planning.toml"
+            legacy_planning_config.write_text(
                 "[plan-task-execute]\nplanning-approval-level = \"less\"\n",
                 encoding="utf-8",
             )
-            less_planning_context = self.run_cli(
+            legacy_planning_context = self.run_cli(
                 db_path,
                 "--config",
-                str(less_planning_config),
+                str(legacy_planning_config),
                 "context",
                 "--event",
                 "UserPromptSubmit",
                 "--json",
             )
-            less_planning_payload = json.loads(less_planning_context.stdout)
-            less_planning_guidance = "\n".join(less_planning_payload["workflow_guidance"])
-            self.assertIn(
-                "only for blocking or high-risk material scope/risk/API/UX/data/compat choices",
-                less_planning_guidance,
-            )
-            self.assertIn("otherwise state assumptions", less_planning_guidance)
-            self.assertIn("if unavailable", less_planning_guidance)
-
-            more_planning_config = Path(tmp) / "more-planning.toml"
-            more_planning_config.write_text(
-                "[plan-task-execute]\nplanning-approval-level = \"more\"\n",
-                encoding="utf-8",
-            )
-            more_planning_context = self.run_cli(
-                db_path,
-                "--config",
-                str(more_planning_config),
-                "context",
-                "--event",
-                "UserPromptSubmit",
-                "--json",
-            )
-            more_planning_payload = json.loads(more_planning_context.stdout)
-            more_planning_guidance = "\n".join(more_planning_payload["workflow_guidance"])
-            self.assertEqual(more_planning_guidance, prompt_guidance)
-
-            no_subagent_config = Path(tmp) / "no-subagent.toml"
-            no_subagent_config.write_text(
-                "[plan-task-execute]\nuse-level-subagent = false\n",
-                encoding="utf-8",
-            )
-            no_subagent_context = self.run_cli(
-                db_path,
-                "--config",
-                str(no_subagent_config),
-                "context",
-                "--event",
-                "UserPromptSubmit",
-                "--json",
-            )
-            no_subagent_payload = json.loads(no_subagent_context.stdout)
-            no_subagent_guidance = "\n".join(no_subagent_payload["workflow_guidance"])
-            self.assertNotIn("required_subagent", no_subagent_guidance)
-            self.assertIn("execution approval", no_subagent_guidance)
+            legacy_planning_payload = json.loads(legacy_planning_context.stdout)
+            legacy_planning_guidance = "\n".join(legacy_planning_payload["workflow_guidance"])
+            self.assertEqual(legacy_planning_guidance, prompt_guidance)
+            self.assertNotIn("only for blocking or high-risk", legacy_planning_guidance)
 
             self.run_cli(
                 db_path,
@@ -1938,8 +1788,6 @@ level_subagent_aggressiveness = "force"
                 "Context task",
                 "--status",
                 "In Progress",
-                "--required-subagent",
-                "@senior-worker",
             )
             active_context = self.run_cli(db_path, "context", "--event", "SessionStart", "--json")
             active_payload = json.loads(active_context.stdout)
@@ -1956,30 +1804,9 @@ level_subagent_aggressiveness = "force"
             self.assertIn("defer the existing run", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("merge the work into one plan", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("Continue only TASK-001", "\n".join(active_prompt_payload["next_actions"]))
-            self.assertIn("spawn @senior-worker for only this task", "\n".join(active_prompt_payload["next_actions"]))
-            self.assertIn("do not claim delegation occurred", "\n".join(active_prompt_payload["next_actions"]))
             approval_index = next(index for index, action in enumerate(active_actions) if "approval approve" in action)
             continue_index = next(index for index, action in enumerate(active_actions) if "Continue only TASK-001" in action)
             self.assertLess(approval_index, continue_index)
-
-            active_no_subagent_context = self.run_cli(
-                db_path,
-                "--config",
-                str(no_subagent_config),
-                "context",
-                "--event",
-                "UserPromptSubmit",
-                "--json",
-            )
-            active_no_subagent_payload = json.loads(active_no_subagent_context.stdout)
-            self.assertNotIn(
-                "spawn @senior-worker",
-                "\n".join(active_no_subagent_payload["next_actions"]),
-            )
-            self.assertNotIn(
-                "required_subagent",
-                "\n".join(active_no_subagent_payload["next_actions"]),
-            )
 
             text = self.run_cli(db_path, "context", "--event", "SessionStart")
             self.assertEqual(text.returncode, 0, text.stderr)
@@ -2008,8 +1835,6 @@ level_subagent_aggressiveness = "force"
             self.assertIn("taplctl search '<compact request query>' --agent", prompt_text.stdout)
             self.assertIn("execution approval", prompt_text.stdout)
             self.assertIn("Execute planned tasks one at a time in task order", prompt_text.stdout)
-            self.assertIn("only when a subagent tool is available", prompt_text.stdout)
-            self.assertIn("do not claim delegation occurred", prompt_text.stdout)
             self.assertNotIn("taplctl finding add --help", prompt_text.stdout)
             self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
             self.assertNotIn("Use numeric stable ids only", prompt_text.stdout)
@@ -2017,15 +1842,14 @@ level_subagent_aggressiveness = "force"
             self.assertNotIn("quote every argument", prompt_text.stdout)
 
     def test_command_help_exposes_field_guidance(self) -> None:
-        default_settings = tapl_config.PlanTaskExecuteConfig()
         self.assertEqual(tapl_prompt.command_help_epilog(), tapl_prompt.render(tapl_prompt.ROOT_HELP_TEMPLATE))
         self.assertEqual(tapl_prompt.search_epilog(), tapl_prompt.render(tapl_prompt.SEARCH_HELP_TEMPLATE))
         self.assertEqual(tapl_prompt.plan_set_epilog(), tapl_prompt.render(tapl_prompt.PLAN_SET_HELP_TEMPLATE))
         self.assertEqual(tapl_prompt.finding_add_epilog(), tapl_prompt.render(tapl_prompt.FINDING_ADD_HELP_TEMPLATE))
         self.assertEqual(tapl_prompt.approval_set_epilog(), tapl_prompt.render(tapl_prompt.APPROVAL_SET_HELP_TEMPLATE))
         self.assertEqual(
-            tapl_prompt.task_set_epilog(settings=default_settings),
-            tapl_prompt.render(tapl_prompt.TASK_SET_HELP_TEMPLATE, default_settings),
+            tapl_prompt.task_set_epilog(),
+            tapl_prompt.render(tapl_prompt.TASK_SET_HELP_TEMPLATE),
         )
         self.assertNotIn("usage:", tapl_prompt.ROOT_HELP_TEMPLATE)
         with tempfile.TemporaryDirectory() as tmp:
@@ -2099,19 +1923,12 @@ level_subagent_aggressiveness = "force"
             self.assertIn("New task creation requires --title and --status", task_help.stdout)
             self.assertIn("--status 'In Progress'", task_help.stdout)
             self.assertIn("Execute planned tasks one at a time", task_help.stdout)
-            self.assertIn(
-                "When level subagent routing is enabled, set required_subagent in the same command",
-                task_help.stdout,
-            )
-            self.assertIn("tool is available and user/session policy allows delegation", task_help.stdout)
-            self.assertIn("do not claim", task_help.stdout)
-            self.assertIn("@senior-worker", task_help.stdout)
             self.assertIn("source plan/spec exists", task_help.stdout)
             self.assertIn("not represent planning or task-design work", task_help.stdout)
             self.assertIn("Executable implementation/verification tasks", task_help.stdout)
             self.assertIn("high-level lifecycle commands", task_help.stdout)
             self.assertIn("Required field sets", task_help.stdout)
-            self.assertIn("executable task: --spec-id, --goal, --action, --verification, --required-subagent", task_help.stdout)
+            self.assertIn("executable task: --spec-id, --goal, --action, --verification", task_help.stdout)
             self.assertIn("--blocker (required for blocked tasks)", task_help.stdout)
             self.assertIn("--next-action (required for blocked tasks)", task_help.stdout)
 
@@ -2217,7 +2034,6 @@ level_subagent_aggressiveness = "force"
                 "spec_id": "PLAN-001",
                 "goal": "Verify task lifecycle",
                 "action": "Run high-level task commands",
-                "required_subagent": "@senior-worker",
                 "verification": "Focused lifecycle test",
             }
             task = self.run_cli(
@@ -2285,44 +2101,17 @@ level_subagent_aggressiveness = "force"
             self.assertIn("Did you mean", bad_status.stderr)
             self.assertIn("taplctl task start TASK-001 --agent", bad_status.stderr)
 
-    def test_task_help_reflects_configured_required_fields(self) -> None:
+    def test_task_help_uses_fixed_required_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
-            config_path = Path(tmp) / "tapl.toml"
-            config_path.write_text(
-                """
-[plan-task-execute]
-use_level_subagent = false
-level_subagent_aggressiveness = "minimal"
-plan_detail = "minimal"
-task_granularity = "minimal"
-require_execution_approval = false
-""",
-                encoding="utf-8",
-            )
-
-            task_help = self.run_cli(db_path, "--config", str(config_path), "task", "set", "--help")
+            task_help = self.run_cli(db_path, "task", "set", "--help")
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
             self.assertIn(
                 "executable task: --spec-id, --goal, --action, --verification; completed task",
                 task_help.stdout,
             )
-            self.assertNotIn(
-                "executable task: --spec-id, --goal, --action, --verification, --required-subagent",
-                task_help.stdout,
-            )
-            self.assertIn("Subagent routing is disabled", task_help.stdout)
-            self.assertIn("--required-subagent (optional; routing disabled)", task_help.stdout)
-            self.assertNotIn("Allowed required_subagent values when enabled", task_help.stdout)
-            self.assertNotIn("--required-subagent '@senior-worker'", task_help.stdout)
 
-    def test_prompt_field_contract_helpers_are_config_aware(self) -> None:
-        default_settings = tapl_config.PlanTaskExecuteConfig()
-        no_subagent_settings = tapl_config.PlanTaskExecuteConfig(
-            use_level_subagent=False,
-            level_subagent_aggressiveness="minimal",
-        )
-
+    def test_prompt_field_contract_helpers_use_invariant_rules(self) -> None:
         self.assertEqual(
             tapl_prompt.markdown_body_fields("plan")[:3],
             (
@@ -2337,22 +2126,16 @@ require_execution_approval = false
                 "spec_id",
                 "goal",
                 "action",
-                "required_subagent",
                 "verification",
                 "result",
                 "blocker",
                 "next_action",
             ),
         )
-        self.assertIn("--required-subagent", tapl_prompt.task_required_field_summary(default_settings))
-        self.assertNotIn("--required-subagent", tapl_prompt.task_required_field_summary(no_subagent_settings))
-        self.assertIn(
-            "--required-subagent (optional; routing disabled)",
-            tapl_prompt.field_contract_section("task", settings=no_subagent_settings),
-        )
+        self.assertIn("--verification", tapl_prompt.task_required_field_summary())
         self.assertEqual(
-            tapl_prompt.task_granularity_remediation("very_granular"),
-            "Split the work so independent edits, migrations, docs, and verification each have tasks.",
+            tapl_prompt.task_granularity_remediation(),
+            "Split every independent edit, migration, and verification step.",
         )
 
     def test_parser_actions_have_help_text(self) -> None:
@@ -2405,19 +2188,16 @@ require_execution_approval = false
             self.assertNotIn("tapl_hook.py", json.dumps(hooks))
             self.assertTrue((codex_home / "config.toml").exists())
             self.assertEqual(payload["tapl_config"], str(base / "home" / ".tapl" / "config.toml"))
-            self.assertIn(
-                "task_granularity",
-                (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8"),
+            tapl_config_data = tomllib.loads(
+                (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8")
             )
-            self.assertIn(
-                "planning_approval_level",
-                (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8"),
-            )
+            self.assertNotIn("plan-task-execute", tapl_config_data)
+            self.assertNotIn("plan_task_execute", tapl_config_data)
             self.assertEqual(
                 (base / "home" / ".tapl" / "version").read_text(encoding="utf-8").strip(),
                 __version__,
             )
-            self.assertTrue((codex_home / "agents" / "senior-worker.toml").exists())
+            self.assertFalse((codex_home / "agents").exists())
 
     def test_install_user_merges_existing_codex_config_without_overwriting_user_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2435,6 +2215,9 @@ multi_agent = false
 """.lstrip(),
                 encoding="utf-8",
             )
+            agents_dir = codex_home / "agents"
+            agents_dir.mkdir()
+            (agents_dir / "senior-worker.toml").write_text("name = \"senior-worker\"\n", encoding="utf-8")
             db_path = base / "tapl.db"
 
             installed = self.run_cli(
@@ -2459,8 +2242,9 @@ multi_agent = false
             self.assertEqual(parsed["approval_policy"], "on-request")
             self.assertEqual(parsed["model_reasoning_effort"], "xhigh")
             self.assertEqual(parsed["personality"], "pragmatic")
-            self.assertFalse(parsed["features"]["multi_agent"])
+            self.assertNotIn("multi_agent", parsed["features"])
             self.assertTrue(parsed["features"]["default_mode_request_user_input"])
+            self.assertFalse((agents_dir / "senior-worker.toml").exists())
 
     def test_install_user_force_applies_managed_codex_config_values_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2501,7 +2285,7 @@ experimental = true
             self.assertEqual(parsed["approval_policy"], "on-request")
             self.assertEqual(parsed["model_reasoning_effort"], "xhigh")
             self.assertEqual(parsed["personality"], "pragmatic")
-            self.assertTrue(parsed["features"]["multi_agent"])
+            self.assertNotIn("multi_agent", parsed["features"])
             self.assertTrue(parsed["features"]["experimental"])
             self.assertTrue(parsed["features"]["default_mode_request_user_input"])
 
@@ -2577,9 +2361,10 @@ experimental = true
                 pre_tool_commands,
             )
             self.assertTrue((repo / ".codex" / "config.toml").exists())
-            self.assertTrue((repo / ".codex" / "agents" / "senior-worker.toml").exists())
-            self.assertIn("task_granularity", (repo / ".tapl" / "config.toml").read_text())
-            self.assertIn("planning_approval_level", (repo / ".tapl" / "config.toml").read_text())
+            self.assertFalse((repo / ".codex" / "agents").exists())
+            tapl_config_data = tomllib.loads((repo / ".tapl" / "config.toml").read_text())
+            self.assertNotIn("plan-task-execute", tapl_config_data)
+            self.assertNotIn("plan_task_execute", tapl_config_data)
             self.assertEqual(
                 (repo / ".tapl" / "version").read_text(encoding="utf-8").strip(),
                 __version__,
@@ -2607,6 +2392,14 @@ experimental = true
                 """
 [search]
 max_results = 3
+
+[plan-task-execute]
+use_level_subagent = true
+level_subagent_aggressiveness = "force"
+plan_detail = "minimal"
+planning_approval_level = "less"
+task_granularity = "minimal"
+require_execution_approval = false
 
 [user]
 keep = true
@@ -2654,6 +2447,14 @@ keep = true
 [search]
 max_results = 3
 
+[plan-task-execute]
+use_level_subagent = true
+level_subagent_aggressiveness = "force"
+plan_detail = "minimal"
+planning_approval_level = "less"
+task_granularity = "minimal"
+require_execution_approval = false
+
 [user]
 keep = true
 """.lstrip(),
@@ -2686,10 +2487,16 @@ keep = true
             self.assertEqual(parsed["search"]["max_results"], 3)
             self.assertEqual(parsed["user"]["keep"], True)
             self.assertEqual(parsed["search"]["mode"], tapl_config.DEFAULT_SEARCH_MODE)
-            self.assertEqual(
-                parsed["plan-task-execute"]["task_granularity"],
-                tapl_config.DEFAULT_TASK_GRANULARITY,
-            )
+            config_text = config_path.read_text(encoding="utf-8")
+            for key in (
+                "use_level_subagent",
+                "level_subagent_aggressiveness",
+                "plan_detail",
+                "planning_approval_level",
+                "task_granularity",
+                "require_execution_approval",
+            ):
+                self.assertNotIn(key, config_text)
             self.assertEqual((tapl_dir / "version").read_text(encoding="utf-8").strip(), __version__)
 
     def test_install_repo_version_upgrade_merge_skips_invalid_tapl_config(self) -> None:
@@ -2757,14 +2564,10 @@ keep = true
             repo_config = tomllib.loads((repo / ".tapl" / "config.toml").read_text(encoding="utf-8"))
             self.assertEqual(user_config["search"]["max_results"], 4)
             self.assertEqual(repo_config["search"]["max_results"], 5)
-            self.assertEqual(
-                user_config["plan-task-execute"]["task_granularity"],
-                tapl_config.DEFAULT_TASK_GRANULARITY,
-            )
-            self.assertEqual(
-                repo_config["plan-task-execute"]["task_granularity"],
-                tapl_config.DEFAULT_TASK_GRANULARITY,
-            )
+            self.assertNotIn("plan-task-execute", user_config)
+            self.assertNotIn("plan_task_execute", user_config)
+            self.assertNotIn("plan-task-execute", repo_config)
+            self.assertNotIn("plan_task_execute", repo_config)
 
     def test_auto_install_does_not_treat_repo_db_as_install_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2842,8 +2645,6 @@ keep = true
                 "Execute approved edit",
                 "--action",
                 "Run durable edit after approval",
-                "--required-subagent",
-                "@senior-worker",
                 "--verification",
                 "PreToolUse enforce allows approved edit",
             )
@@ -2906,28 +2707,8 @@ keep = true
     def test_hook_enforce_blocks_config_validation_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
-            config_path = Path(tmp) / "tapl.toml"
-            minimal_config_path = Path(tmp) / "minimal.toml"
-            minimal_config_path.write_text(
-                """
-[plan-task-execute]
-use_level_subagent = true
-level_subagent_aggressiveness = "minimal"
-""",
-                encoding="utf-8",
-            )
-            config_path.write_text(
-                """
-[plan-task-execute]
-use_level_subagent = true
-level_subagent_aggressiveness = "force"
-""",
-                encoding="utf-8",
-            )
             self.run_cli(
                 db_path,
-                "--config",
-                str(minimal_config_path),
                 "task",
                 "set",
                 "--id",
@@ -2940,8 +2721,6 @@ level_subagent_aggressiveness = "force"
 
             blocked = self.run_cli(
                 db_path,
-                "--config",
-                str(config_path),
                 "hook-event",
                 "--event",
                 "PreToolUse",
@@ -2952,20 +2731,12 @@ level_subagent_aggressiveness = "force"
                 input_text="{}",
             )
             self.assertEqual(blocked.returncode, 2)
-            self.assertIn("missing_required_subagent", blocked.stderr)
-            self.assertIn("Set --required-subagent", blocked.stderr)
+            self.assertIn("missing_plan", blocked.stderr)
+            self.assertIn("taplctl plan apply", blocked.stderr)
 
-    def test_hook_observe_warns_for_very_granular_single_task(self) -> None:
+    def test_hook_observe_warns_for_fixed_very_granular_single_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
-            config_path = Path(tmp) / "tapl.toml"
-            config_path.write_text(
-                """
-[plan-task-execute]
-task_granularity = "very_granular"
-""",
-                encoding="utf-8",
-            )
             self.run_cli(
                 db_path,
                 "plan",
@@ -2987,14 +2758,10 @@ task_granularity = "very_granular"
                 "All work in one task",
                 "--status",
                 "In Progress",
-                "--required-subagent",
-                "@senior-worker",
             )
 
             warned = self.run_cli(
                 db_path,
-                "--config",
-                str(config_path),
                 "hook-event",
                 "--event",
                 "PreToolUse",
@@ -3034,7 +2801,7 @@ task_granularity = "very_granular"
             self.assertIn("Before planning non-trivial work", event.stdout)
             self.assertIn("snippet is insufficient", event.stdout)
             self.assertIn("Planning must happen before implementation", event.stdout)
-            self.assertIn("Plan detail for the current config", event.stdout)
+            self.assertIn('Fixed plan detail (`plan_detail = "very_detailed"`)', event.stdout)
             self.assertNotIn("taplctl plan set --help", event.stdout)
             self.assertNotIn("Plan fields: --id", event.stdout)
             self.assertNotIn("Task fields:", event.stdout)
@@ -3184,8 +2951,6 @@ task_granularity = "very_granular"
                 "Execute the isolated workflow.",
                 "--action",
                 "Use repo-local taplctl commands from the isolated workspace.",
-                "--required-subagent",
-                "@senior-worker",
                 "--verification",
                 "PreToolUse enforce allows durable work after approval.",
                 "--agent",
@@ -3643,8 +3408,6 @@ task_granularity = "very_granular"
                 "Finish the original implementation task.",
                 "--action",
                 "Continue implementation from the active task.",
-                "--required-subagent",
-                "@senior-worker",
                 "--verification",
                 "Context asks for direction before new durable edits.",
                 "--json",
@@ -3962,7 +3725,7 @@ VSCode 확장을 추가하고 markdown preview를 연결한다.
             task = next(item for item in payload["items"] if item["stable_id"] == "TASK-001")
             self.assertEqual(task["status"], "Completed")
             self.assertEqual(task["spec_id"], "SPEC-001")
-            self.assertEqual(task["required_subagent"], "@senior-worker")
+            self.assertNotIn("required_subagent", task)
             self.assertIn("### Action\nTypeScript extension scaffold를 추가한다.", task["body"])
             self.assertNotIn("Phase 2", task["result"])
 

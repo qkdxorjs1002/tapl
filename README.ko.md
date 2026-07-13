@@ -83,8 +83,8 @@ Codex는 `tapl` lifecycle guidance를 받고, structured CLI field로 plan/task
 일반적인 사용에서는 Codex에게 작업을 요청하고, 설치된 hook이 record를 최신
 상태로 유지하게 두면 됩니다. Workflow state를 디버깅하거나 수동으로 보정해야
 할 때는 command help에서 필드 규칙과 required field set을 확인할 수 있습니다.
-`--config`를 넘기면 `task set --help`도 subagent routing 같은
-`[plan-task-execute]` 설정을 반영합니다.
+`--config`는 검색 동작에만 적용되고, task help와 validation은 항상 TAPL의 고정
+workflow 정책을 사용합니다.
 
 ```sh
 taplctl plan set --help
@@ -247,11 +247,10 @@ taplctl archive create --help
 부족하면, 결과의 numeric `id`를 `taplctl item show --id <id>`에 넘겨
 전체 record detail을 확인한 뒤 사용합니다.
 
-Plan/task validation은 같은 config 파일의 `[plan-task-execute]`로 제어합니다.
-`plan_detail`, `task_granularity`, `planning_approval_level`,
-`level_subagent_aggressiveness`, `require_execution_approval` 같은 설정은 lifecycle
-context와 validation issue에 반영됩니다. `taplctl task set --help`도 선택된
-config 기준의 effective required task field set을 보여줍니다.
+Plan/task workflow 정책은 config로 바꿀 수 없습니다. TAPL은 항상 매우 상세한
+계획, 계획 확정 전의 명시적 사용자 승인, 독립된 edit·migration·verification 단위의
+작업 분할, durable edit 전의 실행 승인 기록을 요구합니다. `taplctl task set --help`는
+항상 같은 required task field set을 보여줍니다.
 
 ## 소스 구조
 
@@ -259,7 +258,7 @@ config 기준의 effective required task field set을 보여줍니다.
 .
 ├── .codex/                    # taplctl install repo가 생성하는 repo-local 파일
 ├── .tapl/config.toml          # Repo-local runtime config
-├── tapl/.codex/               # taplctl package에 포함되는 Codex hook/agent template
+├── tapl/.codex/               # taplctl package에 포함되는 Codex config/hook template
 ├── tapl/.tapl/config.toml     # 기본 tapl config template
 ├── tapl/taplctl/              # Python CLI와 workflow harness 구현
 ├── tapl/tests/                # Python tests

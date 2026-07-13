@@ -6,10 +6,7 @@ from dataclasses import dataclass
 from string import Template
 from typing import Iterable, Any
 
-from . import config as tapl_config
 
-
-LEVEL_SUBAGENTS = ("@junior-worker", "@senior-worker", "@specialist-worker")
 PLAN_KEY_LABELS = (
     "Objective",
     "Requirements trace",
@@ -90,13 +87,6 @@ TASK_FIELDS = (
     FieldSpec("goal", "--goal", "Outcome this task must achieve.", "required for executable tasks", "Goal"),
     FieldSpec("action", "--action", "Concrete work to perform.", "required for executable tasks", "Action"),
     FieldSpec(
-        "required_subagent",
-        "--required-subagent",
-        "One of the configured @*-worker values.",
-        "required for executable tasks when routing is enabled",
-        "Required subagent",
-    ),
-    FieldSpec(
         "verification",
         "--verification",
         "Command, check, or review proving completion.",
@@ -168,7 +158,6 @@ AGENT_STATUS_FIELDS = {
         "spec_id",
         "goal",
         "action",
-        "required_subagent",
         "verification",
         "result",
         "blocker",
@@ -178,7 +167,7 @@ AGENT_STATUS_FIELDS = {
 }
 AGENT_ITEM_FIELDS = {
     "plan": ("plan_id", *PLAN_BODY_FIELDS),
-    "task": ("spec_id", "goal", "action", "required_subagent", "verification", "result", "blocker", "next_action"),
+    "task": ("spec_id", "goal", "action", "verification", "result", "blocker", "next_action"),
     "finding": ("body", "impact", "related_ids"),
 }
 
@@ -198,8 +187,6 @@ Write workflow records and reports in the user's language unless asked otherwise
 - Do not commit, push, rebase, reset, discard changes, or include workflow records in commits unless explicitly requested.
 - Check the worktree before and after work when practical. Never overwrite user changes.
 - Keep TAPL records as current-state snapshots, not logs.
-- The main agent writes TAPL records and final status. Subagents may draft or execute only and must not modify TAPL records.
-- Subagent timeouts are system-enforced. Check status every 5 minutes and wait calmly until completion, failure, or timeout.
 
 ## Planning
 
@@ -209,21 +196,20 @@ Keep the plan current as decisions are made. Mark it finalized only after explic
 
 Before finalizing the plan, use `request_user_input` proactively for material ambiguity, trade-offs, or choices that affect scope, risk, compatibility, cost, architecture, UX, data model, public interfaces, or implementation direction.
 
-Plan detail for the current config: ${plan_detail_guidance}
+Fixed plan detail (`plan_detail = "very_detailed"`): ${plan_detail_guidance}
 
 The plan must be concise but executable. Include only what is needed for the implementation to proceed safely.
 
-Planning approval guidance: ${planning_approval_guidance}
+Fixed planning approval (`planning_approval_level = "more"`): ${planning_approval_guidance}
 
 ## Tasks And Execution
 
 Tasks are executable implementation or verification work derived from the stored plan, not planning or task-design work.
 
 - Keep tasks focused on the current execution window and next useful step.
-Task granularity for the current config: ${task_granularity_guidance}
+Fixed task granularity (`task_granularity = "very_granular"`): ${task_granularity_guidance}
 ${task_execution_order_guidance}
 ${context_execution_approval_guidance}
-${context_subagent_guidance}
 
 - Task state must reflect current reality: only active work is In Progress, completed work has implementation and verification done, and blocked work records the blocker and next action.
 - Keep blocked, skipped, pending, or unverified work in TAPL records.
@@ -340,7 +326,7 @@ TASK_SET_HELP_TEMPLATE = """Task writing rules:
   Existing task updates are partial: pass --id plus only changed fields;
   omitted fields keep their stored values. New task creation requires --title and --status.
   ${task_fields_guidance}
-${subagent_help_lines}  Split tasks by meaningful implementation or verification step.
+  Split tasks by meaningful implementation or verification step.
   Status values: ${status_values}. Quote multi-word statuses, e.g. --status 'In Progress'.
   Keep task text in the user's language unless asked otherwise.
 
@@ -353,7 +339,7 @@ ${task_field_contract}
 Example:
   taplctl task set --id TASK-001 --title 'Implement change' \\
     --status 'In Progress' --spec-id PLAN-001 --goal 'Make requested behavior work' \\
-    --action 'Edit the relevant files'${example_task_required_subagent} \\
+    --action 'Edit the relevant files' \\
     --verification 'Run focused tests' --agent
   taplctl task set --id TASK-001 --status Completed --result 'Focused tests passed' --agent"""
 
@@ -391,31 +377,21 @@ def render_template(template: str, **variables: Any) -> str:
     return Template(template).safe_substitute(values).strip()
 
 
-def render(template: str, settings: tapl_config.PlanTaskExecuteConfig | None = None, **overrides: Any) -> str:
-    return render_template(template, **template_variables(settings, **overrides))
+def render(template: str, **overrides: Any) -> str:
+    return render_template(template, **template_variables(**overrides))
 
 
-def template_variables(
-    settings: tapl_config.PlanTaskExecuteConfig | None = None,
-    **overrides: Any,
-) -> dict[str, str]:
-    config = settings or tapl_config.PlanTaskExecuteConfig()
+def template_variables(**overrides: Any) -> dict[str, str]:
     values = {
-        "allowed_subagents": ", ".join(LEVEL_SUBAGENTS),
         "plan_labels": ", ".join(PLAN_KEY_LABELS),
         "task_statuses": "`, `".join(TASK_STATUSES),
-        "plan_detail_guidance": plan_detail_guidance(config.plan_detail),
-        "planning_approval_guidance": planning_approval_guidance(config.planning_approval_level),
-        "task_granularity_guidance": task_granularity_guidance(config.task_granularity),
-        "task_required_fields": task_required_fields(config),
-        "task_fields_guidance": task_format_guidance(config),
-        "task_required_field_summary": task_required_field_summary(config),
-        "subagent_routing_guidance": subagent_routing_guidance(config),
-        "subagent_execution_guidance": subagent_execution_guidance(config),
-        "execution_approval_guidance": execution_approval_guidance(config),
-        "command_required_subagent": (
-            " --required-subagent '@junior-worker'" if config.use_level_subagent else ""
-        ),
+        "plan_detail_guidance": plan_detail_guidance(),
+        "planning_approval_guidance": planning_approval_guidance(),
+        "task_granularity_guidance": task_granularity_guidance(),
+        "task_required_fields": task_required_fields(),
+        "task_fields_guidance": task_format_guidance(),
+        "task_required_field_summary": task_required_field_summary(),
+        "execution_approval_guidance": execution_approval_guidance(),
         "taplctl_execution_guidance": taplctl_execution_guidance(),
         "taplctl_command_guidance": taplctl_command_guidance(),
         "lifecycle_recipe_guidance": lifecycle_recipe_guidance(),
@@ -430,15 +406,10 @@ def template_variables(
         "plan_key_label_guidance": plan_key_label_guidance(),
         "plan_format_guidance": plan_format_guidance(),
         "task_plan_dependency_guidance": task_plan_dependency_guidance(),
-        "context_execution_approval_guidance": context_execution_approval_guidance(config),
-        "context_subagent_guidance": context_subagent_guidance(config),
+        "context_execution_approval_guidance": context_execution_approval_guidance(),
         "status_values": ", ".join(TASK_STATUSES),
-        "subagent_help_lines": task_help_subagent_lines(config, allowed_subagents_text()),
-        "example_task_required_subagent": (
-            " --required-subagent '@senior-worker'" if requires_required_subagent(config) else ""
-        ),
         "plan_field_contract": field_contract_section("plan"),
-        "task_field_contract": field_contract_section("task", settings=config),
+        "task_field_contract": field_contract_section("task"),
         "finding_field_contract": field_contract_section("finding"),
         "approval_field_contract": field_contract_section("approval"),
         "markdown_finding_guidance": markdown_record_guidance("finding details and impact"),
@@ -475,23 +446,14 @@ def field_label(record: str, name: str) -> str:
 def field_required_note(
     record: str,
     spec: FieldSpec,
-    settings: tapl_config.PlanTaskExecuteConfig | None = None,
 ) -> str:
-    if record == "task" and spec.name == "required_subagent" and settings is not None:
-        if not settings.use_level_subagent:
-            return "optional; routing disabled"
-        if settings.level_subagent_aggressiveness == "minimal":
-            return "optional for explicit subagent routing"
     return spec.required
 
 
-def field_contract_lines(
-    record: str,
-    settings: tapl_config.PlanTaskExecuteConfig | None = None,
-) -> list[str]:
+def field_contract_lines(record: str) -> list[str]:
     lines: list[str] = []
     for spec in field_specs(record):
-        note = field_required_note(record, spec, settings)
+        note = field_required_note(record, spec)
         required = f" ({note})" if note else ""
         lines.append(f"{spec.flag}{required}: {spec.help}")
     return lines
@@ -501,9 +463,8 @@ def field_contract_section(
     record: str,
     *,
     indent: str = "  ",
-    settings: tapl_config.PlanTaskExecuteConfig | None = None,
 ) -> str:
-    return "\n".join(f"{indent}{line}" for line in field_contract_lines(record, settings))
+    return "\n".join(f"{indent}{line}" for line in field_contract_lines(record))
 
 
 def markdown_body_fields(record: str) -> tuple[tuple[str, str], ...]:
@@ -519,14 +480,9 @@ def agent_item_fields(record: str) -> tuple[str, ...]:
     return AGENT_ITEM_FIELDS[record]
 
 
-def task_required_field_names(
-    settings: tapl_config.PlanTaskExecuteConfig,
-    status: str,
-) -> tuple[str, ...]:
+def task_required_field_names(status: str) -> tuple[str, ...]:
     if status in EXECUTABLE_TASK_STATUSES:
         fields = ["spec_id", "goal", "action", "verification"]
-        if settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal":
-            fields.append("required_subagent")
         if status == "Blocked":
             fields.extend(("blocker", "next_action"))
         return tuple(fields)
@@ -535,25 +491,18 @@ def task_required_field_names(
     return ()
 
 
-def task_required_field_flags(
-    settings: tapl_config.PlanTaskExecuteConfig,
-    status: str,
-) -> tuple[str, ...]:
-    return tuple(field_flag("task", field) for field in task_required_field_names(settings, status))
+def task_required_field_flags(status: str) -> tuple[str, ...]:
+    return tuple(field_flag("task", field) for field in task_required_field_names(status))
 
 
-def task_required_field_summary(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    executable = ", ".join(task_required_field_flags(settings, "Pending"))
-    completed = ", ".join(task_required_field_flags(settings, "Completed"))
-    blocked = ", ".join(task_required_field_flags(settings, "Blocked"))
+def task_required_field_summary() -> str:
+    executable = ", ".join(task_required_field_flags("Pending"))
+    completed = ", ".join(task_required_field_flags("Completed"))
+    blocked = ", ".join(task_required_field_flags("Blocked"))
     return (
         f"new task: --id, --title, --status; executable task: {executable}; "
         f"completed task: {completed}; blocked task: {blocked}."
     )
-
-
-def allowed_subagents_text() -> str:
-    return ", ".join(LEVEL_SUBAGENTS)
 
 
 def invalid_plan_id_remediation() -> str:
@@ -568,20 +517,6 @@ def invalid_task_spec_id_remediation() -> str:
     return "Set --spec-id to a stored numeric plan/spec id such as `PLAN-001` or `SPEC-001`."
 
 
-def required_subagent_remediation(settings: tapl_config.PlanTaskExecuteConfig | None = None) -> str:
-    if settings is not None and settings.level_subagent_aggressiveness == "minimal":
-        return "Use --required-subagent only for intentionally delegated tasks."
-    return f"Set --required-subagent to one of: {allowed_subagents_text()}."
-
-
-def new_task_required_subagent_remediation(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    return (
-        "Pass --required-subagent in the same `taplctl task create` command "
-        f"using one of: {allowed_subagents_text()}. "
-        "Use minimal routing config only for intentionally direct tasks."
-    )
-
-
 def missing_plan_remediation() -> str:
     return "Create or update a plan with `taplctl plan apply --stdin-json --agent` before durable edits."
 
@@ -594,9 +529,9 @@ def plan_content_remediation() -> str:
     return "Include objective, REQ trace, selected approach, affected files/interfaces, execution order, risks, and validation."
 
 
-def task_content_remediation(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    required = task_required_field_summary(settings)
-    return f"Set missing task fields according to the configured field contract: {required}"
+def task_content_remediation() -> str:
+    required = task_required_field_summary()
+    return f"Set missing task fields according to the fixed field contract: {required}"
 
 
 def multiple_tasks_in_progress_remediation() -> str:
@@ -619,12 +554,8 @@ def execution_approval_missing_remediation() -> str:
     )
 
 
-def task_granularity_remediation(value: str) -> str:
-    if value == "less_granular":
-        return "Split the work into major phases or owner boundaries."
-    if value == "very_granular":
-        return "Split the work so independent edits, migrations, docs, and verification each have tasks."
-    return "Split the work into meaningful implementation and verification tasks."
+def task_granularity_remediation() -> str:
+    return "Split every independent edit, migration, and verification step."
 
 
 def summarize_request_next_action() -> str:
@@ -697,25 +628,16 @@ def multiple_in_progress_next_action(labels: str) -> str:
     return f"Only one task may be In Progress; finish/block/skip all but earliest: {labels}."
 
 
-def continue_task_next_action(label: str, assignment: str = "") -> str:
-    route = f" {assignment};" if assignment else ""
-    return f"Continue only {label};{route} set Completed, Blocked, or Skipped before another task."
+def continue_task_next_action(label: str) -> str:
+    return f"Continue only {label}; set Completed, Blocked, or Skipped before another task."
 
 
-def start_task_next_action(label: str, assignment: str = "") -> str:
-    route = f"; {assignment}" if assignment else ""
-    return f"Start next task {label}: set In Progress immediately before execution{route}."
+def start_task_next_action(label: str) -> str:
+    return f"Start next task {label}: set In Progress immediately before execution."
 
 
 def resolve_blocked_task_next_action(label: str) -> str:
     return f"Resolve, replan, or skip blocked task {label} before later tasks."
-
-
-def subagent_assignment_next_action(required_subagent: str) -> str:
-    return (
-        f"if subagent delegation is available and allowed, spawn {required_subagent} for only this task; "
-        "otherwise do not claim delegation occurred"
-    )
 
 
 def durable_edit_requires_plan_message() -> str:
@@ -756,7 +678,6 @@ def archive_summary(
 
 
 def context_workflow_guidance(
-    settings: tapl_config.PlanTaskExecuteConfig,
     *,
     event: str,
     state: dict[str, Any],
@@ -767,7 +688,7 @@ def context_workflow_guidance(
     if event == "Stop":
         return [stop_guidance()]
 
-    return [user_prompt_submit_guidance(settings)]
+    return [user_prompt_submit_guidance()]
 
 
 def session_start_guidance() -> str:
@@ -778,29 +699,15 @@ def stop_guidance() -> str:
     return render(STOP_GUIDANCE_TEMPLATE)
 
 
-def user_prompt_submit_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    return render(CONTEXT_INJECTION_PROMPT_TEMPLATE, settings)
+def user_prompt_submit_guidance() -> str:
+    return render(CONTEXT_INJECTION_PROMPT_TEMPLATE)
 
 
-def context_execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    if settings.require_execution_approval:
-        return (
-            "Execution approval is required before task execution or durable edits; explicit edit, test, "
-            "implementation, and verification requests count as explicit user approval. Tool-confirmed continuation "
-            "uses the request_user_input source."
-        )
-    return "Execution approval is optional for material risk or scope; missing approval is a warning."
-
-
-def context_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    if not settings.use_level_subagent:
-        return ""
-    allowed = ", ".join(LEVEL_SUBAGENTS)
+def context_execution_approval_guidance() -> str:
     return (
-        "Subagent routing is task metadata. Choose the appropriate configured worker level for executable tasks, "
-        "mark the task In Progress before work, spawn the exact worker only when a subagent tool is available and "
-        "policy allows delegation, and otherwise do not claim delegation occurred. "
-        f"Configured worker levels: {allowed}."
+        "Fixed execution approval (`require_execution_approval = true`): execution approval is required before "
+        "task execution or durable edits; explicit edit, test, implementation, and verification requests count as "
+        "explicit user approval. Tool-confirmed continuation uses the request_user_input source."
     )
 
 
@@ -824,79 +731,17 @@ def external_findings_guidance() -> str:
     )
 
 
-def level_subagent_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    allowed = ", ".join(LEVEL_SUBAGENTS)
-    if not settings.use_level_subagent:
-        return "Level subagent routing is disabled; omit required_subagent and do not spawn subagents."
-    if settings.level_subagent_aggressiveness == "minimal":
-        return (
-            "Set required_subagent only for obvious risk or explicit routing; missing values do "
-            f"not warn or error. Treat it as routing metadata. Allowed values: {allowed}."
-        )
-    if settings.level_subagent_aggressiveness == "force":
-        return (
-            f"Every executable task must set required_subagent to one of {allowed}; missing values are errors. "
-            "Set it when creating the task, not as a follow-up repair."
-        )
-    return (
-        f"Choose required_subagent from {allowed} based on task risk/config and set it when creating "
-        "new executable tasks; existing unrouted executable tasks warn."
+def plan_detail_guidance() -> str:
+    return "Expand edge cases, alternatives considered, and per-spec validation."
+
+
+def planning_approval_guidance() -> str:
+    guidance = (
+        "Before `taplctl plan apply --stdin-json --agent`, use request_user_input Tool early for unclear planning "
+        "methods, material scope/risk/API/UX/data/compat, or tradeoffs. Ask short, focused "
+        "questions with 2-3 mutually exclusive options, and continue with follow-ups until "
+        "the plan is materially clear."
     )
-
-
-def subagent_execution_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    if not settings.use_level_subagent:
-        return "Subagent execution routing is disabled; execute tasks directly without subagent assignment."
-    return (
-        "Before executing a task with required_subagent, set it In Progress. Spawn that exact subagent "
-        "only when a subagent tool is available and user/session policy allows delegation; otherwise "
-        "do not claim delegation occurred, and the main agent records direct execution, result, and final status."
-    )
-
-
-def subagent_routing_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    if not settings.use_level_subagent:
-        return ""
-    return (
-        "Task routing:\n\n"
-        "- `@junior-worker`: low-risk mechanical changes, formatting, small docs, simple test updates.\n"
-        "- `@senior-worker`: normal feature work, refactoring, bug fixes, multi-file changes with clear tests, backward compatibility work.\n"
-        "- `@specialist-worker`: security, auth, permissions, migrations, payments, data loss risk, performance-critical or concurrency-sensitive code, public API changes.\n\n"
-        "Set `required_subagent` in the same command that creates each executable task. "
-        "Spawn that exact subagent only when the subagent tool is available and policy allows delegation; "
-        "otherwise execute directly and do not claim delegation occurred."
-    )
-
-
-def plan_detail_guidance(value: str) -> str:
-    return {
-        "minimal": "Write objective, selected approach, affected files, and validation only.",
-        "less_detailed": "Add constraints and risks only when they affect execution.",
-        "detailed": "Include requirements trace, execution order, risks, and validation.",
-        "very_detailed": "Expand edge cases, alternatives considered, and per-spec validation.",
-    }[value]
-
-
-def planning_approval_guidance(value: str) -> str:
-    guidance = {
-        "less": (
-            "Before `taplctl plan apply --stdin-json --agent`, use request_user_input Tool only for blocking or "
-            "high-risk material scope/risk/API/UX/data/compat choices. Ask follow-up questions "
-            "only when the answer remains blocking; otherwise state assumptions."
-        ),
-        "auto": (
-            "Before `taplctl plan apply --stdin-json --agent`, use request_user_input Tool for ambiguous material "
-            "scope/risk/API/UX/data/compat decisions. Prefer one short question with 2-3 "
-            "mutually exclusive options; ask additional questions only when needed to resolve "
-            "material ambiguity."
-        ),
-        "more": (
-            "Before `taplctl plan apply --stdin-json --agent`, use request_user_input Tool early for unclear planning "
-            "methods, material scope/risk/API/UX/data/compat, or tradeoffs. Ask short, focused "
-            "questions with 2-3 mutually exclusive options, and continue with follow-ups until "
-            "the plan is materially clear."
-        ),
-    }[value]
     return (
         f"{guidance} Invoke it only when the Tool is available in the current mode; "
         "when multiple independent decisions are already known, batch up to three short questions in one "
@@ -997,44 +842,33 @@ def task_execution_order_guidance() -> str:
     )
 
 
-def task_granularity_guidance(value: str) -> str:
-    return {
-        "minimal": "Use one executable task unless phases are truly separate.",
-        "less_granular": "Split by major phase or owner boundary.",
-        "granular": "Split by meaningful implementation and verification steps.",
-        "very_granular": "Split every independent edit, migration, and verification step.",
-    }[value]
+def task_granularity_guidance() -> str:
+    return "Split every independent edit, migration, and verification step."
 
 
-def task_required_fields(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    fields = ", ".join(task_required_field_flags(settings, "Pending"))
+def task_required_fields() -> str:
+    fields = ", ".join(task_required_field_flags("Pending"))
     return f"Each executable task must include {fields} when applicable."
 
 
-def task_format_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
-    fields = task_required_field_flags(settings, "Pending")
-    optional_subagent = ""
-    if settings.use_level_subagent and settings.level_subagent_aggressiveness == "minimal":
-        optional_subagent = " Set --required-subagent only for explicit subagent routing."
+def task_format_guidance() -> str:
+    fields = task_required_field_flags("Pending")
     return (
         f"Executable implementation/verification tasks should include {', '.join(fields)}, "
-        f"completed tasks should include {', '.join(task_required_field_flags(settings, 'Completed'))}; "
-        f"blocked tasks should include {', '.join(task_required_field_flags(settings, 'Blocked'))}. "
+        f"completed tasks should include {', '.join(task_required_field_flags('Completed'))}; "
+        f"blocked tasks should include {', '.join(task_required_field_flags('Blocked'))}. "
         "When updating an existing task, pass only changed fields; omitted fields keep stored values."
-        f"{optional_subagent}"
     )
 
 
-def execution_approval_guidance(settings: tapl_config.PlanTaskExecuteConfig) -> str:
+def execution_approval_guidance() -> str:
     base = (
         "After task design/task create and before starting or continuing task execution, set execution approval with "
         "`taplctl approval approve --prompt '<approved scope>' --source explicit_user --agent` "
         "when the user explicitly requested execution; use `--source request_user_input` when approval came from "
         "request_user_input."
     )
-    if settings.require_execution_approval:
-        return base + " Missing execution approval is a validation error when require_execution_approval is true."
-    return base + " Missing execution approval is a warning, and enforce-mode hooks block on it."
+    return base + " Missing execution approval is always a validation error."
 
 
 def command_help_epilog() -> str:
@@ -1051,46 +885,12 @@ def plan_set_epilog() -> str:
 
 def task_set_epilog(
     *,
-    settings: tapl_config.PlanTaskExecuteConfig | None = None,
     statuses: Iterable[str] = TASK_STATUSES,
-    subagents: Iterable[str] = LEVEL_SUBAGENTS,
 ) -> str:
-    config = settings or tapl_config.PlanTaskExecuteConfig()
     status_values = ", ".join(statuses)
-    subagent_values = ", ".join(subagents)
     return render(
         TASK_SET_HELP_TEMPLATE,
-        config,
         status_values=status_values,
-        subagent_help_lines=task_help_subagent_lines(config, subagent_values),
-        example_task_required_subagent=(
-            " --required-subagent '@senior-worker'" if requires_required_subagent(config) else ""
-        ),
-    )
-
-
-def requires_required_subagent(settings: tapl_config.PlanTaskExecuteConfig) -> bool:
-    return bool(settings.use_level_subagent and settings.level_subagent_aggressiveness != "minimal")
-
-
-def task_help_subagent_lines(settings: tapl_config.PlanTaskExecuteConfig, subagent_values: str) -> str:
-    if not settings.use_level_subagent:
-        return "  Subagent routing is disabled; --required-subagent is optional metadata and not required.\n"
-    if settings.level_subagent_aggressiveness == "minimal":
-        return (
-            "  Set --required-subagent only for explicit subagent routing; direct tasks may omit it.\n"
-            "  Before execution set In Progress; spawn that exact subagent only when a subagent\n"
-            "  tool is available and user/session policy allows delegation. Otherwise do not claim\n"
-            "  delegation occurred; the main agent records direct execution and result/status.\n"
-            f"  Allowed required_subagent values when used: {subagent_values}.\n"
-        )
-    return (
-        "  When level subagent routing is enabled, set required_subagent in the same command\n"
-        "  that creates each executable task; treat it as routing metadata.\n"
-        "  Before execution set In Progress; spawn that exact subagent only when a subagent\n"
-        "  tool is available and user/session policy allows delegation. Otherwise do not claim\n"
-        "  delegation occurred; the main agent records direct execution and result/status.\n"
-        f"  Allowed required_subagent values when enabled: {subagent_values}.\n"
     )
 
 
