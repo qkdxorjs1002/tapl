@@ -296,7 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace-root",
         type=Path,
         default=None,
-        help="Explicit workspace root where .tapl/workspace.toml and tapl.db are initialized.",
+        help="Explicit workspace root where .tapl/tapl.db is initialized.",
     )
     add_agent_output_args(init)
     init.set_defaults(handler=cmd_init)

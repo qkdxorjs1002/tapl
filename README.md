@@ -124,11 +124,11 @@ boundary.
 
 ### 5. One CLI, workspace-local state
 
-Install `taplctl` once. Each Codex workspace keeps a `.tapl/workspace.toml`
-anchor and `.tapl/tapl.db`. On the first hook event, `tapl` explicitly
-initializes the payload working directory when no ancestor anchor exists.
-Nested Git repositories then reuse that workspace anchor instead of creating
-separate history databases.
+Install `taplctl` once. Each Codex workspace keeps its state in
+`.tapl/tapl.db`, which also acts as the workspace anchor. On the first hook
+event, `tapl` explicitly initializes the payload working directory when no
+ancestor database exists. Nested Git repositories then reuse that workspace
+database instead of creating separate history databases.
 
 To select the workspace root manually, run:
 
@@ -136,8 +136,8 @@ To select the workspace root manually, run:
 taplctl init --workspace-root /path/to/workspace
 ```
 
-An intentionally independent nested repository can use its own explicit
-workspace initialization.
+An intentionally independent nested repository can initialize its own
+`.tapl/tapl.db`.
 
 ### 6. Optional VS Code viewer
 
@@ -289,7 +289,6 @@ Runtime state and local build output are intentionally not part of the source
 contract:
 
 ```text
-.tapl/workspace.toml
 .tapl/tapl.db
 tapl/.venv/
 tapl/dist/

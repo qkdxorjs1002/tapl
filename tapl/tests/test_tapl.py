@@ -77,7 +77,7 @@ class TaplCliTests(unittest.TestCase):
         self.assertEqual(version.returncode, 0, version.stderr)
         self.assertEqual(version.stdout.strip(), f"taplctl {expected_version}")
 
-    def test_workspace_marker_takes_priority_over_nested_git(self) -> None:
+    def test_workspace_db_takes_priority_over_nested_git(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
             child_repo = workspace / "services" / "child"
@@ -91,29 +91,24 @@ class TaplCliTests(unittest.TestCase):
             initialized = tapl_db.initialize_workspace(workspace)
 
             self.assertEqual(initialized["workspace_root"], str(workspace.resolve()))
-            self.assertEqual(initialized["workspace_marker_action"], "created")
+            self.assertEqual(initialized["db_action"], "created")
             self.assertEqual(tapl_db.find_workspace_root(nested_dir), workspace.resolve())
             self.assertEqual(tapl_db.find_repo_root(nested_dir), workspace.resolve())
-            self.assertEqual(
-                (workspace / tapl_db.WORKSPACE_MARKER_RELATIVE).read_text(encoding="utf-8"),
-                tapl_db.WORKSPACE_MARKER_TEXT,
-            )
+            self.assertTrue((workspace / tapl_db.DEFAULT_DB_RELATIVE).is_file())
 
-    def test_unanchored_nested_db_does_not_override_workspace_marker(self) -> None:
+    def test_nearest_workspace_db_takes_priority(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
             child_repo = workspace / "child"
             child_repo.mkdir(parents=True)
             (workspace / ".git").mkdir()
             (child_repo / ".git").mkdir()
-            stale_db = child_repo / tapl_db.DEFAULT_DB_RELATIVE
-            stale_db.parent.mkdir()
-            stale_db.touch()
             tapl_db.initialize_workspace(workspace)
+            tapl_db.initialize_workspace(child_repo)
 
             self.assertEqual(
                 tapl_db.default_db_path(child_repo),
-                workspace.resolve() / tapl_db.DEFAULT_DB_RELATIVE,
+                child_repo.resolve() / tapl_db.DEFAULT_DB_RELATIVE,
             )
 
     def test_init_workspace_root_is_explicit_and_idempotent(self) -> None:
@@ -137,10 +132,10 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
             payload = json.loads(initialized.stdout)
             self.assertEqual(payload["workspace_root"], str(workspace.resolve()))
-            self.assertEqual(payload["workspace_marker_action"], "created")
             self.assertEqual(payload["db_action"], "created")
-            self.assertTrue((workspace / tapl_db.WORKSPACE_MARKER_RELATIVE).is_file())
             self.assertTrue((workspace / tapl_db.DEFAULT_DB_RELATIVE).is_file())
+            self.assertNotIn("workspace_marker", payload)
+            self.assertNotIn("workspace_marker_action", payload)
             self.assertFalse((outside / ".tapl").exists())
 
             repeated = self.run_taplctl(
@@ -153,7 +148,6 @@ class TaplCliTests(unittest.TestCase):
             )
             self.assertEqual(repeated.returncode, 0, repeated.stderr)
             repeated_payload = json.loads(repeated.stdout)
-            self.assertEqual(repeated_payload["workspace_marker_action"], "unchanged")
             self.assertEqual(repeated_payload["db_action"], "unchanged")
 
             conflict = self.run_taplctl(
@@ -2458,10 +2452,7 @@ experimental = true
                 (repo / ".tapl" / "version").read_text(encoding="utf-8").strip(),
                 __version__,
             )
-            self.assertEqual(
-                (repo / tapl_db.WORKSPACE_MARKER_RELATIVE).read_text(encoding="utf-8"),
-                tapl_db.WORKSPACE_MARKER_TEXT,
-            )
+            self.assertFalse((repo / ".tapl" / "workspace.toml").exists())
             self.assertFalse((repo / ".codex" / "tapl" / "tapl.toml").exists())
             self.assertTrue((repo / ".tapl" / "tapl.db").exists())
 
@@ -3636,8 +3627,9 @@ keep = true
                 "New request",
             )
             self.assertEqual(payload["workspace"]["workspace_root"], str(workspace.resolve()))
-            self.assertTrue((workspace / tapl_db.WORKSPACE_MARKER_RELATIVE).exists())
             self.assertTrue((workspace / ".tapl" / "tapl.db").exists())
+            self.assertNotIn("workspace_marker", payload["workspace"])
+            self.assertNotIn("workspace_marker_action", payload["workspace"])
             self.assertEqual(
                 (workspace / ".tapl" / "version").read_text(encoding="utf-8").strip(),
                 __version__,
@@ -3672,7 +3664,6 @@ keep = true
             )
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
             initialized_payload = json.loads(initialized.stdout)
-            self.assertEqual(initialized_payload["workspace"]["workspace_marker_action"], "created")
             self.assertEqual(initialized_payload["workspace"]["db_action"], "created")
 
             nested_event = self.run_taplctl(
@@ -3689,7 +3680,7 @@ keep = true
             self.assertEqual(nested_event.returncode, 0, nested_event.stderr)
             nested_payload = json.loads(nested_event.stdout)
             self.assertEqual(nested_payload["workspace"]["workspace_root"], str(workspace.resolve()))
-            self.assertEqual(nested_payload["workspace"]["workspace_marker_action"], "unchanged")
+            self.assertEqual(nested_payload["workspace"]["db_action"], "unchanged")
             self.assertFalse((child_repo / ".tapl").exists())
 
             nested_init = self.run_taplctl("init", "--json", cwd=child_repo, env_overrides=env)

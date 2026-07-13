@@ -14,9 +14,6 @@ from typing import Any, Iterable
 
 SCHEMA_VERSION = 5
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
-WORKSPACE_MARKER_RELATIVE = Path(".tapl") / "workspace.toml"
-WORKSPACE_MARKER_VERSION = 1
-WORKSPACE_MARKER_TEXT = f"version = {WORKSPACE_MARKER_VERSION}\n"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
 TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
@@ -50,7 +47,7 @@ def ancestor_paths(start: Path | None = None) -> list[Path]:
 
 def find_workspace_root(start: Path | None = None) -> Path | None:
     for path in ancestor_paths(start):
-        if (path / WORKSPACE_MARKER_RELATIVE).is_file():
+        if (path / DEFAULT_DB_RELATIVE).is_file():
             return path
     return None
 
@@ -76,20 +73,12 @@ def find_repo_root(start: Path | None = None) -> Path:
 def initialize_workspace(root: Path | str) -> dict[str, Any]:
     workspace_root = Path(root).expanduser().resolve()
     workspace_root.mkdir(parents=True, exist_ok=True)
-    marker_path = workspace_root / WORKSPACE_MARKER_RELATIVE
-    marker_existed = marker_path.exists()
-    if not marker_existed:
-        marker_path.parent.mkdir(parents=True, exist_ok=True)
-        marker_path.write_text(WORKSPACE_MARKER_TEXT, encoding="utf-8")
-
     db_path = workspace_root / DEFAULT_DB_RELATIVE
     db_existed = db_path.exists()
     conn = connect(db_path)
     conn.close()
     return {
         "workspace_root": str(workspace_root),
-        "workspace_marker": str(marker_path),
-        "workspace_marker_action": "unchanged" if marker_existed else "created",
         "db": str(db_path),
         "db_action": "unchanged" if db_existed else "created",
     }
