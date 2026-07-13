@@ -184,7 +184,7 @@ def should_skip_auto_install(args: argparse.Namespace) -> bool:
     command = getattr(args, "command", None)
     if args.db is not None or args.config is not None:
         return True
-    if command in {None, "install", "hook-event"}:
+    if command in {None, "init", "install", "hook-event"}:
         return True
     return command == "searchd" and getattr(args, "searchd_command", None) == "run"
 
@@ -292,6 +292,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     init = sub.add_parser("init", help="Initialize the tapl database.")
+    init.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=None,
+        help="Explicit workspace root where .tapl/workspace.toml and tapl.db are initialized.",
+    )
     add_agent_output_args(init)
     init.set_defaults(handler=cmd_init)
 
@@ -688,6 +694,19 @@ def load_config(args: argparse.Namespace, *, start: Path | None = None) -> tapl_
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    if args.workspace_root is not None:
+        if args.db is not None:
+            raise ValueError("--workspace-root cannot be combined with --db")
+        initialized = db.initialize_workspace(args.workspace_root)
+        conn = db.connect(initialized["db"])
+        payload = {
+            "ok": True,
+            **initialized,
+            "schema": db.get_meta(conn),
+        }
+        emit(payload, args.json, args.agent)
+        return 0
+
     conn = open_conn(args)
     payload = {
         "ok": True,
@@ -1938,7 +1957,9 @@ def cmd_hook_event(args: argparse.Namespace) -> int:
             payload = {"raw": raw}
 
     start = payload_cwd(payload)
+    workspace: dict[str, Any] | None = None
     if args.db is None and args.config is None:
+        start, workspace = initialize_hook_workspace(start)
         tapl_install.auto_install_if_needed(start=start)
     settings = load_config(args, start=start)
     outcome = hooks.handle_event(
@@ -1949,6 +1970,8 @@ def cmd_hook_event(args: argparse.Namespace) -> int:
         payload=payload,
         tapl_settings=settings,
     )
+    if workspace is not None:
+        outcome["workspace"] = workspace
     emit_hook_outcome(outcome, args.json, args.agent)
     return 2 if outcome.get("block") else 0
 
@@ -1981,6 +2004,14 @@ def payload_cwd(payload: dict[str, Any]) -> Path | None:
     if isinstance(value, str) and value.strip():
         return Path(value).expanduser()
     return None
+
+
+def initialize_hook_workspace(start: Path | None) -> tuple[Path | None, dict[str, Any] | None]:
+    if start is None:
+        return None, None
+    workspace_root = db.find_workspace_root(start) or start
+    initialized = db.initialize_workspace(workspace_root)
+    return Path(initialized["workspace_root"]), initialized
 
 
 def emit(payload: dict[str, Any], as_json: bool, as_agent: bool = False) -> None:

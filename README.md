@@ -122,12 +122,22 @@ Those hooks call `taplctl hook-event`, load the current workflow state, and
 return concise lifecycle context. The agent interprets intent; hooks guard the
 boundary.
 
-### 5. One CLI, repo-local state
+### 5. One CLI, workspace-local state
 
-Install `taplctl` once. Each repository keeps its own `.tapl/tapl.db`.
+Install `taplctl` once. Each Codex workspace keeps a `.tapl/workspace.toml`
+anchor and `.tapl/tapl.db`. On the first hook event, `tapl` explicitly
+initializes the payload working directory when no ancestor anchor exists.
+Nested Git repositories then reuse that workspace anchor instead of creating
+separate history databases.
 
-That split keeps installation simple while preventing one workspace's workflow
-state from leaking into another.
+To select the workspace root manually, run:
+
+```sh
+taplctl init --workspace-root /path/to/workspace
+```
+
+An intentionally independent nested repository can use its own explicit
+workspace initialization.
 
 ### 6. Optional VS Code viewer
 
@@ -228,7 +238,7 @@ uv build
 ## Useful Commands
 
 ```sh
-taplctl init
+taplctl init --workspace-root /path/to/workspace
 taplctl doctor
 taplctl status
 taplctl validate
@@ -279,6 +289,7 @@ Runtime state and local build output are intentionally not part of the source
 contract:
 
 ```text
+.tapl/workspace.toml
 .tapl/tapl.db
 tapl/.venv/
 tapl/dist/

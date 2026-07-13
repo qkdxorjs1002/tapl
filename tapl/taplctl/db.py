@@ -14,6 +14,9 @@ from typing import Any, Iterable
 
 SCHEMA_VERSION = 5
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
+WORKSPACE_MARKER_RELATIVE = Path(".tapl") / "workspace.toml"
+WORKSPACE_MARKER_VERSION = 1
+WORKSPACE_MARKER_TEXT = f"version = {WORKSPACE_MARKER_VERSION}\n"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
 TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
@@ -32,15 +35,32 @@ WORKFLOW_RUN_OUTPUT_FIELDS = (
     "updated_at",
     "archived_at",
 )
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def find_repo_root(start: Path | None = None) -> Path:
+def ancestor_paths(start: Path | None = None) -> list[Path]:
     current = (start or Path.cwd()).resolve()
     if current.is_file():
         current = current.parent
-    candidates = [current, *current.parents]
+    return [current, *current.parents]
+
+
+def find_workspace_root(start: Path | None = None) -> Path | None:
+    for path in ancestor_paths(start):
+        if (path / WORKSPACE_MARKER_RELATIVE).is_file():
+            return path
+    return None
+
+
+def find_repo_root(start: Path | None = None) -> Path:
+    candidates = ancestor_paths(start)
+
+    workspace_root = find_workspace_root(start)
+    if workspace_root is not None:
+        return workspace_root
 
     for path in candidates:
         if (path / ".git").exists():
@@ -50,7 +70,29 @@ def find_repo_root(start: Path | None = None) -> Path:
         if (path / ".codex").exists() and (path / "README.md").exists():
             return path
 
-    return current
+    return candidates[0]
+
+
+def initialize_workspace(root: Path | str) -> dict[str, Any]:
+    workspace_root = Path(root).expanduser().resolve()
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    marker_path = workspace_root / WORKSPACE_MARKER_RELATIVE
+    marker_existed = marker_path.exists()
+    if not marker_existed:
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text(WORKSPACE_MARKER_TEXT, encoding="utf-8")
+
+    db_path = workspace_root / DEFAULT_DB_RELATIVE
+    db_existed = db_path.exists()
+    conn = connect(db_path)
+    conn.close()
+    return {
+        "workspace_root": str(workspace_root),
+        "workspace_marker": str(marker_path),
+        "workspace_marker_action": "unchanged" if marker_existed else "created",
+        "db": str(db_path),
+        "db_action": "unchanged" if db_existed else "created",
+    }
 
 
 def default_db_path(start: Path | None = None) -> Path:

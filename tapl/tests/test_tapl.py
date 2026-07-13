@@ -77,6 +77,95 @@ class TaplCliTests(unittest.TestCase):
         self.assertEqual(version.returncode, 0, version.stderr)
         self.assertEqual(version.stdout.strip(), f"taplctl {expected_version}")
 
+    def test_workspace_marker_takes_priority_over_nested_git(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            child_repo = workspace / "services" / "child"
+            nested_dir = child_repo / "src"
+            (workspace / ".git").mkdir(parents=True)
+            (child_repo / ".git").mkdir(parents=True)
+            nested_dir.mkdir()
+
+            self.assertEqual(tapl_db.find_repo_root(nested_dir), child_repo.resolve())
+
+            initialized = tapl_db.initialize_workspace(workspace)
+
+            self.assertEqual(initialized["workspace_root"], str(workspace.resolve()))
+            self.assertEqual(initialized["workspace_marker_action"], "created")
+            self.assertEqual(tapl_db.find_workspace_root(nested_dir), workspace.resolve())
+            self.assertEqual(tapl_db.find_repo_root(nested_dir), workspace.resolve())
+            self.assertEqual(
+                (workspace / tapl_db.WORKSPACE_MARKER_RELATIVE).read_text(encoding="utf-8"),
+                tapl_db.WORKSPACE_MARKER_TEXT,
+            )
+
+    def test_unanchored_nested_db_does_not_override_workspace_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            child_repo = workspace / "child"
+            child_repo.mkdir(parents=True)
+            (workspace / ".git").mkdir()
+            (child_repo / ".git").mkdir()
+            stale_db = child_repo / tapl_db.DEFAULT_DB_RELATIVE
+            stale_db.parent.mkdir()
+            stale_db.touch()
+            tapl_db.initialize_workspace(workspace)
+
+            self.assertEqual(
+                tapl_db.default_db_path(child_repo),
+                workspace.resolve() / tapl_db.DEFAULT_DB_RELATIVE,
+            )
+
+    def test_init_workspace_root_is_explicit_and_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            workspace = base / "workspace"
+            outside = base / "outside"
+            home = base / "home"
+            outside.mkdir()
+            home.mkdir()
+            env = {"HOME": str(home)}
+
+            initialized = self.run_taplctl(
+                "init",
+                "--workspace-root",
+                str(workspace),
+                "--json",
+                cwd=outside,
+                env_overrides=env,
+            )
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            payload = json.loads(initialized.stdout)
+            self.assertEqual(payload["workspace_root"], str(workspace.resolve()))
+            self.assertEqual(payload["workspace_marker_action"], "created")
+            self.assertEqual(payload["db_action"], "created")
+            self.assertTrue((workspace / tapl_db.WORKSPACE_MARKER_RELATIVE).is_file())
+            self.assertTrue((workspace / tapl_db.DEFAULT_DB_RELATIVE).is_file())
+            self.assertFalse((outside / ".tapl").exists())
+
+            repeated = self.run_taplctl(
+                "init",
+                "--workspace-root",
+                str(workspace),
+                "--json",
+                cwd=outside,
+                env_overrides=env,
+            )
+            self.assertEqual(repeated.returncode, 0, repeated.stderr)
+            repeated_payload = json.loads(repeated.stdout)
+            self.assertEqual(repeated_payload["workspace_marker_action"], "unchanged")
+            self.assertEqual(repeated_payload["db_action"], "unchanged")
+
+            conflict = self.run_taplctl(
+                "--db",
+                str(base / "custom.db"),
+                "init",
+                "--workspace-root",
+                str(workspace),
+            )
+            self.assertEqual(conflict.returncode, 1)
+            self.assertIn("--workspace-root cannot be combined with --db", conflict.stderr)
+
     def test_init_task_status_and_search(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
@@ -2369,6 +2458,10 @@ experimental = true
                 (repo / ".tapl" / "version").read_text(encoding="utf-8").strip(),
                 __version__,
             )
+            self.assertEqual(
+                (repo / tapl_db.WORKSPACE_MARKER_RELATIVE).read_text(encoding="utf-8"),
+                tapl_db.WORKSPACE_MARKER_TEXT,
+            )
             self.assertFalse((repo / ".codex" / "tapl" / "tapl.toml").exists())
             self.assertTrue((repo / ".tapl" / "tapl.db").exists())
 
@@ -3542,6 +3635,8 @@ keep = true
                 payload["context"]["active_run"]["request_summary"],
                 "New request",
             )
+            self.assertEqual(payload["workspace"]["workspace_root"], str(workspace.resolve()))
+            self.assertTrue((workspace / tapl_db.WORKSPACE_MARKER_RELATIVE).exists())
             self.assertTrue((workspace / ".tapl" / "tapl.db").exists())
             self.assertEqual(
                 (workspace / ".tapl" / "version").read_text(encoding="utf-8").strip(),
@@ -3550,6 +3645,81 @@ keep = true
             self.assertTrue((workspace / ".codex" / "hooks.json").exists())
             self.assertFalse((outside / ".tapl").exists())
             self.assertFalse((outside / ".codex").exists())
+
+    def test_hook_workspace_bootstrap_keeps_nested_git_on_one_db(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            workspace = base / "workspace"
+            child_repo = workspace / "services" / "child"
+            outside = base / "outside"
+            home = base / "home"
+            (workspace / ".git").mkdir(parents=True)
+            (child_repo / ".git").mkdir(parents=True)
+            outside.mkdir()
+            home.mkdir()
+            env = {"HOME": str(home)}
+
+            initialized = self.run_taplctl(
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text=json.dumps({"cwd": str(workspace), "prompt": "Initialize workspace"}),
+                cwd=outside,
+                env_overrides=env,
+            )
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            initialized_payload = json.loads(initialized.stdout)
+            self.assertEqual(initialized_payload["workspace"]["workspace_marker_action"], "created")
+            self.assertEqual(initialized_payload["workspace"]["db_action"], "created")
+
+            nested_event = self.run_taplctl(
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text=json.dumps({"cwd": str(child_repo), "prompt": "Continue nested work"}),
+                cwd=outside,
+                env_overrides=env,
+            )
+            self.assertEqual(nested_event.returncode, 0, nested_event.stderr)
+            nested_payload = json.loads(nested_event.stdout)
+            self.assertEqual(nested_payload["workspace"]["workspace_root"], str(workspace.resolve()))
+            self.assertEqual(nested_payload["workspace"]["workspace_marker_action"], "unchanged")
+            self.assertFalse((child_repo / ".tapl").exists())
+
+            nested_init = self.run_taplctl("init", "--json", cwd=child_repo, env_overrides=env)
+            self.assertEqual(nested_init.returncode, 0, nested_init.stderr)
+            self.assertEqual(
+                json.loads(nested_init.stdout)["db"],
+                str(workspace.resolve() / tapl_db.DEFAULT_DB_RELATIVE),
+            )
+
+    def test_hook_explicit_db_bypasses_workspace_bootstrap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            workspace = base / "workspace"
+            explicit_db = base / "explicit.db"
+            workspace.mkdir()
+
+            event = self.run_cli(
+                explicit_db,
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text=json.dumps({"cwd": str(workspace), "prompt": "Use explicit database"}),
+            )
+            self.assertEqual(event.returncode, 0, event.stderr)
+            self.assertTrue(explicit_db.exists())
+            self.assertFalse((workspace / ".tapl").exists())
+            self.assertNotIn("workspace", json.loads(event.stdout))
 
     def test_archive_show_includes_items_and_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

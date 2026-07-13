@@ -127,6 +127,12 @@ def install_repo(
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
         *install_static_codex_templates(root / ".codex", force=force, dry_run=dry_run),
         *remove_deprecated_codex_templates(root / ".codex", dry_run=dry_run),
+        write_text_if_needed(
+            root / db.WORKSPACE_MARKER_RELATIVE,
+            db.WORKSPACE_MARKER_TEXT,
+            force=False,
+            dry_run=dry_run,
+        ),
         write_tapl_config(
             config_path,
             default_config_text(),
