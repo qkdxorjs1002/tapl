@@ -1001,7 +1001,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertIn("user-selected-merge", semantic_text)
             conn.close()
 
-    def test_custom_fields_help_and_context_require_autonomous_history_judgment_and_user_language(self) -> None:
+    def test_custom_fields_help_and_context_require_history_judgment_user_language_and_deduplication(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
             plan_help = self.run_cli(db_path, "plan", "apply", "--help")
@@ -1015,8 +1015,13 @@ class TaplCliTests(unittest.TestCase):
                 self.assertIn("natural-language labels", output)
                 self.assertIn("string values in the user's language", output)
                 self.assertIn("avoid snake_case", output)
+                self.assertIn("inspect the record's existing `custom_fields`", output)
+                self.assertIn("one field for each fact, decision, constraint, or path", output)
+                self.assertIn("synonymous label or duplicate value", output)
+                self.assertIn("clearest, most specific label as the canonical key", output)
+                self.assertIn("top-level nulls for the obsolete alias keys", output)
                 self.assertIn("file paths, commands, API names", output)
-                self.assertIn("use its exact stored key", output)
+                self.assertIn("when the distinction is unclear, preserve them or ask", output)
                 self.assertIn("Do not copy standard fields", output)
                 self.assertIn("top-level null value deletes", output)
 
@@ -1029,7 +1034,11 @@ class TaplCliTests(unittest.TestCase):
             self.assertIn("natural-language labels", guidance)
             self.assertIn("string values in the user's language", guidance)
             self.assertIn("avoid snake_case", guidance)
-            self.assertIn("use its exact stored key", guidance)
+            self.assertIn("inspect the record's existing `custom_fields`", guidance)
+            self.assertIn("synonymous label or duplicate value", guidance)
+            self.assertIn("clearest, most specific label as the canonical key", guidance)
+            self.assertIn("top-level nulls for the obsolete alias keys", guidance)
+            self.assertIn("when the distinction is unclear, preserve them or ask", guidance)
 
     def test_task_set_requires_title_and_status_for_new_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
