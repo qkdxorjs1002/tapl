@@ -13,6 +13,7 @@
     "skipLibCheck": true
   },
   "include": [
+    "src/i18n.ts",
     "src/extension.ts",
     "src/vscode.d.ts"
   ]

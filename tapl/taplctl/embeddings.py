@@ -26,7 +26,7 @@ def dependency_status() -> dict[str, Any]:
 def reindex(conn: sqlite3.Connection, *, dry_run: bool = False) -> dict[str, Any]:
     items = conn.execute(
         """
-        SELECT id, stable_id, kind, title, body, raw_text, run_id
+        SELECT id, stable_id, kind, title, body, raw_text, custom_fields_json, run_id
         FROM items
         ORDER BY id
         """
@@ -91,7 +91,15 @@ def reindex(conn: sqlite3.Connection, *, dry_run: bool = False) -> dict[str, Any
             """,
             (
                 item["id"],
-                db.content_hash([item["stable_id"], item["title"], item["body"], item["raw_text"]]),
+                db.content_hash(
+                    [
+                        item["stable_id"],
+                        item["title"],
+                        item["body"],
+                        item["raw_text"],
+                        db.custom_fields_search_text(item["custom_fields_json"]),
+                    ]
+                ),
                 db.utc_now(),
             ),
         )
@@ -297,6 +305,7 @@ def item_text(row: sqlite3.Row) -> str:
             row["title"],
             row["body"],
             row["raw_text"],
+            db.custom_fields_search_text(row["custom_fields_json"]),
         ]
         if part
     )

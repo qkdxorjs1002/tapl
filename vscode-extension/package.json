@@ -1,7 +1,7 @@
 {
   "name": "tapl-workflow-viewer",
-  "displayName": "tapl Workflow Viewer",
-  "description": "View tapl SQLite workflow state through the taplctl CLI.",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
   "version": "0.3.0",
   "publisher": "paragonnov",
   "license": "MIT",
@@ -46,38 +46,38 @@
   },
   "contributes": {
     "configuration": {
-      "title": "tapl Workflow",
+      "title": "%configuration.title%",
       "properties": {
         "taplWorkflow.taplctlPath": {
           "type": "string",
           "default": "",
-          "description": "Path or command name for taplctl. Leave empty to search PATH plus common Homebrew locations."
+          "description": "%configuration.taplctlPath.description%"
         }
       }
     },
     "commands": [
       {
         "command": "taplWorkflow.refresh",
-        "title": "Refresh Workflow Views",
-        "category": "tapl Workflow",
+        "title": "%command.refresh.title%",
+        "category": "%command.category%",
         "icon": "$(refresh)"
       },
       {
         "command": "taplWorkflow.openOverview",
-        "title": "Open tapl Dashboard",
-        "category": "tapl Workflow",
+        "title": "%command.openOverview.title%",
+        "category": "%command.category%",
         "icon": "$(preview)"
       },
       {
         "command": "taplWorkflow.openArchive",
-        "title": "Open tapl Archive",
-        "category": "tapl Workflow",
+        "title": "%command.openArchive.title%",
+        "category": "%command.category%",
         "icon": "$(archive)"
       },
       {
         "command": "taplWorkflow.search",
-        "title": "Search tapl Workflow",
-        "category": "tapl Workflow",
+        "title": "%command.search.title%",
+        "category": "%command.category%",
         "icon": "$(search)"
       }
     ],
@@ -94,11 +94,11 @@
       "taplWorkflow": [
         {
           "id": "taplWorkflow.active",
-          "name": "Active"
+          "name": "%view.active.name%"
         },
         {
           "id": "taplWorkflow.archives",
-          "name": "Archives"
+          "name": "%view.archives.name%"
         }
       ]
     },

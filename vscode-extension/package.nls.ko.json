@@ -1,0 +1,13 @@
+{
+  "extension.displayName": "tapl workflow 뷰어",
+  "extension.description": "tapl workflow 상태를 시각적으로 확인합니다.",
+  "configuration.title": "tapl workflow",
+  "configuration.taplctlPath.description": "taplctl의 경로 또는 명령 이름입니다. 비워 두면 PATH와 일반적인 Homebrew 설치 경로를 검색합니다.",
+  "command.category": "tapl workflow",
+  "command.refresh.title": "workflow 보기 새로고침",
+  "command.openOverview.title": "tapl 대시보드 열기",
+  "command.openArchive.title": "tapl 아카이브 열기",
+  "command.search.title": "tapl workflow 검색",
+  "view.active.name": "활성",
+  "view.archives.name": "아카이브"
+}

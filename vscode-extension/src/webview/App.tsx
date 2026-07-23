@@ -1,4 +1,5 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { resolveLocale, type SupportedLocale } from '../i18n';
 import type {
   HostMessage,
   TaplArchive,
@@ -6,6 +7,7 @@ import type {
   TaplEvent,
   TaplItem,
   TaplItemDetail,
+  TaplJsonValue,
   TaplSearchPayload,
   TaplSearchResult,
   TaplStatus,
@@ -13,6 +15,7 @@ import type {
   WebviewView
 } from './types';
 import { vscodeApi } from './vscodeApi';
+import { I18nProvider, useI18n } from './i18n';
 
 const TASK_STATUSES = ['Pending', 'In Progress', 'Blocked', 'Completed', 'Skipped'];
 const DEFAULT_TASK_COUNTS: Record<string, number> = {
@@ -25,8 +28,11 @@ const DEFAULT_TASK_COUNTS: Record<string, number> = {
 
 export function App(): JSX.Element {
   const api = vscodeApi();
-  const restored = api.getState() as { view?: WebviewView } | undefined;
+  const restored = api.getState() as { view?: WebviewView; locale?: SupportedLocale } | undefined;
   const [view, setView] = useState<WebviewView | undefined>(restored?.view);
+  const [locale, setLocale] = useState<SupportedLocale>(() => resolveLocale(
+    restored?.locale ?? document.documentElement.lang ?? navigator.language
+  ));
 
   useEffect(() => {
     const listener = (event: MessageEvent<HostMessage>) => {
@@ -35,13 +41,17 @@ export function App(): JSX.Element {
         return;
       }
       if (message.type === 'hydrate' || message.type === 'view:update') {
+        const nextLocale = resolveLocale(message.locale);
         setView(message.view);
-        api.setState({ view: message.view });
+        setLocale(nextLocale);
+        api.setState({ view: message.view, locale: nextLocale });
       }
       if (message.type === 'error') {
+        const nextLocale = resolveLocale(message.locale);
         const errorView: WebviewView = { type: 'error', message: message.message };
         setView(errorView);
-        api.setState({ view: errorView });
+        setLocale(nextLocale);
+        api.setState({ view: errorView, locale: nextLocale });
       }
     };
     window.addEventListener('message', listener);
@@ -49,22 +59,37 @@ export function App(): JSX.Element {
     return () => window.removeEventListener('message', listener);
   }, [api]);
 
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   if (!view) {
     return (
-      <main className="tapl-shell">
-        <section className="tapl-card">
-          <div className="tapl-card-body">
-            <span className="loading loading-spinner loading-md" />
-            <p className="tapl-muted m-0">Loading tapl workflow...</p>
-          </div>
-        </section>
-      </main>
+      <I18nProvider locale={locale}>
+        <LoadingView />
+      </I18nProvider>
     );
   }
 
   return (
-    <main className="tapl-shell" data-theme="tapl">
-      <ViewRenderer view={view} send={(message) => api.postMessage(message)} />
+    <I18nProvider locale={locale}>
+      <main className="tapl-shell" data-theme="tapl">
+        <ViewRenderer view={view} send={(message) => api.postMessage(message)} />
+      </main>
+    </I18nProvider>
+  );
+}
+
+function LoadingView(): JSX.Element {
+  const { t } = useI18n();
+  return (
+    <main className="tapl-shell">
+      <section className="tapl-card">
+        <div className="tapl-card-body">
+          <span className="loading loading-spinner loading-md" />
+          <p className="tapl-muted m-0">{t('loadingWorkflow')}</p>
+        </div>
+      </section>
     </main>
   );
 }
@@ -95,6 +120,7 @@ function OverviewView({
   view: Extract<WebviewView, { type: 'overview' }>;
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
+  const { t } = useI18n();
   const { status, archives, searchQuery } = view;
   const counts = { ...DEFAULT_TASK_COUNTS, ...(status.task_counts || {}) };
   const totalTasks = status.tasks.length;
@@ -102,9 +128,9 @@ function OverviewView({
   const openTasks = (counts.Pending ?? 0) + (counts['In Progress'] ?? 0) + (counts.Blocked ?? 0);
   const completionPercent = totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0;
   const activeSummary = status.active_run
-    ? String(status.active_run.request_summary || status.active_run.slug || 'active')
-    : 'No active run';
-  const activeRunSlug = status.active_run ? String(status.active_run.slug || 'active') : 'No active run';
+    ? String(status.active_run.request_summary || status.active_run.slug || t('active'))
+    : t('noActiveRunTitle');
+  const activeRunSlug = status.active_run ? String(status.active_run.slug || t('active')) : t('noActiveRunTitle');
   const pendingCount = counts.Pending ?? 0;
   const activeCount = counts['In Progress'] ?? 0;
   const blockedCount = counts.Blocked ?? 0;
@@ -118,10 +144,10 @@ function OverviewView({
         <div className="tapl-hero-main">
           <div className="tapl-hero-copy">
             <div className="tapl-hero-meta">
-              <span className="tapl-eyebrow">workspace</span>
+              <span className="tapl-eyebrow">{t('workspace')}</span>
               <Badge label={activeRunSlug} tone={status.active_run ? 'in-progress' : undefined} />
             </div>
-            <h1 className="m-0 text-3xl font-semibold">tapl Workflow</h1>
+            <h1 className="m-0 text-3xl font-semibold">{t('appTitle')}</h1>
             <p className="tapl-hero-summary">{conciseText(activeSummary, 220)}</p>
             <div className="tapl-hero-pills">
               <Pill label="Pending" value={pendingCount} />
@@ -132,49 +158,49 @@ function OverviewView({
           <div className="tapl-command-panel">
             <div className="tapl-command-actions">
               <button className="btn btn-primary btn-sm" type="button" onClick={() => send({ command: 'refresh' })}>
-                Refresh
+                {t('refresh')}
               </button>
               <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'debug' })}>
-                Debug
+                {t('debug')}
               </button>
             </div>
             <SearchForm defaultQuery={searchQuery} send={send} />
             <ProgressMeter
-              label="Run progress"
+              label={t('runProgress')}
               value={completionPercent}
-              detail={`${completedTasks} of ${totalTasks} work items completed`}
+              detail={t('completedOfTotal', { completed: completedTasks, total: totalTasks })}
             />
           </div>
         </div>
       </header>
       <section className="tapl-metric-grid">
-        <Stat label="Open work" value={String(openTasks)} detail={`${activeCount} active / ${blockedCount} blocked`} tone={blockedCount ? 'blocked' : 'in-progress'} />
-        <Stat label="Current plan" value={String(status.plans.length)} detail={currentPlan ? conciseText(currentPlan.title, 48) : 'no execution spec'} tone="info" />
-        <Stat label="Next task" value={nextTask ? nextTask.stable_id : 'None'} detail={nextTask ? conciseText(nextTask.title, 48) : 'queue is clear'} tone="pending" />
-        <Stat label="Archives" value={String(archives.length)} detail="recent saved runs" tone="completed" />
+        <Stat label={t('openWork')} value={String(openTasks)} detail={t('activeAndBlocked', { active: activeCount, blocked: blockedCount })} tone={blockedCount ? 'blocked' : 'in-progress'} />
+        <Stat label={t('currentPlan')} value={String(status.plans.length)} detail={currentPlan ? conciseText(currentPlan.title, 48) : t('noExecutionSpec')} tone="info" />
+        <Stat label={t('nextTask')} value={nextTask ? nextTask.stable_id : t('none')} detail={nextTask ? conciseText(nextTask.title, 48) : t('queueIsClear')} tone="pending" />
+        <Stat label={t('archives')} value={String(archives.length)} detail={t('recentSavedRuns')} tone="completed" />
       </section>
       <section className="tapl-grid">
         <div className="tapl-main">
           <Card
-            title="Active board"
-            eyebrow="Work items"
-            aside={<span className="tapl-muted text-sm">{status.incomplete_tasks} incomplete</span>}
+            title={t('activeBoard')}
+            eyebrow={t('workItems')}
+            aside={<span className="tapl-muted text-sm">{t('incompleteCount', { count: status.incomplete_tasks })}</span>}
           >
             <TaskBoard tasks={status.tasks} />
           </Card>
-          <Card title="Workflow records" eyebrow="Views">
+          <Card title={t('workflowRecords')} eyebrow={t('views')}>
             <RecordTabs
               tabs={[
-                { id: 'plan', label: 'Plan', count: status.plans.length, content: <ItemList items={status.plans} empty="No plan records." /> },
-                { id: 'tasks', label: 'Tasks', count: status.tasks.length, content: <ItemList items={status.tasks} empty="No task records." /> },
-                { id: 'findings', label: 'Findings', count: status.findings.length, content: <ItemList items={status.findings} empty="No finding records." /> }
+                { id: 'plan', label: t('plan'), count: status.plans.length, content: <ItemList items={status.plans} empty={t('noPlanRecords')} /> },
+                { id: 'tasks', label: t('tasks'), count: status.tasks.length, content: <ItemList items={status.tasks} empty={t('noTaskRecords')} /> },
+                { id: 'findings', label: t('findings'), count: status.findings.length, content: <ItemList items={status.findings} empty={t('noFindingRecords')} /> }
               ]}
             />
           </Card>
         </div>
         <aside className="tapl-rail">
           <RunFocus status={status} counts={counts} />
-          <Card title="Recent archives" eyebrow="Activity">
+          <Card title={t('recentArchives')} eyebrow={t('activity')}>
             <ArchiveList archives={archives} send={send} />
           </Card>
         </aside>
@@ -192,6 +218,7 @@ function ArchiveView({
   detail?: TaplArchiveDetail;
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
+  const { t } = useI18n();
   const archiveMeta = detail?.archive ?? archive;
   const items = detail?.items ?? [];
   const plans = items.filter((item) => item.kind === 'plan');
@@ -205,33 +232,33 @@ function ArchiveView({
       <Topbar
         eyebrow={formatTimestamp(archiveMeta.created_at)}
         title={archiveMeta.slug}
-        action={<button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>Back</button>}
+        action={<button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>{t('back')}</button>}
       />
-      <section className="tapl-stats">
-        <Stat label="Archive" value="Saved" detail={formatTimestamp(archiveMeta.created_at) || archiveMeta.slug} />
-        <Stat label="Tasks" value={String(tasks.length)} detail={`${(counts.Pending ?? 0) + (counts['In Progress'] ?? 0) + (counts.Blocked ?? 0)} incomplete`} />
-        <Stat label="Records" value={String(items.length)} detail={`${plans.length} plan / ${findings.length} findings`} />
-        <Stat label="Events" value={String(detail?.events.length ?? 0)} detail={detail ? 'archived hook events' : 'detail unavailable'} />
+      <section className="tapl-metric-grid">
+        <Stat label={t('archive')} value={t('saved')} detail={formatTimestamp(archiveMeta.created_at) || archiveMeta.slug} />
+        <Stat label={t('tasks')} value={String(tasks.length)} detail={t('incompleteCount', { count: (counts.Pending ?? 0) + (counts['In Progress'] ?? 0) + (counts.Blocked ?? 0) })} />
+        <Stat label={t('records')} value={String(items.length)} detail={t('planAndFindings', { plans: plans.length, findings: findings.length })} />
+        <Stat label={t('events')} value={String(detail?.events.length ?? 0)} detail={detail ? t('archivedHookEvents') : t('detailUnavailable')} />
       </section>
       <div className="flex flex-wrap gap-2">
         {TASK_STATUSES.map((status) => <Pill key={status} label={status} value={counts[status]} />)}
       </div>
       <section className="tapl-grid">
         <div className="tapl-main">
-          <Card title="Archived workflow records">
+          <Card title={t('archivedWorkflowRecords')}>
             <RecordTabs
               tabs={[
-                { id: 'plan', label: 'Plan', count: plans.length, content: <ItemList items={plans} empty={detail ? 'No plan records.' : 'Archive details unavailable.'} /> },
-                { id: 'tasks', label: 'Tasks', count: tasks.length, content: <ItemList items={tasks} empty={detail ? 'No task records.' : 'Archive details unavailable.'} /> },
-                { id: 'findings', label: 'Findings', count: findings.length, content: <ItemList items={findings} empty={detail ? 'No finding records.' : 'Archive details unavailable.'} /> }
+                { id: 'plan', label: t('plan'), count: plans.length, content: <ItemList items={plans} empty={detail ? t('noPlanRecords') : t('archiveDetailsUnavailable')} /> },
+                { id: 'tasks', label: t('tasks'), count: tasks.length, content: <ItemList items={tasks} empty={detail ? t('noTaskRecords') : t('archiveDetailsUnavailable')} /> },
+                { id: 'findings', label: t('findings'), count: findings.length, content: <ItemList items={findings} empty={detail ? t('noFindingRecords') : t('archiveDetailsUnavailable')} /> }
               ]}
             />
           </Card>
         </div>
         <aside className="tapl-rail">
           <ArchiveSummary archive={archiveMeta} />
-          <Card title="Other records">
-            <ItemList items={otherItems} empty={detail ? 'No other archived records.' : 'Archive details unavailable.'} />
+          <Card title={t('otherRecords')}>
+            <ItemList items={otherItems} empty={detail ? t('noOtherArchivedRecords') : t('archiveDetailsUnavailable')} />
           </Card>
         </aside>
       </section>
@@ -241,7 +268,7 @@ function ArchiveView({
           type="button"
           onClick={() => send({ command: 'archiveEvents', archiveId: archiveMeta.id })}
         >
-          Hook Events
+          {t('hookEvents')}
         </button>
       </footer>
     </>
@@ -257,50 +284,53 @@ function ArchiveEventsView({
   detail?: TaplArchiveDetail;
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
+  const { t } = useI18n();
   const archiveMeta = detail?.archive ?? archive;
   const events = detail?.events ?? [];
   return (
     <>
       <Topbar
         eyebrow={archiveMeta.slug}
-        title="Hook Events"
-        action={<button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>Back</button>}
+        title={t('hookEvents')}
+        action={<button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>{t('back')}</button>}
       />
-      <section className="tapl-stats">
-        <Stat label="Archive" value="Saved" detail={formatTimestamp(archiveMeta.created_at) || archiveMeta.slug} />
-        <Stat label="Events" value={String(events.length)} detail={detail ? 'archived hook events' : 'detail unavailable'} />
+      <section className="tapl-metric-grid">
+        <Stat label={t('archive')} value={t('saved')} detail={formatTimestamp(archiveMeta.created_at) || archiveMeta.slug} />
+        <Stat label={t('events')} value={String(events.length)} detail={detail ? t('archivedHookEvents') : t('detailUnavailable')} />
       </section>
-      <Card title="Archived hook events">
-        <EventList events={events} empty={detail ? 'No archived hook events.' : 'Archive details unavailable.'} />
+      <Card title={t('archivedHookEvents')}>
+        <EventList events={events} empty={detail ? t('noArchivedHookEvents') : t('archiveDetailsUnavailable')} />
       </Card>
     </>
   );
 }
 
 function DebugView({ status, send }: { status: TaplStatus; send: (message: WebviewCommand) => void }): JSX.Element {
+  const { t } = useI18n();
   return (
     <>
       <Topbar
-        eyebrow="Debug"
-        title="Hook Events"
-        action={<button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>Back</button>}
+        eyebrow={t('debug')}
+        title={t('hookEvents')}
+        action={<button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>{t('back')}</button>}
       />
-      <Card title="Recent hook events">
-        <EventList events={status.recent_events} empty="No hook events." />
+      <Card title={t('recentHookEvents')}>
+        <EventList events={status.recent_events} empty={t('noHookEvents')} />
       </Card>
     </>
   );
 }
 
 function SearchView({ search, send }: { search: TaplSearchPayload; send: (message: WebviewCommand) => void }): JSX.Element {
+  const { t } = useI18n();
   return (
     <>
       <Topbar
-        eyebrow={`${search.mode} search`}
-        title="Search Results"
+        eyebrow={t('searchMode', { mode: search.mode })}
+        title={t('searchResults')}
         action={
           <div className="flex flex-wrap justify-end gap-2">
-            <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>Back</button>
+            <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>{t('back')}</button>
             <SearchForm defaultQuery={search.query} send={send} />
           </div>
         }
@@ -311,7 +341,7 @@ function SearchView({ search, send }: { search: TaplSearchPayload; send: (messag
             {search.results.map((result, index) => <SearchResult key={`${result.id ?? result.stable_id}-${index}`} result={result} send={send} />)}
           </div>
         ) : (
-          <p className="tapl-muted m-0">No results for {search.query}.</p>
+          <p className="tapl-muted m-0">{t('noResultsFor', { query: search.query })}</p>
         )}
       </Card>
     </>
@@ -327,36 +357,37 @@ function SearchItemView({
   detail?: TaplItemDetail;
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
+  const { t, kind, status: displayStatus } = useI18n();
   const title = detail?.title ?? result.title;
   const status = detail?.status ?? result.status;
   const content = detail?.body || detail?.raw_text || result.snippet || '';
   return (
     <>
       <Topbar
-        eyebrow={`${detail?.kind ?? result.kind} ${detail?.stable_id ?? result.stable_id}`}
+        eyebrow={`${kind(detail?.kind ?? result.kind)} ${detail?.stable_id ?? result.stable_id}`}
         title={title}
-        action={<button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>Back</button>}
+        action={<button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>{t('back')}</button>}
       />
       <div className="tapl-stack max-w-5xl">
-        <Card title="Details">
+        <Card title={t('details')}>
           <DetailList
             fields={[
-              ['Status', status],
-              ['Run', detail?.run_slug],
-              ['Run status', detail?.run_status],
-              ['Source', detail?.source ?? result.source],
-              ['Archive', detail?.archive_slug],
-              ['Search source', result.search_source]
+              [t('status'), displayStatus(status)],
+              [t('run'), detail?.run_slug],
+              [t('runStatus'), detail?.run_status],
+              [t('source'), detail?.source ?? result.source],
+              [t('archive'), detail?.archive_slug],
+              [t('searchSource'), result.search_source]
             ]}
           />
           {detail?.archive_id ? (
             <button className="btn btn-primary btn-sm mt-3" type="button" onClick={() => send({ command: 'openArchive', archiveId: detail.archive_id as string })}>
-              Open Archive
+              {t('openArchive')}
             </button>
           ) : null}
         </Card>
         {content ? (
-          <Card title="Content">
+          <Card title={t('content')}>
             <ReadableBlock content={content} />
           </Card>
         ) : null}
@@ -367,8 +398,9 @@ function SearchItemView({
 }
 
 function ErrorView({ message }: { message: string }): JSX.Element {
+  const { t } = useI18n();
   return (
-    <Card title="tapl unavailable">
+    <Card title={t('taplUnavailable')}>
       <p className="text-error">{message}</p>
     </Card>
   );
@@ -439,6 +471,7 @@ function ProgressMeter({ label, value, detail }: { label: string; value: number;
 }
 
 function SearchForm({ defaultQuery, send }: { defaultQuery: string; send: (message: WebviewCommand) => void }): JSX.Element {
+  const { t } = useI18n();
   const [query, setQuery] = useState(defaultQuery);
   useEffect(() => setQuery(defaultQuery), [defaultQuery]);
   const submit = (event: FormEvent) => {
@@ -452,11 +485,11 @@ function SearchForm({ defaultQuery, send }: { defaultQuery: string; send: (messa
       <input
         className="input input-bordered input-sm join-item"
         value={query}
-        placeholder="Search workflow history"
-        aria-label="Search workflow history"
+        placeholder={t('searchWorkflowHistory')}
+        aria-label={t('searchWorkflowHistory')}
         onChange={(event) => setQuery(event.target.value)}
       />
-      <button className="btn btn-primary btn-sm join-item" type="submit">Search</button>
+      <button className="btn btn-primary btn-sm join-item" type="submit">{t('search')}</button>
     </form>
   );
 }
@@ -489,50 +522,105 @@ function RecordTabs({ tabs }: { tabs: Array<{ id: string; label: string; count: 
 }
 
 function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
+  const { t } = useI18n();
+  const orderedTasks = [...tasks].sort((left, right) => (
+    left.stable_id.localeCompare(right.stable_id, undefined, { numeric: true, sensitivity: 'base' })
+  ));
+
+  if (!orderedTasks.length) {
+    return (
+      <section className="tapl-journey-empty" aria-label={t('workItemSteps')}>
+        <span className="tapl-journey-empty-icon" aria-hidden="true">✓</span>
+        <div>
+          <h3 className="m-0 text-sm font-semibold">{t('noWorkItemsYet')}</h3>
+          <p className="tapl-muted m-0 mt-1 text-xs">{t('approvedTasksAppear')}</p>
+        </div>
+      </section>
+    );
+  }
+
+  const upperStepCount = Math.ceil(orderedTasks.length / 2);
+  const journeyStyle = {
+    '--journey-columns': String(upperStepCount)
+  } as CSSProperties;
+
   return (
-    <section className="tapl-board" aria-label="Tasks grouped by status">
-      {TASK_STATUSES.map((status) => {
-        const statusTasks = tasks.filter((task) => task.status === status);
-        return (
-          <section key={status} className={`tapl-lane ${statusClass(status)} ${statusTasks.length ? '' : 'empty'}`}>
-            <div className="tapl-lane-body">
-              <div className="tapl-lane-header">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className={`tapl-status-dot ${statusClass(status)}`} />
-                  <h3 className="m-0 text-sm font-semibold">{status}</h3>
-                </div>
-                <span className="badge badge-sm">{statusTasks.length}</span>
-              </div>
-              <div className="tapl-stack">
-                {statusTasks.slice(0, 5).map((task) => <TaskCard key={task.stable_id} task={task} />)}
-                {statusTasks.length > 5 ? <p className="tapl-muted m-0 text-xs">+{statusTasks.length - 5} more</p> : null}
-                {!statusTasks.length ? <p className="tapl-empty-state">No work items.</p> : null}
-              </div>
-            </div>
-          </section>
-        );
-      })}
+    <section
+      className={`tapl-journey ${orderedTasks.length === 1 ? 'single' : ''} ${orderedTasks.length > 8 ? 'dense' : ''}`}
+      style={journeyStyle}
+      aria-label={t('workItemsInOrder', { count: orderedTasks.length })}
+    >
+      <ol className="tapl-journey-list">
+        {orderedTasks.map((task, index) => {
+          const isReturnStep = index >= upperStepCount;
+          const returnIndex = index - upperStepCount;
+          const column = isReturnStep ? upperStepCount - returnIndex : index + 1;
+          const row = isReturnStep ? 2 : 1;
+          const stepStyle = {
+            '--step-column': String(column),
+            '--step-row': String(row)
+          } as CSSProperties;
+          return (
+            <TaskStep
+              key={task.stable_id}
+              task={task}
+              index={index}
+              style={stepStyle}
+              phase={isReturnStep ? 'return' : 'outbound'}
+              turns={orderedTasks.length > 1 && index === upperStepCount - 1}
+              isLast={index === orderedTasks.length - 1}
+            />
+          );
+        })}
+      </ol>
+      <div className="tapl-journey-direction" aria-hidden="true">
+        <span>{t('start')}</span>
+        <span>{t('continueLabel')}</span>
+      </div>
     </section>
   );
 }
 
-function TaskCard({ task }: { task: TaplItem }): JSX.Element {
-  const summary = conciseText(task.body || task.title, 150);
-  const hasBadges = Boolean(task.status);
+function TaskStep({
+  task,
+  index,
+  style,
+  phase,
+  turns,
+  isLast
+}: {
+  task: TaplItem;
+  index: number;
+  style: CSSProperties;
+  phase: 'outbound' | 'return';
+  turns: boolean;
+  isLast: boolean;
+}): JSX.Element {
+  const taskStatus = task.status || 'Pending';
+  const tone = statusClass(taskStatus);
+  const summary = conciseText(task.body || task.title, 132);
+  const metadata = [formatTimestamp(task.updated_at), task.source].filter(Boolean).join(' / ');
+  const isCurrent = taskStatus === 'In Progress';
   return (
-    <article className="tapl-item tapl-task-card">
-      <div className="tapl-task-meta">
-        <span className="tapl-task-id kbd kbd-xs">{task.stable_id}</span>
-        {hasBadges ? (
-          <div className="tapl-task-badges">
-            {task.status ? <Badge label={task.status} tone={statusClass(task.status)} /> : null}
-          </div>
-        ) : null}
+    <li
+      className={`tapl-journey-step ${tone} ${phase} ${turns ? 'turns' : ''} ${isLast ? 'is-last' : ''}`}
+      style={style}
+      aria-current={isCurrent ? 'step' : undefined}
+    >
+      <div className="tapl-step-node" aria-hidden="true">
+        <span>{String(index + 1).padStart(2, '0')}</span>
       </div>
-      <h4 className="m-0 text-sm font-semibold">{task.title}</h4>
-      {summary && summary !== task.title ? <p className="tapl-muted mt-2 text-xs">{summary}</p> : null}
-      <p className="tapl-muted mt-2 text-xs">{[formatTimestamp(task.updated_at), task.source].filter(Boolean).join(' / ')}</p>
-    </article>
+      <article className="tapl-step-card">
+        <div className="tapl-step-meta">
+          <span className="tapl-task-id">{task.stable_id}</span>
+          <Badge label={taskStatus} tone={tone} />
+        </div>
+        <h4 className="tapl-step-title">{task.title}</h4>
+        {summary && summary !== task.title ? <p className="tapl-step-summary">{summary}</p> : null}
+        <CustomFieldSummary fields={task.custom_fields} />
+        {metadata ? <p className="tapl-step-detail">{metadata}</p> : null}
+      </article>
+    </li>
   );
 }
 
@@ -561,6 +649,7 @@ function ItemCard({ item }: { item: TaplItem }): JSX.Element {
       </div>
       <h3 className="m-0 text-sm font-semibold">{item.title}</h3>
       {item.body ? <ReadableBlock content={item.body} /> : null}
+      <CustomFieldsBlock fields={item.custom_fields} />
     </article>
   );
 }
@@ -577,21 +666,23 @@ function EventList({ events, empty }: { events: TaplEvent[]; empty: string }): J
 }
 
 function EventCard({ event }: { event: TaplEvent }): JSX.Element {
+  const { t } = useI18n();
   return (
     <article className="tapl-item tapl-record-card">
       <div className="mb-2 flex items-start justify-between gap-2">
         <strong>{event.event_type}{event.tool_name ? ` ${event.tool_name}` : ''}</strong>
         <Badge label={event.mode} />
       </div>
-      <p className="m-0">{event.message || 'recorded'}</p>
+      <p className="m-0">{event.message || t('recorded')}</p>
       <p className="tapl-muted mt-2 text-xs">{formatTimestamp(event.created_at)}</p>
     </article>
   );
 }
 
 function ArchiveList({ archives, send }: { archives: TaplArchive[]; send: (message: WebviewCommand) => void }): JSX.Element {
+  const { t } = useI18n();
   if (!archives.length) {
-    return <p className="tapl-empty-state">No archives.</p>;
+    return <p className="tapl-empty-state">{t('noTaplArchives')}</p>;
   }
   return (
     <div className="tapl-stack">
@@ -603,7 +694,7 @@ function ArchiveList({ archives, send }: { archives: TaplArchive[]; send: (messa
           onClick={() => send({ command: 'openArchive', archiveId: archive.id })}
         >
           <span className="tapl-archive-title">{archive.slug}</span>
-          <span className="tapl-muted mt-1 block text-sm">{conciseText(archive.summary || 'No summary', 140)}</span>
+          <span className="tapl-muted mt-1 block text-sm">{conciseText(archive.summary || t('noSummary'), 140)}</span>
           <span className="tapl-muted mt-1 block text-xs">{formatTimestamp(archive.created_at)}</span>
         </button>
       ))}
@@ -612,16 +703,17 @@ function ArchiveList({ archives, send }: { archives: TaplArchive[]; send: (messa
 }
 
 function ArchiveSummary({ archive }: { archive: TaplArchive }): JSX.Element {
+  const { t } = useI18n();
   return (
-    <Card title="Summary">
-      <p>{archive.summary || 'No summary recorded.'}</p>
+    <Card title={t('summary')}>
+      <p>{archive.summary || t('noSummaryRecorded')}</p>
       {archive.request_summary ? <p className="tapl-muted">{archive.request_summary}</p> : null}
       <DetailList
         fields={[
-          ['Run', archive.run_slug],
-          ['Created', formatTimestamp(archive.run_created_at)],
-          ['Updated', formatTimestamp(archive.run_updated_at)],
-          ['Archived run', formatTimestamp(archive.run_archived_at)]
+          [t('run'), archive.run_slug],
+          [t('created'), formatTimestamp(archive.run_created_at)],
+          [t('updated'), formatTimestamp(archive.run_updated_at)],
+          [t('archivedRun'), formatTimestamp(archive.run_archived_at)]
         ]}
       />
     </Card>
@@ -629,18 +721,19 @@ function ArchiveSummary({ archive }: { archive: TaplArchive }): JSX.Element {
 }
 
 function RunFocus({ status, counts }: { status: TaplStatus; counts: Record<string, number> }): JSX.Element {
+  const { t } = useI18n();
   const currentPlan = status.plans[0];
   const blockedTasks = status.tasks.filter((task) => task.status === 'Blocked');
   const latestFinding = status.findings[0];
   const nextTask = status.tasks.find((task) => task.status === 'In Progress')
     ?? status.tasks.find((task) => task.status === 'Pending');
   return (
-    <Card title="Run health" eyebrow="Focus" className="tapl-focus-card">
+    <Card title={t('runHealth')} eyebrow={t('focus')} className="tapl-focus-card">
       <div className="tapl-detail-grid">
-        <FocusRow label="Current plan" value={currentPlan ? currentPlan.title : 'No plan records'} detail={currentPlan?.stable_id} />
-        <FocusRow label="Next work" value={nextTask ? nextTask.title : 'No active task'} detail={nextTask?.stable_id} />
-        <FocusRow label="Blocked" value={`${counts.Blocked ?? blockedTasks.length} work items`} detail={blockedTasks[0]?.title} />
-        <FocusRow label="Latest finding" value={latestFinding ? latestFinding.title : 'No findings'} detail={latestFinding?.stable_id} />
+        <FocusRow label={t('currentPlan')} value={currentPlan ? currentPlan.title : t('noPlanRecordsTitle')} detail={currentPlan?.stable_id} />
+        <FocusRow label={t('nextWork')} value={nextTask ? nextTask.title : t('noActiveTask')} detail={nextTask?.stable_id} />
+        <FocusRow label={t('blocked')} value={t('blockedWorkItems', { count: counts.Blocked ?? blockedTasks.length })} detail={blockedTasks[0]?.title} />
+        <FocusRow label={t('latestFinding')} value={latestFinding ? latestFinding.title : t('noFindings')} detail={latestFinding?.stable_id} />
       </div>
     </Card>
   );
@@ -657,13 +750,14 @@ function FocusRow({ label, value, detail }: { label: string; value: string; deta
 }
 
 function SearchResult({ result, send }: { result: TaplSearchResult; send: (message: WebviewCommand) => void }): JSX.Element {
+  const { kind, status } = useI18n();
   const content = (
     <>
       <div className="mb-1 flex items-start justify-between gap-2">
         <strong><span className="kbd kbd-xs">{result.stable_id}</span> {result.title}</strong>
-        <Badge label={result.kind} />
+        <Badge label={kind(result.kind)} />
       </div>
-      {result.status ? <span className="tapl-muted text-sm">{result.status}</span> : null}
+      {result.status ? <span className="tapl-muted text-sm">{status(result.status)}</span> : null}
       {result.snippet ? <p className="tapl-muted mt-2 text-sm">{conciseText(result.snippet, 180)}</p> : null}
       <p className="tapl-muted mt-2 text-xs">{result.search_source}{result.source ? ` / ${result.source}` : ''}</p>
     </>
@@ -679,38 +773,133 @@ function SearchResult({ result, send }: { result: TaplSearchResult; send: (messa
 }
 
 function ItemMetadata({ item }: { item: TaplItemDetail }): JSX.Element {
+  const { t } = useI18n();
   const executionFields: Array<[string, unknown]> = [
-    ['Spec', item.spec_id],
-    ['Goal', item.goal],
-    ['Action', item.action],
-    ['Verification', item.verification],
-    ['Result', item.result],
-    ['Blocker', item.blocker],
-    ['Next Action', item.next_action]
+    [t('spec'), item.spec_id],
+    [t('goal'), item.goal],
+    [t('action'), item.action],
+    [t('verification'), item.verification],
+    [t('result'), item.result],
+    [t('blocker'), item.blocker],
+    [t('nextAction'), item.next_action]
   ];
   const auditFields: Array<[string, unknown]> = [
-    ['Related IDs', item.related_ids],
-    ['Impact', item.impact],
-    ['Request', item.request_summary],
-    ['Updated', formatTimestamp(item.updated_at)],
-    ['Archived at', formatTimestamp(item.archive_created_at)]
+    [t('relatedIds'), item.related_ids],
+    [t('impact'), item.impact],
+    [t('request'), item.request_summary],
+    [t('updated'), formatTimestamp(item.updated_at)],
+    [t('archivedAt'), formatTimestamp(item.archive_created_at)]
   ];
   return (
     <>
-      <Card title="Execution">
-        <DetailList fields={executionFields} empty="No execution metadata." />
+      {hasCustomFields(item.custom_fields) ? (
+        <Card title={t('customFields')}>
+          <CustomFieldRows fields={item.custom_fields as Record<string, TaplJsonValue>} />
+        </Card>
+      ) : null}
+      <Card title={t('execution')}>
+        <DetailList fields={executionFields} empty={t('noExecutionMetadata')} />
       </Card>
-      <Card title="Audit">
-        <DetailList fields={auditFields} empty="No audit metadata." />
+      <Card title={t('audit')}>
+        <DetailList fields={auditFields} empty={t('noAuditMetadata')} />
       </Card>
     </>
   );
 }
 
+function CustomFieldSummary({ fields }: { fields?: Record<string, TaplJsonValue> }): JSX.Element | null {
+  const { t } = useI18n();
+  const entries = Object.entries(fields ?? {});
+  if (!entries.length) {
+    return null;
+  }
+  const visible = entries.filter(([, value]) => isCompactCustomValue(value)).slice(0, 2);
+  const remaining = entries.length - visible.length;
+  return (
+    <div className="tapl-custom-summary" aria-label={t('customFields')}>
+      {visible.map(([label, value]) => (
+        <span key={label} className="tapl-custom-chip" title={`${label}: ${String(value)}`}>
+          <span className="tapl-custom-chip-label">{label}</span>
+          <span className="tapl-custom-chip-value">{String(value)}</span>
+        </span>
+      ))}
+      {remaining > 0 ? (
+        <span className="tapl-custom-more" title={t('customFieldCount', { count: entries.length })}>
+          +{remaining}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function CustomFieldsBlock({ fields }: { fields?: Record<string, TaplJsonValue> }): JSX.Element | null {
+  const { t } = useI18n();
+  if (!hasCustomFields(fields)) {
+    return null;
+  }
+  return (
+    <section className="tapl-custom-fields" aria-label={t('customFields')}>
+      <div className="tapl-custom-header">
+        <span className="tapl-eyebrow">{t('customFields')}</span>
+        <span className="badge badge-sm">{Object.keys(fields).length}</span>
+      </div>
+      <CustomFieldRows fields={fields} />
+    </section>
+  );
+}
+
+function CustomFieldRows({ fields }: { fields: Record<string, TaplJsonValue> }): JSX.Element {
+  return (
+    <dl className="tapl-custom-grid">
+      {Object.entries(fields).map(([label, value]) => (
+        <div key={label} className="tapl-custom-row">
+          <dt>{label}</dt>
+          <dd><JsonValue value={value} /></dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function JsonValue({ value, depth = 0 }: { value: TaplJsonValue; depth?: number }): JSX.Element {
+  if (value === null) {
+    return <span className="tapl-json-null">null</span>;
+  }
+  if (Array.isArray(value)) {
+    return (
+      <ol className="tapl-json-array">
+        {value.map((item, index) => <li key={index}><JsonValue value={item} depth={depth + 1} /></li>)}
+      </ol>
+    );
+  }
+  if (typeof value === 'object') {
+    return (
+      <dl className="tapl-json-object">
+        {Object.entries(value).map(([label, item]) => (
+          <div key={label} className="tapl-json-entry">
+            <dt>{label}</dt>
+            <dd><JsonValue value={item} depth={depth + 1} /></dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <span className={`tapl-json-${typeof value}`}>{String(value)}</span>;
+}
+
+function hasCustomFields(fields: Record<string, TaplJsonValue> | undefined): fields is Record<string, TaplJsonValue> {
+  return Boolean(fields && Object.keys(fields).length);
+}
+
+function isCompactCustomValue(value: TaplJsonValue): value is string | number | boolean {
+  return value !== '' && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
+}
+
 function DetailList({ fields, empty }: { fields: Array<[string, unknown]>; empty?: string }): JSX.Element {
+  const { t } = useI18n();
   const rows = fields.filter(([, value]) => value !== undefined && value !== null && value !== '');
   if (!rows.length) {
-    return <p className="tapl-muted m-0">{empty ?? 'Not recorded.'}</p>;
+    return <p className="tapl-muted m-0">{empty ?? t('notRecorded')}</p>;
   }
   return (
     <div className="tapl-detail-grid">
@@ -725,9 +914,10 @@ function DetailList({ fields, empty }: { fields: Array<[string, unknown]>; empty
 }
 
 function ReadableBlock({ content }: { content: unknown }): JSX.Element {
+  const { t } = useI18n();
   const blocks = useMemo(() => parseReadableBlocks(String(content ?? '')), [content]);
   if (!blocks.length) {
-    return <p className="tapl-muted m-0">Not recorded.</p>;
+    return <p className="tapl-muted m-0">{t('notRecorded')}</p>;
   }
   return <div className="tapl-readable markdown-body mt-3">{blocks}</div>;
 }
@@ -777,11 +967,13 @@ function parseReadableBlocks(content: string): ReactNode[] {
 }
 
 function Badge({ label, tone }: { label: string; tone?: string }): JSX.Element {
-  return <span className={`badge badge-outline ${tone ?? statusClass(label)}`}>{label}</span>;
+  const { status } = useI18n();
+  return <span className={`badge badge-sm ${tone ?? statusClass(label)}`}>{status(label)}</span>;
 }
 
 function Pill({ label, value }: { label: string; value: number | undefined }): JSX.Element {
-  return <Badge label={`${label} ${value ?? 0}`} tone={statusClass(label)} />;
+  const { status } = useI18n();
+  return <Badge label={`${status(label)} ${value ?? 0}`} tone={statusClass(label)} />;
 }
 
 function countTaskStatuses(tasks: TaplItem[]): Record<string, number> {

@@ -160,6 +160,10 @@ declare module 'vscode' {
     export function registerCommand(command: string, callback: (...args: unknown[]) => unknown): Disposable;
     export function executeCommand<T = unknown>(command: string, ...rest: unknown[]): Thenable<T>;
   }
+
+  export namespace env {
+    export const language: string;
+  }
 }
 
 declare class TextDecoder {

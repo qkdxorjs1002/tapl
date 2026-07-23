@@ -37,7 +37,9 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 const childProcess = __importStar(require("child_process"));
 const vscode = __importStar(require("vscode"));
+const i18n_1 = require("./i18n");
 const COMMAND_PREFIX = "taplWorkflow";
+const UI_LOCALE = (0, i18n_1.resolveLocale)(vscode.env.language);
 const TAPL_DB_WATCH_DEBOUNCE_MS = 2000;
 const TAPLCTL_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 const TAPLCTL_PATH_SETTING = "taplctlPath";
@@ -46,6 +48,9 @@ const COMMON_TAPLCTL_COMMANDS = [
     "/opt/homebrew/bin/taplctl",
     "/usr/local/bin/taplctl"
 ];
+function localize(key, params) {
+    return (0, i18n_1.translate)(UI_LOCALE, key, params);
+}
 const DEFAULT_STATUS = {
     active_run: null,
     task_counts: {
@@ -148,14 +153,14 @@ class WorkflowNode extends vscode.TreeItem {
         if (options.kind === 'overview') {
             this.command = {
                 command: `${COMMAND_PREFIX}.openOverview`,
-                title: 'Open tapl Dashboard',
+                title: localize('openTaplDashboard'),
                 arguments: [this]
             };
         }
         if (options.kind === 'archive') {
             this.command = {
                 command: `${COMMAND_PREFIX}.openArchive`,
-                title: 'Open tapl Archive',
+                title: localize('openTaplArchive'),
                 arguments: [this]
             };
         }
@@ -178,7 +183,7 @@ class ActiveProvider {
         }
         const root = getWorkspaceRoot();
         if (!root) {
-            return [emptyNode('Open a workspace folder.')];
+            return [emptyNode(localize('openWorkspaceFolder'))];
         }
         const result = await safeTapl(['status', '--json']);
         if (!result.ok) {
@@ -187,15 +192,15 @@ class ActiveProvider {
         const status = result.value;
         const nodes = [
             new WorkflowNode({
-                label: 'tapl Dashboard',
+                label: localize('dashboardLabel'),
                 kind: 'overview',
-                description: status.active_run ? 'active run' : 'no active run',
-                tooltip: 'Open tapl workflow dashboard',
+                description: status.active_run ? localize('activeRun') : localize('noActiveRun'),
+                tooltip: localize('openWorkflowDashboard'),
                 icon: 'dashboard'
             })
         ];
         for (const task of status.tasks) {
-            const description = task.status || undefined;
+            const description = task.status ? (0, i18n_1.translateStatus)(UI_LOCALE, task.status) : undefined;
             nodes.push(new WorkflowNode({
                 label: `${task.stable_id} ${task.title}`,
                 kind: 'task',
@@ -227,7 +232,7 @@ class ArchiveProvider {
             return [emptyNode(result.error)];
         }
         if (result.value.length === 0) {
-            return [emptyNode('No tapl archives found.')];
+            return [emptyNode(localize('noTaplArchives'))];
         }
         return result.value.map((archive) => new WorkflowNode({
             label: archive.slug,
@@ -264,7 +269,7 @@ class WorkflowWebviewManager {
     }
     async searchFromCommand() {
         const query = await vscode.window.showInputBox({
-            prompt: 'Search tapl workflow history',
+            prompt: localize('searchWorkflowHistory'),
             value: this.lastSearch?.query ?? ''
         });
         if (query === undefined) {
@@ -321,13 +326,13 @@ class WorkflowWebviewManager {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets', 'index.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets', 'index.css'));
         return `<!doctype html>
-<html lang="en">
+<html lang="${UI_LOCALE}">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src ${webview.cspSource}; font-src ${webview.cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${styleUri}">
-  <title>tapl Workflow</title>
+  <title>${localize('appTitle')}</title>
 </head>
 <body>
   <div id="root"></div>
@@ -340,7 +345,7 @@ class WorkflowWebviewManager {
             return;
         }
         const view = await this.buildCurrentView();
-        const message = { type, view };
+        const message = { type, view, locale: UI_LOCALE };
         await this.panel.webview.postMessage(message);
     }
     async buildCurrentView() {
@@ -1262,7 +1267,7 @@ async function safeTapl(args) {
         return { ok: true, value: { ...DEFAULT_STATUS, ...JSON.parse(result.value.stdout) } };
     }
     catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : 'Failed to parse taplctl JSON.' };
+        return { ok: false, error: error instanceof Error ? error.message : localize('failedParseTaplctlJson') };
     }
 }
 async function safeArchives(limit) {
@@ -1279,7 +1284,7 @@ async function safeArchives(limit) {
         return { ok: true, value: payload.archives ?? [] };
     }
     catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : 'Failed to parse tapl archive JSON.' };
+        return { ok: false, error: error instanceof Error ? error.message : localize('failedParseArchiveJson') };
     }
 }
 async function safeArchiveDetail(archiveId) {
@@ -1290,10 +1295,10 @@ async function safeArchiveDetail(archiveId) {
     try {
         const payload = JSON.parse(result.value.stdout);
         if (payload.ok === false) {
-            return { ok: false, error: payload.error ?? 'Failed to load tapl archive detail.' };
+            return { ok: false, error: payload.error ?? localize('failedLoadArchiveDetail') };
         }
         if (!payload.archive) {
-            return { ok: false, error: 'tapl archive detail response did not include an archive.' };
+            return { ok: false, error: localize('missingArchiveDetail') };
         }
         return {
             ok: true,
@@ -1305,7 +1310,7 @@ async function safeArchiveDetail(archiveId) {
         };
     }
     catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : 'Failed to parse tapl archive detail JSON.' };
+        return { ok: false, error: error instanceof Error ? error.message : localize('failedParseArchiveDetailJson') };
     }
 }
 async function safeItemDetail(itemId) {
@@ -1316,15 +1321,15 @@ async function safeItemDetail(itemId) {
     try {
         const payload = JSON.parse(result.value.stdout);
         if (payload.ok === false) {
-            return { ok: false, error: payload.error ?? 'Failed to load tapl item detail.' };
+            return { ok: false, error: payload.error ?? localize('failedLoadItemDetail') };
         }
         if (!payload.item) {
-            return { ok: false, error: 'tapl item detail response did not include an item.' };
+            return { ok: false, error: localize('missingItemDetail') };
         }
         return { ok: true, value: payload.item };
     }
     catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : 'Failed to parse tapl item detail JSON.' };
+        return { ok: false, error: error instanceof Error ? error.message : localize('failedParseItemDetailJson') };
     }
 }
 async function searchTapl(query) {
@@ -1336,13 +1341,13 @@ async function searchTapl(query) {
         return { ok: true, value: JSON.parse(result.value.stdout) };
     }
     catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : 'Failed to parse tapl search JSON.' };
+        return { ok: false, error: error instanceof Error ? error.message : localize('failedParseSearchJson') };
     }
 }
 async function runTapl(args) {
     const root = getWorkspaceRoot();
     if (!root) {
-        return { ok: false, error: 'Open a workspace folder to use tapl.' };
+        return { ok: false, error: localize('openWorkspaceToUseTapl') };
     }
     const commands = taplctlCommandCandidates();
     const failures = [];
@@ -1353,16 +1358,16 @@ async function runTapl(args) {
         }
         failures.push(`${command}: ${result.error}`);
         if (!result.commandNotFound) {
-            return { ok: false, error: `taplctl failed using ${command}: ${result.error}` };
+            return { ok: false, error: localize('taplctlFailedUsing', { command, error: result.error }) };
         }
     }
     return {
         ok: false,
         error: [
-            'Unable to execute taplctl.',
-            `Tried: ${commands.join(', ')}.`,
-            `Set ${COMMAND_PREFIX}.${TAPLCTL_PATH_SETTING} to the full taplctl path if it is installed elsewhere.`,
-            failures.length ? `Last error: ${failures[failures.length - 1]}` : ''
+            localize('unableExecuteTaplctl'),
+            localize('triedCommands', { commands: commands.join(', ') }),
+            localize('setTaplctlPath', { setting: `${COMMAND_PREFIX}.${TAPLCTL_PATH_SETTING}` }),
+            failures.length ? localize('lastError', { error: failures[failures.length - 1] }) : ''
         ].filter(Boolean).join(' ')
     };
 }

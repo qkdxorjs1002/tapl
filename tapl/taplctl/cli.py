@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -108,6 +109,12 @@ def add_plan_write_args(parser: argparse.ArgumentParser, *, include_json_input: 
     parser.add_argument("--validation", default=None, help=tapl_prompt.field_help("plan", "validation"))
     parser.add_argument("--approval-needs", default=None, help=tapl_prompt.field_help("plan", "approval_needs"))
     parser.add_argument("--notes", default=None, help=tapl_prompt.field_help("plan", "notes"))
+    parser.add_argument(
+        "--custom-fields",
+        type=custom_fields_arg,
+        default=None,
+        help=tapl_prompt.field_help("plan", "custom_fields"),
+    )
     parser.add_argument("--status", default=None, help=tapl_prompt.field_help("plan", "status"))
     if include_json_input:
         add_json_input_args(parser)
@@ -135,6 +142,12 @@ def add_task_write_args(
     parser.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
     parser.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
     parser.add_argument("--next-action", default=None, help=tapl_prompt.field_help("task", "next_action"))
+    parser.add_argument(
+        "--custom-fields",
+        type=custom_fields_arg,
+        default=None,
+        help=tapl_prompt.field_help("task", "custom_fields"),
+    )
     if include_json_input:
         add_json_input_args(parser)
     add_agent_output_args(parser)
@@ -221,6 +234,23 @@ def read_json_object_input(args: argparse.Namespace) -> dict[str, Any]:
     return {normalize_payload_key(key): value for key, value in payload.items()}
 
 
+def custom_fields_arg(value: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"invalid custom fields JSON: {exc}") from exc
+    try:
+        return validate_custom_fields_input(payload)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def validate_custom_fields_input(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("custom_fields must be a JSON object")
+    return db.parse_custom_fields(value)
+
+
 def normalize_payload_key(value: Any) -> str:
     return str(value).strip().replace("-", "_")
 
@@ -243,8 +273,9 @@ def merge_json_fields(
     *,
     aliases: dict[str, tuple[str, ...]] | None = None,
     cli_defaults: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> tuple[str, ...]:
-    payload = read_json_object_input(args)
+    payload = read_json_object_input(args) if payload is None else payload
     if not payload:
         return ()
     aliases = aliases or {}
@@ -262,6 +293,17 @@ def merge_json_fields(
         setattr(args, field, value)
         updated.append(field)
     return tuple(updated)
+
+
+def merge_custom_fields_payload(
+    args: argparse.Namespace,
+    payload: dict[str, Any],
+    updated: list[str],
+) -> None:
+    if getattr(args, "custom_fields", None) is not None or "custom_fields" not in payload:
+        return
+    args.custom_fields = validate_custom_fields_input(payload["custom_fields"])
+    updated.append("custom_fields")
 
 
 def require_arg(args: argparse.Namespace, field: str, flag: str, *, command: str) -> bool:
@@ -415,12 +457,15 @@ def build_parser() -> argparse.ArgumentParser:
     task_create.set_defaults(handler=cmd_task_create)
     task_start = task_sub.add_parser("start", help="Mark one task In Progress.", description="Mark one task In Progress.")
     task_start.add_argument("id", help=tapl_prompt.field_help("task", "id"))
+    task_start.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
+    add_json_input_args(task_start)
     add_agent_output_args(task_start)
     task_start.set_defaults(handler=cmd_task_start)
     task_complete = task_sub.add_parser("complete", help="Mark one task Completed.", description="Mark one task Completed.")
     task_complete.add_argument("id", help=tapl_prompt.field_help("task", "id"))
     task_complete.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
     task_complete.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
+    task_complete.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
     add_json_input_args(task_complete)
     add_agent_output_args(task_complete)
     task_complete.set_defaults(handler=cmd_task_complete)
@@ -429,12 +474,14 @@ def build_parser() -> argparse.ArgumentParser:
     task_block.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
     task_block.add_argument("--next-action", default=None, help=tapl_prompt.field_help("task", "next_action"))
     task_block.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
+    task_block.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
     add_json_input_args(task_block)
     add_agent_output_args(task_block)
     task_block.set_defaults(handler=cmd_task_block)
     task_skip = task_sub.add_parser("skip", help="Mark one task Skipped.", description="Mark one task Skipped.")
     task_skip.add_argument("id", help=tapl_prompt.field_help("task", "id"))
     task_skip.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
+    task_skip.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
     add_json_input_args(task_skip)
     add_agent_output_args(task_skip)
     task_skip.set_defaults(handler=cmd_task_skip)
@@ -762,6 +809,7 @@ STATUS_COMPACT_ITEM_FIELDS = (
     "archived",
     "created_at",
     "updated_at",
+    "custom_fields",
 )
 
 STATUS_EVENT_SUMMARY_FIELDS = (
@@ -1014,14 +1062,21 @@ def provided_arg_fields(args: argparse.Namespace, fields: tuple[str, ...]) -> tu
     return tuple(field for field in fields if getattr(args, field, None) is not None)
 
 
-def append_agent_node(lines: list[str], depth: int, tag: str, value: Any) -> None:
-    if tag in AGENT_SKIP_KEYS or not agent_value_present(value):
+def append_agent_node(
+    lines: list[str],
+    depth: int,
+    tag: str,
+    value: Any,
+    *,
+    apply_skip_filter: bool = True,
+) -> None:
+    if (apply_skip_filter and tag in AGENT_SKIP_KEYS) or not agent_value_present(value):
         return
     tag_name = agent_tag_name(tag)
     if isinstance(value, dict):
         section: list[str] = []
         for key, child in value.items():
-            append_agent_node(section, depth + 1, str(key), child)
+            append_agent_node(section, depth + 1, str(key), child, apply_skip_filter=apply_skip_filter)
         if section:
             indent = "  " * depth
             lines.append(f"{indent}<{tag_name}>")
@@ -1032,7 +1087,7 @@ def append_agent_node(lines: list[str], depth: int, tag: str, value: Any) -> Non
         item_tag = AGENT_LIST_ITEM_TAGS.get(tag, "item")
         section = []
         for child in value:
-            append_agent_node(section, depth + 1, item_tag, child)
+            append_agent_node(section, depth + 1, item_tag, child, apply_skip_filter=apply_skip_filter)
         if section:
             indent = "  " * depth
             lines.append(f"{indent}<{tag_name}>")
@@ -1123,7 +1178,13 @@ def append_agent_mapping(
 
 def append_agent_fields(lines: list[str], depth: int, item: dict[str, Any], fields: tuple[str, ...]) -> None:
     for field in fields:
-        append_agent_value(lines, depth, agent_tag_name(field), item.get(field))
+        append_agent_node(
+            lines,
+            depth,
+            field,
+            item.get(field),
+            apply_skip_filter=field != "custom_fields",
+        )
 
 
 def append_agent_value(lines: list[str], depth: int, tag: str, value: Any) -> None:
@@ -1138,7 +1199,12 @@ def agent_value_present(value: Any) -> bool:
 
 
 def agent_tag_name(value: str) -> str:
-    return value.replace("-", "_")
+    normalized = re.sub(r"[^\w.]+", "_", value.replace("-", "_"), flags=re.UNICODE).strip("_")
+    if not normalized:
+        return "field"
+    if normalized[0].isdigit() or normalized[0] == ".":
+        return f"field_{normalized}"
+    return normalized
 
 
 def agent_escape(value: Any) -> str:
@@ -1276,6 +1342,7 @@ PLAN_WRITE_FIELDS = (
     "validation",
     "approval_needs",
     "notes",
+    "custom_fields",
 )
 
 TASK_WRITE_FIELDS = (
@@ -1289,13 +1356,15 @@ TASK_WRITE_FIELDS = (
     "result",
     "blocker",
     "next_action",
+    "custom_fields",
 )
 
 
 def merge_plan_payload(args: argparse.Namespace) -> tuple[str, ...]:
-    return merge_json_fields(
+    payload = read_json_object_input(args)
+    updated = list(merge_json_fields(
         args,
-        PLAN_WRITE_FIELDS,
+        tuple(field for field in PLAN_WRITE_FIELDS if field != "custom_fields"),
         aliases={
             "id": ("plan_id", "stable_id"),
             "requirements_trace": ("requirements-trace",),
@@ -1305,19 +1374,26 @@ def merge_plan_payload(args: argparse.Namespace) -> tuple[str, ...]:
             "approval_needs": ("approval-needs",),
         },
         cli_defaults={"id": "PLAN-001"},
-    )
+        payload=payload,
+    ))
+    merge_custom_fields_payload(args, payload, updated)
+    return tuple(updated)
 
 
 def merge_task_payload(args: argparse.Namespace) -> tuple[str, ...]:
-    return merge_json_fields(
+    payload = read_json_object_input(args)
+    updated = list(merge_json_fields(
         args,
-        TASK_WRITE_FIELDS,
+        tuple(field for field in TASK_WRITE_FIELDS if field != "custom_fields"),
         aliases={
             "id": ("task_id", "stable_id"),
             "spec_id": ("spec-id", "source_plan", "source_spec"),
             "next_action": ("next-action",),
         },
-    )
+        payload=payload,
+    ))
+    merge_custom_fields_payload(args, payload, updated)
+    return tuple(updated)
 
 
 def ensure_attrs(args: argparse.Namespace, fields: tuple[str, ...], default: Any = None) -> None:
@@ -1371,6 +1447,7 @@ def write_plan(args: argparse.Namespace, *, operation: str) -> int:
         validation=merged_field("validation"),
         approval_needs=merged_field("approval_needs"),
         notes=merged_field("notes"),
+        custom_fields=args.custom_fields,
     )
     plan_task_execute = validation.validate_plan_task_execute(conn)
     if args.agent:
@@ -1393,6 +1470,7 @@ def write_plan(args: argparse.Namespace, *, operation: str) -> int:
                         "validation",
                         "approval_needs",
                         "notes",
+                        "custom_fields",
                     ),
                 ),
                 plan_task_execute=plan_task_execute,
@@ -1531,6 +1609,7 @@ def write_task(args: argparse.Namespace, *, operation: str) -> int:
         result=result,
         blocker=blocker,
         next_action=next_action,
+        custom_fields=args.custom_fields,
     )
     plan_task_execute = validation.validate_plan_task_execute(conn)
     if args.agent:
@@ -1550,6 +1629,7 @@ def write_task(args: argparse.Namespace, *, operation: str) -> int:
                         "result",
                         "blocker",
                         "next_action",
+                        "custom_fields",
                     ),
                 ),
                 plan_task_execute=plan_task_execute,

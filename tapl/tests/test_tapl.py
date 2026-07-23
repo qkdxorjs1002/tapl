@@ -25,6 +25,7 @@ from taplctl import (
     cli as tapl_cli,
     config as tapl_config,
     db as tapl_db,
+    embeddings as tapl_embeddings,
     install as tapl_install,
     prompt as tapl_prompt,
 )
@@ -787,6 +788,239 @@ class TaplCliTests(unittest.TestCase):
                 schema_version = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0]
             self.assertNotIn("required_subagent", columns)
             self.assertEqual(schema_version, str(tapl_db.SCHEMA_VERSION))
+
+    def test_custom_fields_cli_preserves_types_merges_deletes_and_reaches_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            plan_payload = {
+                "id": "PLAN-001",
+                "title": "Custom field plan",
+                "status": "Draft",
+                "custom_fields": {
+                    "Type": "feature",
+                    "Count": 2,
+                    "Enabled": False,
+                    "Tags": ["history", 3, None],
+                    "Choice": {"selected": "merge", "confirmed": True},
+                    "Delete me": "obsolete",
+                    "raw_text": "kept as custom metadata",
+                },
+            }
+            created_plan = self.run_cli(
+                db_path,
+                "plan",
+                "apply",
+                "--stdin-json",
+                "--agent",
+                input_text=json.dumps(plan_payload),
+            )
+            self.assertEqual(created_plan.returncode, 0, created_plan.stderr)
+            self.assertIn("<field>custom_fields</field>", created_plan.stdout)
+            self.assertNotIn("obsolete", created_plan.stdout)
+
+            updated_plan = self.run_cli(
+                db_path,
+                "plan",
+                "apply",
+                "--stdin-json",
+                "--json",
+                input_text=json.dumps(
+                    {
+                        "id": "PLAN-001",
+                        "custom_fields": {
+                            "Type": "enhancement",
+                            "Delete me": None,
+                            "User choices": ["merge", {"reason": "preserve history"}],
+                        },
+                    }
+                ),
+            )
+            self.assertEqual(updated_plan.returncode, 0, updated_plan.stderr)
+
+            task_payload = {
+                "id": "TASK-001",
+                "title": "Custom field task",
+                "spec_id": "PLAN-001",
+                "goal": "Store task metadata",
+                "action": "Exercise lifecycle custom fields",
+                "verification": "Inspect structured outputs",
+                "custom_fields": {"Type": "implementation", "Score": 5},
+            }
+            created_task = self.run_cli(
+                db_path,
+                "task",
+                "create",
+                "--stdin-json",
+                "--json",
+                input_text=json.dumps(task_payload),
+            )
+            self.assertEqual(created_task.returncode, 0, created_task.stderr)
+
+            started_task = self.run_cli(
+                db_path,
+                "task",
+                "start",
+                "TASK-001",
+                "--stdin-json",
+                "--json",
+                input_text=json.dumps({"custom_fields": {"Score": None, "Phase": {"name": "execution"}}}),
+            )
+            self.assertEqual(started_task.returncode, 0, started_task.stderr)
+
+            status = self.run_cli(db_path, "status", "--json")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            payload = json.loads(status.stdout)
+            plan = payload["plans"][0]
+            self.assertEqual(
+                plan["custom_fields"],
+                {
+                    "Choice": {"confirmed": True, "selected": "merge"},
+                    "Count": 2,
+                    "Enabled": False,
+                    "Tags": ["history", 3, None],
+                    "Type": "enhancement",
+                    "User choices": ["merge", {"reason": "preserve history"}],
+                    "raw_text": "kept as custom metadata",
+                },
+            )
+            self.assertEqual(
+                payload["tasks"][0]["custom_fields"],
+                {"Phase": {"name": "execution"}, "Type": "implementation"},
+            )
+
+            agent_status = self.run_cli(db_path, "status", "--agent")
+            self.assertEqual(agent_status.returncode, 0, agent_status.stderr)
+            self.assertIn("<custom_fields>", agent_status.stdout)
+            self.assertIn("<Type>enhancement</Type>", agent_status.stdout)
+            self.assertIn("<User_choices>", agent_status.stdout)
+            self.assertIn("<Phase>", agent_status.stdout)
+            self.assertIn("<raw_text>kept as custom metadata</raw_text>", agent_status.stdout)
+
+            item_id = plan["id"]
+            item = self.run_cli(db_path, "item", "show", "--id", str(item_id), "--json")
+            self.assertEqual(item.returncode, 0, item.stderr)
+            self.assertEqual(json.loads(item.stdout)["item"]["custom_fields"], plan["custom_fields"])
+
+            archived = self.run_cli(
+                db_path,
+                "archive",
+                "create",
+                "--slug",
+                "custom-fields",
+                "--summary",
+                "Custom field archive",
+                "--json",
+            )
+            self.assertEqual(archived.returncode, 0, archived.stderr)
+            archive_id = json.loads(archived.stdout)["archive"]["id"]
+            archive = self.run_cli(db_path, "archive", "show", "--id", archive_id, "--json")
+            self.assertEqual(archive.returncode, 0, archive.stderr)
+            archived_items = json.loads(archive.stdout)["items"]
+            archived_plan = next(item for item in archived_items if item["kind"] == "plan")
+            self.assertEqual(archived_plan["custom_fields"], plan["custom_fields"])
+
+    def test_custom_fields_rejects_non_object_and_empty_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            for custom_fields in ([], None, {" ": "invalid"}):
+                invalid = self.run_cli(
+                    db_path,
+                    "plan",
+                    "apply",
+                    "--stdin-json",
+                    "--json",
+                    input_text=json.dumps(
+                        {"id": "PLAN-001", "title": "Invalid custom fields", "custom_fields": custom_fields}
+                    ),
+                )
+                self.assertEqual(invalid.returncode, 1)
+                self.assertIn("custom_fields", json.loads(invalid.stdout)["error"])
+
+            invalid_flag = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--custom-fields",
+                '["not", "an", "object"]',
+            )
+            self.assertEqual(invalid_flag.returncode, 2)
+            self.assertIn("custom_fields must be a JSON object", invalid_flag.stderr)
+
+    def test_custom_fields_schema_migration_backfills_empty_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            created = self.run_cli(
+                db_path,
+                "plan",
+                "set",
+                "--id",
+                "PLAN-001",
+                "--title",
+                "Legacy plan",
+                "--status",
+                "Draft",
+                "--json",
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("ALTER TABLE items DROP COLUMN custom_fields_json")
+                conn.execute("UPDATE meta SET value = '5' WHERE key = 'schema_version'")
+
+            status = self.run_cli(db_path, "status", "--json", "--full")
+            self.assertEqual(status.returncode, 0, status.stderr)
+            payload = json.loads(status.stdout)
+            self.assertEqual(payload["plans"][0]["custom_fields"], {})
+            self.assertEqual(payload["schema"]["schema_version"], str(tapl_db.SCHEMA_VERSION))
+            with sqlite3.connect(db_path) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(items)")}
+            self.assertIn("custom_fields_json", columns)
+
+    def test_custom_fields_are_searchable_and_part_of_semantic_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            conn = tapl_db.connect(db_path)
+            tapl_db.upsert_plan(
+                conn,
+                plan_id="PLAN-001",
+                title="Searchable custom fields",
+                status="Draft",
+                custom_fields={"DecisionMode": "user-selected-merge", "Areas": ["backend", "history"]},
+            )
+
+            self.assertEqual(tapl_db.search_word(conn, "backend")[0]["stable_id"], "PLAN-001")
+            self.assertEqual(tapl_db.search_bm25(conn, "DecisionMode")[0]["stable_id"], "PLAN-001")
+            row = conn.execute(
+                "SELECT stable_id, kind, title, body, raw_text, custom_fields_json FROM items WHERE stable_id = ?",
+                ("PLAN-001",),
+            ).fetchone()
+            semantic_text = tapl_embeddings.item_text(row)
+            self.assertIn("DecisionMode", semantic_text)
+            self.assertIn("user-selected-merge", semantic_text)
+            conn.close()
+
+    def test_custom_fields_help_and_context_require_autonomous_history_judgment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            plan_help = self.run_cli(db_path, "plan", "apply", "--help")
+            task_help = self.run_cli(db_path, "task", "create", "--help")
+            self.assertEqual(plan_help.returncode, 0, plan_help.stderr)
+            self.assertEqual(task_help.returncode, 0, task_help.stderr)
+            for output in (plan_help.stdout, task_help.stdout):
+                self.assertIn("--custom-fields", output)
+                self.assertIn("proactively populate `custom_fields`", output)
+                self.assertIn("AGENTS.md and the user do not explicitly request", output)
+                self.assertIn("Do not copy standard fields", output)
+                self.assertIn("top-level null value deletes", output)
+
+            context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
+            self.assertEqual(context.returncode, 0, context.stderr)
+            guidance = "\n".join(json.loads(context.stdout)["workflow_guidance"])
+            self.assertIn("proactively populate `custom_fields`", guidance)
+            self.assertIn("future search, review, handoff, or decision reconstruction", guidance)
+            self.assertIn("even when AGENTS.md and the user do not explicitly request", guidance)
 
     def test_task_set_requires_title_and_status_for_new_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2213,6 +2447,7 @@ searchd_start_timeout_ms = 1
                 "result",
                 "blocker",
                 "next_action",
+                "custom_fields",
             ),
         )
         self.assertIn("--verification", tapl_prompt.task_required_field_summary())

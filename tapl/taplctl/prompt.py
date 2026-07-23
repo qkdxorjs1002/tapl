@@ -71,6 +71,12 @@ PLAN_FIELDS = (
     FieldSpec("validation", "--validation", "Validation strategy or commands.", "required for detailed plans", "Validation"),
     FieldSpec("approval_needs", "--approval-needs", "Approval requirements before execution.", label="Approval needs"),
     FieldSpec("notes", "--notes", "Additional notes rendered after standard plan fields.", label="Notes"),
+    FieldSpec(
+        "custom_fields",
+        "--custom-fields",
+        "JSON object of history-relevant metadata; values may be any JSON type and top-level null values delete keys.",
+        label="Custom fields",
+    ),
     FieldSpec("status", "--status", "Plan lifecycle label, e.g. Draft or Finalized.", label="Status"),
 )
 TASK_FIELDS = (
@@ -101,6 +107,12 @@ TASK_FIELDS = (
         "Specific action that would unblock a Blocked task.",
         "required for blocked tasks",
         "Next action",
+    ),
+    FieldSpec(
+        "custom_fields",
+        "--custom-fields",
+        "JSON object of history-relevant metadata; values may be any JSON type and top-level null values delete keys.",
+        label="Custom fields",
     ),
 )
 FINDING_FIELDS = (
@@ -149,7 +161,7 @@ PLAN_BODY_FIELDS = (
 )
 TASK_BODY_FIELDS = ("goal", "action", "verification", "result", "blocker", "next_action")
 AGENT_STATUS_FIELDS = {
-    "plan": ("id", "stable_id", "title", "status", "summary"),
+    "plan": ("id", "stable_id", "title", "status", "summary", "custom_fields"),
     "task": (
         "id",
         "stable_id",
@@ -162,12 +174,13 @@ AGENT_STATUS_FIELDS = {
         "result",
         "blocker",
         "next_action",
+        "custom_fields",
     ),
     "finding": ("id", "stable_id", "title", "source"),
 }
 AGENT_ITEM_FIELDS = {
-    "plan": ("plan_id", *PLAN_BODY_FIELDS),
-    "task": ("spec_id", "goal", "action", "verification", "result", "blocker", "next_action"),
+    "plan": ("plan_id", *PLAN_BODY_FIELDS, "custom_fields"),
+    "task": ("spec_id", "goal", "action", "verification", "result", "blocker", "next_action", "custom_fields"),
     "finding": ("body", "impact", "related_ids"),
 }
 
@@ -187,6 +200,7 @@ Write workflow records and reports in the user's language unless asked otherwise
 - Do not commit, push, rebase, reset, discard changes, or include workflow records in commits unless explicitly requested.
 - Check the worktree before and after work when practical. Never overwrite user changes.
 - Keep TAPL records as current-state snapshots, not logs.
+- ${custom_fields_guidance}
 
 ## Planning
 
@@ -281,6 +295,7 @@ ROOT_HELP_TEMPLATE = """Workflow guidance:
   ${task_execution_order_guidance}
   Use `taplctl <command> <subcommand> --help` for field-writing rules.
   ${structured_record_guidance}
+  ${custom_fields_guidance}
   Use `taplctl validate --agent` after updates to catch missing plan/task details."""
 
 SEARCH_HELP_TEMPLATE = """History search rules:
@@ -305,6 +320,7 @@ PLAN_SET_HELP_TEMPLATE = """Plan writing rules:
   Pass plan content through field arguments; tapl renders the durable Markdown body from a template.
   Summary should be a compact trace such as `REQ-001: approach, files, risks, validation`.
   Existing plan updates are partial: omitted fields keep the stored values.
+  ${custom_fields_guidance}
   Status is free-form; common values are Draft, Finalized, Imported, and Superseded.
 
 Field contract:
@@ -325,6 +341,7 @@ TASK_SET_HELP_TEMPLATE = """Task writing rules:
   ${task_execution_order_guidance}
   Existing task updates are partial: pass --id plus only changed fields;
   omitted fields keep their stored values. New task creation requires --title and --status.
+  ${custom_fields_guidance}
   ${task_fields_guidance}
   Split tasks by meaningful implementation or verification step.
   Status values: ${status_values}. Quote multi-word statuses, e.g. --status 'In Progress'.
@@ -399,6 +416,7 @@ def template_variables(**overrides: Any) -> dict[str, str]:
         "structured_record_guidance": structured_record_guidance(),
         "structured_record_guidance_plan_task": structured_record_guidance("plan/task content"),
         "structured_record_guidance_task": structured_record_guidance("task content"),
+        "custom_fields_guidance": custom_fields_guidance(),
         "stable_id_guidance": stable_id_guidance(),
         "workflow_order_guidance": workflow_order_guidance(),
         "workflow_stage_progression_guidance": workflow_stage_progression_guidance(),
@@ -778,6 +796,17 @@ def structured_record_guidance(subject: str = "plan and task content") -> str:
         f"Pass {subject} through high-level lifecycle commands, using --stdin-json or "
         "--json-file for long values; tapl renders the stored Markdown body from templates "
         "during record merge."
+    )
+
+
+def custom_fields_guidance() -> str:
+    return (
+        "When creating or updating a plan or task, proactively populate `custom_fields` whenever the current "
+        "context contains metadata that will help future search, review, handoff, or decision reconstruction, even "
+        "when AGENTS.md and the user do not explicitly request recording it. Good candidates include work type, "
+        "user choices, constraints, and decision rationale. Use concise, stable labels and JSON values. Do not copy "
+        "standard fields, record transient progress, or invent unsupported facts. Omitted custom fields are preserved; "
+        "provided keys merge at the top level, and a top-level null value deletes that key."
     )
 
 

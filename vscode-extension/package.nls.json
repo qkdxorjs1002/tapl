@@ -1,0 +1,13 @@
+{
+  "extension.displayName": "tapl Workflow Viewer",
+  "extension.description": "View tapl SQLite workflow state through the taplctl CLI.",
+  "configuration.title": "tapl Workflow",
+  "configuration.taplctlPath.description": "Path or command name for taplctl. Leave empty to search PATH plus common Homebrew locations.",
+  "command.category": "tapl Workflow",
+  "command.refresh.title": "Refresh Workflow Views",
+  "command.openOverview.title": "Open tapl Dashboard",
+  "command.openArchive.title": "Open tapl Archive",
+  "command.search.title": "Search tapl Workflow",
+  "view.active.name": "Active",
+  "view.archives.name": "Archives"
+}

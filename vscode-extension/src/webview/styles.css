@@ -6,37 +6,37 @@
 
 :root {
   color-scheme: light dark;
-  --rounded-box: 0.5rem;
-  --rounded-btn: 0.375rem;
+  --rounded-box: 1rem;
+  --rounded-btn: 0.7rem;
   --rounded-badge: 999px;
+  --tapl-tech-blue: #0066ff;
+  --tapl-tech-cyan: #00ffff;
   --tapl-page-bg: var(--vscode-sideBar-background, var(--vscode-panel-background, var(--vscode-editor-background)));
   --tapl-muted: var(--vscode-descriptionForeground, #9ca3af);
-  --tapl-panel: var(--vscode-sideBar-background, var(--tapl-page-bg));
-  --tapl-surface: var(--vscode-editorWidget-background, var(--tapl-panel));
-  --tapl-surface-muted: var(--vscode-input-background, var(--tapl-surface));
-  --tapl-item-bg: var(--vscode-editor-background, var(--tapl-surface));
+  --tapl-panel: color-mix(in srgb, var(--vscode-sideBar-background, var(--tapl-page-bg)) 92%, var(--tapl-tech-blue) 8%);
+  --tapl-surface: color-mix(in srgb, var(--vscode-editorWidget-background, var(--tapl-panel)) 96%, var(--tapl-tech-blue) 4%);
+  --tapl-surface-raised: color-mix(in srgb, var(--tapl-surface) 95%, #ffffff 5%);
+  --tapl-surface-muted: color-mix(in srgb, var(--vscode-input-background, var(--tapl-surface)) 94%, var(--tapl-tech-blue) 6%);
+  --tapl-item-bg: color-mix(in srgb, var(--vscode-editor-background, var(--tapl-surface)) 92%, var(--tapl-surface-raised) 8%);
   --tapl-hover: var(--vscode-list-hoverBackground, var(--tapl-surface-muted));
-  --tapl-success: var(--vscode-testing-iconPassed, #4e9a06);
+  --tapl-success: var(--vscode-testing-iconPassed, #5fd38d);
   --tapl-warning: var(--vscode-editorWarning-foreground, #cca700);
   --tapl-error: var(--vscode-errorForeground, #f48771);
-  --tapl-accent: var(--vscode-focusBorder, #3794ff);
+  --tapl-accent: var(--vscode-focusBorder, var(--tapl-tech-blue));
+  --tapl-highlight: color-mix(in srgb, var(--tapl-tech-cyan) 74%, var(--tapl-accent));
   --tapl-info: var(--vscode-symbolIcon-eventForeground, var(--tapl-accent));
   --tapl-border-base: var(--vscode-panel-border, #3f3f46);
-  --tapl-border-subtle: color-mix(in srgb, var(--tapl-border-base) 54%, transparent);
-  --tapl-border: color-mix(in srgb, var(--tapl-border-base) 78%, var(--vscode-editor-foreground, #d4d4d8) 22%);
-  --tapl-border-panel: color-mix(in srgb, var(--tapl-border-base) 72%, var(--vscode-editor-foreground, #d4d4d8) 28%);
-  --tapl-border-lane: color-mix(in srgb, var(--tapl-border-base) 72%, var(--tapl-accent) 28%);
-  --tapl-border-item: color-mix(in srgb, var(--tapl-border-base) 68%, var(--tapl-surface-muted) 32%);
-  --tapl-border-control: color-mix(in srgb, var(--tapl-border-base) 58%, var(--tapl-accent) 42%);
-  --tapl-border-strong: var(--vscode-focusBorder, #6ca6f8);
-  --tapl-bevel-light: color-mix(in srgb, var(--tapl-surface) 78%, #ffffff 22%);
-  --tapl-bevel-dark: color-mix(in srgb, var(--tapl-surface) 72%, #000000 28%);
-  --tapl-shadow-hard: rgb(0 0 0 / 0.2);
-  --tapl-shadow: 0 14px 30px rgb(0 0 0 / 0.16);
-  --tapl-shadow-soft: 0 5px 12px rgb(0 0 0 / 0.12);
-  --tapl-shadow-raised: inset 1px 1px 0 var(--tapl-bevel-light), inset -1px -1px 0 var(--tapl-bevel-dark), 3px 3px 0 var(--tapl-shadow-hard);
-  --tapl-shadow-item: inset 1px 1px 0 var(--tapl-bevel-light), inset -1px -1px 0 var(--tapl-bevel-dark), 1px 1px 0 var(--tapl-shadow-hard);
-  --tapl-shadow-inset: inset 1px 1px 0 var(--tapl-bevel-light), inset -1px -1px 0 var(--tapl-bevel-dark);
+  --tapl-border-subtle: color-mix(in srgb, var(--tapl-border-base) 24%, transparent);
+  --tapl-border: color-mix(in srgb, var(--tapl-border-base) 46%, transparent);
+  --tapl-border-panel: color-mix(in srgb, var(--tapl-accent) 18%, transparent);
+  --tapl-border-item: color-mix(in srgb, var(--tapl-border-base) 26%, transparent);
+  --tapl-border-control: color-mix(in srgb, var(--tapl-accent) 38%, transparent);
+  --tapl-border-strong: var(--vscode-focusBorder, var(--tapl-tech-cyan));
+  --tapl-shadow: 0 22px 54px rgb(0 0 0 / 0.2);
+  --tapl-shadow-soft: 0 10px 28px rgb(0 0 0 / 0.14);
+  --tapl-shadow-raised: 0 14px 34px rgb(0 0 0 / 0.16), 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent) inset;
+  --tapl-shadow-item: 0 6px 18px rgb(0 0 0 / 0.11);
+  --tapl-shadow-inset: 0 1px 0 rgb(255 255 255 / 0.035) inset;
 }
 
 html {
@@ -48,15 +48,18 @@ body {
   min-height: 100vh;
   min-width: 0;
   margin: 0;
-  padding: 20px;
+  padding: 22px;
   color: var(--vscode-editor-foreground);
-  background: var(--tapl-page-bg);
+  background:
+    radial-gradient(circle at 2% -8%, color-mix(in srgb, var(--tapl-tech-blue) 13%, transparent), transparent 30rem),
+    radial-gradient(circle at 98% 4%, color-mix(in srgb, var(--tapl-tech-cyan) 5%, transparent), transparent 24rem),
+    var(--tapl-page-bg);
   font-family: var(--vscode-font-family);
 }
 
 #root {
   min-height: 100%;
-  background: var(--tapl-page-bg);
+  background: transparent;
 }
 
 button,
@@ -65,32 +68,34 @@ input {
 }
 
 .btn-primary {
-  background: var(--vscode-button-background);
+  border: 0;
+  background: linear-gradient(135deg, var(--vscode-button-background, var(--tapl-tech-blue)), color-mix(in srgb, var(--vscode-button-background, var(--tapl-tech-blue)) 76%, var(--tapl-tech-cyan) 24%));
   color: var(--vscode-button-foreground);
-  border-color: var(--vscode-button-background);
-  box-shadow: 0 1px 0 rgb(0 0 0 / 0.16);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--tapl-accent) 24%, transparent);
 }
 
 .btn-primary:hover {
-  background: var(--vscode-button-hoverBackground);
-  border-color: var(--vscode-button-hoverBackground);
+  background: linear-gradient(135deg, var(--vscode-button-hoverBackground, var(--tapl-accent)), color-mix(in srgb, var(--tapl-accent) 72%, var(--tapl-tech-cyan) 28%));
+  transform: translateY(-1px);
 }
 
 .btn-secondary {
-  background: var(--vscode-button-secondaryBackground, var(--tapl-panel));
+  border-color: transparent;
+  background: color-mix(in srgb, var(--vscode-button-secondaryBackground, var(--tapl-panel)) 88%, transparent);
   color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
-  border-color: var(--tapl-border-control);
+  box-shadow: var(--tapl-shadow-inset);
 }
 
 .btn-secondary:hover {
   background: var(--vscode-button-secondaryHoverBackground, var(--tapl-surface));
-  border-color: var(--tapl-border-strong);
+  color: var(--vscode-editor-foreground);
 }
 
 .input {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
-  border-color: var(--vscode-input-border, var(--tapl-border-control));
+  border-color: color-mix(in srgb, var(--vscode-input-border, var(--tapl-border-control)) 70%, transparent);
+  box-shadow: var(--tapl-shadow-inset);
 }
 
 .input::placeholder {
@@ -122,24 +127,35 @@ pre {
 }
 
 .tapl-shell {
-  @apply mx-auto grid w-full gap-4;
+  @apply mx-auto grid w-full gap-[18px];
   max-width: 1440px;
-  background: var(--tapl-page-bg);
+  color: var(--vscode-editor-foreground, #f1f5f9);
+  background: transparent;
 }
 
 .tapl-topbar {
-  @apply flex flex-wrap items-start justify-between gap-4 rounded-lg border p-4;
-  border-color: var(--tapl-border-panel);
+  @apply flex flex-wrap items-start justify-between gap-4 rounded-2xl border-0 p-5;
   background: var(--tapl-surface);
   box-shadow: var(--tapl-shadow-raised);
 }
 
 .tapl-hero {
-  @apply hero overflow-hidden rounded-lg border p-5;
-  border-color: var(--tapl-border-panel);
+  @apply hero relative overflow-hidden rounded-2xl border-0 p-6;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--tapl-surface) 92%, var(--tapl-accent) 8%), var(--tapl-panel));
-  box-shadow: var(--tapl-shadow), var(--tapl-shadow-inset);
+    radial-gradient(circle at 86% -40%, color-mix(in srgb, var(--tapl-tech-cyan) 15%, transparent), transparent 48%),
+    linear-gradient(135deg, color-mix(in srgb, var(--tapl-surface) 86%, var(--tapl-tech-blue) 14%), color-mix(in srgb, var(--tapl-panel) 96%, #1e1e1e 4%));
+  box-shadow: var(--tapl-shadow);
+}
+
+.tapl-hero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  background: linear-gradient(var(--tapl-tech-cyan), var(--tapl-accent));
+  box-shadow: 0 0 24px color-mix(in srgb, var(--tapl-tech-cyan) 45%, transparent);
 }
 
 .tapl-hero-main {
@@ -147,7 +163,7 @@ pre {
 }
 
 .tapl-hero-copy {
-  @apply grid min-w-0 content-center gap-3;
+  @apply relative z-10 grid min-w-0 content-center gap-3;
 }
 
 .tapl-hero-meta,
@@ -161,11 +177,15 @@ pre {
   color: var(--tapl-muted);
 }
 
+.tapl-hero h1 {
+  letter-spacing: -0.035em;
+}
+
 .tapl-command-panel {
-  @apply grid min-w-0 content-start gap-3 rounded-lg border p-3;
-  border-color: var(--tapl-border-control);
-  background: color-mix(in srgb, var(--tapl-surface-muted) 82%, transparent);
-  box-shadow: var(--tapl-shadow-inset);
+  @apply relative z-10 grid min-w-0 content-start gap-3 rounded-xl border-0 p-3.5;
+  background: color-mix(in srgb, var(--tapl-surface-muted) 76%, transparent);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 12px 30px rgb(0 0 0 / 0.12);
+  backdrop-filter: blur(12px);
 }
 
 .tapl-command-actions {
@@ -181,14 +201,13 @@ pre {
 }
 
 .tapl-progress-card {
-  @apply grid gap-2 rounded-md border p-3;
-  border-color: var(--tapl-border-control);
-  background: var(--tapl-surface);
-  box-shadow: var(--tapl-shadow-inset);
+  @apply grid gap-2 rounded-lg border-0 p-3;
+  background: color-mix(in srgb, var(--tapl-surface) 74%, transparent);
 }
 
 .tapl-progress {
-  height: 0.5rem;
+  height: 0.42rem;
+  background: color-mix(in srgb, var(--tapl-muted) 16%, transparent);
 }
 
 .tapl-metric-grid {
@@ -196,35 +215,62 @@ pre {
 }
 
 .tapl-stats {
-  @apply stats stats-vertical w-full overflow-hidden rounded-lg border shadow-none;
-  border-color: var(--tapl-border-panel);
+  @apply stats stats-vertical w-full overflow-hidden rounded-2xl border-0 shadow-none;
   background: var(--tapl-surface);
-  box-shadow: var(--tapl-shadow-raised);
+  box-shadow: var(--tapl-shadow-soft);
 }
 
 .tapl-stat {
-  @apply rounded-lg border shadow-none;
+  @apply relative overflow-hidden rounded-2xl border-0 shadow-none;
   min-height: 112px;
-  border-color: var(--tapl-border-panel);
   background: var(--tapl-surface);
-  box-shadow: var(--tapl-shadow-raised);
+  box-shadow: var(--tapl-shadow-soft);
 }
 
-.tapl-stat.pending {
-  border-top: 3px solid var(--tapl-warning);
+.tapl-stat::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 999px 999px 0;
+  background: var(--tapl-muted);
+}
+
+.tapl-stat.pending::before {
+  background: var(--tapl-warning);
 }
 
 .tapl-stat.in-progress,
 .tapl-stat.info {
-  border-top: 3px solid var(--tapl-accent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--tapl-surface) 93%, var(--tapl-accent) 7%), var(--tapl-surface));
 }
 
-.tapl-stat.blocked {
-  border-top: 3px solid var(--tapl-error);
+.tapl-stat.in-progress::before,
+.tapl-stat.info::before {
+  background: var(--tapl-accent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--tapl-accent) 40%, transparent);
 }
 
-.tapl-stat.completed {
-  border-top: 3px solid var(--tapl-success);
+.tapl-stat.blocked::before {
+  background: var(--tapl-error);
+}
+
+.tapl-stat.completed::before {
+  background: var(--tapl-success);
+}
+
+.tapl-stat .stat-title {
+  color: var(--tapl-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.tapl-stat .stat-value {
+  letter-spacing: -0.025em;
 }
 
 .tapl-grid {
@@ -237,90 +283,259 @@ pre {
   @apply grid min-w-0 content-start gap-3;
 }
 
+.tapl-main {
+  container: tapl-main / inline-size;
+}
+
 .tapl-card {
-  @apply card min-w-0 overflow-hidden border shadow-none;
-  border-color: var(--tapl-border-panel);
+  @apply card min-w-0 overflow-hidden rounded-2xl border-0 shadow-none;
   background: var(--tapl-surface);
-  border-radius: 0.5rem;
-  box-shadow: var(--tapl-shadow-raised);
+  box-shadow: var(--tapl-shadow-soft);
 }
 
 .tapl-card-body {
-  @apply card-body min-w-0 gap-3 p-4;
+  @apply card-body min-w-0 gap-4 p-5;
 }
 
 .tapl-card-header {
-  @apply flex min-w-0 items-start justify-between gap-3 border-b pb-3;
-  border-color: var(--tapl-border-subtle);
+  @apply flex min-w-0 items-start justify-between gap-3 border-0 pb-1;
 }
 
-.tapl-board {
-  @apply flex max-w-full items-start gap-3 overflow-x-auto pb-2;
-  scrollbar-gutter: stable;
+.tapl-journey {
+  --journey-row-height: 216px;
+  --journey-row-gap: 46px;
+  --journey-column-gap: clamp(12px, 2vw, 24px);
+  --journey-node-size: 34px;
+  --journey-turn-overhang: 8px;
+  @apply relative min-w-0 overflow-hidden rounded-xl px-4 pb-3 pt-8;
+  background:
+    radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--tapl-accent) 12%, transparent), transparent 34%),
+    color-mix(in srgb, var(--tapl-surface-muted) 62%, transparent);
 }
 
-.tapl-lane {
-  @apply card flex-none overflow-hidden border shadow-none;
-  width: clamp(220px, 23vw, 300px);
-  align-self: flex-start;
-  border-color: var(--tapl-border-lane);
-  background: var(--tapl-surface);
-  border-radius: 0.5rem;
-  box-shadow: var(--tapl-shadow-raised);
+.tapl-journey-list {
+  @apply relative z-10 m-0 grid min-w-0 list-none p-0;
+  grid-template-columns: repeat(var(--journey-columns), minmax(0, 1fr));
+  grid-template-rows: repeat(2, var(--journey-row-height));
+  column-gap: var(--journey-column-gap);
+  row-gap: var(--journey-row-gap);
 }
 
-.tapl-lane.pending {
-  border-top: 3px solid var(--tapl-warning);
+.tapl-journey-step {
+  --step-color: var(--tapl-muted);
+  --step-surface: var(--tapl-item-bg);
+  @apply relative grid min-w-0 justify-items-center;
+  grid-column: var(--step-column);
+  grid-row: var(--step-row);
+  grid-template-rows: var(--journey-node-size) minmax(0, 1fr);
+  gap: 10px;
+  isolation: isolate;
 }
 
-.tapl-lane.in-progress {
-  border-top: 3px solid var(--tapl-accent);
+.tapl-journey-step::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--step-color) 68%, var(--tapl-border-base));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--step-color) 18%, transparent);
 }
 
-.tapl-lane.blocked {
-  border-top: 3px solid var(--tapl-error);
+.tapl-journey-step.outbound:not(.turns):not(.is-last)::after {
+  top: calc(var(--journey-node-size) / 2 - 1.5px);
+  left: 50%;
+  width: calc(100% + var(--journey-column-gap));
+  height: 3px;
 }
 
-.tapl-lane.completed {
-  border-top: 3px solid var(--tapl-success);
+.tapl-journey-step.return:not(.is-last)::after {
+  top: calc(var(--journey-node-size) / 2 - 1.5px);
+  right: 50%;
+  width: calc(100% + var(--journey-column-gap));
+  height: 3px;
 }
 
-.tapl-lane.skipped {
-  border-top: 3px solid var(--tapl-muted);
+.tapl-journey-step.turns::after {
+  top: calc(var(--journey-node-size) / 2 - 1.5px);
+  left: 50%;
+  width: calc(50% + var(--journey-turn-overhang));
+  height: calc(var(--journey-row-height) + var(--journey-row-gap) + 3px);
+  border: 3px solid color-mix(in srgb, var(--step-color) 68%, var(--tapl-border-base));
+  border-left: 0;
+  border-radius: 0 34px 34px 0;
+  background: transparent;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--step-color) 12%, transparent);
 }
 
-.tapl-lane.empty {
-  border-color: var(--tapl-border-subtle);
-  background: color-mix(in srgb, var(--tapl-surface) 84%, transparent);
+.tapl-step-node {
+  @apply relative z-10 grid place-items-center rounded-full text-[10px] font-bold tabular-nums;
+  width: var(--journey-node-size);
+  height: var(--journey-node-size);
+  color: var(--step-color);
+  background: color-mix(in srgb, var(--tapl-surface) 86%, var(--step-color) 14%);
+  box-shadow:
+    0 0 0 4px var(--tapl-surface),
+    0 0 0 6px color-mix(in srgb, var(--step-color) 78%, transparent),
+    0 8px 18px rgb(0 0 0 / 0.18);
 }
 
-.tapl-lane-body {
-  @apply grid gap-3 p-3;
+.tapl-step-card {
+  @apply relative z-10 flex h-full w-full min-w-0 flex-col rounded-xl p-3;
+  color: var(--vscode-editor-foreground);
+  background: var(--step-surface);
+  border: 1px solid transparent;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.13);
+  transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
 }
 
-.tapl-lane-header {
-  @apply flex min-w-0 items-center justify-between gap-2;
+.tapl-step-meta {
+  @apply mb-2 flex min-w-0 items-center justify-between gap-2;
 }
 
-.tapl-status-dot {
-  @apply inline-block h-2.5 w-2.5 flex-none rounded-full;
-  background: var(--tapl-muted);
+.tapl-step-meta .badge {
+  @apply h-5 max-w-[58%] truncate px-1.5 text-[10px];
 }
 
-.tapl-status-dot.pending {
-  background: var(--tapl-warning);
+.tapl-task-id {
+  @apply min-w-0 truncate text-[11px] font-bold tracking-wide;
+  color: color-mix(in srgb, var(--step-color) 72%, var(--vscode-editor-foreground));
 }
 
-.tapl-status-dot.in-progress {
+.tapl-step-title {
+  @apply m-0 overflow-hidden text-sm font-semibold leading-5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tapl-step-summary {
+  @apply mt-2 overflow-hidden text-xs leading-5;
+  color: var(--tapl-muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tapl-step-detail {
+  @apply mb-0 mt-auto truncate pt-2 text-[10px];
+  color: color-mix(in srgb, var(--tapl-muted) 82%, transparent);
+}
+
+.tapl-custom-summary {
+  @apply mt-2 flex min-w-0 items-center gap-1 overflow-hidden;
+}
+
+.tapl-custom-chip {
+  @apply inline-flex min-w-0 max-w-[45%] items-center gap-1 rounded-full px-2 py-0.5 text-[10px];
+  color: var(--vscode-editor-foreground);
+  background: color-mix(in srgb, var(--step-color, var(--tapl-accent)) 14%, var(--tapl-surface-muted));
+}
+
+.tapl-custom-chip-label {
+  @apply min-w-0 truncate font-semibold;
+  color: color-mix(in srgb, var(--step-color, var(--tapl-accent)) 76%, var(--vscode-editor-foreground));
+}
+
+.tapl-custom-chip-value {
+  @apply min-w-0 truncate;
+}
+
+.tapl-custom-more {
+  @apply flex-none rounded-full px-1.5 py-0.5 text-[10px] font-semibold;
+  color: var(--tapl-muted);
+  background: color-mix(in srgb, var(--tapl-surface-muted) 82%, transparent);
+}
+
+.tapl-journey-step.pending {
+  --step-color: var(--tapl-warning);
+  --step-surface: color-mix(in srgb, var(--tapl-item-bg) 93%, var(--tapl-warning) 7%);
+}
+
+.tapl-journey-step.pending .tapl-step-card {
+  border-color: color-mix(in srgb, var(--tapl-warning) 18%, transparent);
+}
+
+.tapl-journey-step.in-progress {
+  --step-color: var(--tapl-accent);
+  --step-surface: color-mix(in srgb, var(--tapl-item-bg) 82%, var(--tapl-accent) 18%);
+}
+
+.tapl-journey-step.in-progress .tapl-step-node {
+  color: var(--vscode-button-foreground, #ffffff);
   background: var(--tapl-accent);
+  box-shadow:
+    0 0 0 4px var(--tapl-surface),
+    0 0 0 7px color-mix(in srgb, var(--tapl-accent) 74%, transparent),
+    0 0 26px color-mix(in srgb, var(--tapl-accent) 48%, transparent);
 }
 
-.tapl-status-dot.blocked {
-  background: var(--tapl-error);
+.tapl-journey-step.in-progress .tapl-step-card {
+  border-color: color-mix(in srgb, var(--tapl-accent) 78%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--tapl-accent) 26%, transparent),
+    0 16px 34px color-mix(in srgb, var(--tapl-accent) 19%, rgb(0 0 0 / 0.14));
+  transform: translateY(-2px);
 }
 
-.tapl-status-dot.completed {
-  background: var(--tapl-success);
+.tapl-journey-step.blocked {
+  --step-color: var(--tapl-error);
+  --step-surface: color-mix(in srgb, var(--tapl-item-bg) 73%, var(--tapl-error) 27%);
+}
+
+.tapl-journey-step.blocked .tapl-step-card {
+  border-color: color-mix(in srgb, var(--tapl-error) 82%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--tapl-error) 28%, transparent),
+    0 16px 30px color-mix(in srgb, var(--tapl-error) 20%, rgb(0 0 0 / 0.15));
+}
+
+.tapl-journey-step.completed {
+  --step-color: color-mix(in srgb, var(--tapl-success) 45%, var(--tapl-muted));
+  --step-surface: color-mix(in srgb, var(--tapl-item-bg) 72%, #0b1020 28%);
+}
+
+.tapl-journey-step.completed .tapl-step-card {
+  opacity: 0.68;
+  filter: saturate(0.58);
+}
+
+.tapl-journey-step.skipped {
+  --step-color: var(--tapl-muted);
+  --step-surface: color-mix(in srgb, var(--tapl-item-bg) 86%, transparent);
+}
+
+.tapl-journey-step.skipped .tapl-step-card {
+  opacity: 0.54;
+  filter: grayscale(0.6);
+}
+
+.tapl-journey-direction {
+  @apply pointer-events-none absolute inset-x-4 top-2 flex items-center justify-between text-[9px] font-bold uppercase tracking-[0.16em];
+  color: color-mix(in srgb, var(--tapl-muted) 72%, transparent);
+}
+
+.tapl-journey.single .tapl-journey-list {
+  grid-template-rows: var(--journey-row-height);
+}
+
+.tapl-journey.dense {
+  --journey-row-height: 196px;
+  --journey-column-gap: 12px;
+}
+
+.tapl-journey.dense .tapl-step-summary {
+  -webkit-line-clamp: 2;
+}
+
+.tapl-journey-empty {
+  @apply flex min-h-36 items-center justify-center gap-3 rounded-xl p-5 text-left;
+  background: color-mix(in srgb, var(--tapl-surface-muted) 72%, transparent);
+}
+
+.tapl-journey-empty-icon {
+  @apply grid h-10 w-10 flex-none place-items-center rounded-full text-lg;
+  color: var(--tapl-success);
+  background: color-mix(in srgb, var(--tapl-success) 14%, var(--tapl-surface));
 }
 
 .tapl-muted,
@@ -329,23 +544,24 @@ pre {
 }
 
 .tapl-eyebrow {
-  @apply text-xs font-semibold uppercase tracking-normal;
+  @apply text-[10px] font-bold uppercase tracking-[0.15em];
+  color: color-mix(in srgb, var(--tapl-highlight) 66%, var(--tapl-muted));
 }
 
 .tapl-item {
-  @apply min-w-0 rounded-md border p-3;
-  border-color: var(--tapl-border-item);
-  background: var(--tapl-item-bg);
+  @apply min-w-0 rounded-xl border-0 p-3.5;
+  background: color-mix(in srgb, var(--tapl-item-bg) 88%, var(--tapl-surface-raised) 12%);
   box-shadow: var(--tapl-shadow-item);
 }
 
 .tapl-clickable {
-  @apply w-full cursor-pointer text-left transition-colors;
+  @apply w-full cursor-pointer text-left transition-all;
 }
 
 .tapl-clickable:hover {
-  border-color: var(--tapl-border-strong);
-  background: var(--tapl-hover);
+  background: color-mix(in srgb, var(--tapl-hover) 88%, var(--tapl-accent) 12%);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.16);
+  transform: translateY(-1px);
 }
 
 .tapl-clickable:focus-visible {
@@ -353,25 +569,67 @@ pre {
   outline-offset: 2px;
 }
 
-.tapl-task-card,
 .tapl-record-card {
   @apply grid gap-1;
 }
 
-.tapl-task-meta {
-  @apply mb-2 grid min-w-0 justify-items-start gap-1.5;
+.tapl-custom-fields {
+  @apply mt-3 min-w-0 border-t pt-3;
+  border-color: var(--tapl-border-subtle);
 }
 
-.tapl-task-id {
-  @apply max-w-full flex-none whitespace-nowrap;
+.tapl-custom-header {
+  @apply mb-2 flex items-center justify-between gap-2;
 }
 
-.tapl-task-badges {
-  @apply flex min-w-0 max-w-full flex-wrap items-center gap-1;
+.tapl-custom-grid {
+  @apply m-0 grid min-w-0 gap-2;
 }
 
-.tapl-task-badges .badge {
-  @apply max-w-full truncate;
+.tapl-custom-row {
+  @apply grid min-w-0 gap-1 rounded-lg p-2.5;
+  grid-template-columns: minmax(7rem, 0.32fr) minmax(0, 1fr);
+  background: color-mix(in srgb, var(--tapl-surface-muted) 66%, transparent);
+}
+
+.tapl-custom-row > dt,
+.tapl-json-entry > dt {
+  @apply min-w-0 break-words text-xs font-semibold;
+  color: color-mix(in srgb, var(--tapl-highlight) 62%, var(--vscode-editor-foreground));
+}
+
+.tapl-custom-row > dd,
+.tapl-json-entry > dd {
+  @apply m-0 min-w-0 break-words text-xs leading-5;
+}
+
+.tapl-json-array {
+  @apply m-0 grid list-decimal gap-1 pl-5;
+}
+
+.tapl-json-object {
+  @apply m-0 grid min-w-0 gap-1.5 rounded-md p-2;
+  background: color-mix(in srgb, var(--tapl-item-bg) 76%, transparent);
+}
+
+.tapl-json-entry {
+  @apply grid min-w-0 gap-1;
+  grid-template-columns: minmax(5rem, 0.28fr) minmax(0, 1fr);
+}
+
+.tapl-json-string {
+  white-space: pre-wrap;
+}
+
+.tapl-json-number,
+.tapl-json-boolean {
+  @apply font-mono;
+  color: color-mix(in srgb, var(--tapl-highlight) 72%, var(--vscode-editor-foreground));
+}
+
+.tapl-json-null {
+  @apply font-mono italic;
+  color: var(--tapl-muted);
 }
 
 .tapl-archive-button {
@@ -383,16 +641,16 @@ pre {
 }
 
 .tapl-empty-state {
-  @apply m-0 rounded-md border border-dashed p-3 text-sm;
-  border-color: var(--tapl-border-subtle);
+  @apply m-0 rounded-xl border-0 p-4 text-sm;
   color: var(--tapl-muted);
-  background: color-mix(in srgb, var(--tapl-surface-muted) 72%, transparent);
+  background: color-mix(in srgb, var(--tapl-surface-muted) 68%, transparent);
 }
 
 .kbd {
-  border-color: var(--tapl-border-control);
-  background: var(--tapl-surface-muted);
+  border: 0;
+  background: color-mix(in srgb, var(--tapl-surface-muted) 82%, var(--tapl-accent) 18%);
   color: var(--vscode-editor-foreground);
+  box-shadow: none;
 }
 
 .tapl-detail-grid {
@@ -413,14 +671,12 @@ pre {
 }
 
 .tapl-focus-row {
-  @apply rounded-md border p-3;
-  border-color: var(--tapl-border-item);
-  background: var(--tapl-item-bg);
-  box-shadow: var(--tapl-shadow-item);
+  @apply rounded-xl border-0 p-3.5;
+  background: color-mix(in srgb, var(--tapl-item-bg) 82%, transparent);
+  box-shadow: none;
 }
 
 .tapl-focus-row:first-child {
-  border-top-width: 1px;
   padding-top: 0.75rem;
 }
 
@@ -503,22 +759,23 @@ pre {
 
 .tapl-tabs {
   @apply tabs;
-  border: 1px solid var(--tapl-border-control);
-  border-radius: 0.375rem;
-  background: var(--tapl-surface-muted);
-  padding: 0.25rem;
-  box-shadow: var(--tapl-shadow-inset);
+  border: 0;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--tapl-surface-muted) 82%, transparent);
+  padding: 0.3rem;
+  box-shadow: none;
 }
 
 .tapl-tabs .tab {
-  @apply rounded-md;
+  @apply rounded-lg;
   min-height: 1.8rem;
+  color: var(--tapl-muted);
 }
 
 .tapl-tabs .tab-active {
-  background: var(--vscode-button-secondaryBackground, var(--tapl-surface));
+  background: color-mix(in srgb, var(--tapl-surface-raised) 88%, var(--tapl-accent) 12%);
   color: var(--vscode-editor-foreground);
-  box-shadow: var(--tapl-shadow-item);
+  box-shadow: 0 5px 14px rgb(0 0 0 / 0.12);
 }
 
 .tapl-tab-panel {
@@ -526,8 +783,9 @@ pre {
 }
 
 .badge {
-  border-color: currentColor;
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  border-color: transparent;
+  background: color-mix(in srgb, currentColor 13%, transparent);
+  font-weight: 650;
 }
 
 .badge.pending,
@@ -584,6 +842,68 @@ pre {
   }
 }
 
+@container tapl-main (max-width: 820px) {
+  .tapl-journey {
+    @apply p-4;
+  }
+
+  .tapl-journey-direction {
+    display: none;
+  }
+
+  .tapl-journey-list,
+  .tapl-journey.single .tapl-journey-list {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    row-gap: 0;
+  }
+
+  .tapl-journey-step {
+    grid-column: 1;
+    grid-row: auto;
+    grid-template-columns: var(--journey-node-size) minmax(0, 1fr);
+    grid-template-rows: auto;
+    gap: 12px;
+    min-height: 0;
+    padding-bottom: 16px;
+    justify-items: stretch;
+  }
+
+  .tapl-step-node {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .tapl-step-card {
+    grid-column: 2;
+    grid-row: 1;
+    height: auto;
+    min-height: 122px;
+  }
+
+  .tapl-journey .tapl-journey-step.outbound:not(.is-last)::after,
+  .tapl-journey .tapl-journey-step.return:not(.is-last)::after,
+  .tapl-journey .tapl-journey-step.turns::after {
+    top: calc(var(--journey-node-size) / 2);
+    right: auto;
+    left: calc(var(--journey-node-size) / 2 - 1.5px);
+    width: 3px;
+    height: 100%;
+    border: 0;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--step-color) 68%, var(--tapl-border-base));
+    box-shadow: 0 0 12px color-mix(in srgb, var(--step-color) 18%, transparent);
+  }
+
+  .tapl-journey-step.is-last {
+    padding-bottom: 0;
+  }
+
+  .tapl-journey-step.is-last::after {
+    display: none;
+  }
+}
+
 @media (max-width: 720px) {
   body {
     padding: 16px;
@@ -605,13 +925,11 @@ pre {
     max-width: none;
   }
 
-  .tapl-board {
-    gap: 10px;
+  .tapl-custom-row,
+  .tapl-json-entry {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .tapl-lane {
-    width: min(82vw, 290px);
-  }
 }
 
 @media (max-width: 480px) {
@@ -624,8 +942,50 @@ pre {
   }
 
   .tapl-card-body,
-  .tapl-lane-body,
   .tapl-command-panel {
     padding: 12px;
+  }
+
+  .tapl-journey {
+    padding: 12px;
+  }
+
+  .tapl-step-card {
+    min-height: 112px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .tapl-clickable,
+  .tapl-step-card {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .tapl-topbar,
+  .tapl-hero,
+  .tapl-card,
+  .tapl-stat,
+  .tapl-item,
+  .tapl-step-card,
+  .tapl-focus-row,
+  .tapl-command-panel,
+  .tapl-custom-row,
+  .tapl-json-object {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+
+  .tapl-journey-step::after {
+    background: CanvasText;
+    box-shadow: none;
+  }
+
+  .tapl-journey-step.turns::after {
+    border-color: CanvasText;
+    border-left: 0;
+    background: transparent;
   }
 }

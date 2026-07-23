@@ -1,3 +1,9 @@
+import type { SupportedLocale } from '../i18n';
+
+export type TaplJsonValue = string | number | boolean | null | TaplJsonValue[] | {
+  [key: string]: TaplJsonValue;
+};
+
 export interface TaplStatus {
   active_run: Record<string, unknown> | null;
   task_counts: Record<string, number>;
@@ -17,6 +23,7 @@ export interface TaplItem {
   status?: string;
   source?: string;
   updated_at?: string;
+  custom_fields?: Record<string, TaplJsonValue>;
 }
 
 export interface TaplArchive {
@@ -94,9 +101,9 @@ export type WebviewView =
   | { type: 'error'; message: string };
 
 export type HostMessage =
-  | { type: 'hydrate'; view: WebviewView }
-  | { type: 'view:update'; view: WebviewView }
-  | { type: 'error'; message: string };
+  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale }
+  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale }
+  | { type: 'error'; message: string; locale: SupportedLocale };
 
 export type WebviewCommand =
   | { command: 'ready' }

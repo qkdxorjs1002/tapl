@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -126,6 +126,7 @@ def migrate(conn: sqlite3.Connection) -> None:
           title TEXT NOT NULL,
           body TEXT NOT NULL DEFAULT '',
           raw_text TEXT NOT NULL DEFAULT '',
+          custom_fields_json TEXT NOT NULL DEFAULT '{}',
           status TEXT,
           source TEXT,
           archived INTEGER NOT NULL DEFAULT 0,
@@ -215,6 +216,7 @@ def migrate(conn: sqlite3.Connection) -> None:
 
     ensure_column(conn, "workflow_runs", "result_summary", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "approvals", "source", "TEXT NOT NULL DEFAULT 'unspecified'")
+    ensure_column(conn, "items", "custom_fields_json", "TEXT NOT NULL DEFAULT '{}'")
     drop_column(conn, "tasks", "required_subagent")
     backfill_plan_rows(conn)
     dedupe_active_runs(conn)
@@ -398,27 +400,53 @@ def upsert_item(
     title: str,
     body: str = "",
     raw_text: str = "",
+    custom_fields: dict[str, Any] | None = None,
     status: str | None = None,
     source: str | None = None,
     run_id: str | None = None,
     archived: bool = False,
 ) -> sqlite3.Row:
     run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() if run_id else ensure_active_run(conn)
+    existing = conn.execute(
+        "SELECT custom_fields_json FROM items WHERE run_id = ? AND kind = ? AND stable_id = ?",
+        (run["id"], kind, stable_id),
+    ).fetchone()
+    merged_custom_fields = merge_custom_fields(
+        existing["custom_fields_json"] if existing is not None else None,
+        custom_fields,
+    )
     now = utc_now()
     conn.execute(
         """
-        INSERT INTO items(run_id, stable_id, kind, title, body, raw_text, status, source, archived, created_at, updated_at)
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO items(
+          run_id, stable_id, kind, title, body, raw_text, custom_fields_json,
+          status, source, archived, created_at, updated_at
+        )
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(run_id, kind, stable_id) DO UPDATE SET
           title = excluded.title,
           body = excluded.body,
           raw_text = excluded.raw_text,
+          custom_fields_json = excluded.custom_fields_json,
           status = excluded.status,
           source = excluded.source,
           archived = excluded.archived,
           updated_at = excluded.updated_at
         """,
-        (run["id"], stable_id, kind, title, body, raw_text, status, source, 1 if archived else 0, now, now),
+        (
+            run["id"],
+            stable_id,
+            kind,
+            title,
+            body,
+            raw_text,
+            serialize_custom_fields(merged_custom_fields),
+            status,
+            source,
+            1 if archived else 0,
+            now,
+            now,
+        ),
     )
     item = conn.execute(
         "SELECT * FROM items WHERE run_id = ? AND kind = ? AND stable_id = ?",
@@ -480,6 +508,51 @@ def render_markdown_sections(fields: Iterable[tuple[str, str]]) -> str:
         if text:
             parts.append(f"### {label}\n{text}")
     return "\n\n".join(parts)
+
+
+def parse_custom_fields(value: Any) -> dict[str, Any]:
+    if value is None or value == "":
+        return {}
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid custom_fields JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError("custom_fields must be a JSON object")
+
+    normalized: dict[str, Any] = {}
+    for key, field_value in value.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("custom_fields keys must be non-empty strings")
+        normalized[key] = field_value
+    try:
+        json.dumps(normalized, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"custom_fields contains a non-JSON value: {exc}") from exc
+    return normalized
+
+
+def merge_custom_fields(existing: Any, patch: Any) -> dict[str, Any]:
+    current = parse_custom_fields(existing)
+    if patch is None:
+        return current
+    for key, value in parse_custom_fields(patch).items():
+        if value is None:
+            current.pop(key, None)
+        else:
+            current[key] = value
+    return current
+
+
+def serialize_custom_fields(value: Any) -> str:
+    return json.dumps(
+        parse_custom_fields(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def markdown_body_fields(record: str) -> tuple[tuple[str, str], ...]:
@@ -552,6 +625,7 @@ def upsert_plan(
     validation: str = "",
     approval_needs: str = "",
     notes: str = "",
+    custom_fields: dict[str, Any] | None = None,
     raw_text: str = "",
     source: str | None = None,
     run_id: str | None = None,
@@ -576,6 +650,7 @@ def upsert_plan(
         title=title,
         body=body,
         raw_text=raw_text,
+        custom_fields=custom_fields,
         status=status,
         source=source,
         run_id=run_id,
@@ -643,6 +718,7 @@ def upsert_task(
     result: str = "",
     blocker: str = "",
     next_action: str = "",
+    custom_fields: dict[str, Any] | None = None,
 ) -> sqlite3.Row:
     if status not in TASK_STATUSES:
         raise ValueError(f"invalid task status: {status}")
@@ -661,6 +737,7 @@ def upsert_task(
         stable_id=task_id,
         title=title,
         body=body,
+        custom_fields=custom_fields,
         status=status,
     )
     conn.execute(
@@ -859,7 +936,11 @@ def refresh_item_fts(conn: sqlite3.Connection, item: sqlite3.Row) -> None:
             item["stable_id"],
             item["kind"],
             item["title"],
-            "\n".join(part for part in [item["body"], item["raw_text"]] if part),
+            "\n".join(
+                part
+                for part in [item["body"], item["raw_text"], custom_fields_search_text(item["custom_fields_json"])]
+                if part
+            ),
         ),
     )
 
@@ -1194,11 +1275,11 @@ def search_word(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[d
         """
         SELECT *, 0.0 AS score
         FROM items
-        WHERE title LIKE ? OR body LIKE ? OR raw_text LIKE ? OR stable_id LIKE ?
+        WHERE title LIKE ? OR body LIKE ? OR raw_text LIKE ? OR custom_fields_json LIKE ? OR stable_id LIKE ?
         ORDER BY updated_at DESC
         LIMIT ?
         """,
-        (like, like, like, like, limit),
+        (like, like, like, like, like, limit),
     ).fetchall()
     return [search_row(row, "word") for row in rows]
 
@@ -1214,6 +1295,10 @@ def build_fts_query(query: str) -> str:
 
 def search_row(row: sqlite3.Row, source: str) -> dict[str, Any]:
     data = row_to_dict(row)
+    custom_fields_text = custom_fields_search_text(data.get("custom_fields"))
+    snippet_source = "\n".join(
+        part for part in [data.get("body") or data.get("raw_text") or "", custom_fields_text] if part
+    )
     return {
         "id": data.get("id"),
         "stable_id": data.get("stable_id"),
@@ -1223,7 +1308,7 @@ def search_row(row: sqlite3.Row, source: str) -> dict[str, Any]:
         "source": data.get("source"),
         "score": data.get("score"),
         "search_source": source,
-        "snippet": make_snippet(data.get("body") or data.get("raw_text") or ""),
+        "snippet": make_snippet(snippet_source),
     }
 
 
@@ -1240,10 +1325,20 @@ def content_hash(parts: Iterable[str]) -> str:
     return digest.hexdigest()
 
 
+def custom_fields_search_text(value: Any) -> str:
+    custom_fields = parse_custom_fields(value)
+    if not custom_fields:
+        return ""
+    return json.dumps(custom_fields, ensure_ascii=False, sort_keys=True, allow_nan=False)
+
+
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
-    return {key: row[key] for key in row.keys()}
+    data = {key: row[key] for key in row.keys()}
+    if "custom_fields_json" in data:
+        data["custom_fields"] = parse_custom_fields(data.pop("custom_fields_json"))
+    return data
 
 
 def workflow_run_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
