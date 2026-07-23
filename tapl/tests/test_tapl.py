@@ -1001,7 +1001,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertIn("user-selected-merge", semantic_text)
             conn.close()
 
-    def test_custom_fields_help_and_context_require_autonomous_history_judgment(self) -> None:
+    def test_custom_fields_help_and_context_require_autonomous_history_judgment_and_user_language(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
             plan_help = self.run_cli(db_path, "plan", "apply", "--help")
@@ -1012,6 +1012,11 @@ class TaplCliTests(unittest.TestCase):
                 self.assertIn("--custom-fields", output)
                 self.assertIn("proactively populate `custom_fields`", output)
                 self.assertIn("AGENTS.md and the user do not explicitly request", output)
+                self.assertIn("natural-language labels", output)
+                self.assertIn("string values in the user's language", output)
+                self.assertIn("avoid snake_case", output)
+                self.assertIn("file paths, commands, API names", output)
+                self.assertIn("use its exact stored key", output)
                 self.assertIn("Do not copy standard fields", output)
                 self.assertIn("top-level null value deletes", output)
 
@@ -1021,6 +1026,10 @@ class TaplCliTests(unittest.TestCase):
             self.assertIn("proactively populate `custom_fields`", guidance)
             self.assertIn("future search, review, handoff, or decision reconstruction", guidance)
             self.assertIn("even when AGENTS.md and the user do not explicitly request", guidance)
+            self.assertIn("natural-language labels", guidance)
+            self.assertIn("string values in the user's language", guidance)
+            self.assertIn("avoid snake_case", guidance)
+            self.assertIn("use its exact stored key", guidance)
 
     def test_task_set_requires_title_and_status_for_new_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -804,9 +804,13 @@ def custom_fields_guidance() -> str:
         "When creating or updating a plan or task, proactively populate `custom_fields` whenever the current "
         "context contains metadata that will help future search, review, handoff, or decision reconstruction, even "
         "when AGENTS.md and the user do not explicitly request recording it. Good candidates include work type, "
-        "user choices, constraints, and decision rationale. Use concise, stable labels and JSON values. Do not copy "
-        "standard fields, record transient progress, or invent unsupported facts. Omitted custom fields are preserved; "
-        "provided keys merge at the top level, and a top-level null value deletes that key."
+        "user choices, constraints, and decision rationale. For new fields, write concise natural-language labels and "
+        "human-readable string values in the user's language; avoid snake_case and other code-style tokens. Preserve "
+        "exact source text for file paths, commands, API names, stable IDs, and code identifiers, and preserve JSON "
+        "types for non-string values. Do not rename or migrate unrelated existing keys; when directly updating one, "
+        "use its exact stored key. Do not copy standard fields, record transient progress, or invent unsupported facts. "
+        "Omitted custom fields are preserved; provided keys merge at the top level, and a top-level null value deletes "
+        "that key."
     )
 
 

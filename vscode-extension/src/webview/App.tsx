@@ -1,4 +1,13 @@
-import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import {
+  CSSProperties,
+  FormEvent,
+  ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import { resolveLocale, type SupportedLocale } from '../i18n';
 import type {
   HostMessage,
@@ -18,6 +27,10 @@ import { vscodeApi } from './vscodeApi';
 import { I18nProvider, useI18n } from './i18n';
 
 const TASK_STATUSES = ['Pending', 'In Progress', 'Blocked', 'Completed', 'Skipped'];
+const JOURNEY_MIN_COLUMNS = 2;
+const JOURNEY_MAX_COLUMNS = 4;
+const JOURNEY_TARGET_COLUMN_WIDTH = 200;
+const JOURNEY_COLUMN_GAP = 12;
 const DEFAULT_TASK_COUNTS: Record<string, number> = {
   Pending: 0,
   'In Progress': 0,
@@ -526,6 +539,45 @@ function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
   const orderedTasks = [...tasks].sort((left, right) => (
     left.stable_id.localeCompare(right.stable_id, undefined, { numeric: true, sensitivity: 'base' })
   ));
+  const journeyListRef = useRef<HTMLOListElement>(null);
+  const [journeyColumns, setJourneyColumns] = useState(() => (
+    Math.min(Math.max(orderedTasks.length, 1), JOURNEY_MIN_COLUMNS)
+  ));
+
+  useLayoutEffect(() => {
+    const journeyList = journeyListRef.current;
+    if (!journeyList) {
+      return;
+    }
+
+    const updateColumns = (width: number) => {
+      const responsiveColumns = Math.floor(
+        (width + JOURNEY_COLUMN_GAP) / (JOURNEY_TARGET_COLUMN_WIDTH + JOURNEY_COLUMN_GAP)
+      );
+      const minimumColumns = orderedTasks.length > 1 ? JOURNEY_MIN_COLUMNS : 1;
+      const nextColumns = Math.min(
+        Math.max(orderedTasks.length, 1),
+        JOURNEY_MAX_COLUMNS,
+        Math.max(minimumColumns, responsiveColumns)
+      );
+      setJourneyColumns((currentColumns) => (
+        currentColumns === nextColumns ? currentColumns : nextColumns
+      ));
+    };
+
+    updateColumns(journeyList.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) {
+        updateColumns(entry.contentRect.width);
+      }
+    });
+    observer.observe(journeyList);
+    return () => observer.disconnect();
+  }, [orderedTasks.length]);
 
   if (!orderedTasks.length) {
     return (
@@ -539,9 +591,10 @@ function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
     );
   }
 
-  const upperStepCount = Math.ceil(orderedTasks.length / 2);
+  const journeyRows = Math.ceil(orderedTasks.length / journeyColumns);
   const journeyStyle = {
-    '--journey-columns': String(upperStepCount)
+    '--journey-columns': String(journeyColumns),
+    '--journey-rows': String(journeyRows)
   } as CSSProperties;
 
   return (
@@ -550,12 +603,17 @@ function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
       style={journeyStyle}
       aria-label={t('workItemsInOrder', { count: orderedTasks.length })}
     >
-      <ol className="tapl-journey-list">
+      <ol ref={journeyListRef} className="tapl-journey-list">
         {orderedTasks.map((task, index) => {
-          const isReturnStep = index >= upperStepCount;
-          const returnIndex = index - upperStepCount;
-          const column = isReturnStep ? upperStepCount - returnIndex : index + 1;
-          const row = isReturnStep ? 2 : 1;
+          const rowIndex = Math.floor(index / journeyColumns);
+          const positionInRow = index % journeyColumns;
+          const isReverseRow = rowIndex % 2 === 1;
+          const column = isReverseRow
+            ? journeyColumns - positionInRow
+            : positionInRow + 1;
+          const row = rowIndex + 1;
+          const isLast = index === orderedTasks.length - 1;
+          const turns = positionInRow === journeyColumns - 1 && !isLast;
           const stepStyle = {
             '--step-column': String(column),
             '--step-row': String(row)
@@ -566,9 +624,11 @@ function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
               task={task}
               index={index}
               style={stepStyle}
-              phase={isReturnStep ? 'return' : 'outbound'}
-              turns={orderedTasks.length > 1 && index === upperStepCount - 1}
-              isLast={index === orderedTasks.length - 1}
+              direction={isReverseRow ? 'reverse' : 'forward'}
+              turnSide={turns ? (isReverseRow ? 'left' : 'right') : undefined}
+              isLast={isLast}
+              row={row}
+              column={column}
             />
           );
         })}
@@ -585,27 +645,33 @@ function TaskStep({
   task,
   index,
   style,
-  phase,
-  turns,
-  isLast
+  direction,
+  turnSide,
+  isLast,
+  row,
+  column
 }: {
   task: TaplItem;
   index: number;
   style: CSSProperties;
-  phase: 'outbound' | 'return';
-  turns: boolean;
+  direction: 'forward' | 'reverse';
+  turnSide?: 'left' | 'right';
   isLast: boolean;
+  row: number;
+  column: number;
 }): JSX.Element {
   const taskStatus = task.status || 'Pending';
   const tone = statusClass(taskStatus);
-  const summary = conciseText(task.body || task.title, 132);
   const metadata = [formatTimestamp(task.updated_at), task.source].filter(Boolean).join(' / ');
   const isCurrent = taskStatus === 'In Progress';
   return (
     <li
-      className={`tapl-journey-step ${tone} ${phase} ${turns ? 'turns' : ''} ${isLast ? 'is-last' : ''}`}
+      className={`tapl-journey-step ${tone} ${direction} ${turnSide ? `turns turn-${turnSide}` : ''} ${isLast ? 'is-last' : ''}`}
       style={style}
       aria-current={isCurrent ? 'step' : undefined}
+      data-journey-column={column}
+      data-journey-direction={direction}
+      data-journey-row={row}
     >
       <div className="tapl-step-node" aria-hidden="true">
         <span>{String(index + 1).padStart(2, '0')}</span>
@@ -616,7 +682,6 @@ function TaskStep({
           <Badge label={taskStatus} tone={tone} />
         </div>
         <h4 className="tapl-step-title">{task.title}</h4>
-        {summary && summary !== task.title ? <p className="tapl-step-summary">{summary}</p> : null}
         <CustomFieldSummary fields={task.custom_fields} />
         {metadata ? <p className="tapl-step-detail">{metadata}</p> : null}
       </article>
