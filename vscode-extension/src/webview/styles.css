@@ -838,6 +838,53 @@ pre {
   }
 }
 
+.tapl-shell[data-layout='small'] {
+  max-width: 720px;
+}
+
+.tapl-shell[data-layout='small'] .tapl-hero-main,
+.tapl-shell[data-layout='small'] .tapl-metric-grid,
+.tapl-shell[data-layout='small'] .tapl-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tapl-shell[data-layout='medium'] {
+  max-width: 1080px;
+}
+
+.tapl-shell[data-layout='medium'] .tapl-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tapl-shell[data-layout='large'] {
+  max-width: 1440px;
+}
+
+@media (min-width: 640px) {
+  .tapl-shell[data-layout='medium'] .tapl-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 860px) {
+  .tapl-shell[data-layout='medium'] .tapl-hero-main,
+  .tapl-shell[data-layout='large'] .tapl-hero-main {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
+  }
+}
+
+@media (min-width: 900px) {
+  .tapl-shell[data-layout='large'] .tapl-metric-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 980px) {
+  .tapl-shell[data-layout='large'] .tapl-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  }
+}
+
 @container tapl-main (max-width: 680px) {
   .tapl-journey {
     --journey-column-gap: 10px;

@@ -11,6 +11,8 @@ import {
 } from './i18n';
 
 type NodeKind = 'overview' | 'task' | 'archive' | 'empty';
+type DisplayLayout = 'auto' | 'small' | 'medium' | 'large';
+type DisplayLanguage = 'auto' | SupportedLocale;
 
 type TaplJsonValue = string | number | boolean | null | TaplJsonValue[] | {
   [key: string]: TaplJsonValue;
@@ -139,15 +141,16 @@ type WebviewView =
   | { type: 'error'; message: string };
 
 type HostWebviewMessage =
-  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale }
-  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale }
-  | { type: 'error'; message: string; locale: SupportedLocale };
+  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout }
+  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout }
+  | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout };
 
 const COMMAND_PREFIX = "taplWorkflow";
-const UI_LOCALE = resolveLocale(vscode.env.language);
 const TAPL_DB_WATCH_DEBOUNCE_MS = 2000;
 const TAPLCTL_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 const TAPLCTL_PATH_SETTING = "taplctlPath";
+const LANGUAGE_SETTING = "language";
+const LAYOUT_SETTING = "layout";
 const COMMON_TAPLCTL_COMMANDS = [
   "taplctl",
   "/opt/homebrew/bin/taplctl",
@@ -155,7 +158,7 @@ const COMMON_TAPLCTL_COMMANDS = [
 ];
 
 function localize(key: TranslationKey, params?: TranslationParams): string {
-  return translate(UI_LOCALE, key, params);
+  return translate(displayLocale(), key, params);
 }
 const DEFAULT_STATUS: TaplStatus = {
   active_run: null,
@@ -246,6 +249,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand(`${COMMAND_PREFIX}.search`, async () => {
       await webviewManager.searchFromCommand();
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (
+        !event.affectsConfiguration(`${COMMAND_PREFIX}.${LANGUAGE_SETTING}`)
+        && !event.affectsConfiguration(`${COMMAND_PREFIX}.${LAYOUT_SETTING}`)
+      ) {
+        return;
+      }
+      refreshAll();
     })
   );
 
@@ -340,7 +352,7 @@ class ActiveProvider implements vscode.TreeDataProvider<WorkflowNode> {
       })
     ];
     for (const task of status.tasks) {
-      const description = task.status ? translateStatus(UI_LOCALE, task.status) : undefined;
+      const description = task.status ? translateStatus(displayLocale(), task.status) : undefined;
       nodes.push(new WorkflowNode({
         label: `${task.stable_id} ${task.title}`,
         kind: 'task',
@@ -488,8 +500,9 @@ class WorkflowWebviewManager {
   private renderShell(webview: vscode.Webview): string {
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets', 'index.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets', 'index.css'));
+    const locale = displayLocale();
     return `<!doctype html>
-<html lang="${UI_LOCALE}">
+<html lang="${locale}">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src ${webview.cspSource}; font-src ${webview.cspSource};">
@@ -509,7 +522,12 @@ class WorkflowWebviewManager {
       return;
     }
     const view = await this.buildCurrentView();
-    const message: HostWebviewMessage = { type, view, locale: UI_LOCALE };
+    const message: HostWebviewMessage = {
+      type,
+      view,
+      locale: displayLocale(),
+      layout: displayLayout()
+    };
     await this.panel.webview.postMessage(message);
   }
 
@@ -1643,6 +1661,25 @@ function taplctlCommandCandidates(): string[] {
     configured || undefined,
     ...COMMON_TAPLCTL_COMMANDS
   ]);
+}
+
+function displayLocale(): SupportedLocale {
+  const configured = vscode.workspace
+    .getConfiguration(COMMAND_PREFIX)
+    .get<unknown>(LANGUAGE_SETTING, 'auto');
+  const language: DisplayLanguage = configured === 'ko' || configured === 'en'
+    ? configured
+    : 'auto';
+  return resolveLocale(language === 'auto' ? vscode.env.language : language);
+}
+
+function displayLayout(): DisplayLayout {
+  const configured = vscode.workspace
+    .getConfiguration(COMMAND_PREFIX)
+    .get<unknown>(LAYOUT_SETTING, 'auto');
+  return configured === 'small' || configured === 'medium' || configured === 'large'
+    ? configured
+    : 'auto';
 }
 
 function uniqueStrings(values: Array<string | undefined>): string[] {

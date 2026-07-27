@@ -122,6 +122,10 @@ declare module 'vscode' {
     get<T>(section: string, defaultValue: T): T;
   }
 
+  export interface ConfigurationChangeEvent {
+    affectsConfiguration(section: string): boolean;
+  }
+
   export type Event<T> = (listener: (e: T) => unknown) => Disposable;
 
   export interface TreeDataProvider<T> {
@@ -153,6 +157,7 @@ declare module 'vscode' {
       readFile(uri: Uri): Thenable<Uint8Array>;
     };
     export function getConfiguration(section?: string): WorkspaceConfiguration;
+    export function onDidChangeConfiguration(listener: (event: ConfigurationChangeEvent) => unknown): Disposable;
     export function createFileSystemWatcher(globPattern: RelativePattern): FileSystemWatcher;
   }
 

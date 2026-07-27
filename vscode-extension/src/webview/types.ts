@@ -1,5 +1,7 @@
 import type { SupportedLocale } from '../i18n';
 
+export type DisplayLayout = 'auto' | 'small' | 'medium' | 'large';
+
 export type TaplJsonValue = string | number | boolean | null | TaplJsonValue[] | {
   [key: string]: TaplJsonValue;
 };
@@ -101,9 +103,9 @@ export type WebviewView =
   | { type: 'error'; message: string };
 
 export type HostMessage =
-  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale }
-  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale }
-  | { type: 'error'; message: string; locale: SupportedLocale };
+  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout }
+  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout }
+  | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout };
 
 export type WebviewCommand =
   | { command: 'ready' }

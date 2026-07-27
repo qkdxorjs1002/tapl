@@ -52,6 +52,51 @@
           "type": "string",
           "default": "",
           "description": "%configuration.taplctlPath.description%"
+        },
+        "taplWorkflow.layout": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "small",
+            "medium",
+            "large"
+          ],
+          "enumItemLabels": [
+            "%configuration.layout.enum.auto.label%",
+            "%configuration.layout.enum.small.label%",
+            "%configuration.layout.enum.medium.label%",
+            "%configuration.layout.enum.large.label%"
+          ],
+          "enumDescriptions": [
+            "%configuration.layout.enum.auto.description%",
+            "%configuration.layout.enum.small.description%",
+            "%configuration.layout.enum.medium.description%",
+            "%configuration.layout.enum.large.description%"
+          ],
+          "title": "%configuration.layout.title%",
+          "description": "%configuration.layout.description%"
+        },
+        "taplWorkflow.language": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "ko",
+            "en"
+          ],
+          "enumItemLabels": [
+            "%configuration.language.enum.auto.label%",
+            "%configuration.language.enum.ko.label%",
+            "%configuration.language.enum.en.label%"
+          ],
+          "enumDescriptions": [
+            "%configuration.language.enum.auto.description%",
+            "%configuration.language.enum.ko.description%",
+            "%configuration.language.enum.en.description%"
+          ],
+          "title": "%configuration.language.title%",
+          "description": "%configuration.language.description%"
         }
       }
     },

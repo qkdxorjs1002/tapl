@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { resolveLocale, type SupportedLocale } from '../i18n';
 import type {
+  DisplayLayout,
   HostMessage,
   TaplArchive,
   TaplArchiveDetail,
@@ -31,6 +32,12 @@ const JOURNEY_MIN_COLUMNS = 2;
 const JOURNEY_MAX_COLUMNS = 4;
 const JOURNEY_TARGET_COLUMN_WIDTH = 200;
 const JOURNEY_COLUMN_GAP = 12;
+const JOURNEY_LAYOUT_MAX_COLUMNS: Record<DisplayLayout, number> = {
+  auto: 4,
+  small: 2,
+  medium: 3,
+  large: 4
+};
 const DEFAULT_TASK_COUNTS: Record<string, number> = {
   Pending: 0,
   'In Progress': 0,
@@ -39,13 +46,24 @@ const DEFAULT_TASK_COUNTS: Record<string, number> = {
   Skipped: 0
 };
 
+function resolveDisplayLayout(value: unknown): DisplayLayout {
+  return value === 'small' || value === 'medium' || value === 'large'
+    ? value
+    : 'auto';
+}
+
 export function App(): JSX.Element {
   const api = vscodeApi();
-  const restored = api.getState() as { view?: WebviewView; locale?: SupportedLocale } | undefined;
+  const restored = api.getState() as {
+    view?: WebviewView;
+    locale?: SupportedLocale;
+    layout?: unknown;
+  } | undefined;
   const [view, setView] = useState<WebviewView | undefined>(restored?.view);
   const [locale, setLocale] = useState<SupportedLocale>(() => resolveLocale(
     restored?.locale ?? document.documentElement.lang ?? navigator.language
   ));
+  const [layout, setLayout] = useState<DisplayLayout>(() => resolveDisplayLayout(restored?.layout));
 
   useEffect(() => {
     const listener = (event: MessageEvent<HostMessage>) => {
@@ -55,16 +73,20 @@ export function App(): JSX.Element {
       }
       if (message.type === 'hydrate' || message.type === 'view:update') {
         const nextLocale = resolveLocale(message.locale);
+        const nextLayout = resolveDisplayLayout(message.layout);
         setView(message.view);
         setLocale(nextLocale);
-        api.setState({ view: message.view, locale: nextLocale });
+        setLayout(nextLayout);
+        api.setState({ view: message.view, locale: nextLocale, layout: nextLayout });
       }
       if (message.type === 'error') {
         const nextLocale = resolveLocale(message.locale);
+        const nextLayout = resolveDisplayLayout(message.layout);
         const errorView: WebviewView = { type: 'error', message: message.message };
         setView(errorView);
         setLocale(nextLocale);
-        api.setState({ view: errorView, locale: nextLocale });
+        setLayout(nextLayout);
+        api.setState({ view: errorView, locale: nextLocale, layout: nextLayout });
       }
     };
     window.addEventListener('message', listener);
@@ -79,24 +101,24 @@ export function App(): JSX.Element {
   if (!view) {
     return (
       <I18nProvider locale={locale}>
-        <LoadingView />
+        <LoadingView layout={layout} />
       </I18nProvider>
     );
   }
 
   return (
     <I18nProvider locale={locale}>
-      <main className="tapl-shell" data-theme="tapl">
-        <ViewRenderer view={view} send={(message) => api.postMessage(message)} />
+      <main className="tapl-shell" data-theme="tapl" data-layout={layout}>
+        <ViewRenderer view={view} layout={layout} send={(message) => api.postMessage(message)} />
       </main>
     </I18nProvider>
   );
 }
 
-function LoadingView(): JSX.Element {
+function LoadingView({ layout }: { layout: DisplayLayout }): JSX.Element {
   const { t } = useI18n();
   return (
-    <main className="tapl-shell">
+    <main className="tapl-shell" data-layout={layout}>
       <section className="tapl-card">
         <div className="tapl-card-body">
           <span className="loading loading-spinner loading-md" />
@@ -107,10 +129,18 @@ function LoadingView(): JSX.Element {
   );
 }
 
-function ViewRenderer({ view, send }: { view: WebviewView; send: (message: WebviewCommand) => void }): JSX.Element {
+function ViewRenderer({
+  view,
+  layout,
+  send
+}: {
+  view: WebviewView;
+  layout: DisplayLayout;
+  send: (message: WebviewCommand) => void;
+}): JSX.Element {
   switch (view.type) {
     case 'overview':
-      return <OverviewView view={view} send={send} />;
+      return <OverviewView view={view} layout={layout} send={send} />;
     case 'archive':
       return <ArchiveView archive={view.archive} detail={view.detail} send={send} />;
     case 'archiveEvents':
@@ -128,9 +158,11 @@ function ViewRenderer({ view, send }: { view: WebviewView; send: (message: Webvi
 
 function OverviewView({
   view,
+  layout,
   send
 }: {
   view: Extract<WebviewView, { type: 'overview' }>;
+  layout: DisplayLayout;
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
   const { t } = useI18n();
@@ -199,7 +231,7 @@ function OverviewView({
             eyebrow={t('workItems')}
             aside={<span className="tapl-muted text-sm">{t('incompleteCount', { count: status.incomplete_tasks })}</span>}
           >
-            <TaskBoard tasks={status.tasks} />
+            <TaskBoard tasks={status.tasks} layout={layout} />
           </Card>
           <Card title={t('workflowRecords')} eyebrow={t('views')}>
             <RecordTabs
@@ -534,7 +566,7 @@ function RecordTabs({ tabs }: { tabs: Array<{ id: string; label: string; count: 
   );
 }
 
-function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
+function TaskBoard({ tasks, layout }: { tasks: TaplItem[]; layout: DisplayLayout }): JSX.Element {
   const { t } = useI18n();
   const orderedTasks = [...tasks].sort((left, right) => (
     left.stable_id.localeCompare(right.stable_id, undefined, { numeric: true, sensitivity: 'base' })
@@ -558,6 +590,7 @@ function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
       const nextColumns = Math.min(
         Math.max(orderedTasks.length, 1),
         JOURNEY_MAX_COLUMNS,
+        JOURNEY_LAYOUT_MAX_COLUMNS[layout],
         Math.max(minimumColumns, responsiveColumns)
       );
       setJourneyColumns((currentColumns) => (
@@ -577,7 +610,7 @@ function TaskBoard({ tasks }: { tasks: TaplItem[] }): JSX.Element {
     });
     observer.observe(journeyList);
     return () => observer.disconnect();
-  }, [orderedTasks.length]);
+  }, [orderedTasks.length, layout]);
 
   if (!orderedTasks.length) {
     return (
