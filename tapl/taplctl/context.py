@@ -39,7 +39,11 @@ def build_context(
             "plans": len(state.get("plans", [])),
             "tasks": len(state.get("tasks", [])),
             "incomplete_tasks": state.get("incomplete_tasks", 0),
+            "active_batches": len(state.get("active_batches", [])),
+            "active_executions": len(state.get("active_executions", [])),
         },
+        "active_batches": state.get("active_batches", []),
+        "active_executions": state.get("active_executions", []),
         "config": settings.as_dict(),
         "plan_task_execute": plan_task,
         "instructions": instructions(event=event),
@@ -143,6 +147,9 @@ def next_actions(
     if event == "SessionStart":
         if state.get("incomplete_tasks", 0):
             actions.append(tapl_prompt.session_start_incomplete_next_action())
+            execution_action = task_execution_next_action(state)
+            if state.get("active_batches") and execution_action:
+                actions.append(execution_action)
         return actions
 
     if not state.get("active_run"):
@@ -182,9 +189,8 @@ def covered_validation_issue_codes(state: dict[str, Any], plan_task: dict[str, A
     if state.get("incomplete_tasks", 0):
         if approval_next_action(plan_task):
             codes.update({"execution_approval_missing", "execution_approval_rejected"})
-        tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
-        in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
-        if len(in_progress) > 1:
+        execution_action = task_execution_next_action(state)
+        if execution_action:
             codes.add("multiple_tasks_in_progress")
     return codes
 
@@ -215,6 +221,10 @@ def active_run_direction_next_action(state: dict[str, Any], prompt: str) -> str:
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
     in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
     if in_progress:
+        active_batches = state.get("active_batches")
+        if isinstance(active_batches, list) and active_batches:
+            labels = ", ".join(task_label(task) for task in in_progress)
+            return tapl_prompt.run_stopped_during_batch_next_action(labels)
         label = task_label(in_progress[0])
         return tapl_prompt.run_stopped_during_task_next_action(label)
 
@@ -264,6 +274,50 @@ def task_execution_next_action(
     if not tasks:
         return ""
 
+    active_batches = state.get("active_batches")
+    if isinstance(active_batches, list) and active_batches:
+        if len(active_batches) > 1:
+            batch_ids = ", ".join(batch_id(payload) for payload in active_batches)
+            return tapl_prompt.multiple_active_batches_next_action(batch_ids)
+        payload = active_batches[0] if isinstance(active_batches[0], dict) else {}
+        batch = payload.get("batch") if isinstance(payload.get("batch"), dict) else {}
+        executions = payload.get("executions") if isinstance(payload.get("executions"), list) else []
+        assignments = ", ".join(
+            execution_assignment(execution)
+            for execution in executions
+            if isinstance(execution, dict)
+        )
+        return tapl_prompt.continue_parallel_batch_next_action(
+            str(batch.get("batch_id") or batch.get("id") or "batch"),
+            assignments or "no execution rows; recover this stale batch",
+        )
+
+    active_task_ids = {
+        task_label(execution)
+        for execution in (
+            state.get("active_executions")
+            if isinstance(state.get("active_executions"), list)
+            else []
+        )
+        if isinstance(execution, dict)
+    }
+    missing_parallel_execution = [
+        task
+        for task in tasks
+        if str(task.get("status") or "") == "In Progress"
+        and str(task.get("execution_mode") or "sequential") == "parallel"
+        and task_label(task) not in active_task_ids
+    ]
+    if missing_parallel_execution:
+        labels = ", ".join(task_label(task) for task in missing_parallel_execution)
+        return tapl_prompt.repair_missing_parallel_execution_next_action(labels)
+
+    if execution_approved(state):
+        dispatchable_sets = dispatchable_parallel_task_sets(state)
+        if dispatchable_sets:
+            labels = " ".join(task_label(task) for task in dispatchable_sets[0])
+            return tapl_prompt.dispatch_parallel_tasks_next_action(labels)
+
     in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
     if len(in_progress) > 1:
         labels = ", ".join(task_label(task) for task in in_progress)
@@ -281,6 +335,94 @@ def task_execution_next_action(
         if status == "Blocked":
             return tapl_prompt.resolve_blocked_task_next_action(label)
     return ""
+
+
+def dispatchable_parallel_task_sets(state: dict[str, Any]) -> list[list[dict[str, Any]]]:
+    tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
+    tasks_by_id = {task_label(task): task for task in tasks}
+    active_executions = (
+        state.get("active_executions")
+        if isinstance(state.get("active_executions"), list)
+        else []
+    )
+    active_paths = [
+        path
+        for execution in active_executions
+        if isinstance(execution, dict)
+        for path in owned_paths(execution)
+    ]
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for task in tasks:
+        if (
+            str(task.get("status") or "") != "Pending"
+            or str(task.get("execution_mode") or "sequential") != "parallel"
+            or str(task.get("executor_kind") or "main") != "subagent"
+        ):
+            continue
+        group = str(task.get("parallel_group") or "").strip()
+        spec_id = str(task.get("spec_id") or "").strip()
+        paths = owned_paths(task)
+        dependencies = task.get("depends_on") if isinstance(task.get("depends_on"), list) else []
+        if (
+            not group
+            or not paths
+            or any(
+                str(tasks_by_id.get(str(dependency), {}).get("status") or "") != "Completed"
+                for dependency in dependencies
+            )
+            or any(db._owned_paths_overlap(path, active_path) for path in paths for active_path in active_paths)
+        ):
+            continue
+        grouped.setdefault((spec_id, group), []).append(task)
+
+    dispatchable: list[list[dict[str, Any]]] = []
+    for members in grouped.values():
+        if len(members) < 2 or group_has_owned_path_overlap(members):
+            continue
+        dispatchable.append(members)
+    dispatchable.sort(key=lambda members: task_label(members[0]))
+    return dispatchable
+
+
+def group_has_owned_path_overlap(tasks: list[dict[str, Any]]) -> bool:
+    for index, left in enumerate(tasks):
+        for right in tasks[index + 1 :]:
+            if any(
+                db._owned_paths_overlap(left_path, right_path)
+                for left_path in owned_paths(left)
+                for right_path in owned_paths(right)
+            ):
+                return True
+    return False
+
+
+def owned_paths(task: dict[str, Any]) -> list[str]:
+    try:
+        return db.parse_owned_paths(task.get("owned_paths"))
+    except ValueError:
+        return []
+
+
+def execution_approved(state: dict[str, Any]) -> bool:
+    approval = (
+        (state.get("approvals") or {}).get(db.DEFAULT_APPROVAL_KIND)
+        if isinstance(state.get("approvals"), dict)
+        else {}
+    )
+    return isinstance(approval, dict) and approval.get("state") == "approved"
+
+
+def batch_id(payload: dict[str, Any]) -> str:
+    batch = payload.get("batch") if isinstance(payload.get("batch"), dict) else {}
+    return str(batch.get("batch_id") or batch.get("id") or "batch")
+
+
+def execution_assignment(execution: dict[str, Any]) -> str:
+    return (
+        f"{task_label(execution)}={execution.get('execution_id') or 'missing-id'}"
+        f"({execution.get('execution_state') or 'unknown'})"
+    )
+
 
 def task_label(task: dict[str, Any]) -> str:
     return str(task.get("stable_id") or task.get("task_id") or "task")

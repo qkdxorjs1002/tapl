@@ -94,6 +94,20 @@ def handle_event(
         if remaining:
             message = tapl_prompt.stop_remaining_tasks_message(remaining)
             block = mode == "enforce"
+        active_batches = (
+            state.get("active_batches") if isinstance(state.get("active_batches"), list) else []
+        )
+        active_executions = (
+            state.get("active_executions")
+            if isinstance(state.get("active_executions"), list)
+            else []
+        )
+        if active_batches:
+            message = combine_messages(
+                message,
+                tapl_prompt.stop_active_executions_message(len(active_executions)),
+            )
+            block = mode == "enforce"
         check = validation.validate_plan_task_execute(conn)
         issue_message = validation.format_issues(check)
         if issue_message:
@@ -154,6 +168,8 @@ def should_auto_archive_on_stop(
 ) -> bool:
     run = state.get("active_run")
     if not isinstance(run, dict):
+        return False
+    if state.get("active_batches") or state.get("active_executions"):
         return False
 
     result = run.get("result_summary")

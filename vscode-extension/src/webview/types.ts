@@ -13,8 +13,39 @@ export interface TaplStatus {
   plans: TaplItem[];
   tasks: TaplItem[];
   findings: TaplItem[];
+  active_batches?: TaplExecutionBatch[];
+  active_executions?: TaplExecution[];
   recent_events: TaplEvent[];
   schema: Record<string, string>;
+}
+
+export interface TaplExecution {
+  execution_id: string;
+  task_id?: string;
+  title?: string;
+  execution_state?: string;
+  batch_id?: string;
+  batch_state?: string;
+  execution_mode?: string;
+  executor_kind?: string;
+  parallel_group?: string;
+  owned_paths?: string[];
+  executor_ref?: string;
+  model?: string;
+  reasoning_effort?: string;
+  started_at?: string;
+  finished_at?: string;
+}
+
+export interface TaplExecutionBatch {
+  batch: {
+    batch_id?: string;
+    id?: string;
+    state?: string;
+    parallel_group?: string;
+    failure_policy?: string;
+  };
+  executions: TaplExecution[];
 }
 
 export interface TaplItem {
@@ -26,6 +57,12 @@ export interface TaplItem {
   source?: string;
   updated_at?: string;
   custom_fields?: Record<string, TaplJsonValue>;
+  execution_mode?: string;
+  executor_kind?: string;
+  parallel_group?: string;
+  owned_paths?: string[];
+  depends_on?: string[];
+  active_execution?: TaplExecution;
 }
 
 export interface TaplArchive {

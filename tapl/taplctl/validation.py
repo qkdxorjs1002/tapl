@@ -40,7 +40,11 @@ def validate_plan_task_execute(
     issues.extend(validate_plan_content(plans))
     issues.extend(validate_task_granularity(plans, tasks))
     issues.extend(validate_task_content(tasks))
-    issues.extend(validate_task_execution_order(tasks))
+    issues.extend(validate_task_planning_contract(tasks))
+    issues.extend(validate_task_dependencies(tasks))
+    issues.extend(validate_owned_path_exclusivity(state, tasks))
+    issues.extend(validate_execution_state(state, tasks))
+    issues.extend(validate_task_execution_order(tasks, state))
     issues.extend(validate_execution_approval(state, tasks))
     errors = [item for item in issues if item["severity"] == "error"]
     warnings = [item for item in issues if item["severity"] == "warning"]
@@ -242,14 +246,373 @@ def validate_task_content(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return issues
 
 
-def validate_task_execution_order(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def validate_task_planning_contract(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    parallel_groups: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        label = task_label(task)
+        mode = str(task.get("execution_mode") or "sequential")
+        executor = str(task.get("executor_kind") or "main")
+        group = str(task.get("parallel_group") or "").strip()
+        owned_paths = task_owned_paths(task)
+
+        if mode not in db.EXECUTION_MODES:
+            issues.append(
+                issue(
+                    "error",
+                    "invalid_task_execution_mode",
+                    f"{label} has invalid execution_mode `{mode}`.",
+                    tapl_prompt.parallel_task_contract_remediation(),
+                    stable_id=label,
+                )
+            )
+            continue
+        if executor not in db.EXECUTOR_KINDS:
+            issues.append(
+                issue(
+                    "error",
+                    "invalid_task_executor_kind",
+                    f"{label} has invalid executor_kind `{executor}`.",
+                    tapl_prompt.parallel_task_contract_remediation(),
+                    stable_id=label,
+                )
+            )
+            continue
+
+        if mode == "sequential":
+            if executor != "main" or group:
+                issues.append(
+                    issue(
+                        "error",
+                        "invalid_sequential_task_contract",
+                        f"{label} is sequential but executor_kind={executor} or parallel_group is set.",
+                        tapl_prompt.sequential_task_contract_remediation(),
+                        stable_id=label,
+                    )
+                )
+            continue
+
+        if executor != "subagent" or not group:
+            issues.append(
+                issue(
+                    "error",
+                    "invalid_parallel_task_contract",
+                    f"{label} is parallel but does not declare executor_kind=subagent and a parallel_group.",
+                    tapl_prompt.parallel_task_contract_remediation(),
+                    stable_id=label,
+                )
+            )
+        if not owned_paths:
+            issues.append(
+                issue(
+                    "warning",
+                    "parallel_task_owned_paths_missing",
+                    f"{label} is parallel but does not declare owned_paths.",
+                    tapl_prompt.parallel_owned_paths_remediation(),
+                    stable_id=label,
+                )
+            )
+        if group:
+            parallel_groups.setdefault(group, []).append(task)
+
+    for group, members in parallel_groups.items():
+        executable_members = [
+            task
+            for task in members
+            if task_status(task) in EXECUTABLE_STATUSES
+        ]
+        if len(executable_members) == 1:
+            issues.append(
+                issue(
+                    "warning",
+                    "parallel_group_has_single_executable_task",
+                    f"Parallel group `{group}` has only one executable task.",
+                    tapl_prompt.parallel_group_size_remediation(),
+                    stable_id=task_label(executable_members[0]),
+                )
+            )
+    return issues
+
+
+def validate_task_dependencies(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    tasks_by_id = {task_label(task): task for task in tasks}
+    graph = {label: task_dependencies(task) for label, task in tasks_by_id.items()}
+
+    for label, dependencies in graph.items():
+        task = tasks_by_id[label]
+        for dependency_id in dependencies:
+            dependency = tasks_by_id.get(dependency_id)
+            if dependency is None:
+                issues.append(
+                    issue(
+                        "error",
+                        "unknown_task_dependency",
+                        f"{label} depends on missing task {dependency_id}.",
+                        tapl_prompt.task_dependency_remediation(),
+                        stable_id=label,
+                    )
+                )
+                continue
+            if (
+                str(task.get("execution_mode") or "sequential") == "parallel"
+                and str(task.get("parallel_group") or "").strip()
+                == str(dependency.get("parallel_group") or "").strip()
+                and str(task.get("parallel_group") or "").strip()
+            ):
+                issues.append(
+                    issue(
+                        "error",
+                        "parallel_group_dependency_conflict",
+                        f"{label} depends on {dependency_id} in the same parallel_group.",
+                        tapl_prompt.parallel_group_dependency_remediation(),
+                        stable_id=label,
+                    )
+                )
+            if task_status(dependency) != "Completed" and task_status(task) in EXECUTABLE_STATUSES:
+                severity = "error" if task_status(task) == "In Progress" else "warning"
+                issues.append(
+                    issue(
+                        severity,
+                        "unmet_task_dependency",
+                        f"{label} is {task_status(task)} but dependency {dependency_id} is {task_status(dependency)}.",
+                        tapl_prompt.unmet_task_dependency_remediation(),
+                        stable_id=label,
+                    )
+                )
+
+    cycle = dependency_cycle(graph)
+    if cycle:
+        issues.append(
+            issue(
+                "error",
+                "task_dependency_cycle",
+                f"Task dependency cycle detected: {' -> '.join(cycle)}.",
+                tapl_prompt.task_dependency_cycle_remediation(),
+                stable_id=cycle[0],
+            )
+        )
+    return issues
+
+
+def validate_owned_path_exclusivity(
+    state: dict[str, Any],
+    tasks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    conflicts: set[str] = set()
+    parallel_groups: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        if (
+            str(task.get("execution_mode") or "sequential") == "parallel"
+            and task_status(task) in EXECUTABLE_STATUSES
+        ):
+            group = str(task.get("parallel_group") or "").strip()
+            if group:
+                parallel_groups.setdefault(group, []).append(task)
+
+    for group, members in parallel_groups.items():
+        for index, left in enumerate(members):
+            for right in members[index + 1 :]:
+                for left_path in task_owned_paths(left):
+                    for right_path in task_owned_paths(right):
+                        if db._owned_paths_overlap(left_path, right_path):
+                            conflicts.add(
+                                f"group {group}: {task_label(left)}:{left_path} overlaps "
+                                f"{task_label(right)}:{right_path}"
+                            )
+
+    active_executions = state.get("active_executions")
+    if not isinstance(active_executions, list):
+        active_executions = []
+    for index, left in enumerate(active_executions):
+        if not isinstance(left, dict):
+            continue
+        for right in active_executions[index + 1 :]:
+            if not isinstance(right, dict):
+                continue
+            for left_path in task_owned_paths(left):
+                for right_path in task_owned_paths(right):
+                    if db._owned_paths_overlap(left_path, right_path):
+                        conflicts.add(
+                            f"active executions: {task_label(left)}:{left_path} overlaps "
+                            f"{task_label(right)}:{right_path}"
+                        )
+
+    return [
+        issue(
+            "error",
+            "owned_path_overlap",
+            f"Parallel task ownership overlaps: {conflict}.",
+            tapl_prompt.owned_path_overlap_remediation(),
+        )
+        for conflict in sorted(conflicts)
+    ]
+
+
+def validate_execution_state(
+    state: dict[str, Any],
+    tasks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    tasks_by_id = {task_label(task): task for task in tasks}
+    active_batches = state.get("active_batches")
+    if not isinstance(active_batches, list):
+        active_batches = []
+    active_executions = state.get("active_executions")
+    if not isinstance(active_executions, list):
+        active_executions = []
+    active_by_task = {
+        task_label(execution): execution
+        for execution in active_executions
+        if isinstance(execution, dict)
+    }
+
+    for payload in active_batches:
+        if not isinstance(payload, dict):
+            continue
+        batch = payload.get("batch") if isinstance(payload.get("batch"), dict) else {}
+        executions = payload.get("executions") if isinstance(payload.get("executions"), list) else []
+        active = [
+            execution
+            for execution in executions
+            if isinstance(execution, dict)
+            and execution.get("execution_state") in db.ACTIVE_EXECUTION_STATES
+        ]
+        batch_id = str(batch.get("batch_id") or batch.get("id") or "batch")
+        batch_state = str(batch.get("state") or "")
+        if batch_state == "active" and not active:
+            issues.append(
+                issue(
+                    "error",
+                    "stale_active_execution_batch",
+                    f"Execution batch {batch_id} is active but has no active executions.",
+                    tapl_prompt.stale_execution_batch_remediation(batch_id),
+                )
+            )
+        elif batch_state != "active" and active:
+            issues.append(
+                issue(
+                    "error",
+                    "execution_batch_state_mismatch",
+                    f"Execution batch {batch_id} is {batch_state or 'unknown'} while executions remain active.",
+                    tapl_prompt.stale_execution_batch_remediation(batch_id),
+                )
+            )
+
+        batch_group = str(batch.get("parallel_group") or "").strip()
+        specs: set[str] = set()
+        for execution in executions:
+            if not isinstance(execution, dict):
+                continue
+            specs.add(str(execution.get("spec_id") or ""))
+            if (
+                str(execution.get("parallel_group") or "").strip() != batch_group
+                or execution.get("execution_mode") != "parallel"
+                or execution.get("executor_kind") != "subagent"
+            ):
+                issues.append(
+                    issue(
+                        "error",
+                        "execution_batch_contract_mismatch",
+                        f"{task_label(execution)} does not match execution batch {batch_id}'s parallel contract.",
+                        tapl_prompt.execution_batch_contract_remediation(batch_id),
+                        stable_id=task_label(execution),
+                    )
+                )
+        if len(specs) > 1:
+            issues.append(
+                issue(
+                    "error",
+                    "execution_batch_mixed_plans",
+                    f"Execution batch {batch_id} contains tasks from multiple plans.",
+                    tapl_prompt.execution_batch_contract_remediation(batch_id),
+                )
+            )
+
+    for execution in active_executions:
+        if not isinstance(execution, dict):
+            continue
+        label = task_label(execution)
+        task = tasks_by_id.get(label)
+        if task is None or task_status(task) != "In Progress":
+            issues.append(
+                issue(
+                    "error",
+                    "active_execution_task_state_mismatch",
+                    f"Active execution {execution.get('execution_id') or ''} expects {label} to be In Progress.",
+                    tapl_prompt.execution_task_state_remediation(),
+                    stable_id=label,
+                )
+            )
+
+    for task in tasks:
+        if (
+            task_status(task) == "In Progress"
+            and str(task.get("execution_mode") or "sequential") == "parallel"
+            and task_label(task) not in active_by_task
+        ):
+            issues.append(
+                issue(
+                    "error",
+                    "parallel_task_missing_active_execution",
+                    f"{task_label(task)} is In Progress without an active execution.",
+                    tapl_prompt.parallel_task_missing_execution_remediation(),
+                    stable_id=task_label(task),
+                )
+            )
+    return issues
+
+
+def validate_task_execution_order(
+    tasks: list[dict[str, Any]],
+    state: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     in_progress: list[tuple[int, dict[str, Any]]] = [
         (index, task)
         for index, task in enumerate(tasks)
         if task_status(task) == "In Progress"
     ]
-    if len(in_progress) > 1:
+    active_executions = (
+        state.get("active_executions")
+        if isinstance(state, dict) and isinstance(state.get("active_executions"), list)
+        else []
+    )
+    active_by_task = {
+        task_label(execution): execution
+        for execution in active_executions
+        if isinstance(execution, dict)
+    }
+    batch_ids = {
+        str(active_by_task[task_label(task)].get("batch_id") or "")
+        for _, task in in_progress
+        if task_label(task) in active_by_task
+    }
+    all_have_execution = bool(in_progress) and all(
+        task_label(task) in active_by_task for _, task in in_progress
+    )
+    valid_parallel_batch = len(in_progress) > 1 and all_have_execution and len(batch_ids) == 1
+    if len(in_progress) > 1 and all_have_execution and len(batch_ids) > 1:
+        labels = ", ".join(task_label(task) for _, task in in_progress)
+        issues.append(
+            issue(
+                "error",
+                "multiple_active_execution_batches",
+                f"In Progress tasks span multiple execution batches: {labels}.",
+                tapl_prompt.mixed_execution_batches_remediation(),
+            )
+        )
+    elif len(in_progress) > 1 and active_by_task and not all_have_execution:
+        labels = ", ".join(task_label(task) for _, task in in_progress)
+        issues.append(
+            issue(
+                "error",
+                "mixed_in_progress_execution_state",
+                f"In Progress tasks mix batch-managed and unmanaged execution: {labels}.",
+                tapl_prompt.mixed_in_progress_state_remediation(),
+            )
+        )
+    elif len(in_progress) > 1 and not valid_parallel_batch:
         labels = ", ".join(task_label(task) for _, task in in_progress)
         issues.append(
             issue(
@@ -260,10 +623,17 @@ def validate_task_execution_order(tasks: list[dict[str, Any]]) -> list[dict[str,
             )
         )
 
-    if not in_progress:
+    if not in_progress or valid_parallel_batch:
         return issues
 
-    first_index, first_task = in_progress[0]
+    sequential_in_progress = [
+        (index, task)
+        for index, task in in_progress
+        if task_label(task) not in active_by_task
+    ]
+    if not sequential_in_progress:
+        return issues
+    first_index, first_task = sequential_in_progress[0]
     earlier_incomplete = [
         task
         for task in tasks[:first_index]
@@ -281,6 +651,52 @@ def validate_task_execution_order(tasks: list[dict[str, Any]]) -> list[dict[str,
             )
         )
     return issues
+
+
+def task_dependencies(task: dict[str, Any]) -> list[str]:
+    value = task.get("depends_on")
+    if not isinstance(value, list):
+        return []
+    return [str(dependency).strip() for dependency in value if str(dependency).strip()]
+
+
+def task_owned_paths(task: dict[str, Any]) -> list[str]:
+    value = task.get("owned_paths")
+    try:
+        return db.parse_owned_paths(value)
+    except ValueError:
+        return []
+
+
+def dependency_cycle(graph: dict[str, list[str]]) -> list[str]:
+    visited: set[str] = set()
+    active: list[str] = []
+    active_set: set[str] = set()
+
+    def visit(node: str) -> list[str]:
+        if node in active_set:
+            index = active.index(node)
+            return [*active[index:], node]
+        if node in visited:
+            return []
+        visited.add(node)
+        active.append(node)
+        active_set.add(node)
+        for dependency in graph.get(node, []):
+            if dependency not in graph:
+                continue
+            cycle = visit(dependency)
+            if cycle:
+                return cycle
+        active.pop()
+        active_set.remove(node)
+        return []
+
+    for node in graph:
+        cycle = visit(node)
+        if cycle:
+            return cycle
+    return []
 
 
 def validate_execution_approval(

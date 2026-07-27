@@ -553,11 +553,105 @@ def task_content_remediation() -> str:
 
 
 def multiple_tasks_in_progress_remediation() -> str:
-    return "Execute planned tasks one at a time; complete, block, or skip the current task before starting another."
+    return (
+        "For sequential work, complete, block, or skip the current task before starting another. "
+        "For intentional parallel work, return the tasks to Pending, declare the parallel/subagent "
+        "contract and exclusive owned_paths, then use `taplctl task dispatch`."
+    )
 
 
 def task_started_out_of_order_remediation() -> str:
     return "Run tasks in task order; finish, resolve, skip, or replan earlier tasks before continuing the later task."
+
+
+def sequential_task_contract_remediation() -> str:
+    return (
+        "Use execution_mode=sequential, executor_kind=main, and an empty parallel_group; "
+        "otherwise declare the complete parallel subagent contract."
+    )
+
+
+def parallel_task_contract_remediation() -> str:
+    return (
+        "Set execution_mode=parallel, executor_kind=subagent, and the same non-empty "
+        "parallel_group on tasks intended for one dispatch."
+    )
+
+
+def parallel_owned_paths_remediation() -> str:
+    return (
+        "Declare the files or directory scopes exclusively owned by this SubAgent with owned_paths "
+        "before dispatch."
+    )
+
+
+def parallel_group_size_remediation() -> str:
+    return "Add another independent Pending task to the group or make this task sequential."
+
+
+def task_dependency_remediation() -> str:
+    return "Replace the dependency with a task in the active run or remove the invalid edge."
+
+
+def task_dependency_cycle_remediation() -> str:
+    return "Remove or reorder dependency edges until the task graph is acyclic."
+
+
+def parallel_group_dependency_remediation() -> str:
+    return (
+        "Tasks dispatched in the same parallel_group must be independent; move the dependent task "
+        "to a later group or remove the dependency."
+    )
+
+
+def unmet_task_dependency_remediation() -> str:
+    return "Complete every dependency before starting or dispatching this task."
+
+
+def owned_path_overlap_remediation() -> str:
+    return (
+        "Give each concurrent SubAgent exclusive non-overlapping owned_paths, or execute the "
+        "conflicting tasks in separate batches."
+    )
+
+
+def stale_execution_batch_remediation(batch_id: str) -> str:
+    return (
+        f"Inspect batch {batch_id}, settle every active execution by its execution_id, or run "
+        f"`taplctl batch recover --id {batch_id} --agent` before continuing."
+    )
+
+
+def execution_batch_contract_remediation(batch_id: str) -> str:
+    return (
+        f"Recover batch {batch_id}, repair the affected task contracts while Pending, and dispatch "
+        "one same-plan, same-group task set again."
+    )
+
+
+def execution_task_state_remediation() -> str:
+    return (
+        "Do not edit a batch-managed task status directly; settle it with "
+        "`task complete|block|skip --execution-id <id>` or recover its batch."
+    )
+
+
+def parallel_task_missing_execution_remediation() -> str:
+    return (
+        "Return the task to Pending through batch recovery, then use `taplctl task dispatch`; "
+        "parallel tasks must not be started with the sequential task start command."
+    )
+
+
+def mixed_execution_batches_remediation() -> str:
+    return "Settle or recover one active batch before dispatching or continuing another batch."
+
+
+def mixed_in_progress_state_remediation() -> str:
+    return (
+        "Settle the batch-managed tasks by execution_id and finish/block/skip unmanaged sequential "
+        "tasks; do not mix both execution modes concurrently."
+    )
 
 
 def execution_approval_rejected_remediation() -> str:
@@ -617,7 +711,10 @@ def session_start_incomplete_next_action() -> str:
 
 
 def stop_incomplete_tasks_next_action() -> str:
-    return "Complete, block, or skip remaining tasks before Stop auto-archives."
+    return (
+        "Complete, block, or skip remaining tasks and settle or recover every active execution "
+        "batch before Stop auto-archives."
+    )
 
 
 def run_stopped_during_task_next_action(label: str) -> str:
@@ -625,6 +722,14 @@ def run_stopped_during_task_next_action(label: str) -> str:
         f"Run stopped during task execution at {label}; get user approval before durable edits: "
         f"continue execution from {label} and finish existing work first, defer the existing run and archive it, "
         "or merge the work into one plan with the new request."
+    )
+
+
+def run_stopped_during_batch_next_action(labels: str) -> str:
+    return (
+        f"Run stopped while a parallel batch is active for {labels}; do not start unrelated durable "
+        "work. Continue the existing SubAgents and settle every execution_id, or recover/cancel the "
+        "batch before asking the user whether to defer, archive, or merge a different request."
     )
 
 
@@ -643,11 +748,45 @@ def different_request_next_action() -> str:
 
 
 def multiple_in_progress_next_action(labels: str) -> str:
-    return f"Only one task may be In Progress; finish/block/skip all but earliest: {labels}."
+    return (
+        f"Unmanaged tasks are simultaneously In Progress; finish/block/skip all but the current "
+        f"sequential task, or recover and explicitly dispatch them as one parallel batch: {labels}."
+    )
 
 
 def continue_task_next_action(label: str) -> str:
     return f"Continue only {label}; set Completed, Blocked, or Skipped before another task."
+
+
+def dispatch_parallel_tasks_next_action(labels: str) -> str:
+    return (
+        f"Dispatch ready parallel tasks atomically: `taplctl task dispatch {labels} --agent`. "
+        "Then the root agent must spawn one SubAgent per manifest execution concurrently."
+    )
+
+
+def continue_parallel_batch_next_action(batch_id: str, assignments: str) -> str:
+    return (
+        f"Continue active batch {batch_id}. Root agent only: keep TAPL writes centralized, run one "
+        f"SubAgent per task concurrently, and settle each result with its exact execution id "
+        f"using `taplctl task complete|block|skip <TASK> --execution-id <ID> --agent`. "
+        f"Assignments: {assignments}. If any spawn did not start, recover or cancel the whole batch."
+    )
+
+
+def multiple_active_batches_next_action(batch_ids: str) -> str:
+    return (
+        f"Multiple execution batches are active ({batch_ids}); do not spawn more SubAgents. "
+        "Settle or recover/cancel one batch at a time until the state is consistent."
+    )
+
+
+def repair_missing_parallel_execution_next_action(labels: str) -> str:
+    return (
+        f"Parallel task(s) are In Progress without a manifest execution ({labels}); do not continue "
+        "or settle them as sequential tasks. Repair them to Pending, then dispatch the complete group "
+        "atomically, or recover the batch if one exists."
+    )
 
 
 def start_task_next_action(label: str) -> str:
@@ -669,6 +808,13 @@ def durable_edit_requires_plan_message() -> str:
 
 def stop_remaining_tasks_message(remaining: int) -> str:
     return f"tapl: {remaining} task(s) remain incomplete; update task state or archive before stopping."
+
+
+def stop_active_executions_message(count: int) -> str:
+    return (
+        f"tapl: {count} execution(s) remain active; settle each execution_id or recover/cancel "
+        "the batch before stopping."
+    )
 
 
 def archived_completed_run_message(slug: str) -> str:
@@ -807,8 +953,8 @@ def custom_fields_guidance() -> str:
         "multiple tasks, including the overall work type, user choices, global constraints, strategy, and decision "
         "rationale, on the plan instead of copying it to every task. Populate a task's `custom_fields` only with "
         "metadata unique to that task, such as owned files or interfaces, task-specific constraints, or task-specific "
-        "validation conditions. When a task was actually delegated to a subagent, record the model and reasoning "
-        "effort used as task-specific metadata, for example `서브 에이전트 모델`: `gpt-5.6-sol (xhigh)` in Korean "
+        "validation conditions. When a task was actually delegated to a subagent, the root agent must record the actual model and reasoning "
+        "effort used (not merely the requested value) as task-specific metadata during settlement, for example `서브 에이전트 모델`: `gpt-5.6-sol (xhigh)` in Korean "
         "or `SubAgent Model`: `gpt-5.6-sol (xhigh)` in English; omit this field when no subagent was used. Do not "
         "copy a fact already represented on the source plan, or duplicate "
         "the same key and value across sibling tasks merely for convenience. If separate tasks genuinely need distinct facts "
@@ -838,7 +984,8 @@ def workflow_order_guidance() -> str:
         "Lifecycle order: inspect status -> resolve residual run direction with user approval -> "
         "analyze/search and clarify until unblocked -> `taplctl plan apply --stdin-json --agent` -> "
         "`taplctl task create --stdin-json --agent` -> `taplctl approval approve --prompt '<approved scope>' --source explicit_user --agent` -> "
-        "`taplctl task start/complete/block/skip` -> `taplctl run finish` -> allow eligible `taplctl archive finish`."
+        "`taplctl task start/complete/block/skip` for sequential work or `taplctl task dispatch` plus "
+        "execution-id settlement for parallel work -> `taplctl run finish` -> allow eligible `taplctl archive finish`."
     )
 
 
@@ -867,8 +1014,9 @@ def lifecycle_recipe_guidance() -> str:
     return (
         "Primary lifecycle commands: `taplctl run summarize`, `taplctl plan apply --stdin-json`, "
         "`taplctl task create --stdin-json`, `taplctl approval approve`, `taplctl task start`, "
-        "`taplctl task complete`, `taplctl task block`, `taplctl task skip`, `taplctl run finish`, "
-        "and `taplctl archive finish`. Use low-level `set` commands only for repair/debug or when a recipe says so."
+        "`taplctl task dispatch`, `taplctl task complete`, `taplctl task block`, `taplctl task skip`, "
+        "`taplctl batch cancel`, `taplctl batch recover`, `taplctl run finish`, and `taplctl archive finish`. "
+        "Use low-level `set` commands only for repair/debug or when a recipe says so."
     )
 
 
@@ -882,9 +1030,17 @@ def task_plan_dependency_guidance() -> str:
 
 def task_execution_order_guidance() -> str:
     return (
-        "Execute planned tasks one at a time in task order: use `taplctl task start TASK-001 --agent` "
-        "immediately before work, then use `taplctl task complete`, `taplctl task block`, or "
-        "`taplctl task skip` before starting another task."
+        "Execute planned tasks one at a time in task order when they are sequential: use "
+        "`taplctl task start TASK-001 --agent` "
+        "immediately before work, then complete, block, or skip it before another sequential task. "
+        "Tasks explicitly declared as execution_mode=parallel, executor_kind=subagent, in the same "
+        "parallel_group, with completed dependencies and exclusive owned_paths may run concurrently only "
+        "after atomic `taplctl task dispatch`. The root agent is the sole TAPL state writer: it must spawn "
+        "one SubAgent per dispatched task concurrently, keep each worker inside its owned_paths, and settle "
+        "each task with the exact manifest execution_id via `taplctl task complete|block|skip --execution-id`. "
+        "Record the actual delegated model and reasoning effort in task custom_fields. If any SubAgent spawn "
+        "fails or the root is interrupted, recover or cancel the batch before retrying; never leave a partial "
+        "batch or start another batch around it."
     )
 
 

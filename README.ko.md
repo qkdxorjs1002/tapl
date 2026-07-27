@@ -150,6 +150,80 @@ taplctl item show --id <id> --json
 Activity bar에서 active run, plan, task, finding, archive, search result를 볼
 수 있습니다.
 
+### 7. 병렬 SubAgent dispatch
+
+TAPL은 repo-local SQLite 상태 저장소이자 검증기, execution manifest 조율자입니다.
+실제 SubAgent를 spawn하지는 않습니다. 실제 spawn과 관리는 Codex/root runtime의
+책임입니다. 기본값은 main agent가 수행하는 순차 task이며, 독점적인 파일 또는
+directory 범위를 줄 수 있는 독립 작업에만 병렬 dispatch를 사용하세요.
+
+같은 plan 및 비어 있지 않은 group에 호환되는 `Pending` task를 만듭니다. 병렬
+task마다 `parallel` mode, `subagent` executor, 독점 `owned-path`를 선언해야
+합니다. Dependency는 선택 사항이지만, 선언했다면 dispatch 전에 모두 반드시
+`Completed` 상태여야 합니다.
+
+```sh
+# TASK-004는 이미 Completed 상태입니다. 아래 두 task는 별도 path를 소유합니다.
+taplctl task create --id TASK-005 --title '집중 테스트 추가' --status Pending \
+  --spec-id PLAN-001 --goal '병렬 dispatch 동작을 검증한다' \
+  --action '집중 CLI 테스트를 추가한다' --verification '집중 테스트 suite를 실행한다' \
+  --execution-mode parallel --executor-kind subagent --parallel-group dispatch-docs \
+  --owned-path tapl/tests/test_tapl.py --owned-path tapl/tests/fixtures \
+  --depends-on TASK-004 --agent
+
+taplctl task create --id TASK-006 --title '병렬 dispatch 문서화' --status Pending \
+  --spec-id PLAN-001 --goal '지원되는 workflow를 문서화한다' \
+  --action '사용자 문서를 갱신한다' --verification 'README 예시를 검토한다' \
+  --execution-mode parallel --executor-kind subagent --parallel-group dispatch-docs \
+  --owned-path README.md --depends-on TASK-004 --agent
+```
+
+같은 group의 호환되는 `Pending` task를 두 개 이상 원자적으로 dispatch합니다.
+`--batch-id`는 재시도를 식별 가능하게 하고, `--execution-metadata`는 task별
+예정 executor reference, model, reasoning effort를 기록합니다. 명령은 task별
+`execution_id`를 포함하는 manifest row를 출력합니다.
+
+```sh
+taplctl task dispatch TASK-005 TASK-006 --batch-id docs-20260727 \
+  --execution-metadata '{
+    "TASK-005": {"executor_ref": "tests-worker", "model": "gpt-5.6-terra", "reasoning_effort": "high"},
+    "TASK-006": {"executor_ref": "docs-worker", "model": "gpt-5.6-terra", "reasoning_effort": "high"}
+  }' --agent
+```
+
+Root agent는 이 manifest를 읽고, 반환된 각 task와 `execution_id`마다 서로 다른
+SubAgent를 동시에 spawn하며, 각 worker가 선언한 path 안에서만 작업하게 합니다.
+TAPL state 작성은 root agent만 합니다. Batch가 관리하는 status를 직접 바꾸지
+말고, 각 결과를 정확한 manifest ID로 정산하세요.
+
+```sh
+taplctl task complete TASK-005 --execution-id <TASK-005의-execution-id> \
+  --verification 'uv run python -m unittest tests.test_tapl' \
+  --result '집중 dispatch 테스트를 통과했다' --agent
+taplctl task block TASK-006 --execution-id <TASK-006의-execution-id> \
+  --verification 'README 검토' --blocker '필요한 제품 결정이 없다' \
+  --next-action '결정을 받은 뒤 task를 다시 dispatch한다' --agent
+taplctl task skip TASK-006 --execution-id <TASK-006의-execution-id> \
+  --result 'Plan 변경 후 더 이상 필요하지 않다' --agent
+```
+
+Dispatch는 완료되지 않은 dependency, 서로 다른 plan 또는 group, 겹치는 path
+(파일과 그 부모 directory의 충돌 포함), 기존 active work와 충돌하는 owned path를
+거부합니다. 한 group의 task는 서로 독립적이어야 하므로 같은 group의 다른 task에
+dependency를 걸지 마세요. Worker 일부를 spawn하지 못했거나 root runtime이
+중단되면, 실행된 task를 정산하고 active batch 전체를 recover 또는 cancel한 뒤에만
+재시도합니다.
+
+```sh
+taplctl batch recover docs-20260727 --reason 'Root runtime이 중단되었다' --agent
+taplctl batch cancel docs-20260727 --block \
+  --reason '한 worker를 시작할 수 없다' --agent
+```
+
+`taplctl status --agent`로 active batch와 execution ID를 확인하고,
+`taplctl next --agent`로 가장 안전한 다음 lifecycle 명령을 확인하세요. 현재
+batch가 active인 동안에는 두 번째 batch를 시작하지 마세요.
+
 ## 설치 상세
 
 ### 필요 환경

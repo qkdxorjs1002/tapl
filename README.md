@@ -153,6 +153,81 @@ taplctl item show --id <id> --json
 It gives you an activity-bar view over active runs, plans, tasks, findings,
 archives, and search results.
 
+### 7. Parallel SubAgent dispatch
+
+TAPL is the repo-local SQLite state store, validator, and execution-manifest
+coordinator. It does **not** spawn workers itself: the Codex/root runtime
+spawns and manages the actual SubAgents. Sequential tasks run on the main
+agent by default; use parallel dispatch only for independent work that can be
+given exclusive file or directory scopes.
+
+Create compatible `Pending` tasks in one plan and one non-empty group. Each
+parallel task must declare `parallel` mode, the `subagent` executor, and its
+exclusive owned paths. Dependencies are optional, but every listed dependency
+must already be `Completed` before dispatch.
+
+```sh
+# TASK-004 is already Completed. These two tasks own separate paths.
+taplctl task create --id TASK-005 --title 'Add focused tests' --status Pending \
+  --spec-id PLAN-001 --goal 'Cover parallel dispatch behavior' \
+  --action 'Add focused CLI tests' --verification 'Run the focused test suite' \
+  --execution-mode parallel --executor-kind subagent --parallel-group dispatch-docs \
+  --owned-path tapl/tests/test_tapl.py --owned-path tapl/tests/fixtures \
+  --depends-on TASK-004 --agent
+
+taplctl task create --id TASK-006 --title 'Document parallel dispatch' --status Pending \
+  --spec-id PLAN-001 --goal 'Document the supported workflow' \
+  --action 'Update the user documentation' --verification 'Review the README examples' \
+  --execution-mode parallel --executor-kind subagent --parallel-group dispatch-docs \
+  --owned-path README.md --depends-on TASK-004 --agent
+```
+
+Dispatch two or more compatible `Pending` tasks in the same group atomically.
+`--batch-id` makes a retry identifiable, and `--execution-metadata` records
+the intended executor reference, model, and reasoning effort for every task.
+The command prints one manifest row per task, including its `execution_id`.
+
+```sh
+taplctl task dispatch TASK-005 TASK-006 --batch-id docs-20260727 \
+  --execution-metadata '{
+    "TASK-005": {"executor_ref": "tests-worker", "model": "gpt-5.6-terra", "reasoning_effort": "high"},
+    "TASK-006": {"executor_ref": "docs-worker", "model": "gpt-5.6-terra", "reasoning_effort": "high"}
+  }' --agent
+```
+
+The root agent reads that manifest, concurrently spawns a different SubAgent
+for each returned task and `execution_id`, and keeps each worker within its
+declared paths. Only the root agent writes TAPL state. It settles each result
+with the exact manifest ID—never by directly editing a batch-managed status:
+
+```sh
+taplctl task complete TASK-005 --execution-id <execution-id-for-TASK-005> \
+  --verification 'uv run python -m unittest tests.test_tapl' \
+  --result 'Focused dispatch coverage passed' --agent
+taplctl task block TASK-006 --execution-id <execution-id-for-TASK-006> \
+  --verification 'README review' --blocker 'Required product decision is unavailable' \
+  --next-action 'Obtain the decision and redispatch the task' --agent
+taplctl task skip TASK-006 --execution-id <execution-id-for-TASK-006> \
+  --result 'No longer needed after the plan changed' --agent
+```
+
+Dispatch rejects tasks with unmet dependencies, mixed plans or groups, paths
+that overlap (including a file and its parent directory), or other active work
+that conflicts with their owned paths. Tasks in one group must be independent;
+do not make one depend on another member of that same group. If any worker
+cannot be spawned, or the root runtime is interrupted, settle what ran and
+recover or cancel the entire active batch before retrying:
+
+```sh
+taplctl batch recover docs-20260727 --reason 'Root runtime interrupted' --agent
+taplctl batch cancel docs-20260727 --block \
+  --reason 'One worker could not be started' --agent
+```
+
+Use `taplctl status --agent` to inspect active batches and execution IDs, and
+`taplctl next --agent` for the safest follow-up command. Do not start a second
+batch while the current batch remains active.
+
 ## Install Details
 
 ### Requirements

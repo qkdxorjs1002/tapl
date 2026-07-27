@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import concurrent.futures
 import io
 import argparse
 import json
@@ -66,6 +67,58 @@ class TaplCliTests(unittest.TestCase):
             env=env,
             cwd=str(cwd) if cwd else None,
         )
+
+    def create_parallel_fixture(
+        self,
+        db_path: Path,
+        *,
+        task_ids: tuple[str, ...] = ("TASK-001", "TASK-002", "TASK-003"),
+        owned_paths: tuple[str, ...] = ("tapl/a.py", "tapl/b.py", "tapl/c.py"),
+        dependencies: dict[str, list[str]] | None = None,
+        executor_kinds: dict[str, str] | None = None,
+    ) -> None:
+        plan = self.run_cli(
+            db_path, "plan", "set", "--id", "PLAN-001", "--title", "Parallel plan",
+            "--status", "Finalized", "--summary", "Dispatch independent subagent tasks.", "--json",
+        )
+        self.assertEqual(plan.returncode, 0, plan.stderr)
+        for index, task_id in enumerate(task_ids):
+            payload = {
+                "id": task_id,
+                "title": f"{task_id} parallel work",
+                "spec_id": "PLAN-001",
+                "goal": f"Complete {task_id}",
+                "action": f"Implement {task_id}",
+                "verification": f"Verify {task_id}",
+                "execution_mode": "parallel",
+                "executor_kind": (executor_kinds or {}).get(task_id, "subagent"),
+                "parallel_group": "workers",
+                "owned_paths": [owned_paths[index]],
+                "depends_on": [],
+            }
+            task = self.run_cli(
+                db_path, "task", "create", "--stdin-json", "--json", input_text=json.dumps(payload)
+            )
+            self.assertEqual(task.returncode, 0, task.stderr)
+        for task_id, task_dependencies in (dependencies or {}).items():
+            updated = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--stdin-json",
+                "--json",
+                input_text=json.dumps({"id": task_id, "depends_on": task_dependencies}),
+            )
+            self.assertEqual(updated.returncode, 0, updated.stderr)
+        approval = self.run_cli(
+            db_path, "approval", "approve", "--prompt", "Execute parallel work", "--json"
+        )
+        self.assertEqual(approval.returncode, 0, approval.stderr)
+
+    def status_json(self, db_path: Path, *, full: bool = True) -> dict[str, object]:
+        result = self.run_cli(db_path, "status", "--json", *( ["--full"] if full else []))
+        self.assertEqual(result.returncode, 0, f"{result.stderr}\n{result.stdout}")
+        return json.loads(result.stdout)
 
     def test_version_comes_from_pyproject(self) -> None:
         with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
@@ -4278,6 +4331,229 @@ Legacy archive를 tapl 구조로 옮긴다.
             conn.close()
             self.assertEqual(md_items, 0)
             self.assertEqual(old_runs, 0)
+
+    def test_parallel_schema_v7_and_task_parallel_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            initialized = self.run_cli(db_path, "init", "--json")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("UPDATE meta SET value = '6' WHERE key = 'schema_version'")
+                conn.commit()
+
+            self.create_parallel_fixture(db_path, task_ids=("TASK-001", "TASK-002"), owned_paths=("src/a.py", "src/b.py"))
+            with sqlite3.connect(db_path) as conn:
+                version = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0]
+                tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+                task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+                conn.commit()
+            self.assertEqual(version, "7")
+            self.assertTrue({"task_dependencies", "execution_batches", "task_executions"} <= tables)
+            self.assertTrue({"execution_mode", "executor_kind", "parallel_group", "owned_paths_json"} <= task_columns)
+            payload = self.status_json(db_path)
+            tasks = {task["stable_id"]: task for task in payload["tasks"]}  # type: ignore[index]
+            self.assertEqual(tasks["TASK-001"]["execution_mode"], "parallel")
+            self.assertEqual(tasks["TASK-001"]["owned_paths"], ["src/a.py"])
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("UPDATE meta SET value = '8' WHERE key = 'schema_version'")
+                conn.commit()
+            with self.assertRaisesRegex(RuntimeError, "newer than supported"):
+                tapl_db.connect(db_path)
+
+    def test_parallel_dispatch_manifest_is_idempotent_and_settlement_requires_exact_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            task_ids = ("TASK-001", "TASK-002", "TASK-003")
+            self.create_parallel_fixture(db_path)
+            metadata = {
+                "TASK-001": {"executor_ref": "agent-a", "model": "gpt-5.6-terra", "reasoning_effort": "high"},
+                "TASK-002": {"executor_ref": "agent-b"},
+            }
+            dispatched = self.run_cli(
+                db_path, "task", "dispatch", *task_ids, "--batch-id", "BATCH-001",
+                "--execution-metadata", json.dumps(metadata), "--json",
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            manifest = json.loads(dispatched.stdout)
+            self.assertEqual(manifest["batch"]["batch_id"], "BATCH-001")
+            executions = {row["task_id"]: row for row in manifest["executions"]}
+            self.assertEqual(set(executions), set(task_ids))
+            self.assertEqual(executions["TASK-001"]["model"], "gpt-5.6-terra")
+
+            repeated = self.run_cli(db_path, "task", "dispatch", *task_ids, "--batch-id", "BATCH-001", "--json")
+            self.assertEqual(repeated.returncode, 0, repeated.stderr)
+            repeated_ids = {row["task_id"]: row["execution_id"] for row in json.loads(repeated.stdout)["executions"]}
+            self.assertEqual(repeated_ids, {task_id: row["execution_id"] for task_id, row in executions.items()})
+
+            validation = self.run_cli(db_path, "validate", "--json")
+            self.assertEqual(validation.returncode, 0, validation.stdout)
+            validation_payload = json.loads(validation.stdout)
+            validation_codes = {
+                issue["code"] for issue in validation_payload["plan_task_execute"]["warnings"]
+            }
+            self.assertNotIn("multiple_tasks_in_progress", validation_codes)
+            self.assertNotIn("mixed_in_progress_execution_state", validation_codes)
+            context = self.run_cli(db_path, "context", "--json")
+            self.assertEqual(context.returncode, 0, context.stderr)
+            context_payload = json.loads(context.stdout)
+            self.assertEqual(len(context_payload["active_executions"]), 3)
+            self.assertIn("BATCH-001", "\n".join(context_payload["next_actions"]))
+            agent_status = self.run_cli(db_path, "status", "--agent")
+            self.assertEqual(agent_status.returncode, 0, agent_status.stderr)
+            self.assertIn("<active_batches>", agent_status.stdout)
+            self.assertIn("<active_executions>", agent_status.stdout)
+
+            missing = self.run_cli(db_path, "task", "complete", "TASK-001", "--result", "done", "--json")
+            self.assertNotEqual(missing.returncode, 0)
+            mismatched = self.run_cli(
+                db_path, "task", "complete", "TASK-001", "--execution-id", executions["TASK-002"]["execution_id"],
+                "--result", "done", "--json",
+            )
+            self.assertNotEqual(mismatched.returncode, 0)
+
+            completed = self.run_cli(
+                db_path, "task", "complete", "TASK-001", "--execution-id", executions["TASK-001"]["execution_id"],
+                "--verification", "Focused checks passed", "--result", "done",
+                "--custom-fields", json.dumps({"SubAgent Model": "gpt-5.6-terra (high)"}), "--json",
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            blocked = self.run_cli(
+                db_path, "task", "block", "TASK-002", "--execution-id", executions["TASK-002"]["execution_id"],
+                "--blocker", "dependency failed", "--next-action", "retry", "--json",
+            )
+            self.assertEqual(blocked.returncode, 0, blocked.stderr)
+            skipped = self.run_cli(
+                db_path, "task", "skip", "TASK-003", "--execution-id", executions["TASK-003"]["execution_id"],
+                "--result", "not needed", "--json",
+            )
+            self.assertEqual(skipped.returncode, 0, skipped.stderr)
+            stale = self.run_cli(
+                db_path, "task", "complete", "TASK-001", "--execution-id", executions["TASK-001"]["execution_id"],
+                "--result", "again", "--json",
+            )
+            self.assertNotEqual(stale.returncode, 0)
+            payload = self.status_json(db_path)
+            tasks = {task["stable_id"]: task for task in payload["tasks"]}  # type: ignore[index]
+            self.assertEqual(tasks["TASK-001"]["status"], "Completed")
+            self.assertEqual(tasks["TASK-001"]["verification"], "Focused checks passed")
+            self.assertEqual(tasks["TASK-001"]["custom_fields"]["SubAgent Model"], "gpt-5.6-terra (high)")
+            self.assertEqual(tasks["TASK-002"]["status"], "Blocked")
+            self.assertEqual(tasks["TASK-003"]["status"], "Skipped")
+            self.assertEqual(payload["active_batches"], [])
+
+    def test_parallel_dispatch_validation_is_atomic_for_dependencies_contracts_and_paths(self) -> None:
+        cases = (
+            ("dependency", {"TASK-001": ["TASK-003"]}, ("src/a.py", "src/b.py", "src/c.py"), {}),
+            ("contract", {}, ("src/a.py", "src/b.py", "src/c.py"), {"TASK-002": "main"}),
+            ("paths", {}, ("src/shared", "src/shared/file.py", "src/c.py"), {}),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, dependencies, paths, executors in cases:
+                db_path = Path(tmp) / f"{name}.db"
+                self.create_parallel_fixture(
+                    db_path, dependencies=dependencies, owned_paths=paths, executor_kinds=executors
+                )
+                invalid = self.run_cli(
+                    db_path, "task", "dispatch", "TASK-001", "TASK-002", "--batch-id", f"BATCH-{name}", "--json"
+                )
+                self.assertNotEqual(invalid.returncode, 0, invalid.stdout)
+                state = self.status_json(db_path)
+                self.assertEqual(state["active_batches"], [])
+                self.assertEqual(state["active_executions"], [])
+                self.assertEqual({task["status"] for task in state["tasks"]}, {"Pending"})  # type: ignore[index]
+
+    def test_parallel_dispatch_claim_cancel_and_active_run_guards(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            task_ids = ("TASK-001", "TASK-002")
+            self.create_parallel_fixture(db_path, task_ids=task_ids, owned_paths=("src/a.py", "src/b.py"))
+
+            def claim(batch_id: str) -> str:
+                conn = tapl_db.connect(db_path)
+                try:
+                    tapl_db.dispatch_tasks(conn, task_ids, batch_id=batch_id)
+                    return "success"
+                except ValueError:
+                    return "rejected"
+                finally:
+                    conn.close()
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                outcomes = list(executor.map(claim, ("BATCH-A", "BATCH-B")))
+            self.assertEqual(outcomes.count("success"), 1)
+            self.assertEqual(outcomes.count("rejected"), 1)
+            state = self.status_json(db_path)
+            batch_id = state["active_batches"][0]["batch"]["batch_id"]  # type: ignore[index]
+            self.assertEqual(len(state["active_executions"]), 2)
+
+            finish = self.run_cli(db_path, "run", "finish", "--result", "premature", "--json")
+            archive = self.run_cli(db_path, "archive", "finish", "--slug", "premature", "--json")
+            stop = self.run_cli(
+                db_path, "hook-event", "--event", "Stop", "--mode", "enforce", "--json", input_text="{}"
+            )
+            self.assertNotEqual(finish.returncode, 0)
+            self.assertNotEqual(archive.returncode, 0)
+            self.assertNotEqual(stop.returncode, 0)
+
+            recovered = self.run_cli(db_path, "batch", "recover", batch_id, "--reason", "interrupted", "--json")
+            self.assertEqual(recovered.returncode, 0, recovered.stderr)
+            state = self.status_json(db_path)
+            recovered_tasks = {
+                task["stable_id"]: task for task in state["tasks"]  # type: ignore[index]
+            }
+            self.assertEqual({task["status"] for task in recovered_tasks.values()}, {"Pending"})
+            self.assertTrue(
+                all(task["blocker"] == "" for task in recovered_tasks.values())
+            )
+            self.assertTrue(
+                all(task["next_action"] == "" for task in recovered_tasks.values())
+            )
+
+            preserved_next_action = "Re-check the existing task-specific recovery steps."
+            updated = self.run_cli(
+                db_path,
+                "task",
+                "set",
+                "--id",
+                "TASK-001",
+                "--next-action",
+                preserved_next_action,
+                "--json",
+            )
+            self.assertEqual(updated.returncode, 0, updated.stderr)
+            dispatched = self.run_cli(db_path, "task", "dispatch", *task_ids, "--batch-id", "BATCH-C", "--json")
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            cancelled = self.run_cli(db_path, "batch", "cancel", "BATCH-C", "--block", "--reason", "halt", "--json")
+            self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+            state = self.status_json(db_path)
+            blocked_tasks = {
+                task["stable_id"]: task for task in state["tasks"]  # type: ignore[index]
+            }
+            self.assertEqual({task["status"] for task in blocked_tasks.values()}, {"Blocked"})
+            self.assertTrue(
+                all(task["blocker"] for task in blocked_tasks.values())
+            )
+            self.assertTrue(
+                all(task["next_action"] for task in blocked_tasks.values())
+            )
+            self.assertEqual(
+                blocked_tasks["TASK-001"]["next_action"],
+                preserved_next_action,
+            )
+            for task in blocked_tasks.values():
+                self.assertIn("### Blocker\n", task["body"])
+                self.assertIn("### Next action\n", task["body"])
+
+            validated = self.run_cli(db_path, "validate", "--json")
+            self.assertEqual(validated.returncode, 0, validated.stdout)
+            warnings = json.loads(validated.stdout)["plan_task_execute"]["warnings"]
+            missing_content = [
+                warning
+                for warning in warnings
+                if warning["code"] == "task_content_missing_fields"
+                and warning.get("stable_id") in task_ids
+            ]
+            self.assertEqual(missing_content, [])
 
 
 if __name__ == "__main__":

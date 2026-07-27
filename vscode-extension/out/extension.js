@@ -456,8 +456,9 @@ class WorkflowWebviewManager {
             void vscode.window.showWarningMessage(detail.error);
             return;
         }
-        const result = this.searchResultForItemId(itemId) ?? searchResultFromItem(detail.value);
-        await this.navigate({ type: 'searchItem', result, detail: detail.value }, { pushHistory: true, reveal: false });
+        const enrichedDetail = await enrichTaskDetail(detail.value);
+        const result = this.searchResultForItemId(itemId) ?? searchResultFromItem(enrichedDetail);
+        await this.navigate({ type: 'searchItem', result, detail: enrichedDetail }, { pushHistory: true, reveal: false });
     }
     searchResultForItemId(itemId) {
         if (this.currentView.type === 'search') {
@@ -519,6 +520,8 @@ function renderOverview(status, archives, searchQuery = '') {
         ? String(status.active_run.request_summary || status.active_run.slug || 'active')
         : 'No active run';
     const activeRunSlug = status.active_run ? String(status.active_run.slug || 'active') : 'No active run';
+    const activeBatches = Array.isArray(status.active_batches) ? status.active_batches : [];
+    const activeExecutions = Array.isArray(status.active_executions) ? status.active_executions : [];
     const workflowTabs = [
         {
             id: 'plan',
@@ -567,6 +570,8 @@ function renderOverview(status, archives, searchQuery = '') {
       ${metric('Run progress', `${completionPercent}%`, `${completedTasks} of ${totalTasks} work items completed`)}
       ${metric('Open work', String(openTasks), `${inProgressTasks} active / ${blockedTasks} blocked`)}
       ${metric('Plans', String(status.plans.length), 'execution specs in this run')}
+      ${metric(localize('activeBatches'), String(activeBatches.length), localize('activeExecutions'))}
+      ${metric(localize('activeExecutions'), String(activeExecutions.length), localize('activeBatches'))}
       ${metric('Archives', String(archives.length), 'recent saved runs')}
     </section>
     <main class="dashboard-grid">
@@ -581,6 +586,7 @@ function renderOverview(status, archives, searchQuery = '') {
           </div>
           ${renderTaskBoard(status.tasks)}
         </section>
+        ${renderActiveBatchesPanel(activeBatches)}
         <section class="panel saved-views">
           <div class="section-heading">
             <div>
@@ -852,6 +858,43 @@ function renderRunFocusPanel(status, taskCounts) {
     </section>
   `;
 }
+function renderActiveBatchesPanel(batches) {
+    if (!batches.length) {
+        return '';
+    }
+    const rows = batches.map((payload, index) => {
+        const batch = payload.batch ?? {};
+        const executions = Array.isArray(payload.executions) ? payload.executions : [];
+        const group = batch.parallel_group || localize('none');
+        const state = batch.state || localize('active');
+        const batchId = batch.batch_id || batch.id || `${localize('batch')} ${index + 1}`;
+        const taskIds = executions
+            .map((execution) => execution.task_id)
+            .filter((taskId) => Boolean(taskId))
+            .join(', ');
+        return `
+      <article class="item compact">
+        <div class="item-head">
+          <strong>${escapeHtml(batchId)}</strong>
+          <span class="badge ${escapeAttribute(statusClass(state))}">${escapeHtml(state)}</span>
+        </div>
+        <p>${escapeHtml(localize('batchSummary', { group, state, count: executions.length }))}</p>
+        ${taskIds ? `<p class="muted">${escapeHtml(taskIds)}</p>` : ''}
+      </article>
+    `;
+    }).join('');
+    return `
+    <section class="panel">
+      <div class="section-heading compact-heading">
+        <div>
+          <p class="eyebrow">${escapeHtml(localize('execution'))}</p>
+          <h2>${escapeHtml(localize('activeBatches'))}</h2>
+        </div>
+      </div>
+      ${rows}
+    </section>
+  `;
+}
 function renderFocusRow(label, value, detail) {
     return `
     <div class="focus-row">
@@ -982,14 +1025,22 @@ function renderSearchItemView(result, detail) {
   `;
 }
 function renderItemMetadata(item) {
+    const activeExecution = item.active_execution;
     const executionFields = [
-        ['Spec', item.spec_id],
-        ['Goal', item.goal],
-        ['Action', item.action],
-        ['Verification', item.verification],
-        ['Result', item.result],
-        ['Blocker', item.blocker],
-        ['Next Action', item.next_action]
+        [localize('spec'), item.spec_id],
+        [localize('goal'), item.goal],
+        [localize('action'), item.action],
+        [localize('verification'), item.verification],
+        [localize('result'), item.result],
+        [localize('blocker'), item.blocker],
+        [localize('nextAction'), item.next_action],
+        [localize('executionMode'), item.execution_mode],
+        [localize('executor'), item.executor_kind],
+        [localize('parallelGroup'), item.parallel_group],
+        [localize('ownedPaths'), item.owned_paths?.join(', ')],
+        [localize('dependencies'), item.depends_on?.join(', ')],
+        [localize('executionId'), activeExecution?.execution_id],
+        [localize('executionState'), activeExecution?.execution_state]
     ];
     const auditFields = [
         ['Related IDs', item.related_ids],
@@ -1344,6 +1395,28 @@ async function safeItemDetail(itemId) {
     catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : localize('failedParseItemDetailJson') };
     }
+}
+async function enrichTaskDetail(detail) {
+    if (detail.kind !== 'task') {
+        return detail;
+    }
+    const status = await safeTapl(['status', '--json', '--full']);
+    if (!status.ok) {
+        return detail;
+    }
+    const task = status.value.tasks.find((candidate) => candidate.stable_id === detail.stable_id);
+    if (!task) {
+        return detail;
+    }
+    return {
+        ...detail,
+        execution_mode: detail.execution_mode ?? task.execution_mode,
+        executor_kind: detail.executor_kind ?? task.executor_kind,
+        parallel_group: detail.parallel_group ?? task.parallel_group,
+        owned_paths: detail.owned_paths ?? task.owned_paths,
+        depends_on: detail.depends_on ?? task.depends_on,
+        active_execution: task.active_execution
+    };
 }
 async function searchTapl(query) {
     const result = await runTapl(['search', query, '--json']);

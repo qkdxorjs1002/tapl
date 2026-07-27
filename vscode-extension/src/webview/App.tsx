@@ -15,6 +15,7 @@ import type {
   TaplArchive,
   TaplArchiveDetail,
   TaplEvent,
+  TaplExecutionBatch,
   TaplItem,
   TaplItemDetail,
   TaplJsonValue,
@@ -182,6 +183,8 @@ function OverviewView({
   const nextTask = status.tasks.find((task) => task.status === 'In Progress')
     ?? status.tasks.find((task) => task.status === 'Pending');
   const currentPlan = status.plans[0];
+  const activeBatches = Array.isArray(status.active_batches) ? status.active_batches : [];
+  const activeExecutions = Array.isArray(status.active_executions) ? status.active_executions : [];
 
   return (
     <>
@@ -222,6 +225,8 @@ function OverviewView({
         <Stat label={t('openWork')} value={String(openTasks)} detail={t('activeAndBlocked', { active: activeCount, blocked: blockedCount })} tone={blockedCount ? 'blocked' : 'in-progress'} />
         <Stat label={t('currentPlan')} value={String(status.plans.length)} detail={currentPlan ? conciseText(currentPlan.title, 48) : t('noExecutionSpec')} tone="info" />
         <Stat label={t('nextTask')} value={nextTask ? nextTask.stable_id : t('none')} detail={nextTask ? conciseText(nextTask.title, 48) : t('queueIsClear')} tone="pending" />
+        <Stat label={t('activeBatches')} value={String(activeBatches.length)} detail={t('activeExecutions')} tone={activeBatches.length ? 'in-progress' : undefined} />
+        <Stat label={t('activeExecutions')} value={String(activeExecutions.length)} detail={t('activeBatches')} tone={activeExecutions.length ? 'in-progress' : undefined} />
         <Stat label={t('archives')} value={String(archives.length)} detail={t('recentSavedRuns')} tone="completed" />
       </section>
       <section className="tapl-grid">
@@ -233,6 +238,7 @@ function OverviewView({
           >
             <TaskBoard tasks={status.tasks} layout={layout} />
           </Card>
+          <ActiveBatches batches={activeBatches} />
           <Card title={t('workflowRecords')} eyebrow={t('views')}>
             <RecordTabs
               tabs={[
@@ -818,6 +824,37 @@ function ArchiveSummary({ archive }: { archive: TaplArchive }): JSX.Element {
   );
 }
 
+function ActiveBatches({ batches }: { batches: TaplExecutionBatch[] }): JSX.Element {
+  const { t } = useI18n();
+  if (!batches.length) {
+    return null;
+  }
+  return (
+    <Card title={t('activeBatches')} eyebrow={t('execution')}>
+      <div className="tapl-stack">
+        {batches.map((payload, index) => {
+          const batch = payload.batch ?? {};
+          const executions = Array.isArray(payload.executions) ? payload.executions : [];
+          const group = batch.parallel_group || t('none');
+          const state = batch.state || t('active');
+          const batchId = batch.batch_id || batch.id || `${t('batch')} ${index + 1}`;
+          const taskIds = executions.map((execution) => execution.task_id).filter(Boolean).join(', ');
+          return (
+            <article key={batchId} className="tapl-item tapl-record-card">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <strong>{batchId}</strong>
+                <Badge label={state} tone={statusClass(state)} />
+              </div>
+              <p className="m-0 text-sm">{t('batchSummary', { group, state, count: executions.length })}</p>
+              {taskIds ? <p className="tapl-muted mt-2 text-xs">{taskIds}</p> : null}
+            </article>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 function RunFocus({ status, counts }: { status: TaplStatus; counts: Record<string, number> }): JSX.Element {
   const { t } = useI18n();
   const currentPlan = status.plans[0];
@@ -825,12 +862,16 @@ function RunFocus({ status, counts }: { status: TaplStatus; counts: Record<strin
   const latestFinding = status.findings[0];
   const nextTask = status.tasks.find((task) => task.status === 'In Progress')
     ?? status.tasks.find((task) => task.status === 'Pending');
+  const activeBatches = Array.isArray(status.active_batches) ? status.active_batches.length : 0;
+  const activeExecutions = Array.isArray(status.active_executions) ? status.active_executions.length : 0;
   return (
     <Card title={t('runHealth')} eyebrow={t('focus')} className="tapl-focus-card">
       <div className="tapl-detail-grid">
         <FocusRow label={t('currentPlan')} value={currentPlan ? currentPlan.title : t('noPlanRecordsTitle')} detail={currentPlan?.stable_id} />
         <FocusRow label={t('nextWork')} value={nextTask ? nextTask.title : t('noActiveTask')} detail={nextTask?.stable_id} />
         <FocusRow label={t('blocked')} value={t('blockedWorkItems', { count: counts.Blocked ?? blockedTasks.length })} detail={blockedTasks[0]?.title} />
+        <FocusRow label={t('activeBatches')} value={String(activeBatches)} detail={t('activeExecutions')} />
+        <FocusRow label={t('activeExecutions')} value={String(activeExecutions)} />
         <FocusRow label={t('latestFinding')} value={latestFinding ? latestFinding.title : t('noFindings')} detail={latestFinding?.stable_id} />
       </div>
     </Card>
@@ -872,6 +913,7 @@ function SearchResult({ result, send }: { result: TaplSearchResult; send: (messa
 
 function ItemMetadata({ item }: { item: TaplItemDetail }): JSX.Element {
   const { t } = useI18n();
+  const activeExecution = item.active_execution;
   const executionFields: Array<[string, unknown]> = [
     [t('spec'), item.spec_id],
     [t('goal'), item.goal],
@@ -879,7 +921,14 @@ function ItemMetadata({ item }: { item: TaplItemDetail }): JSX.Element {
     [t('verification'), item.verification],
     [t('result'), item.result],
     [t('blocker'), item.blocker],
-    [t('nextAction'), item.next_action]
+    [t('nextAction'), item.next_action],
+    [t('executionMode'), item.execution_mode],
+    [t('executor'), item.executor_kind],
+    [t('parallelGroup'), item.parallel_group],
+    [t('ownedPaths'), item.owned_paths?.join(', ')],
+    [t('dependencies'), item.depends_on?.join(', ')],
+    [t('executionId'), activeExecution?.execution_id],
+    [t('executionState'), activeExecution?.execution_state]
   ];
   const auditFields: Array<[string, unknown]> = [
     [t('relatedIds'), item.related_ids],

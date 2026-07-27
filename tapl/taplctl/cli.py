@@ -55,8 +55,32 @@ def plan_set_epilog() -> str:
 
 
 def task_set_epilog() -> str:
-    return tapl_prompt.task_set_epilog(
+    text = tapl_prompt.task_set_epilog(
         statuses=db.TASK_STATUSES,
+    )
+    text = text.replace(
+        (
+            "Execute planned tasks one at a time in task order: use "
+            "`taplctl task start TASK-001 --agent` immediately before work, then use "
+            "`taplctl task complete`, `taplctl task block`, or `taplctl task skip` "
+            "before starting another task."
+        ),
+        (
+            "Execute sequential tasks one at a time with `taplctl task start`; "
+            "for independent subagent work, declare the same --parallel-group with "
+            "--execution-mode parallel, --executor-kind subagent, and disjoint "
+            "--owned-path values, then use `taplctl task dispatch TASK-001 TASK-002 --agent`."
+        ),
+    )
+    text = text.replace("--id (CLI required):", "--id (required via CLI flag or JSON):")
+    return text + (
+        "\n  Parallel task fields: --execution-mode sequential|parallel, "
+        "--executor-kind main|subagent, --parallel-group GROUP, repeated "
+        "--owned-path PATH, and repeated --depends-on TASK-ID."
+        "\n  Parallel lifecycle: dispatch two or more compatible Pending tasks; "
+        "complete/block/skip requires the exact --execution-id from the dispatch "
+        "manifest and settles the active execution atomically; "
+        "`taplctl batch recover BATCH-ID` recovers interrupted work."
     )
 
 
@@ -142,6 +166,37 @@ def add_task_write_args(
     parser.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
     parser.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
     parser.add_argument("--next-action", default=None, help=tapl_prompt.field_help("task", "next_action"))
+    parser.add_argument(
+        "--execution-mode",
+        choices=db.EXECUTION_MODES,
+        default=None,
+        help="Task execution mode: sequential or parallel.",
+    )
+    parser.add_argument(
+        "--executor-kind",
+        choices=db.EXECUTOR_KINDS,
+        default=None,
+        help="Task executor: main agent or subagent.",
+    )
+    parser.add_argument(
+        "--parallel-group",
+        default=None,
+        help="Shared non-empty group id for tasks dispatched together.",
+    )
+    parser.add_argument(
+        "--owned-path",
+        dest="owned_paths",
+        action="append",
+        default=None,
+        help="File or directory owned by this task. Repeat for multiple paths.",
+    )
+    parser.add_argument(
+        "--depends-on",
+        dest="depends_on",
+        action="append",
+        default=None,
+        help="Task id that must be Completed first. Repeat for multiple dependencies.",
+    )
     parser.add_argument(
         "--custom-fields",
         type=custom_fields_arg,
@@ -245,6 +300,16 @@ def custom_fields_arg(value: str) -> dict[str, Any]:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def json_object_arg(value: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(f"invalid JSON object: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise argparse.ArgumentTypeError("value must be a JSON object")
+    return payload
+
+
 def validate_custom_fields_input(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("custom_fields must be a JSON object")
@@ -265,6 +330,39 @@ def payload_text(payload: dict[str, Any], *names: str) -> str | None:
             return json.dumps(value, ensure_ascii=False, sort_keys=True)
         return str(value)
     return None
+
+
+def payload_string_list(payload: dict[str, Any], *names: str) -> list[str] | None:
+    for name in names:
+        key = normalize_payload_key(name)
+        if key not in payload or payload[key] is None:
+            continue
+        value = payload[key]
+        if isinstance(value, str):
+            values = [value]
+        elif isinstance(value, list):
+            values = value
+        else:
+            raise ValueError(f"{key} must be a string or an array of strings")
+        if any(not isinstance(item, str) or not item.strip() for item in values):
+            raise ValueError(f"{key} must contain only non-empty strings")
+        return [item.strip() for item in values]
+    return None
+
+
+def merge_json_string_list(
+    args: argparse.Namespace,
+    field: str,
+    payload: dict[str, Any],
+    *aliases: str,
+) -> bool:
+    if getattr(args, field, None) is not None:
+        return False
+    value = payload_string_list(payload, field, *aliases)
+    if value is None:
+        return False
+    setattr(args, field, value)
+    return True
 
 
 def merge_json_fields(
@@ -444,7 +542,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=task_set_epilog(),
         formatter_class=HELP_FORMATTER,
     )
-    add_task_write_args(task_set)
+    add_task_write_args(task_set, required_id=False, include_json_input=True)
     task_set.set_defaults(handler=cmd_task_set)
     task_create = task_sub.add_parser(
         "create",
@@ -461,8 +559,37 @@ def build_parser() -> argparse.ArgumentParser:
     add_json_input_args(task_start)
     add_agent_output_args(task_start)
     task_start.set_defaults(handler=cmd_task_start)
+    task_dispatch = task_sub.add_parser(
+        "dispatch",
+        help="Atomically dispatch multiple parallel subagent tasks.",
+        description=(
+            "Validate and atomically dispatch two or more compatible Pending tasks, "
+            "then print a per-task execution manifest."
+        ),
+    )
+    task_dispatch.add_argument("ids", nargs="*", help="Task ids to dispatch together.")
+    task_dispatch.add_argument("--batch-id", default=None, help="Idempotent execution batch id.")
+    task_dispatch.add_argument(
+        "--failure-policy",
+        default=None,
+        help=f"Batch failure policy. Defaults to {db.DEFAULT_FAILURE_POLICY}.",
+    )
+    task_dispatch.add_argument(
+        "--execution-metadata",
+        type=json_object_arg,
+        default=None,
+        help="JSON object mapping task ids to executor_ref/model/reasoning_effort objects.",
+    )
+    add_json_input_args(task_dispatch)
+    add_agent_output_args(task_dispatch)
+    task_dispatch.set_defaults(handler=cmd_task_dispatch)
     task_complete = task_sub.add_parser("complete", help="Mark one task Completed.", description="Mark one task Completed.")
     task_complete.add_argument("id", help=tapl_prompt.field_help("task", "id"))
+    task_complete.add_argument(
+        "--execution-id",
+        default=None,
+        help="Execution id to settle. Required when the task has an active parallel execution.",
+    )
     task_complete.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
     task_complete.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
     task_complete.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
@@ -471,6 +598,11 @@ def build_parser() -> argparse.ArgumentParser:
     task_complete.set_defaults(handler=cmd_task_complete)
     task_block = task_sub.add_parser("block", help="Mark one task Blocked.", description="Mark one task Blocked.")
     task_block.add_argument("id", help=tapl_prompt.field_help("task", "id"))
+    task_block.add_argument(
+        "--execution-id",
+        default=None,
+        help="Execution id to settle. Required when the task has an active parallel execution.",
+    )
     task_block.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
     task_block.add_argument("--next-action", default=None, help=tapl_prompt.field_help("task", "next_action"))
     task_block.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
@@ -480,11 +612,42 @@ def build_parser() -> argparse.ArgumentParser:
     task_block.set_defaults(handler=cmd_task_block)
     task_skip = task_sub.add_parser("skip", help="Mark one task Skipped.", description="Mark one task Skipped.")
     task_skip.add_argument("id", help=tapl_prompt.field_help("task", "id"))
+    task_skip.add_argument(
+        "--execution-id",
+        default=None,
+        help="Execution id to settle. Required when the task has an active parallel execution.",
+    )
     task_skip.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
     task_skip.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
     add_json_input_args(task_skip)
     add_agent_output_args(task_skip)
     task_skip.set_defaults(handler=cmd_task_skip)
+
+    batch = sub.add_parser("batch", help="Manage parallel execution batches.", formatter_class=HELP_FORMATTER)
+    batch_sub = batch.add_subparsers(dest="batch_command")
+    batch_cancel = batch_sub.add_parser(
+        "cancel",
+        help="Cancel an active batch and recover or block its tasks.",
+        description="Cancel an active execution batch. Tasks return to Pending unless --block is used.",
+    )
+    batch_cancel.add_argument("id", help="Execution batch id.")
+    batch_cancel.add_argument("--reason", default="", help="Cancellation reason.")
+    batch_cancel.add_argument(
+        "--block",
+        action="store_true",
+        help="Leave cancelled tasks Blocked instead of recovering them to Pending.",
+    )
+    add_agent_output_args(batch_cancel)
+    batch_cancel.set_defaults(handler=cmd_batch_cancel)
+    batch_recover = batch_sub.add_parser(
+        "recover",
+        help="Cancel a stale active batch and recover its tasks to Pending.",
+        description="Recover an interrupted active execution batch so its tasks can be dispatched again.",
+    )
+    batch_recover.add_argument("id", help="Execution batch id.")
+    batch_recover.add_argument("--reason", default="", help="Recovery reason.")
+    add_agent_output_args(batch_recover)
+    batch_recover.set_defaults(handler=cmd_batch_recover)
 
     finding = sub.add_parser("finding", help="Manage findings.")
     finding_sub = finding.add_subparsers(dest="finding_command")
@@ -600,7 +763,15 @@ def build_parser() -> argparse.ArgumentParser:
     next_cmd.set_defaults(handler=cmd_next)
 
     recipe = sub.add_parser("recipe", help="Show agent command recipes.", description="Show agent command recipes.")
-    recipe.add_argument("name", nargs="?", default="all", help="Recipe name, e.g. plan-apply, task-create, task-complete, approval-approve, archive-finish.")
+    recipe.add_argument(
+        "name",
+        nargs="?",
+        default="all",
+        help=(
+            "Recipe name, e.g. plan-apply, task-create, task-dispatch, "
+            "task-complete, batch-recover, archive-finish."
+        ),
+    )
     add_agent_output_args(recipe)
     recipe.set_defaults(handler=cmd_recipe)
 
@@ -844,10 +1015,14 @@ def status_output_payload(
             "tasks": len(tasks),
             "findings": len(findings),
             "archives": archive_count,
+            "active_batches": len(payload.get("active_batches") or []),
+            "active_executions": len(payload.get("active_executions") or []),
         },
         "plans": plans if full else [compact_status_item(item) for item in plans],
         "tasks": tasks if full else [compact_status_item(item) for item in tasks],
         "findings": findings if full else [compact_status_item(item) for item in findings],
+        "active_batches": list(payload.get("active_batches") or []),
+        "active_executions": list(payload.get("active_executions") or []),
     }
     for key in ("config", "plan_task_execute", "approvals"):
         if key in payload:
@@ -924,8 +1099,11 @@ AGENT_SKIP_KEYS = {
 }
 
 AGENT_LIST_ITEM_TAGS = {
+    "active_batches": "batch",
+    "active_executions": "execution",
     "approvals": "approval",
     "archives": "archive",
+    "executions": "execution",
     "files": "file",
     "findings": "finding",
     "instructions": "instruction",
@@ -965,6 +1143,8 @@ def agent_status(payload: dict[str, Any]) -> str:
     approvals = payload.get("approvals") if isinstance(payload.get("approvals"), dict) else {}
     approval = approvals.get(db.DEFAULT_APPROVAL_KIND) if isinstance(approvals, dict) else None
     append_agent_mapping(lines, 1, "execution_approval", approval or {}, ("state", "decision", "prompt", "source"))
+    append_agent_node(lines, 1, "active_batches", payload.get("active_batches"))
+    append_agent_node(lines, 1, "active_executions", payload.get("active_executions"))
     append_agent_issues(lines, payload.get("plan_task_execute"))
     append_agent_items(lines, 1, "plans", "plan", payload.get("plans"), AGENT_STATUS_PLAN_FIELDS)
     append_agent_items(lines, 1, "tasks", "task", payload.get("tasks"), AGENT_STATUS_TASK_FIELDS)
@@ -1104,6 +1284,8 @@ def append_agent_counts(lines: list[str], payload: dict[str, Any]) -> None:
         "tasks": counts.get("tasks", 0),
         "findings": counts.get("findings", 0),
         "incomplete_tasks": payload.get("incomplete_tasks", 0),
+        "active_batches": counts.get("active_batches", 0),
+        "active_executions": counts.get("active_executions", 0),
     }
     append_agent_mapping(lines, 1, "counts", values, tuple(values.keys()))
 
@@ -1356,6 +1538,12 @@ TASK_WRITE_FIELDS = (
     "result",
     "blocker",
     "next_action",
+    "execution_mode",
+    "executor_kind",
+    "parallel_group",
+    "owned_paths",
+    "depends_on",
+    "execution_id",
     "custom_fields",
 )
 
@@ -1384,14 +1572,26 @@ def merge_task_payload(args: argparse.Namespace) -> tuple[str, ...]:
     payload = read_json_object_input(args)
     updated = list(merge_json_fields(
         args,
-        tuple(field for field in TASK_WRITE_FIELDS if field != "custom_fields"),
+        tuple(
+            field
+            for field in TASK_WRITE_FIELDS
+            if field not in ("custom_fields", "owned_paths", "depends_on")
+        ),
         aliases={
             "id": ("task_id", "stable_id"),
             "spec_id": ("spec-id", "source_plan", "source_spec"),
             "next_action": ("next-action",),
+            "execution_mode": ("execution-mode",),
+            "executor_kind": ("executor-kind",),
+            "parallel_group": ("parallel-group",),
+            "execution_id": ("execution-id",),
         },
         payload=payload,
     ))
+    if merge_json_string_list(args, "owned_paths", payload, "owned-paths", "owned_path"):
+        updated.append("owned_paths")
+    if merge_json_string_list(args, "depends_on", payload, "depends-on", "dependencies"):
+        updated.append("depends_on")
     merge_custom_fields_payload(args, payload, updated)
     return tuple(updated)
 
@@ -1490,6 +1690,9 @@ def write_plan(args: argparse.Namespace, *, operation: str) -> int:
 
 
 def cmd_task_set(args: argparse.Namespace) -> int:
+    merge_task_payload(args)
+    if not require_arg(args, "id", "--id", command="task set"):
+        return 1
     return write_task(args, operation="task_set")
 
 
@@ -1509,6 +1712,44 @@ def cmd_task_start(args: argparse.Namespace) -> int:
     return write_task(args, operation="task_start")
 
 
+def cmd_task_dispatch(args: argparse.Namespace) -> int:
+    payload = read_json_object_input(args)
+    if not args.ids:
+        args.ids = payload_string_list(payload, "task_ids", "task-ids", "ids", "tasks") or []
+    merge_json_fields(
+        args,
+        ("batch_id", "failure_policy"),
+        aliases={
+            "batch_id": ("batch-id",),
+            "failure_policy": ("failure-policy",),
+        },
+        payload=payload,
+    )
+    if args.execution_metadata is None and "execution_metadata" in payload:
+        metadata = payload["execution_metadata"]
+        if not isinstance(metadata, dict):
+            raise ValueError("execution_metadata must be a JSON object")
+        args.execution_metadata = metadata
+    failure_policy = args.failure_policy or db.DEFAULT_FAILURE_POLICY
+    manifest = db.dispatch_tasks(
+        open_conn(args),
+        args.ids,
+        batch_id=args.batch_id,
+        failure_policy=failure_policy,
+        execution_metadata=args.execution_metadata,
+    )
+    output = {
+        "ok": True,
+        "operation": "task_dispatch",
+        **manifest,
+    }
+    if args.agent:
+        print(agent_output(output, "tapl_dispatch_manifest"))
+    else:
+        emit(output, args.json, args.agent)
+    return 0
+
+
 def cmd_task_complete(args: argparse.Namespace) -> int:
     merge_task_payload(args)
     args.status = "Completed"
@@ -1516,7 +1757,7 @@ def cmd_task_complete(args: argparse.Namespace) -> int:
         return 1
     if not require_arg(args, "result", "--result", command="task complete"):
         return 1
-    return write_task(args, operation="task_complete")
+    return settle_or_write_task(args, operation="task_complete")
 
 
 def cmd_task_block(args: argparse.Namespace) -> int:
@@ -1526,13 +1767,110 @@ def cmd_task_block(args: argparse.Namespace) -> int:
         return 1
     if not require_arg(args, "next_action", "--next-action", command="task block"):
         return 1
-    return write_task(args, operation="task_block")
+    return settle_or_write_task(args, operation="task_block")
 
 
 def cmd_task_skip(args: argparse.Namespace) -> int:
     merge_task_payload(args)
     args.status = "Skipped"
-    return write_task(args, operation="task_skip")
+    return settle_or_write_task(args, operation="task_skip")
+
+
+def active_execution_id_for_task(conn: sqlite3.Connection, task_id: str) -> str | None:
+    run = db.active_run(conn)
+    if run is None:
+        return None
+    row = conn.execute(
+        """
+        SELECT te.id
+        FROM task_executions te
+        JOIN items i ON i.id = te.task_item_id
+        WHERE i.run_id = ?
+          AND i.kind = 'task'
+          AND i.stable_id = ?
+          AND te.state IN ('dispatched', 'running')
+        LIMIT 1
+        """,
+        (run["id"], task_id),
+    ).fetchone()
+    return str(row["id"]) if row is not None else None
+
+
+def settle_or_write_task(args: argparse.Namespace, *, operation: str) -> int:
+    ensure_attrs(args, TASK_WRITE_FIELDS)
+    conn = open_conn(args)
+    active_execution_id = active_execution_id_for_task(conn, args.id)
+    if active_execution_id is not None and args.execution_id is None:
+        emit(
+            {
+                "ok": False,
+                "error": (
+                    f"{args.id} has an active parallel execution; "
+                    "pass the exact --execution-id from its dispatch manifest."
+                ),
+                "task_id": args.id,
+                "suggestion": (
+                    f"taplctl task {operation.removeprefix('task_')} {args.id} "
+                    "--execution-id '<execution-id>' --agent"
+                ),
+            },
+            args.json,
+            args.agent,
+        )
+        return 1
+    if args.execution_id is None:
+        return write_task(args, operation=operation)
+    receipt = db.settle_task_execution(
+        conn,
+        args.execution_id,
+        task_status=args.status,
+        task_id=args.id,
+        verification=args.verification,
+        result=args.result,
+        blocker=args.blocker,
+        next_action=args.next_action,
+        custom_fields=args.custom_fields,
+    )
+    output = {
+        "ok": True,
+        "operation": operation,
+        "settled_execution_id": args.execution_id,
+        **receipt,
+    }
+    if args.agent:
+        print(agent_output(output, "tapl_batch_receipt"))
+    else:
+        emit(output, args.json, args.agent)
+    return 0
+
+
+def cmd_batch_cancel(args: argparse.Namespace) -> int:
+    receipt = db.cancel_execution_batch(
+        open_conn(args),
+        args.id,
+        reason=args.reason,
+        recover_pending=not args.block,
+    )
+    output = {"ok": True, "operation": "batch_cancel", **receipt}
+    if args.agent:
+        print(agent_output(output, "tapl_batch_receipt"))
+    else:
+        emit(output, args.json, args.agent)
+    return 0
+
+
+def cmd_batch_recover(args: argparse.Namespace) -> int:
+    receipt = db.recover_execution_batch(
+        open_conn(args),
+        args.id,
+        reason=args.reason,
+    )
+    output = {"ok": True, "operation": "batch_recover", **receipt}
+    if args.agent:
+        print(agent_output(output, "tapl_batch_receipt"))
+    else:
+        emit(output, args.json, args.agent)
+    return 0
 
 
 def write_task(args: argparse.Namespace, *, operation: str) -> int:
@@ -1610,6 +1948,11 @@ def write_task(args: argparse.Namespace, *, operation: str) -> int:
         blocker=blocker,
         next_action=next_action,
         custom_fields=args.custom_fields,
+        execution_mode=args.execution_mode,
+        executor_kind=args.executor_kind,
+        parallel_group=args.parallel_group,
+        owned_paths=args.owned_paths,
+        depends_on=args.depends_on,
     )
     plan_task_execute = validation.validate_plan_task_execute(conn)
     if args.agent:
@@ -1629,6 +1972,11 @@ def write_task(args: argparse.Namespace, *, operation: str) -> int:
                         "result",
                         "blocker",
                         "next_action",
+                        "execution_mode",
+                        "executor_kind",
+                        "parallel_group",
+                        "owned_paths",
+                        "depends_on",
                         "custom_fields",
                     ),
                 ),
@@ -1884,6 +2232,33 @@ def next_recommendations(state: dict[str, Any], plan_task_execute: dict[str, Any
     in_progress = first_task_with_status(tasks, ("In Progress",))
     if in_progress:
         label = task_id_for_recipe(in_progress)
+        parallel_in_progress = [
+            task
+            for task in tasks
+            if task.get("status") == "In Progress"
+            and task.get("execution_mode") == "parallel"
+            and task.get("executor_kind") == "subagent"
+        ]
+        if parallel_in_progress:
+            label = task_id_for_recipe(parallel_in_progress[0])
+            return [
+                recommendation(
+                    "settle-parallel-task",
+                    (
+                        f"taplctl task complete {label} --execution-id '<execution-id>' "
+                        "--verification '<check>' --result '<result>' --agent"
+                    ),
+                    (
+                        "One or more parallel subagent tasks are active; use the exact "
+                        "execution id from the dispatch manifest to prevent stale settlement."
+                    ),
+                ),
+                recommendation(
+                    "recover-parallel-batch",
+                    "taplctl batch recover '<batch-id>' --reason '<reason>' --agent",
+                    "Use the dispatch manifest batch id if an interrupted batch must return to Pending.",
+                ),
+            ]
         return [
             recommendation(
                 "complete-or-block-task",
@@ -1899,6 +2274,35 @@ def next_recommendations(state: dict[str, Any], plan_task_execute: dict[str, Any
 
     pending = first_task_with_status(tasks, ("Pending",))
     if pending:
+        parallel_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for task in tasks:
+            if (
+                task.get("status") == "Pending"
+                and task.get("execution_mode") == "parallel"
+                and task.get("executor_kind") == "subagent"
+                and str(task.get("parallel_group") or "").strip()
+            ):
+                key = (
+                    str(task.get("spec_id") or ""),
+                    str(task.get("parallel_group") or ""),
+                )
+                parallel_groups.setdefault(key, []).append(task)
+        dispatchable = next(
+            (group for group in parallel_groups.values() if len(group) >= 2),
+            None,
+        )
+        if dispatchable:
+            labels = " ".join(task_id_for_recipe(task) for task in dispatchable)
+            return [
+                recommendation(
+                    "dispatch-parallel-tasks",
+                    f"taplctl task dispatch {labels} --agent",
+                    (
+                        "At least two Pending subagent tasks share a parallel group; "
+                        "dispatch validates dependencies and owned paths atomically."
+                    ),
+                )
+            ]
         label = task_id_for_recipe(pending)
         return [
             recommendation(
@@ -1938,9 +2342,29 @@ def lifecycle_recipes() -> list[dict[str, str]]:
         recipe("task-create", "taplctl task create --stdin-json --agent", "Create a pending executable task from a JSON object."),
         recipe("approval-approve", "taplctl approval approve --prompt 'Execute TASK-001 from PLAN-001' --source explicit_user --agent", "Record execution approval."),
         recipe("task-start", "taplctl task start TASK-001 --agent", "Mark one task In Progress without quoting a status value."),
+        recipe(
+            "task-dispatch",
+            "taplctl task dispatch TASK-001 TASK-002 --execution-metadata '{\"TASK-001\":{\"model\":\"gpt-5.6-sol\",\"reasoning_effort\":\"xhigh\"}}' --agent",
+            "Atomically dispatch compatible Pending tasks and return their execution ids.",
+        ),
         recipe("task-complete", "taplctl task complete TASK-001 --verification '<check>' --result '<result>' --agent", "Mark one task Completed."),
+        recipe(
+            "task-settle",
+            "taplctl task complete TASK-001 --execution-id '<execution-id>' --verification '<check>' --result '<result>' --agent",
+            "Atomically settle one parallel execution and its task.",
+        ),
         recipe("task-block", "taplctl task block TASK-001 --blocker '<blocker>' --next-action '<next action>' --agent", "Mark one task Blocked."),
         recipe("task-skip", "taplctl task skip TASK-001 --result '<skip reason>' --agent", "Mark one task Skipped."),
+        recipe(
+            "batch-cancel",
+            "taplctl batch cancel '<batch-id>' --reason '<reason>' --block --agent",
+            "Cancel active executions and leave their tasks Blocked.",
+        ),
+        recipe(
+            "batch-recover",
+            "taplctl batch recover '<batch-id>' --reason '<reason>' --agent",
+            "Cancel an interrupted batch and return active tasks to Pending.",
+        ),
         recipe("run-finish", "taplctl run finish --result '<result summary>' --agent", "Record the completed result summary."),
         recipe("archive-finish", "taplctl archive finish --slug '<timestamp-task-slug>' --summary '<archive summary>' --agent", "Archive the active run."),
     ]
@@ -2126,6 +2550,19 @@ def humanize(payload: dict[str, Any]) -> str:
         return "\n".join(lines)
     if "active_run" in payload and "task_counts" in payload:
         return humanize_status(payload)
+    if "batch" in payload and "executions" in payload:
+        batch = payload["batch"]
+        batch_id = batch.get("batch_id") or batch.get("id") or ""
+        lines = [f"batch {batch_id}: {batch.get('state', '')}"]
+        lines.extend(
+            (
+                f"{execution.get('task_id', '')} "
+                f"{execution.get('execution_state', '')} "
+                f"{execution.get('execution_id', '')}"
+            ).strip()
+            for execution in payload.get("executions") or []
+        )
+        return "\n".join(lines)
     if "item" in payload:
         item = payload["item"]
         return f"{item['kind']} {item['stable_id']} {item['title']}"
