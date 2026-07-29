@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from string import Template
 from typing import Iterable, Any
 
+from . import config as tapl_config
+
 
 PLAN_KEY_LABELS = (
     "Objective",
@@ -223,6 +225,7 @@ Tasks are executable implementation or verification work derived from the stored
 - Keep tasks focused on the current execution window and next useful step.
 Fixed task granularity (`task_granularity = "very_granular"`): ${task_granularity_guidance}
 ${task_execution_order_guidance}
+${subagent_delegation_guidance}
 ${context_execution_approval_guidance}
 
 - Task state must reflect current reality: only active work is In Progress, completed work has implementation and verification done, and blocked work records the blocker and next action.
@@ -421,6 +424,7 @@ def template_variables(**overrides: Any) -> dict[str, str]:
         "workflow_order_guidance": workflow_order_guidance(),
         "workflow_stage_progression_guidance": workflow_stage_progression_guidance(),
         "task_execution_order_guidance": task_execution_order_guidance(),
+        "subagent_delegation_guidance": subagent_delegation_guidance(),
         "plan_key_label_guidance": plan_key_label_guidance(),
         "plan_format_guidance": plan_format_guidance(),
         "task_plan_dependency_guidance": task_plan_dependency_guidance(),
@@ -846,13 +850,14 @@ def context_workflow_guidance(
     event: str,
     state: dict[str, Any],
     prompt: str = "",
+    subagents: tapl_config.SubagentsConfig | None = None,
 ) -> list[str]:
     if event == "SessionStart":
         return [session_start_guidance()]
     if event == "Stop":
         return [stop_guidance()]
 
-    return [user_prompt_submit_guidance()]
+    return [user_prompt_submit_guidance(subagents=subagents)]
 
 
 def session_start_guidance() -> str:
@@ -863,8 +868,11 @@ def stop_guidance() -> str:
     return render(STOP_GUIDANCE_TEMPLATE)
 
 
-def user_prompt_submit_guidance() -> str:
-    return render(CONTEXT_INJECTION_PROMPT_TEMPLATE)
+def user_prompt_submit_guidance(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
+    return render(
+        CONTEXT_INJECTION_PROMPT_TEMPLATE,
+        subagent_delegation_guidance=subagent_delegation_guidance(subagents),
+    )
 
 
 def context_execution_approval_guidance() -> str:
@@ -1041,6 +1049,61 @@ def task_execution_order_guidance() -> str:
         "Record the actual delegated model and reasoning effort in task custom_fields. If any SubAgent spawn "
         "fails or the root is interrupted, recover or cancel the batch before retrying; never leave a partial "
         "batch or start another batch around it."
+    )
+
+
+def subagents_enabled(subagents: tapl_config.SubagentsConfig | None = None) -> bool:
+    return (subagents or tapl_config.SubagentsConfig()).enabled
+
+
+def configured_subagent_models(
+    subagents: tapl_config.SubagentsConfig | None = None,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    configured: list[tuple[str, tuple[str, ...]]] = []
+    for model in (subagents or tapl_config.SubagentsConfig()).models:
+        name = model.name.strip()
+        efforts = tuple(
+            effort.strip()
+            for effort in model.reasoning_efforts
+            if effort.strip()
+        )
+        if name and efforts:
+            configured.append((name, efforts))
+    return tuple(configured)
+
+
+def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None = None) -> str:
+    if not subagents_enabled(subagents):
+        return ""
+
+    models = configured_subagent_models(subagents)
+    available_models = "\n".join(
+        f"- `{name}`: {', '.join(f'`{effort}`' for effort in efforts)}"
+        for name, efforts in models
+    )
+    if not available_models:
+        available_models = "- No configured model/reasoning-effort pairs are available; do not delegate work."
+
+    return (
+        "### SubAgent Delegation\n\n"
+        "- For every executable task, assess its complexity and difficulty, then delegate it to a SubAgent with an "
+        "efficient, suitable model and reasoning effort. Keep coordination, TAPL record writes, and cross-task "
+        "decisions with the root agent.\n"
+        "- Choose a model and reasoning effort only from the configured pairs below, and only after intersecting them "
+        "with the pairs actually supported by the current SubAgent runtime. Do not request a configured pair that is "
+        "unavailable at runtime; choose the most efficient suitable pair from that intersection.\n"
+        "- Configured available model/reasoning-effort pairs:\n"
+        f"{available_models}\n"
+        "- If the runtime/configuration intersection has no usable pair, report that delegation is unavailable and "
+        "have the root agent execute the task without a SubAgent.\n"
+        "- For parallel delegation, tasks must explicitly use `execution_mode=parallel`, `executor_kind=subagent`, "
+        "the same non-empty `parallel_group`, completed dependencies, and exclusive `owned_paths`; dispatch them "
+        "atomically with `taplctl task dispatch`. The root agent must spawn one SubAgent per manifest execution "
+        "concurrently, keep each worker inside its owned_paths, and settle every task with its exact manifest "
+        "`execution_id` via `taplctl task complete|block|skip --execution-id`. Recover or cancel the batch if any "
+        "spawn fails or the root is interrupted.\n"
+        "- During settlement, record the actual runtime model and reasoning effort used—not merely the requested "
+        "pair—in that task's `custom_fields`; omit it when no SubAgent was used."
     )
 
 

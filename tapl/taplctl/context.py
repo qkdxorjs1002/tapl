@@ -51,6 +51,7 @@ def build_context(
             event=event,
             state=state,
             prompt=prompt,
+            subagents=settings.subagents,
         ),
         "next_actions": next_actions(state, plan_task, event, prompt),
         "validation_issues": validation_issues(plan_task, covered_issue_codes),
@@ -129,11 +130,13 @@ def workflow_guidance(
     event: str,
     state: dict[str, Any],
     prompt: str = "",
+    subagents: tapl_config.SubagentsConfig | None = None,
 ) -> list[str]:
     return tapl_prompt.context_workflow_guidance(
         event=event,
         state=state,
         prompt=prompt,
+        subagents=subagents,
     )
 
 

@@ -331,6 +331,41 @@ taplctl archive create --help
 부족하면, 결과의 numeric `id`를 `taplctl item show --id <id>`에 넘겨
 전체 record detail을 확인한 뒤 사용합니다.
 
+### SubAgent 위임 설정
+
+TAPL은 repo-local `.tapl/config.toml`을 `~/.tapl/config.toml`보다 먼저 읽으므로,
+두 파일이 모두 있으면 repository 설정이 우선합니다. TAPL이 위임 정책과
+model/reasoning allowlist를 agent prompt에 주입할지 다음과 같이 설정합니다.
+
+```toml
+[subagents]
+enabled = true
+
+[subagents.models]
+"gpt-5.6-sol" = ["xhigh", "max"]
+"gpt-5.6-terra" = ["high", "xhigh", "max"]
+"gpt-5.6-luna" = ["high", "xhigh"]
+```
+
+활성화하면 주입되는 정책은 root agent가 모든 실행 작업의 복잡도를 판단하고,
+설정된 model/reasoning 조합 중 효율적인 조합으로 해당 작업을 SubAgent에게
+위임하도록 합니다. TAPL이 제공하는 prompt 내용을 끄려면 다음처럼 설정합니다.
+
+```toml
+[subagents]
+enabled = false
+```
+
+`enabled = false`이면 TAPL은 SubAgent 위임 정책과 model/reasoning allowlist를
+모두 주입하지 않습니다. 이 설정은 `AGENTS.md`처럼 다른 출처에 있는 별도의
+위임 지시까지 제거하지는 않습니다.
+
+설정한 model 목록은 정책상 allowlist일 뿐이며, runtime에 model을 설치하거나
+지원 가능 여부를 보장하지는 않습니다. Root agent는 설정된 model/reasoning
+조합과 현재 runtime이 실제 지원하는 조합의 교집합만 사용해야 하며, 지원하지
+않는 설정 조합을 선택해서는 안 됩니다. 이 교집합이 비어 있으면 root agent가
+해당 작업을 직접 실행합니다.
+
 Plan/task workflow 정책은 config로 바꿀 수 없습니다. TAPL은 항상 매우 상세한
 계획, 계획 확정 전의 명시적 사용자 승인, 독립된 edit·migration·verification 단위의
 작업 분할, durable edit 전의 실행 승인 기록을 요구합니다. `taplctl task set --help`는

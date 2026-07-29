@@ -1270,8 +1270,155 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(cfg.search.hybrid_bm25_ratio, 0.35)
             self.assertEqual(cfg.search.semantic_provider, "auto")
             self.assertEqual(cfg.search.searchd_model_idle_timeout_seconds, 1800)
+            self.assertTrue(cfg.subagents.enabled)
+            self.assertEqual(
+                cfg.subagents.as_dict()["models"],
+                {
+                    "gpt-5.6-sol": ["xhigh", "max"],
+                    "gpt-5.6-terra": ["high", "xhigh", "max"],
+                    "gpt-5.6-luna": ["high", "xhigh"],
+                },
+            )
+            self.assertEqual(cfg.as_dict()["subagents"], cfg.subagents.as_dict())
             self.assertNotIn("plan_task_execute", cfg.as_dict())
             self.assertFalse(hasattr(cfg, "plan_task_execute"))
+
+    def test_config_loads_custom_and_disabled_subagent_settings_without_runtime_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "tapl.toml"
+            config_path.write_text(
+                """
+[subagents]
+enabled = true
+
+[subagents.models]
+"gpt-5.6-luna" = ["high", "xhigh"]
+" future-runtime-model " = [" custom-effort "]
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            cfg = tapl_config.load(config_path)
+
+            self.assertTrue(cfg.subagents.enabled)
+            self.assertEqual(
+                cfg.subagents.as_dict(),
+                {
+                    "enabled": True,
+                    "models": {
+                        "gpt-5.6-luna": ["high", "xhigh"],
+                        "future-runtime-model": ["custom-effort"],
+                    },
+                },
+            )
+
+            config_path.write_text(
+                """
+[subagents]
+enabled = false
+
+[subagents.models]
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            disabled = tapl_config.load(config_path)
+
+            self.assertFalse(disabled.subagents.enabled)
+            self.assertEqual(disabled.subagents.models, ())
+            self.assertEqual(disabled.as_dict()["subagents"], {"enabled": False, "models": {}})
+
+            config_path.write_text(
+                "[subagents]\nenabled = false\n",
+                encoding="utf-8",
+            )
+
+            disabled_with_defaults = tapl_config.load(config_path)
+
+            self.assertFalse(disabled_with_defaults.subagents.enabled)
+            self.assertEqual(
+                disabled_with_defaults.subagents.as_dict()["models"],
+                {
+                    "gpt-5.6-sol": ["xhigh", "max"],
+                    "gpt-5.6-terra": ["high", "xhigh", "max"],
+                    "gpt-5.6-luna": ["high", "xhigh"],
+                },
+            )
+
+    def test_config_strictly_rejects_invalid_subagent_settings(self) -> None:
+        cases = (
+            (
+                "subagents = true\n",
+                "subagents must be a TOML table",
+            ),
+            (
+                '[subagents]\nenabled = "true"\n',
+                "subagents.enabled must be a boolean",
+            ),
+            (
+                '[subagents]\nmodels = ["gpt-5.6-sol"]\n',
+                "subagents.models must be a TOML table",
+            ),
+            (
+                "[subagents]\nenabled = true\n[subagents.models]\n",
+                "subagents.models must define at least one model when subagents.enabled is true",
+            ),
+            (
+                '[subagents.models]\n"" = ["xhigh"]\n',
+                "subagents.models model names must be non-empty strings",
+            ),
+            (
+                '[subagents.models]\nfoo = ["high"]\n" foo" = ["xhigh"]\n',
+                "subagents.models contains duplicate model name: foo",
+            ),
+            (
+                '[subagents.models]\n"gpt-5.6-sol" = "xhigh"\n',
+                "subagents.models.gpt-5.6-sol must be an array of reasoning effort strings",
+            ),
+            (
+                '[subagents.models]\n"gpt-5.6-sol" = []\n',
+                "subagents.models.gpt-5.6-sol must contain at least one reasoning effort",
+            ),
+            (
+                '[subagents.models]\n"gpt-5.6-sol" = ["xhigh", "xhigh"]\n',
+                "subagents.models.gpt-5.6-sol contains duplicate reasoning effort: xhigh",
+            ),
+            (
+                '[subagents.models]\n"gpt-5.6-sol" = ["xhigh", 3]\n',
+                "subagents.models.gpt-5.6-sol[1] must be a non-empty string",
+            ),
+            (
+                '[subagents.models]\nfoo = [" "]\n',
+                "subagents.models.foo[0] must be a non-empty string",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "tapl.toml"
+            for content, expected_error in cases:
+                with self.subTest(expected_error=expected_error):
+                    config_path.write_text(content, encoding="utf-8")
+                    with self.assertRaises(ValueError) as raised:
+                        tapl_config.load(config_path)
+                    self.assertEqual(str(raised.exception), expected_error)
+
+            config_path.write_text(
+                '[subagents]\nenabled = "true"\n',
+                encoding="utf-8",
+            )
+            surfaced = self.run_cli(
+                Path(tmp) / "tapl.db",
+                "--config",
+                str(config_path),
+                "context",
+                "--event",
+                "UserPromptSubmit",
+                "--json",
+            )
+            self.assertEqual(surfaced.returncode, 1, surfaced.stderr)
+            self.assertEqual(
+                json.loads(surfaced.stdout),
+                {"ok": False, "error": "subagents.enabled must be a boolean"},
+            )
 
     def test_approval_cli_records_status_and_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2604,6 +2751,17 @@ searchd_start_timeout_ms = 1
             tapl_config_data = tomllib.loads(
                 (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8")
             )
+            self.assertEqual(
+                tapl_config_data["subagents"],
+                {
+                    "enabled": True,
+                    "models": {
+                        "gpt-5.6-sol": ["xhigh", "max"],
+                        "gpt-5.6-terra": ["high", "xhigh", "max"],
+                        "gpt-5.6-luna": ["high", "xhigh"],
+                    },
+                },
+            )
             self.assertNotIn("plan-task-execute", tapl_config_data)
             self.assertNotIn("plan_task_execute", tapl_config_data)
             self.assertEqual(
@@ -2815,6 +2973,12 @@ planning_approval_level = "less"
 task_granularity = "minimal"
 require_execution_approval = false
 
+[subagents]
+enabled = false
+
+[subagents.models]
+"user-runtime-model" = ["custom-effort"]
+
 [user]
 keep = true
 """.lstrip(),
@@ -2845,6 +3009,15 @@ keep = true
 
             parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(parsed["search"]["max_results"], tapl_config.DEFAULT_SEARCH_MAX_RESULTS)
+            self.assertTrue(parsed["subagents"]["enabled"])
+            self.assertEqual(
+                parsed["subagents"]["models"],
+                {
+                    "gpt-5.6-sol": ["xhigh", "max"],
+                    "gpt-5.6-terra": ["high", "xhigh", "max"],
+                    "gpt-5.6-luna": ["high", "xhigh"],
+                },
+            )
             self.assertNotIn("user", parsed)
             self.assertEqual((tapl_dir / "version").read_text(encoding="utf-8").strip(), __version__)
 
@@ -2868,6 +3041,12 @@ plan_detail = "minimal"
 planning_approval_level = "less"
 task_granularity = "minimal"
 require_execution_approval = false
+
+[subagents]
+enabled = false
+
+[subagents.models]
+"user-runtime-model" = ["custom-effort"]
 
 [user]
 keep = true
@@ -2901,6 +3080,15 @@ keep = true
             self.assertEqual(parsed["search"]["max_results"], 3)
             self.assertEqual(parsed["user"]["keep"], True)
             self.assertEqual(parsed["search"]["mode"], tapl_config.DEFAULT_SEARCH_MODE)
+            self.assertFalse(parsed["subagents"]["enabled"])
+            self.assertEqual(
+                parsed["subagents"]["models"]["user-runtime-model"],
+                ["custom-effort"],
+            )
+            self.assertEqual(
+                parsed["subagents"]["models"]["gpt-5.6-luna"],
+                ["high", "xhigh"],
+            )
             config_text = config_path.read_text(encoding="utf-8")
             for key in (
                 "use_level_subagent",
@@ -3223,6 +3411,9 @@ keep = true
             self.assertIn("## Next Actions", event.stdout)
             self.assertNotIn("## 9. Command Shapes", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
+            self.assertIn("### SubAgent Delegation", event.stdout)
+            self.assertIn("`gpt-5.6-sol`: `xhigh`, `max`", event.stdout)
+            self.assertIn("`gpt-5.6-luna`: `high`, `xhigh`", event.stdout)
 
             event_json = self.run_cli(
                 db_path,
@@ -3239,6 +3430,158 @@ keep = true
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["context"]["prompt_summary"], "Implement lifecycle context")
             self.assertIn("workflow_guidance", payload["context"])
+
+    def test_context_and_user_prompt_hook_apply_enabled_and_disabled_subagent_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            db_path = base / "tapl.db"
+            enabled_config = base / "enabled.toml"
+            disabled_config = base / "disabled.toml"
+            enabled_config.write_text(
+                """
+[subagents]
+enabled = true
+
+[subagents.models]
+"gpt-5.6-luna" = ["xhigh"]
+"future-runtime-model" = ["custom-effort"]
+""".lstrip(),
+                encoding="utf-8",
+            )
+            disabled_config.write_text(
+                """
+[subagents]
+enabled = false
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            context = self.run_cli(
+                db_path,
+                "--config",
+                str(enabled_config),
+                "context",
+                "--event",
+                "UserPromptSubmit",
+                "--json",
+            )
+            self.assertEqual(context.returncode, 0, context.stderr)
+            context_payload = json.loads(context.stdout)
+            self.assertEqual(
+                context_payload["config"]["subagents"],
+                {
+                    "enabled": True,
+                    "models": {
+                        "gpt-5.6-luna": ["xhigh"],
+                        "future-runtime-model": ["custom-effort"],
+                    },
+                },
+            )
+            guidance = "\n".join(context_payload["workflow_guidance"])
+            self.assertIn("### SubAgent Delegation", guidance)
+            self.assertIn("`gpt-5.6-luna`: `xhigh`", guidance)
+            self.assertIn("`future-runtime-model`: `custom-effort`", guidance)
+            self.assertIn("actually supported by the current SubAgent runtime", guidance)
+            self.assertLess(
+                guidance.index("## Tasks And Execution"),
+                guidance.index("### SubAgent Delegation"),
+            )
+            self.assertLess(
+                guidance.index("### SubAgent Delegation"),
+                guidance.index("Fixed execution approval (`require_execution_approval = true`)"),
+            )
+
+            status = self.run_cli(
+                db_path,
+                "--config",
+                str(enabled_config),
+                "status",
+                "--json",
+            )
+            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertEqual(
+                json.loads(status.stdout)["config"]["subagents"],
+                context_payload["config"]["subagents"],
+            )
+
+            hook = self.run_cli(
+                db_path,
+                "--config",
+                str(enabled_config),
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Delegate configured work"}',
+            )
+            self.assertEqual(hook.returncode, 0, hook.stderr)
+            hook_payload = json.loads(hook.stdout)
+            self.assertEqual(
+                hook_payload["context"]["config"]["subagents"],
+                context_payload["config"]["subagents"],
+            )
+            self.assertIn("### SubAgent Delegation", hook_payload["message"])
+            self.assertIn("`gpt-5.6-luna`: `xhigh`", hook_payload["message"])
+
+            disabled_context = self.run_cli(
+                db_path,
+                "--config",
+                str(disabled_config),
+                "context",
+                "--event",
+                "UserPromptSubmit",
+                "--json",
+            )
+            self.assertEqual(disabled_context.returncode, 0, disabled_context.stderr)
+            disabled_payload = json.loads(disabled_context.stdout)
+            self.assertEqual(
+                disabled_payload["config"]["subagents"],
+                {
+                    "enabled": False,
+                    "models": {
+                        "gpt-5.6-sol": ["xhigh", "max"],
+                        "gpt-5.6-terra": ["high", "xhigh", "max"],
+                        "gpt-5.6-luna": ["high", "xhigh"],
+                    },
+                },
+            )
+            self.assertNotIn(
+                "### SubAgent Delegation",
+                "\n".join(disabled_payload["workflow_guidance"]),
+            )
+
+            disabled_hook = self.run_cli(
+                db_path,
+                "--config",
+                str(disabled_config),
+                "hook-event",
+                "--event",
+                "UserPromptSubmit",
+                "--mode",
+                "observe",
+                "--json",
+                input_text='{"prompt": "Run without delegation"}',
+            )
+            self.assertEqual(disabled_hook.returncode, 0, disabled_hook.stderr)
+            disabled_hook_payload = json.loads(disabled_hook.stdout)
+            self.assertNotIn("### SubAgent Delegation", disabled_hook_payload["message"])
+
+            session = self.run_cli(
+                db_path,
+                "--config",
+                str(enabled_config),
+                "context",
+                "--event",
+                "SessionStart",
+                "--json",
+            )
+            self.assertEqual(session.returncode, 0, session.stderr)
+            self.assertNotIn(
+                "### SubAgent Delegation",
+                "\n".join(json.loads(session.stdout)["workflow_guidance"]),
+            )
 
     def test_isolated_hook_config_can_use_repo_taplctl_workflow_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

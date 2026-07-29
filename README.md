@@ -338,6 +338,42 @@ taplctl archive create --help
 snippet is not enough context, use its numeric `id` with
 `taplctl item show --id <id>` before relying on the full record details.
 
+### SubAgent delegation configuration
+
+TAPL loads the repo-local `.tapl/config.toml` before `~/.tapl/config.toml`, so
+the repository configuration takes precedence when both files exist. Configure
+whether TAPL injects its delegation policy and the model/reasoning allowlist
+into the agent prompt as follows:
+
+```toml
+[subagents]
+enabled = true
+
+[subagents.models]
+"gpt-5.6-sol" = ["xhigh", "max"]
+"gpt-5.6-terra" = ["high", "xhigh", "max"]
+"gpt-5.6-luna" = ["high", "xhigh"]
+```
+
+When enabled, the injected policy tells the root agent to assess the complexity
+of every executable task and delegate it using an efficient configured
+model/reasoning pair. To disable that TAPL-provided prompt content, set:
+
+```toml
+[subagents]
+enabled = false
+```
+
+With `enabled = false`, TAPL injects neither its SubAgent delegation policy
+nor its model/reasoning allowlist. This setting does not remove separate
+delegation instructions from another source, such as `AGENTS.md`.
+
+The configured model list is a policy allowlist, not a runtime installation or
+capability guarantee. A root agent must use only the intersection of the
+configured model/reasoning pairs and the pairs its current runtime actually
+supports; unavailable configured pairs must not be selected. If that
+intersection is empty, the root agent executes the task directly.
+
 Plan/task workflow policy is fixed rather than configurable. TAPL always asks
 for a very detailed plan, explicit user confirmation before plan finalization,
 independently split edit/migration/verification tasks, and recorded execution

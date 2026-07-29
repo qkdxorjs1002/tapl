@@ -15,3 +15,13 @@ semantic_provider = "auto"
 
 # 0 disables model unload. The default keeps the model warm for 30 minutes after the last search.
 searchd_model_idle_timeout_seconds = 1800
+
+[subagents]
+# Enable subagent delegation for eligible tasks.
+enabled = true
+
+# Each model maps to the reasoning-effort levels available for delegation.
+[subagents.models]
+"gpt-5.6-sol" = ["xhigh", "max"]
+"gpt-5.6-terra" = ["high", "xhigh", "max"]
+"gpt-5.6-luna" = ["high", "xhigh"]

@@ -17,6 +17,12 @@ DEFAULT_HYBRID_SEMANTIC_RATIO = 0.65
 DEFAULT_SEARCH_MAX_RESULTS = 12
 DEFAULT_SEMANTIC_PROVIDER = "auto"
 DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
+DEFAULT_SUBAGENTS_ENABLED = True
+DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("gpt-5.6-sol", ("xhigh", "max")),
+    ("gpt-5.6-terra", ("high", "xhigh", "max")),
+    ("gpt-5.6-luna", ("high", "xhigh")),
+)
 
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
@@ -50,16 +56,52 @@ class SearchConfig:
 
 
 @dataclass(frozen=True)
+class SubagentModelConfig:
+    name: str
+    reasoning_efforts: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "reasoning_efforts": list(self.reasoning_efforts),
+        }
+
+
+def default_subagent_models() -> tuple[SubagentModelConfig, ...]:
+    return tuple(
+        SubagentModelConfig(name=name, reasoning_efforts=reasoning_efforts)
+        for name, reasoning_efforts in DEFAULT_SUBAGENT_MODELS
+    )
+
+
+@dataclass(frozen=True)
+class SubagentsConfig:
+    enabled: bool = DEFAULT_SUBAGENTS_ENABLED
+    models: tuple[SubagentModelConfig, ...] = field(default_factory=default_subagent_models)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "models": {
+                model.name: list(model.reasoning_efforts)
+                for model in self.models
+            },
+        }
+
+
+@dataclass(frozen=True)
 class TaplConfig:
     path: str
     exists: bool
     search: SearchConfig = field(default_factory=SearchConfig)
+    subagents: SubagentsConfig = field(default_factory=SubagentsConfig)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "path": self.path,
             "exists": self.exists,
             "search": self.search.as_dict(),
+            "subagents": self.subagents.as_dict(),
         }
 
 
@@ -164,10 +206,31 @@ def load(
             "search.searchd_model_idle_timeout_seconds",
         ),
     )
+    subagents_data = table(data, "subagents")
+    subagents_enabled = boolean(
+        setting(
+            subagents_data,
+            "enabled",
+            default=DEFAULT_SUBAGENTS_ENABLED,
+        ),
+        "subagents.enabled",
+    )
+    if "models" in subagents_data:
+        subagent_models = parse_subagent_models(
+            subagents_data["models"],
+            enabled=subagents_enabled,
+        )
+    else:
+        subagent_models = default_subagent_models()
+
     return TaplConfig(
         path=str(config_path),
         exists=exists,
         search=search,
+        subagents=SubagentsConfig(
+            enabled=subagents_enabled,
+            models=subagent_models,
+        ),
     )
 
 
@@ -197,6 +260,65 @@ def choice(value: Any, allowed: tuple[str, ...], key: str) -> str:
         joined = ", ".join(allowed)
         raise ValueError(f"{key} must be one of: {joined}")
     return normalized
+
+
+def boolean(value: Any, key: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean")
+    return value
+
+
+def parse_subagent_models(
+    value: Any,
+    *,
+    enabled: bool,
+    key: str = "subagents.models",
+) -> tuple[SubagentModelConfig, ...]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must be a TOML table")
+
+    models: list[SubagentModelConfig] = []
+    seen_models: set[str] = set()
+    for raw_name, raw_efforts in value.items():
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise ValueError(f"{key} model names must be non-empty strings")
+        name = raw_name.strip()
+        model_key = f"{key}.{name}"
+        if name in seen_models:
+            raise ValueError(f"{key} contains duplicate model name: {name}")
+        seen_models.add(name)
+
+        if not isinstance(raw_efforts, list):
+            raise ValueError(f"{model_key} must be an array of reasoning effort strings")
+        if not raw_efforts:
+            raise ValueError(f"{model_key} must contain at least one reasoning effort")
+
+        reasoning_efforts: list[str] = []
+        seen: set[str] = set()
+        for index, raw_effort in enumerate(raw_efforts):
+            effort_key = f"{model_key}[{index}]"
+            if not isinstance(raw_effort, str) or not raw_effort.strip():
+                raise ValueError(f"{effort_key} must be a non-empty string")
+            effort = raw_effort.strip()
+            if effort in seen:
+                raise ValueError(
+                    f"{model_key} contains duplicate reasoning effort: {effort}"
+                )
+            seen.add(effort)
+            reasoning_efforts.append(effort)
+
+        models.append(
+            SubagentModelConfig(
+                name=name,
+                reasoning_efforts=tuple(reasoning_efforts),
+            )
+        )
+
+    if enabled and not models:
+        raise ValueError(
+            f"{key} must define at least one model when subagents.enabled is true"
+        )
+    return tuple(models)
 
 
 def ratio(value: Any, key: str) -> float:
