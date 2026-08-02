@@ -111,7 +111,11 @@ function Test-ByteArrayEqual {
 function Get-WindowsLauncherBytes {
     param([Parameter(Mandatory = $true)][string]$Command)
 
-    if ($Command.IndexOfAny([char[]]"\"`r`n") -ge 0) {
+    if (
+        $Command.IndexOf([char]34) -ge 0 -or
+        $Command.IndexOf([char]13) -ge 0 -or
+        $Command.IndexOf([char]10) -ge 0
+    ) {
         Stop-Installer "the taplctl command path cannot be represented safely in a batch launcher."
     }
     $escaped = $Command.Replace("%", "%%")

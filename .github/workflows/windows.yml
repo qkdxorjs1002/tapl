@@ -25,5 +25,20 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Parse installer with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path -LiteralPath '.\install.ps1').Path,
+            [ref]$tokens,
+            [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
       - name: Run Windows installer tests (stdlib-only fixtures)
         run: python -m unittest -v tapl.tests.test_installer_windows
