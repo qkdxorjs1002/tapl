@@ -232,8 +232,11 @@ batch while the current batch remains active.
 
 ### Requirements
 
-- Python 3.11 or newer. The bundled Homebrew formula uses `python@3.12`.
+- Python 3.11 or newer with the `venv` module. The bundled Homebrew formula
+  uses `python@3.12`.
 - SQLite with FTS5 and extension loading support.
+- For the Windows standalone installer: Windows 10 or 11 and either Windows
+  PowerShell 5.1 or newer, or PowerShell 7.
 - Homebrew, if installing with the bundled formula.
 - `uv`, if developing or building from source.
 - VS Code, only if you want the optional workflow viewer.
@@ -257,6 +260,39 @@ If it prints a `PATH` export, run that export in the current shell and add it
 to your shell configuration for future shells. Once `taplctl` resolves in your
 `PATH`, run `taplctl install user` (or `taplctl install repo`) and then
 `taplctl validate`, as shown in [Configure Codex hooks](#configure-codex-hooks).
+
+### Windows (`irm | iex`)
+
+The PowerShell installer supports Windows 10 and 11 and installs only the
+`taplctl` CLI:
+
+```powershell
+irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
+```
+
+It requires Windows PowerShell 5.1 or newer (or PowerShell 7), Python 3.11 or
+newer with the `venv` module, and writable per-user installation directories.
+By default, the managed installation root is `%LOCALAPPDATA%\tapl` and the
+public launcher is `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`. Set
+`TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`, or `TAPL_INSTALL_MANIFEST_URL` to override
+the installation root, launcher directory, or release manifest URL.
+
+The installer adds its launcher directory to the user `PATH` only when it is
+not already present, and also updates the current PowerShell session. New
+processes receive the user `PATH` entry; the system `PATH` is not changed and
+no administrator privileges are required. It does not install Codex hooks
+automatically. Once `taplctl` resolves in `PATH`, run `taplctl install user`
+(or `taplctl install repo`) and then `taplctl validate`, as shown in
+[Configure Codex hooks](#configure-codex-hooks).
+
+The installer validates the release manifest and verifies the downloaded wheel
+against its published SHA-256 before activation. As with any `irm | iex`
+command, review the script source if your environment requires a different
+trust process. The CLI wheel itself is platform-independent, but its Python
+dependencies still need wheels compatible with your Windows Python version and
+architecture. Standard supported Windows Python environments normally install
+them through pip; an uncommon architecture or very new Python release can
+require build tools or fail when a compatible dependency wheel is unavailable.
 
 ### Homebrew
 
@@ -334,9 +370,10 @@ uv build
 
 ### Updates
 
-`taplctl update` manages only installations created by the Linux `curl | sh`
-installer; it verifies the published release before activating an update. It
-does not change Homebrew or source-checkout installations.
+`taplctl update` manages installations created by the Linux `curl | sh` or
+Windows PowerShell installers. It verifies the release manifest and wheel
+SHA-256 before activating an update. It does not change Homebrew or
+source-checkout installations.
 
 ```sh
 # Linux curl-sh installation
@@ -345,6 +382,15 @@ taplctl update
 
 # Equivalent: re-run the installer to fetch the latest managed release
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell managed installation
+taplctl update --check
+taplctl update
+
+# Equivalent: re-run the installer to fetch the latest managed release
+irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
 ```
 
 Update a Homebrew installation with the formula you installed:
@@ -359,9 +405,11 @@ brew update && brew upgrade taplctl-semantic
 
 For a source checkout, update the checkout and its dependencies using the
 source workflow. The release CLI wheel is platform-independent, but its Python
-dependencies still need compatible Linux wheels. In particular, musl-based
-systems such as Alpine may require compatible wheels or local build tools;
-installation can fail when those dependencies cannot be installed.
+dependencies still need compatible wheels for the target platform. In
+particular, musl-based Linux systems such as Alpine may require compatible
+wheels or local build tools; the same can apply on Windows for an uncommon
+architecture or very new Python release. Installation can fail when those
+dependencies cannot be installed.
 
 ## Useful Commands
 

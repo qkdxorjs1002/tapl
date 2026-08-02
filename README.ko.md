@@ -228,8 +228,11 @@ batch가 active인 동안에는 두 번째 batch를 시작하지 마세요.
 
 ### 필요 환경
 
-- Python 3.11 이상. 함께 제공하는 Homebrew formula는 `python@3.12`를 사용합니다.
+- `venv` 모듈이 포함된 Python 3.11 이상. 함께 제공하는 Homebrew formula는
+  `python@3.12`를 사용합니다.
 - FTS5와 extension loading을 지원하는 SQLite.
+- Windows 독립형 설치 프로그램의 경우 Windows 10 또는 11, 그리고 Windows PowerShell
+  5.1 이상 또는 PowerShell 7.
 - 함께 제공하는 formula로 설치할 경우 Homebrew.
 - Source 개발 또는 build를 할 경우 `uv`.
 - Workflow viewer를 사용할 경우에만 VS Code.
@@ -252,6 +255,34 @@ curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh |
 `PATH`에서 `taplctl`을 찾을 수 있게 되면 [Codex hook 설정](#codex-hook-설정)에 나온 것처럼
 `taplctl install user`(또는 `taplctl install repo`)를 실행한 다음 `taplctl validate`를
 실행하세요.
+
+### Windows (`irm | iex`)
+
+PowerShell 설치 프로그램은 Windows 10과 11을 지원하며 `taplctl` CLI만 설치합니다.
+
+```powershell
+irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
+```
+
+Windows PowerShell 5.1 이상 또는 PowerShell 7, `venv` 모듈이 포함된 Python 3.11 이상,
+그리고 쓰기 가능한 사용자별 설치 디렉터리가 필요합니다. 기본 관리 설치 루트는
+`%LOCALAPPDATA%\tapl`이고 공개 launcher는 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다.
+`TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`, `TAPL_INSTALL_MANIFEST_URL`로 각각 설치 루트,
+launcher 디렉터리, release manifest URL을 재정의할 수 있습니다.
+
+설치 프로그램은 launcher 디렉터리가 사용자 `PATH`에 아직 없을 때만 한 번 추가하고,
+현재 PowerShell 세션도 갱신합니다. 새 프로세스에는 사용자 `PATH` 항목이 적용되며,
+시스템 `PATH`는 바꾸지 않고 관리자 권한도 필요하지 않습니다. Codex hook은 자동으로
+설치하지 않습니다. `PATH`에서 `taplctl`을 찾을 수 있게 되면 [Codex hook 설정](#codex-hook-설정)에
+나온 것처럼 `taplctl install user`(또는 `taplctl install repo`)를 실행한 다음
+`taplctl validate`를 실행하세요.
+
+설치 프로그램은 release manifest를 검증하고, 활성화 전에 내려받은 wheel이 공개된
+SHA-256과 일치하는지 확인합니다. `irm | iex` 명령을 사용할 때는 환경의 신뢰 절차에 맞게
+script source도 검토하세요. CLI wheel 자체는 platform-independent이지만 Python 의존성은
+Windows Python version 및 architecture와 호환되는 wheel이 필요합니다. 일반적인 지원 Windows
+Python 환경에서는 pip가 이를 설치하지만, 드문 architecture 또는 아주 새로운 Python release에서는
+호환 wheel이 없어 build tool이 필요하거나 설치에 실패할 수 있습니다.
 
 ### Homebrew
 
@@ -326,9 +357,9 @@ uv build
 
 ### 업데이트
 
-`taplctl update`는 Linux `curl | sh` 설치 프로그램으로 설치한 경우만 관리하며,
-업데이트를 활성화하기 전에 공개 release를 검증합니다. Homebrew 또는 source checkout으로
-설치한 경우에는 변경하지 않습니다.
+`taplctl update`는 Linux `curl | sh` 또는 Windows PowerShell 설치 프로그램으로 설치한
+경우를 관리합니다. 업데이트를 활성화하기 전에 release manifest와 wheel SHA-256을 검증합니다.
+Homebrew 또는 source checkout으로 설치한 경우에는 변경하지 않습니다.
 
 ```sh
 # Linux curl-sh 설치
@@ -337,6 +368,15 @@ taplctl update
 
 # 동일한 방법: 설치 프로그램을 다시 실행해 최신 관리 release 가져오기
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell managed 설치
+taplctl update --check
+taplctl update
+
+# 동일한 방법: 설치 프로그램을 다시 실행해 최신 managed release 가져오기
+irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
 ```
 
 Homebrew 설치는 설치한 formula에 맞게 업데이트하세요.
@@ -350,9 +390,11 @@ brew update && brew upgrade taplctl-semantic
 ```
 
 Source checkout은 source workflow로 checkout과 의존성을 업데이트하세요. Release CLI
-wheel은 platform-independent이지만, Python 의존성에는 호환되는 Linux wheel이 여전히
-필요합니다. 특히 Alpine처럼 musl 기반인 시스템에서는 호환되는 wheel 또는 로컬 build tool이
-필요할 수 있으며, 의존성을 설치하지 못하면 설치에 실패할 수 있습니다.
+wheel은 platform-independent이지만, Python 의존성에는 대상 platform과 호환되는 wheel이
+여전히 필요합니다. 특히 Alpine처럼 musl 기반인 Linux 시스템에서는 호환되는 wheel 또는
+로컬 build tool이 필요할 수 있습니다. Windows에서도 드문 architecture 또는 아주 새로운
+Python release에서는 같은 상황이 발생할 수 있으며, 의존성을 설치하지 못하면 설치에 실패할 수
+있습니다.
 
 ## 자주 쓰는 명령
 

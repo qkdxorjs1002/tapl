@@ -1,8 +1,8 @@
-"""Self-update support for installations created by ``curl | sh``.
+"""Self-update support for installations created by the official installers.
 
 The updater deliberately refuses to operate on package-manager and source-tree
 installations.  A valid installer metadata file, the active virtual
-environment, and the public ``taplctl`` symlink must all describe the same
+environment, and the managed public launcher must all describe the same
 installation before either checking for or applying an update.
 """
 
@@ -72,6 +72,7 @@ class _Installation:
     venv: Path
     executable: Path
     command: Path
+    method: str
     version: str
     manifest_url: str
 
@@ -126,11 +127,11 @@ def update_installation(
     current_python: str | os.PathLike[str] | None = None,
     runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
-    """Atomically update a validated ``curl-sh`` installation.
+    """Atomically update a validated installer-managed installation.
 
     The old environment is retained.  A failed candidate build is removed, and
-    a metadata activation failure restores the previous command symlink before
-    returning an error.
+    a metadata activation failure restores the previous command symlink or
+    launcher before returning an error.
     """
 
     installation = _load_installation(
@@ -175,6 +176,7 @@ def update_installation(
                 candidate,
                 wheel_path,
                 manifest.version,
+                method=installation.method,
                 python_path=python_path,
                 runner=command_runner,
             )
@@ -256,6 +258,7 @@ def _load_installation(
     python_path = _absolute_path(current_python if current_python is not None else sys.executable)
     path = _metadata_path(metadata_path, prefix)
 
+    metadata: Any = None
     try:
         if path.is_symlink() or not path.is_file():
             raise ValueError("metadata is missing or is not a regular file")
@@ -273,34 +276,48 @@ def _load_installation(
         schema = metadata.get("schema_version")
         if schema != 1 or isinstance(schema, bool):
             raise ValueError("unsupported metadata schema")
-        if metadata.get("method") != "curl-sh":
-            raise ValueError("installation method is not curl-sh")
+        method = metadata.get("method")
+        if not isinstance(method, str) or method not in {"curl-sh", "powershell"}:
+            raise ValueError("installation method is not supported")
 
         install_root = _metadata_absolute_path(metadata, "install_root")
         bin_dir = _metadata_absolute_path(metadata, "bin_dir")
         venv = _metadata_absolute_path(metadata, "venv")
         executable = _metadata_absolute_path(metadata, "executable")
         versions_dir = install_root / "versions"
-        command = venv / "bin" / "taplctl"
+        if method == "powershell":
+            command = venv / "Scripts" / "taplctl.exe"
+            expected_python = venv / "Scripts" / "python.exe"
+            expected_executable = bin_dir / "taplctl.cmd"
+        else:
+            command = venv / "bin" / "taplctl"
+            expected_python = venv / "bin" / "python"
+            expected_executable = bin_dir / "taplctl"
 
         if path != install_root / "install.json":
             raise ValueError("metadata path is outside the recorded install root")
-        if executable != bin_dir / "taplctl":
+        if executable != expected_executable:
             raise ValueError("recorded executable is outside the recorded bin directory")
         if not _is_strict_descendant(venv, versions_dir):
             raise ValueError("recorded venv is outside the versions directory")
         if prefix != venv:
             raise ValueError("the active Python prefix is not the recorded venv")
-        if python_path != venv / "bin" / "python":
+        if python_path != expected_python:
             raise ValueError("the active Python executable is not owned by the recorded venv")
         if not install_root.is_dir() or not versions_dir.is_dir() or not bin_dir.is_dir():
             raise ValueError("recorded installation directories are missing")
-        if not command.is_file() or not os.access(command, os.X_OK):
+        if not command.is_file() or (method == "curl-sh" and not os.access(command, os.X_OK)):
             raise ValueError("recorded taplctl command is missing or not executable")
-        if not executable.is_symlink():
-            raise ValueError("the public taplctl executable is not a symlink")
-        if _resolved_link_target(executable) != command:
-            raise ValueError("the public taplctl symlink is not owned by this installation")
+        if method == "powershell":
+            if executable.is_symlink() or not executable.is_file():
+                raise ValueError("the public taplctl launcher is not a regular file")
+            if executable.read_bytes() != _windows_launcher_bytes(command):
+                raise ValueError("the public taplctl launcher is not owned by this installation")
+        else:
+            if not executable.is_symlink():
+                raise ValueError("the public taplctl executable is not a symlink")
+            if _resolved_link_target(executable) != command:
+                raise ValueError("the public taplctl symlink is not owned by this installation")
 
         version = _required_version(metadata.get("version"), "install metadata version")
         manifest_url = _required_url(metadata.get("manifest_url"), "install metadata manifest URL")
@@ -309,8 +326,11 @@ def _load_installation(
         if not isinstance(wheel_sha256, str) or _SHA256_RE.fullmatch(wheel_sha256) is None:
             raise ValueError("invalid install metadata wheel SHA-256")
     except (KeyError, OSError, ValueError) as exc:
+        message = "taplctl is not running from a valid curl-sh installation"
+        if isinstance(metadata, dict) and metadata.get("method") == "powershell":
+            message = "taplctl is not running from a valid PowerShell installation"
         raise UpdateError(
-            "taplctl is not running from a valid curl-sh installation",
+            message,
             code="unsupported_installation",
             details={"metadata_path": str(path)},
         ) from exc
@@ -324,6 +344,7 @@ def _load_installation(
         venv=venv,
         executable=executable,
         command=command,
+        method=method,
         version=version,
         manifest_url=manifest_url,
     )
@@ -354,6 +375,22 @@ def _resolved_link_target(path: Path) -> Path:
     if os.path.isabs(target):
         return Path(os.path.abspath(target))
     return Path(os.path.abspath(path.parent / target))
+
+
+def _windows_launcher_text(command: Path) -> str:
+    command_text = str(command)
+    if any(char in command_text for char in '"\r\n'):
+        raise ValueError("the taplctl command path cannot be represented safely in a batch launcher")
+    escaped_command = command_text.replace("%", "%%")
+    return (
+        "@echo off\n"
+        "setlocal DisableDelayedExpansion\n"
+        f'"{escaped_command}" %*\n'
+    )
+
+
+def _windows_launcher_bytes(command: Path) -> bytes:
+    return _windows_launcher_text(command).replace("\n", "\r\n").encode("utf-8")
 
 
 def _select_manifest_url(override: str | None, installation: _Installation) -> str:
@@ -568,6 +605,7 @@ def _build_candidate(
     wheel_path: Path,
     version: str,
     *,
+    method: str,
     python_path: Path,
     runner: CommandRunner,
 ) -> None:
@@ -577,8 +615,12 @@ def _build_candidate(
         failure_code="venv_creation_failed",
         failure_message="could not create the update virtual environment",
     )
-    candidate_python = candidate / "bin" / "python"
-    candidate_command = candidate / "bin" / "taplctl"
+    if method == "powershell":
+        candidate_python = candidate / "Scripts" / "python.exe"
+        candidate_command = candidate / "Scripts" / "taplctl.exe"
+    else:
+        candidate_python = candidate / "bin" / "python"
+        candidate_command = candidate / "bin" / "taplctl"
     _run(
         runner,
         [
@@ -615,7 +657,7 @@ def _activation_metadata(
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "method": "curl-sh",
+        "method": installation.method,
         "manifest_url": manifest_url,
         "version": manifest.version,
         "wheel_url": manifest.wheel_url,
@@ -642,6 +684,10 @@ def _activate_candidate(
     manifest: _Manifest,
     manifest_url: str,
 ) -> None:
+    if installation.method == "powershell":
+        _activate_windows_candidate(installation, candidate, manifest, manifest_url)
+        return
+
     old_link_target = os.readlink(installation.executable)
     link_tmp: Path | None = None
     metadata_tmp: Path | None = None
@@ -704,6 +750,102 @@ def _activate_candidate(
         ) from exc
     finally:
         for temporary in (link_tmp, metadata_tmp):
+            if temporary is not None:
+                try:
+                    if temporary.exists() or temporary.is_symlink():
+                        temporary.unlink()
+                except OSError:
+                    pass
+
+
+def _write_temporary_file(parent: Path, prefix: str, content: bytes) -> Path:
+    descriptor, name = tempfile.mkstemp(prefix=prefix, dir=parent)
+    path = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as temporary_file:
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+    except BaseException:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
+    return path
+
+
+def _activate_windows_candidate(
+    installation: _Installation,
+    candidate: Path,
+    manifest: _Manifest,
+    manifest_url: str,
+) -> None:
+    candidate_command = candidate / "Scripts" / "taplctl.exe"
+    candidate_launcher = _windows_launcher_bytes(candidate_command)
+    old_launcher = installation.executable.read_bytes()
+    launcher_tmp: Path | None = None
+    metadata_tmp: Path | None = None
+    launcher_activated = False
+    rollback_succeeded = False
+    try:
+        launcher_tmp = _write_temporary_file(
+            installation.bin_dir,
+            ".taplctl.cmd.tmp.",
+            candidate_launcher,
+        )
+        metadata_bytes = (
+            json.dumps(
+                _activation_metadata(installation, candidate, manifest, manifest_url),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+        metadata_tmp = _write_temporary_file(
+            installation.install_root,
+            ".install.json.",
+            metadata_bytes,
+        )
+
+        os.replace(launcher_tmp, installation.executable)
+        launcher_tmp = None
+        launcher_activated = True
+        try:
+            os.replace(metadata_tmp, installation.metadata_path)
+            metadata_tmp = None
+        except OSError as activation_error:
+            rollback_tmp = _write_temporary_file(
+                installation.bin_dir,
+                ".taplctl.cmd.rollback.",
+                old_launcher,
+            )
+            try:
+                if installation.executable.read_bytes() != candidate_launcher:
+                    raise OSError("taplctl command launcher changed before rollback")
+                os.replace(rollback_tmp, installation.executable)
+                rollback_succeeded = True
+                launcher_activated = False
+            finally:
+                if rollback_tmp.exists() or rollback_tmp.is_symlink():
+                    rollback_tmp.unlink()
+            raise UpdateError(
+                "install metadata could not be activated; the previous command launcher was restored",
+                code="metadata_activation_failed",
+            ) from activation_error
+    except UpdateError:
+        raise
+    except OSError as exc:
+        raise UpdateError(
+            f"could not activate the taplctl update: {exc}",
+            code="activation_failed",
+            details={
+                "candidate_active": launcher_activated,
+                "rollback_succeeded": rollback_succeeded,
+            },
+        ) from exc
+    finally:
+        for temporary in (launcher_tmp, metadata_tmp):
             if temporary is not None:
                 try:
                     if temporary.exists() or temporary.is_symlink():

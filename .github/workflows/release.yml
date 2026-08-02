@@ -6,15 +6,50 @@ on:
       - '*.*.*'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  windows-installer-preflight:
+    name: Windows installer release preflight (PowerShell 5.1)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify install.ps1 with the PowerShell 5.1 parser
+        shell: powershell
+        run: |
+          $installer = Resolve-Path "install.ps1" -ErrorAction Stop
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            $installer.Path,
+            [ref]$tokens,
+            [ref]$parseErrors
+          )
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            throw "install.ps1 contains PowerShell syntax errors."
+          }
+
+      - name: Run Windows installer tests (stdlib-only fixtures)
+        run: python -m unittest -v tapl.tests.test_installer_windows
+
   release:
     name: Build and publish release
+    needs: windows-installer-preflight
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
 
     steps:

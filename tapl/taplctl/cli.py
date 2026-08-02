@@ -451,8 +451,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     update = sub.add_parser(
         "update",
-        help="Check for or install a newer curl-sh release.",
-        description="Check for or install a newer taplctl release for curl | sh installations.",
+        help="Check for or install a newer installer-managed release.",
+        description=(
+            "Check for or install a newer taplctl release for curl | sh or "
+            "PowerShell installations."
+        ),
     )
     update.add_argument("--check", action="store_true", help="Check for an update without installing it.")
     add_agent_output_args(update)
@@ -1008,7 +1011,8 @@ def humanize_update(payload: dict[str, Any]) -> str:
 def humanize_update_error(error: updater.UpdateError) -> str:
     if error.code == "unsupported_installation":
         return (
-            "taplctl update is available only for installations made with curl | sh. "
+            "taplctl update is available only for installations made with the official "
+            "curl | sh or PowerShell installer. "
             "For Homebrew, run `brew upgrade taplctl` (or `brew upgrade taplctl-semantic` "
             "for the semantic formula); for a source checkout or another package manager, "
             "update it using that installation method."
