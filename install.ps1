@@ -92,6 +92,27 @@ function Read-Utf8Text {
     }
 }
 
+function Get-FileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = $null
+    $sha256 = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        $hashBytes = $sha256.ComputeHash($stream)
+        return [System.BitConverter]::ToString($hashBytes).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        if ($null -ne $sha256) {
+            $sha256.Dispose()
+        }
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
 function Test-ByteArrayEqual {
     param(
         [Parameter(Mandatory = $true)][byte[]]$Left,
@@ -513,7 +534,7 @@ try {
         }
 
         try {
-            $actualSha256 = (Get-FileHash -LiteralPath $wheelPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $actualSha256 = Get-FileSha256 -Path $wheelPath
         }
         catch {
             Stop-Installer "could not calculate the wheel SHA-256."
