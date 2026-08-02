@@ -285,7 +285,21 @@ class PowerShellInstallerTests(unittest.TestCase):
         self.assertEqual(version_result.returncode, 0, version_result.stderr)
         self.assertEqual(version_result.stdout.strip(), f"taplctl {version}")
         path_entries = self.path_log.read_text(encoding="utf-8").split(os.pathsep)
-        self.assertIn(os.path.normcase(str(self.bin_dir)), map(os.path.normcase, path_entries))
+        matching_path_entry = False
+        for raw_entry in path_entries:
+            entry = raw_entry.strip().strip('"')
+            if not entry:
+                continue
+            try:
+                if os.path.samefile(entry, self.bin_dir):
+                    matching_path_entry = True
+                    break
+            except OSError:
+                continue
+        self.assertTrue(
+            matching_path_entry,
+            f"{self.bin_dir} was not found in PATH entries: {path_entries!r}",
+        )
         return metadata
 
     def install_initial_release(self, version: str = "1.0.0") -> dict[str, object]:
