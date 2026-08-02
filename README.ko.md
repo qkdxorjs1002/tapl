@@ -234,6 +234,25 @@ batch가 active인 동안에는 두 번째 batch를 시작하지 마세요.
 - Source 개발 또는 build를 할 경우 `uv`.
 - Workflow viewer를 사용할 경우에만 VS Code.
 
+### Linux (`curl | sh`)
+
+독립형 설치 프로그램은 Linux를 지원하며 `taplctl` CLI만 설치합니다.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
+```
+
+`curl`, `venv` 모듈이 포함된 Python 3.11 이상, 그리고 쓰기 가능한 설치 디렉터리가
+필요합니다. 기본 설치 경로는 `${XDG_DATA_HOME:-$HOME/.local/share}/tapl` 및
+`${XDG_BIN_HOME:-$HOME/.local/bin}`입니다. 다른 경로가 필요하면 해당 XDG 변수 또는
+`TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`를 설정하세요.
+
+설치 프로그램은 shell 시작 파일이나 Codex hook을 수정하지 않습니다. `PATH` export가
+출력되면 현재 shell에서 실행하고, 이후 shell에도 적용되도록 shell 설정 파일에 추가하세요.
+`PATH`에서 `taplctl`을 찾을 수 있게 되면 [Codex hook 설정](#codex-hook-설정)에 나온 것처럼
+`taplctl install user`(또는 `taplctl install repo`)를 실행한 다음 `taplctl validate`를
+실행하세요.
+
 ### Homebrew
 
 ```sh
@@ -259,7 +278,9 @@ brew install taplctl-semantic
 brew services start taplctl-semantic
 ```
 
-그 다음 Codex에 연결할 범위를 선택합니다.
+### Codex hook 설정
+
+어떤 방식으로 `taplctl`을 설치했든, 다음 중 Codex에 연결할 범위를 선택하세요.
 
 ```sh
 # 대부분의 사용자: 내 Codex 계정에 한 번 설치
@@ -303,6 +324,36 @@ uv run taplctl --version
 uv build
 ```
 
+### 업데이트
+
+`taplctl update`는 Linux `curl | sh` 설치 프로그램으로 설치한 경우만 관리하며,
+업데이트를 활성화하기 전에 공개 release를 검증합니다. Homebrew 또는 source checkout으로
+설치한 경우에는 변경하지 않습니다.
+
+```sh
+# Linux curl-sh 설치
+taplctl update --check
+taplctl update
+
+# 동일한 방법: 설치 프로그램을 다시 실행해 최신 관리 release 가져오기
+curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
+```
+
+Homebrew 설치는 설치한 formula에 맞게 업데이트하세요.
+
+```sh
+# 기본 formula
+brew update && brew upgrade taplctl
+
+# Semantic search formula
+brew update && brew upgrade taplctl-semantic
+```
+
+Source checkout은 source workflow로 checkout과 의존성을 업데이트하세요. Release CLI
+wheel은 platform-independent이지만, Python 의존성에는 호환되는 Linux wheel이 여전히
+필요합니다. 특히 Alpine처럼 musl 기반인 시스템에서는 호환되는 wheel 또는 로컬 build tool이
+필요할 수 있으며, 의존성을 설치하지 못하면 설치에 실패할 수 있습니다.
+
 ## 자주 쓰는 명령
 
 ```sh
@@ -310,6 +361,8 @@ taplctl init --workspace-root /path/to/workspace
 taplctl doctor
 taplctl status
 taplctl validate
+taplctl update --check
+taplctl update
 taplctl search "query"
 taplctl item show --id 1
 taplctl archive list

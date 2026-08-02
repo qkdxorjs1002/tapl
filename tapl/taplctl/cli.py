@@ -22,6 +22,7 @@ from . import (
     install as tapl_install,
     prompt as tapl_prompt,
     searchd,
+    updater,
     validation,
 )
 
@@ -232,6 +233,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         auto_install_before_handler(args)
         return int(args.handler(args) or 0)
+    except updater.UpdateError as exc:
+        emit_update_error(args, exc)
+        return 1
     except Exception as exc:
         if getattr(args, "json", False):
             print_json({"ok": False, "error": str(exc)})
@@ -252,7 +256,7 @@ def should_skip_auto_install(args: argparse.Namespace) -> bool:
     command = getattr(args, "command", None)
     if args.db is not None or args.config is not None:
         return True
-    if command in {None, "init", "install", "hook-event"}:
+    if command in {None, "init", "install", "update", "hook-event"}:
         return True
     return command == "searchd" and getattr(args, "searchd_command", None) == "run"
 
@@ -444,6 +448,15 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="Check tapl runtime dependencies.")
     add_agent_output_args(doctor)
     doctor.set_defaults(handler=cmd_doctor)
+
+    update = sub.add_parser(
+        "update",
+        help="Check for or install a newer curl-sh release.",
+        description="Check for or install a newer taplctl release for curl | sh installations.",
+    )
+    update.add_argument("--check", action="store_true", help="Check for an update without installing it.")
+    add_agent_output_args(update)
+    update.set_defaults(handler=cmd_update)
 
     status = sub.add_parser("status", help="Show active workflow state.")
     add_agent_output_args(status)
@@ -949,6 +962,58 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     }
     emit(payload, args.json, args.agent)
     return 0
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """Check or apply a release update without touching workflow state."""
+
+    payload = updater.check_for_update() if args.check else updater.update_installation()
+    if args.json:
+        print_json(payload)
+    elif args.agent:
+        print(agent_output(payload))
+    else:
+        print(humanize_update(payload))
+    return 0
+
+
+def emit_update_error(args: argparse.Namespace, error: updater.UpdateError) -> None:
+    """Render updater errors without flattening their stable structured fields."""
+
+    payload = error.as_dict()
+    if getattr(args, "json", False):
+        print_json(payload)
+    elif getattr(args, "agent", False):
+        print(agent_output(payload))
+    else:
+        print(humanize_update_error(error), file=sys.stderr)
+
+
+def humanize_update(payload: dict[str, Any]) -> str:
+    status = payload.get("status")
+    current = str(payload.get("current_version") or "unknown")
+    latest = str(payload.get("latest_version") or current)
+    if status == "update-available":
+        return f"Update available: taplctl {current} → {latest}. Run taplctl update to install it."
+    if status == "up-to-date":
+        return f"taplctl is up to date ({current})."
+    if status == "current-newer":
+        return f"Installed taplctl ({current}) is newer than the published release ({latest})."
+    if status == "updated":
+        previous = str(payload.get("previous_version") or current)
+        return f"Updated taplctl: {previous} → {current}."
+    return f"taplctl update: {status or 'completed'} (current version: {current})."
+
+
+def humanize_update_error(error: updater.UpdateError) -> str:
+    if error.code == "unsupported_installation":
+        return (
+            "taplctl update is available only for installations made with curl | sh. "
+            "For Homebrew, run `brew upgrade taplctl` (or `brew upgrade taplctl-semantic` "
+            "for the semantic formula); for a source checkout or another package manager, "
+            "update it using that installation method."
+        )
+    return f"taplctl update failed ({error.code}): {error}"
 
 
 def cmd_status(args: argparse.Namespace) -> int:

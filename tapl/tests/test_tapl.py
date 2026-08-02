@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import concurrent.futures
+import hashlib
 import io
 import argparse
 import json
@@ -14,7 +15,9 @@ import tempfile
 import tomllib
 import types
 import unittest
+import warnings
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +32,7 @@ from taplctl import (
     embeddings as tapl_embeddings,
     install as tapl_install,
     prompt as tapl_prompt,
+    updater as tapl_updater,
 )
 
 
@@ -4897,6 +4901,690 @@ Legacy archive를 tapl 구조로 옮긴다.
                 and warning.get("stable_id") in task_ids
             ]
             self.assertEqual(missing_content, [])
+
+
+class TaplUpdaterTests(unittest.TestCase):
+    """Self-update contracts for managed Linux ``curl | sh`` installations."""
+
+    manifest_url = "https://updates.example.test/taplctl-install-manifest.json"
+    wheel_url = "https://updates.example.test/taplctl-1.1.0-py3-none-any.whl"
+
+    def create_curl_sh_fixture(self, base: Path, *, version: str = "1.0.0") -> dict[str, Path | str]:
+        install_root = base / "tapl"
+        versions_dir = install_root / "versions"
+        venv = versions_dir / f"taplctl-{version}"
+        bin_dir = base / "bin"
+        command = venv / "bin" / "taplctl"
+        python = venv / "bin" / "python"
+        executable = bin_dir / "taplctl"
+        metadata_path = install_root / "install.json"
+        command.parent.mkdir(parents=True)
+        bin_dir.mkdir(parents=True)
+        command.write_text("#!/bin/sh\n", encoding="utf-8")
+        command.chmod(0o755)
+        python.write_text("#!/bin/sh\n", encoding="utf-8")
+        python.chmod(0o755)
+        executable.symlink_to(command)
+        metadata = {
+            "schema_version": 1,
+            "method": "curl-sh",
+            "manifest_url": self.manifest_url,
+            "version": version,
+            "wheel_url": self.wheel_url,
+            "wheel_sha256": "0" * 64,
+            "install_root": str(install_root),
+            "bin_dir": str(bin_dir),
+            "venv": str(venv),
+            "executable": str(executable),
+            "installed_at": "2026-08-03T00:00:00Z",
+        }
+        metadata_path.write_text(json.dumps(metadata) + "\n", encoding="utf-8")
+        return {
+            "install_root": install_root,
+            "versions_dir": versions_dir,
+            "venv": venv,
+            "bin_dir": bin_dir,
+            "command": command,
+            "python": python,
+            "executable": executable,
+            "metadata_path": metadata_path,
+        }
+
+    def updater_kwargs(self, fixture: dict[str, Path | str], *, opener: object) -> dict[str, object]:
+        return {
+            "metadata_path": fixture["metadata_path"],
+            "current_prefix": fixture["venv"],
+            "current_python": fixture["python"],
+            "opener": opener,
+        }
+
+    def manifest(self, version: str, wheel: bytes, *, wheel_url: str | None = None) -> bytes:
+        return json.dumps(
+            {
+                "schema_version": 1,
+                "version": version,
+                "wheel": {
+                    "url": wheel_url or self.wheel_url,
+                    "sha256": hashlib.sha256(wheel).hexdigest(),
+                },
+            }
+        ).encode("utf-8")
+
+    @staticmethod
+    def set_fixture_urls(
+        fixture: dict[str, Path | str],
+        *,
+        manifest_url: str,
+        wheel_url: str,
+    ) -> None:
+        metadata_path = fixture["metadata_path"]
+        assert isinstance(metadata_path, Path)
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["manifest_url"] = manifest_url
+        metadata["wheel_url"] = wheel_url
+        metadata_path.write_text(json.dumps(metadata) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def opener(responses: dict[str, bytes]) -> object:
+        def open_url(url: str) -> io.BytesIO:
+            return io.BytesIO(responses[url])
+
+        return open_url
+
+    @staticmethod
+    def resolved_target(path: Path) -> Path:
+        return Path(os.path.realpath(path))
+
+    def candidate_runner(self, *, version: str, fail_at: str | None = None) -> object:
+        def run(args: list[str], **_: object) -> types.SimpleNamespace:
+            if args[1:3] == ["-m", "venv"]:
+                candidate = Path(args[-1])
+                if fail_at == "venv":
+                    return types.SimpleNamespace(returncode=1, stdout="", stderr="venv failed")
+                candidate_bin = candidate / "bin"
+                candidate_bin.mkdir(parents=True, exist_ok=True)
+                for name in ("python", "taplctl"):
+                    command = candidate_bin / name
+                    command.write_text("#!/bin/sh\n", encoding="utf-8")
+                    command.chmod(0o755)
+                return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+            if args[1:3] == ["-m", "pip"]:
+                return types.SimpleNamespace(
+                    returncode=1 if fail_at == "pip" else 0,
+                    stdout="",
+                    stderr="pip failed" if fail_at == "pip" else "",
+                )
+            if args[-1] == "--version":
+                return types.SimpleNamespace(returncode=0, stdout=f"taplctl {version}\n", stderr="")
+            self.fail(f"unexpected candidate command: {args}")
+
+        return run
+
+    def test_check_for_update_reports_available_current_and_newer_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = self.create_curl_sh_fixture(Path(tmp))
+            for latest, expected_status, expected_available in (
+                ("1.1.0", "update-available", True),
+                ("1.0.0", "up-to-date", False),
+                ("0.9.0", "current-newer", False),
+            ):
+                with self.subTest(latest=latest):
+                    wheel = b"release wheel"
+                    payload = tapl_updater.check_for_update(
+                        **self.updater_kwargs(
+                            fixture,
+                            opener=self.opener(
+                                {self.manifest_url: self.manifest(latest, wheel)}
+                            ),
+                        )
+                    )
+                    self.assertTrue(payload["ok"])
+                    self.assertEqual(payload["action"], "check")
+                    self.assertEqual(payload["status"], expected_status)
+                    self.assertEqual(payload["current_version"], "1.0.0")
+                    self.assertEqual(payload["latest_version"], latest)
+                    self.assertEqual(payload["update_available"], expected_available)
+
+    def test_check_for_update_redacts_tokenized_urls_without_changing_metadata(self) -> None:
+        manifest_url = (
+            "https://alice:p4ssword@updates.example.test/releases/manifest.json"
+            "?access_token=qsecret#fragsecret"
+        )
+        wheel_url = (
+            "https://bob:wpass@cdn.example.test:8443/artifacts/taplctl-1.1.0.whl"
+            "?access_token=wsecret#wfrag"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = self.create_curl_sh_fixture(Path(tmp))
+            self.set_fixture_urls(
+                fixture,
+                manifest_url=manifest_url,
+                wheel_url=wheel_url,
+            )
+            metadata_path = fixture["metadata_path"]
+            self.assertIsInstance(metadata_path, Path)
+            original_metadata = metadata_path.read_bytes()
+            wheel = b"release wheel"
+            payload = tapl_updater.check_for_update(
+                **self.updater_kwargs(
+                    fixture,
+                    opener=self.opener(
+                        {
+                            manifest_url: self.manifest(
+                                "1.1.0",
+                                wheel,
+                                wheel_url=wheel_url,
+                            )
+                        }
+                    ),
+                )
+            )
+
+            self.assertEqual(
+                payload["manifest_url"],
+                "https://updates.example.test/releases/manifest.json",
+            )
+            self.assertEqual(
+                payload["wheel_url"],
+                "https://cdn.example.test:8443/artifacts/taplctl-1.1.0.whl",
+            )
+            self.assertEqual(metadata_path.read_bytes(), original_metadata)
+            rendered = json.dumps(payload, sort_keys=True)
+            for secret in (
+                "alice",
+                "p4ssword",
+                "access_token",
+                "qsecret",
+                "fragsecret",
+                "bob",
+                "wpass",
+                "wsecret",
+                "wfrag",
+            ):
+                self.assertNotIn(secret, rendered)
+
+    def test_tokenized_manifest_and_download_errors_expose_only_safe_urls(self) -> None:
+        manifest_url = (
+            "https://alice:p4ssword@updates.example.test/releases/manifest.json"
+            "?access_token=qsecret#fragsecret"
+        )
+        wheel_url = (
+            "https://bob:wpass@cdn.example.test/artifacts/taplctl-1.1.0.whl"
+            "?access_token=wsecret#wfrag"
+        )
+        secrets = (
+            "alice",
+            "p4ssword",
+            "access_token",
+            "qsecret",
+            "fragsecret",
+            "bob",
+            "wpass",
+            "wsecret",
+            "wfrag",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = self.create_curl_sh_fixture(Path(tmp))
+            self.set_fixture_urls(
+                fixture,
+                manifest_url=manifest_url,
+                wheel_url=wheel_url,
+            )
+
+            with self.assertRaises(tapl_updater.UpdateError) as invalid_manifest:
+                tapl_updater.check_for_update(
+                    **self.updater_kwargs(
+                        fixture,
+                        opener=self.opener({manifest_url: b'{"schema_version": 1}'}),
+                    )
+                )
+            invalid_payload = invalid_manifest.exception.as_dict()
+            self.assertEqual(invalid_manifest.exception.code, "invalid_manifest")
+            self.assertEqual(
+                invalid_payload["error"]["details"]["manifest_url"],
+                "https://updates.example.test/releases/manifest.json",
+            )
+
+            malformed_url = "not a valid URL?access_token=malformed-secret#bad-fragment"
+            malformed_fixture = self.create_curl_sh_fixture(Path(tmp) / "malformed-url")
+            self.set_fixture_urls(
+                malformed_fixture,
+                manifest_url=malformed_url,
+                wheel_url=wheel_url,
+            )
+
+            def malformed_opener(url: str) -> io.BytesIO:
+                raise OSError(f"network failure while requesting {url}")
+
+            with self.assertRaises(tapl_updater.UpdateError) as malformed_download:
+                tapl_updater.check_for_update(
+                    **self.updater_kwargs(malformed_fixture, opener=malformed_opener)
+                )
+            malformed_payload = malformed_download.exception.as_dict()
+            self.assertEqual(
+                malformed_payload["error"]["details"]["url"],
+                "<invalid-url>",
+            )
+            self.assertNotIn("malformed-secret", json.dumps(malformed_payload))
+            self.assertNotIn("bad-fragment", str(malformed_download.exception))
+
+            wheel = b"release wheel"
+
+            def failing_opener(url: str) -> io.BytesIO:
+                if url == manifest_url:
+                    return io.BytesIO(
+                        self.manifest("1.1.0", wheel, wheel_url=wheel_url)
+                    )
+                raise OSError(f"network failure while requesting {url}")
+
+            with self.assertRaises(tapl_updater.UpdateError) as download_error:
+                tapl_updater.update_installation(
+                    **self.updater_kwargs(fixture, opener=failing_opener),
+                    runner=self.candidate_runner(version="1.1.0"),
+                )
+            download_payload = download_error.exception.as_dict()
+            self.assertEqual(download_error.exception.code, "download_failed")
+            self.assertEqual(
+                download_payload["error"]["details"]["url"],
+                "https://cdn.example.test/artifacts/taplctl-1.1.0.whl",
+            )
+
+            rendered = json.dumps(
+                [invalid_payload, download_payload],
+                sort_keys=True,
+            ) + str(invalid_manifest.exception) + str(download_error.exception)
+            for secret in secrets:
+                self.assertNotIn(secret, rendered)
+
+    def test_check_for_update_rejects_malformed_manifest_and_unowned_installation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            malformed = self.create_curl_sh_fixture(base / "malformed")
+            with self.assertRaises(tapl_updater.UpdateError) as malformed_error:
+                tapl_updater.check_for_update(
+                    **self.updater_kwargs(
+                        malformed,
+                        opener=self.opener({self.manifest_url: b'{"schema_version": 1}'}),
+                    )
+                )
+            self.assertEqual(malformed_error.exception.code, "invalid_manifest")
+
+            cases: list[tuple[str, dict[str, object]]] = []
+            non_curl = self.create_curl_sh_fixture(base / "non-curl")
+            non_curl_metadata_path = non_curl["metadata_path"]
+            self.assertIsInstance(non_curl_metadata_path, Path)
+            metadata = json.loads(non_curl_metadata_path.read_text(encoding="utf-8"))
+            metadata["method"] = "pip"
+            non_curl_metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+            cases.append(("non-curl metadata", non_curl))
+
+            wrong_link = self.create_curl_sh_fixture(base / "wrong-link")
+            wrong_link_executable = wrong_link["executable"]
+            self.assertIsInstance(wrong_link_executable, Path)
+            wrong_link_executable.unlink()
+            other_command = base / "other" / "taplctl"
+            other_command.parent.mkdir(parents=True)
+            other_command.write_text("#!/bin/sh\n", encoding="utf-8")
+            wrong_link_executable.symlink_to(other_command)
+            cases.append(("unowned command symlink", wrong_link))
+
+            wrong_prefix = self.create_curl_sh_fixture(base / "wrong-prefix")
+            wrong_prefix["current_prefix"] = base / "unowned-venv"
+            wrong_prefix["current_python"] = base / "unowned-venv" / "bin" / "python"
+            cases.append(("unowned active prefix", wrong_prefix))
+
+            valid_manifest = self.manifest("1.1.0", b"wheel")
+            for name, fixture in cases:
+                with self.subTest(case=name):
+                    kwargs = self.updater_kwargs(
+                        fixture,
+                        opener=self.opener({self.manifest_url: valid_manifest}),
+                    )
+                    kwargs["current_prefix"] = fixture.get("current_prefix", fixture["venv"])
+                    kwargs["current_python"] = fixture.get("current_python", fixture["python"])
+                    with self.assertRaises(tapl_updater.UpdateError) as unsupported_error:
+                        tapl_updater.check_for_update(**kwargs)
+                    self.assertEqual(unsupported_error.exception.code, "unsupported_installation")
+
+    def test_update_rejects_bad_wheel_checksum_without_changing_installation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = self.create_curl_sh_fixture(Path(tmp))
+            metadata_path = fixture["metadata_path"]
+            executable = fixture["executable"]
+            versions_dir = fixture["versions_dir"]
+            self.assertIsInstance(metadata_path, Path)
+            self.assertIsInstance(executable, Path)
+            self.assertIsInstance(versions_dir, Path)
+            original_metadata = metadata_path.read_bytes()
+            original_target = self.resolved_target(executable)
+            expected_wheel = b"expected release wheel"
+            with self.assertRaises(tapl_updater.UpdateError) as checksum_error:
+                tapl_updater.update_installation(
+                    **self.updater_kwargs(
+                        fixture,
+                        opener=self.opener(
+                            {
+                                self.manifest_url: self.manifest("1.1.0", expected_wheel),
+                                self.wheel_url: b"tampered release wheel",
+                            }
+                        ),
+                    ),
+                    runner=self.candidate_runner(version="1.1.0"),
+                )
+            self.assertEqual(checksum_error.exception.code, "checksum_mismatch")
+            self.assertEqual(metadata_path.read_bytes(), original_metadata)
+            self.assertEqual(self.resolved_target(executable), original_target)
+            self.assertEqual(list(versions_dir.iterdir()), [fixture["venv"]])
+
+    def test_update_installs_verified_candidate_and_activates_metadata(self) -> None:
+        manifest_url = (
+            "https://alice:p4ssword@updates.example.test/releases/manifest.json"
+            "?access_token=qsecret#fragsecret"
+        )
+        wheel_url = (
+            "https://bob:wpass@cdn.example.test/artifacts/taplctl-1.1.0.whl"
+            "?access_token=wsecret#wfrag"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = self.create_curl_sh_fixture(Path(tmp))
+            self.set_fixture_urls(
+                fixture,
+                manifest_url=manifest_url,
+                wheel_url=wheel_url,
+            )
+            wheel = b"verified release wheel"
+            payload = tapl_updater.update_installation(
+                **self.updater_kwargs(
+                    fixture,
+                    opener=self.opener(
+                        {
+                            manifest_url: self.manifest(
+                                "1.1.0",
+                                wheel,
+                                wheel_url=wheel_url,
+                            ),
+                            wheel_url: wheel,
+                        }
+                    ),
+                ),
+                runner=self.candidate_runner(version="1.1.0"),
+            )
+            metadata_path = fixture["metadata_path"]
+            executable = fixture["executable"]
+            self.assertIsInstance(metadata_path, Path)
+            self.assertIsInstance(executable, Path)
+            activated_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            candidate = Path(payload["venv"])
+            self.assertTrue(payload["updated"])
+            self.assertEqual(payload["status"], "updated")
+            self.assertEqual(payload["previous_version"], "1.0.0")
+            self.assertEqual(activated_metadata["version"], "1.1.0")
+            self.assertEqual(activated_metadata["manifest_url"], manifest_url)
+            self.assertEqual(activated_metadata["wheel_url"], wheel_url)
+            self.assertEqual(
+                payload["manifest_url"],
+                "https://updates.example.test/releases/manifest.json",
+            )
+            self.assertEqual(
+                payload["wheel_url"],
+                "https://cdn.example.test/artifacts/taplctl-1.1.0.whl",
+            )
+            self.assertEqual(Path(activated_metadata["venv"]), candidate)
+            self.assertTrue((candidate / "bin" / "taplctl").is_file())
+            self.assertEqual(
+                self.resolved_target(executable),
+                self.resolved_target(candidate / "bin" / "taplctl"),
+            )
+
+    def test_update_candidate_creation_or_pip_failure_preserves_active_installation(self) -> None:
+        for failure, code in (("venv", "venv_creation_failed"), ("pip", "wheel_install_failed")):
+            with self.subTest(failure=failure):
+                with tempfile.TemporaryDirectory() as tmp:
+                    fixture = self.create_curl_sh_fixture(Path(tmp))
+                    metadata_path = fixture["metadata_path"]
+                    executable = fixture["executable"]
+                    versions_dir = fixture["versions_dir"]
+                    self.assertIsInstance(metadata_path, Path)
+                    self.assertIsInstance(executable, Path)
+                    self.assertIsInstance(versions_dir, Path)
+                    original_metadata = metadata_path.read_bytes()
+                    original_target = self.resolved_target(executable)
+                    wheel = b"verified release wheel"
+                    with self.assertRaises(tapl_updater.UpdateError) as failed_update:
+                        tapl_updater.update_installation(
+                            **self.updater_kwargs(
+                                fixture,
+                                opener=self.opener(
+                                    {
+                                        self.manifest_url: self.manifest("1.1.0", wheel),
+                                        self.wheel_url: wheel,
+                                    }
+                                ),
+                            ),
+                            runner=self.candidate_runner(version="1.1.0", fail_at=failure),
+                        )
+                    self.assertEqual(failed_update.exception.code, code)
+                    self.assertEqual(metadata_path.read_bytes(), original_metadata)
+                    self.assertEqual(self.resolved_target(executable), original_target)
+                    self.assertEqual(list(versions_dir.iterdir()), [fixture["venv"]])
+
+    def test_metadata_activation_failure_restores_the_previous_command_link(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = self.create_curl_sh_fixture(Path(tmp))
+            metadata_path = fixture["metadata_path"]
+            executable = fixture["executable"]
+            versions_dir = fixture["versions_dir"]
+            self.assertIsInstance(metadata_path, Path)
+            self.assertIsInstance(executable, Path)
+            self.assertIsInstance(versions_dir, Path)
+            original_metadata = metadata_path.read_bytes()
+            original_target = self.resolved_target(executable)
+            wheel = b"verified release wheel"
+            real_replace = os.replace
+
+            def fail_metadata_replace(source: object, destination: object) -> None:
+                if Path(destination) == metadata_path:
+                    raise OSError("metadata storage is read-only")
+                real_replace(source, destination)
+
+            with mock.patch.object(tapl_updater.os, "replace", side_effect=fail_metadata_replace):
+                with self.assertRaises(tapl_updater.UpdateError) as activation_error:
+                    tapl_updater.update_installation(
+                        **self.updater_kwargs(
+                            fixture,
+                            opener=self.opener(
+                                {
+                                    self.manifest_url: self.manifest("1.1.0", wheel),
+                                    self.wheel_url: wheel,
+                                }
+                            ),
+                        ),
+                        runner=self.candidate_runner(version="1.1.0"),
+                    )
+            self.assertEqual(activation_error.exception.code, "metadata_activation_failed")
+            self.assertEqual(metadata_path.read_bytes(), original_metadata)
+            self.assertEqual(self.resolved_target(executable), original_target)
+            self.assertEqual(list(versions_dir.iterdir()), [fixture["venv"]])
+
+    def test_update_cli_renders_check_and_update_payloads_without_auto_install(self) -> None:
+        check_payload = {
+            "ok": True,
+            "action": "check",
+            "status": "update-available",
+            "update_available": True,
+            "current_version": "1.0.0",
+            "latest_version": "1.1.0",
+        }
+        update_payload = {
+            "ok": True,
+            "action": "update",
+            "status": "updated",
+            "updated": True,
+            "previous_version": "1.0.0",
+            "current_version": "1.1.0",
+            "latest_version": "1.1.0",
+        }
+        cases = (
+            ("check human", ["update", "--check"], check_payload, "check"),
+            ("check json", ["update", "--check", "--json"], check_payload, "check"),
+            ("check agent", ["update", "--check", "--agent"], check_payload, "check"),
+            ("update human", ["update"], update_payload, "update"),
+            ("update json", ["update", "--json"], update_payload, "update"),
+            ("update agent", ["update", "--agent"], update_payload, "update"),
+        )
+        for name, argv, payload, handler in cases:
+            with self.subTest(output=name):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(tapl_cli.updater, "check_for_update", return_value=check_payload) as check,
+                    mock.patch.object(tapl_cli.updater, "update_installation", return_value=update_payload) as update,
+                    mock.patch.object(tapl_cli.tapl_install, "auto_install_if_needed") as auto_install,
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                    warnings.catch_warnings(),
+                ):
+                    warnings.simplefilter("ignore", ResourceWarning)
+                    exit_code = tapl_cli.main(argv)
+                self.assertEqual(exit_code, 0)
+                self.assertEqual(stderr.getvalue(), "")
+                auto_install.assert_not_called()
+                if handler == "check":
+                    check.assert_called_once_with()
+                    update.assert_not_called()
+                else:
+                    update.assert_called_once_with()
+                    check.assert_not_called()
+                rendered = stdout.getvalue()
+                if "--json" in argv:
+                    self.assertEqual(json.loads(rendered), payload)
+                elif "--agent" in argv:
+                    self.assertIn("<tapl_output>", rendered)
+                    self.assertIn(f"<action>{payload['action']}</action>", rendered)
+                    self.assertIn(f"<status>{payload['status']}</status>", rendered)
+                elif handler == "check":
+                    self.assertIn("Update available: taplctl 1.0.0 → 1.1.0", rendered)
+                else:
+                    self.assertEqual(rendered, "Updated taplctl: 1.0.0 → 1.1.0.\n")
+
+    def test_update_cli_renders_structured_unsupported_installation_errors(self) -> None:
+        error = tapl_updater.UpdateError(
+            "taplctl is not running from a valid curl-sh installation",
+            code="unsupported_installation",
+        )
+        cases = (
+            ("human", ["update", "--check"]),
+            ("json", ["update", "--check", "--json"]),
+            ("agent", ["update", "--check", "--agent"]),
+        )
+        for output, argv in cases:
+            with self.subTest(output=output):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(tapl_cli.updater, "check_for_update", side_effect=error) as check,
+                    mock.patch.object(tapl_cli.updater, "update_installation") as update,
+                    mock.patch.object(tapl_cli.tapl_install, "auto_install_if_needed") as auto_install,
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                    warnings.catch_warnings(),
+                ):
+                    warnings.simplefilter("ignore", ResourceWarning)
+                    exit_code = tapl_cli.main(argv)
+                self.assertEqual(exit_code, 1)
+                check.assert_called_once_with()
+                update.assert_not_called()
+                auto_install.assert_not_called()
+                if output == "json":
+                    self.assertEqual(
+                        json.loads(stdout.getvalue()),
+                        {
+                            "ok": False,
+                            "error": {
+                                "code": "unsupported_installation",
+                                "message": "taplctl is not running from a valid curl-sh installation",
+                            },
+                        },
+                    )
+                    self.assertEqual(stderr.getvalue(), "")
+                elif output == "agent":
+                    self.assertIn("<tapl_output>", stdout.getvalue())
+                    self.assertIn("<error>", stdout.getvalue())
+                    self.assertIn("<code>unsupported_installation</code>", stdout.getvalue())
+                    self.assertIn(
+                        "<message>taplctl is not running from a valid curl-sh installation</message>",
+                        stdout.getvalue(),
+                    )
+                    self.assertEqual(stderr.getvalue(), "")
+                else:
+                    self.assertEqual(stdout.getvalue(), "")
+                    self.assertIn("brew upgrade taplctl", stderr.getvalue())
+                    self.assertIn("brew upgrade taplctl-semantic", stderr.getvalue())
+
+    def test_update_cli_json_and_agent_outputs_keep_tokenized_urls_redacted(self) -> None:
+        payload = {
+            "ok": True,
+            "action": "check",
+            "status": "update-available",
+            "update_available": True,
+            "current_version": "1.0.0",
+            "latest_version": "1.1.0",
+            "manifest_url": "https://updates.example.test/releases/manifest.json",
+            "wheel_url": "https://cdn.example.test/artifacts/taplctl-1.1.0.whl",
+        }
+        error = tapl_updater.UpdateError(
+            "could not download update data",
+            code="download_failed",
+            details={"url": "https://cdn.example.test/artifacts/taplctl-1.1.0.whl"},
+        )
+        secrets = (
+            "alice",
+            "p4ssword",
+            "access_token",
+            "qsecret",
+            "fragsecret",
+            "bob",
+            "wpass",
+            "wsecret",
+            "wfrag",
+        )
+        for mode in ("--json", "--agent"):
+            with self.subTest(mode=mode):
+                rendered_parts: list[str] = []
+                for result in (payload, error):
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    patch_kwargs = (
+                        {"return_value": result}
+                        if isinstance(result, dict)
+                        else {"side_effect": result}
+                    )
+                    with (
+                        mock.patch.object(
+                            tapl_cli.updater,
+                            "check_for_update",
+                            **patch_kwargs,
+                        ),
+                        mock.patch.object(tapl_cli.tapl_install, "auto_install_if_needed"),
+                        contextlib.redirect_stdout(stdout),
+                        contextlib.redirect_stderr(stderr),
+                    ):
+                        exit_code = tapl_cli.main(["update", "--check", mode])
+                    self.assertEqual(exit_code, 0 if isinstance(result, dict) else 1)
+                    rendered_parts.extend((stdout.getvalue(), stderr.getvalue()))
+
+                combined = "".join(rendered_parts)
+                self.assertIn(
+                    "https://updates.example.test/releases/manifest.json",
+                    combined,
+                )
+                self.assertIn(
+                    "https://cdn.example.test/artifacts/taplctl-1.1.0.whl",
+                    combined,
+                )
+                self.assertIn("download_failed", combined)
+                for secret in secrets:
+                    self.assertNotIn(secret, combined)
 
 
 if __name__ == "__main__":

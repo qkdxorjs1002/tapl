@@ -130,12 +130,91 @@ jobs:
           wheel_name="$(basename "${wheel_path}")"
           wheel_sha256="$(sha256sum "${wheel_path}" | awk '{print $1}')"
           wheel_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${wheel_name}"
+          manifest_path="release-dist/taplctl-install-manifest.json"
+
+          python - "${manifest_path}" "${RELEASE_VERSION}" "${wheel_url}" "${wheel_sha256}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          manifest_path = Path(sys.argv[1])
+          manifest = {
+              "schema_version": 1,
+              "version": sys.argv[2],
+              "wheel": {
+                  "url": sys.argv[3],
+                  "sha256": sys.argv[4],
+              },
+          }
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
 
           echo "wheel_name=${wheel_name}" >> "${GITHUB_OUTPUT}"
           echo "wheel_sha256=${wheel_sha256}" >> "${GITHUB_OUTPUT}"
           echo "wheel_url=${wheel_url}" >> "${GITHUB_OUTPUT}"
 
           ls -lh release-dist
+
+      - name: Validate release assets
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          WHEEL_NAME: ${{ steps.assets.outputs.wheel_name }}
+          WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
+          WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sh -n install.sh
+          python - "release-dist/taplctl-install-manifest.json" "release-dist/${WHEEL_NAME}" "${RELEASE_VERSION}" "${WHEEL_URL}" "${WHEEL_SHA256}" <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          manifest_path = Path(sys.argv[1])
+          wheel_path = Path(sys.argv[2])
+          version, wheel_url, wheel_sha256 = sys.argv[3:]
+
+          if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+              raise SystemExit("invalid release version")
+          if re.fullmatch(r"[0-9a-f]{64}", wheel_sha256) is None:
+              raise SystemExit("invalid wheel SHA-256")
+          expected_wheel_name = f"taplctl-{version}-py3-none-any.whl"
+          expected_wheel_url = (
+              f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/"
+              f"{os.environ['GITHUB_REF_NAME']}/{expected_wheel_name}"
+          )
+          if wheel_path.name != expected_wheel_name:
+              raise SystemExit(f"unexpected wheel filename: {wheel_path.name}")
+          if wheel_url != expected_wheel_url:
+              raise SystemExit(f"unexpected wheel URL: {wheel_url}")
+          if not wheel_path.is_file():
+              raise SystemExit(f"wheel is missing: {wheel_path}")
+
+          expected = {
+              "schema_version": 1,
+              "version": version,
+              "wheel": {
+                  "url": wheel_url,
+                  "sha256": wheel_sha256,
+              },
+          }
+          try:
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+              raise SystemExit(f"invalid install manifest JSON: {exc}")
+          if manifest != expected:
+              raise SystemExit("install manifest does not match the required schema or release asset metadata")
+
+          actual_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+          if actual_sha256 != wheel_sha256:
+              raise SystemExit(
+                  f"wheel SHA-256 mismatch: expected {wheel_sha256}, got {actual_sha256}"
+              )
+          PY
 
       - name: Publish GitHub Release
         env:

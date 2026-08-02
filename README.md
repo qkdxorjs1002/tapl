@@ -238,6 +238,26 @@ batch while the current batch remains active.
 - `uv`, if developing or building from source.
 - VS Code, only if you want the optional workflow viewer.
 
+### Linux (`curl | sh`)
+
+The standalone installer supports Linux and installs only the `taplctl` CLI:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
+```
+
+It requires `curl`, Python 3.11 or newer with the `venv` module, and writable
+installation directories. By default these are
+`${XDG_DATA_HOME:-$HOME/.local/share}/tapl` and
+`${XDG_BIN_HOME:-$HOME/.local/bin}`; set the corresponding XDG variables (or
+`TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR`) if you need different locations.
+
+The installer does not modify your shell startup files or install Codex hooks.
+If it prints a `PATH` export, run that export in the current shell and add it
+to your shell configuration for future shells. Once `taplctl` resolves in your
+`PATH`, run `taplctl install user` (or `taplctl install repo`) and then
+`taplctl validate`, as shown in [Configure Codex hooks](#configure-codex-hooks).
+
 ### Homebrew
 
 ```sh
@@ -264,7 +284,9 @@ pre-loaded:
 brew services start taplctl-semantic
 ```
 
-Then choose how to wire it into Codex:
+### Configure Codex hooks
+
+After installing `taplctl` by any method, choose how to wire it into Codex:
 
 ```sh
 # Most users: install once for your Codex account
@@ -310,6 +332,37 @@ uv run taplctl --version
 uv build
 ```
 
+### Updates
+
+`taplctl update` manages only installations created by the Linux `curl | sh`
+installer; it verifies the published release before activating an update. It
+does not change Homebrew or source-checkout installations.
+
+```sh
+# Linux curl-sh installation
+taplctl update --check
+taplctl update
+
+# Equivalent: re-run the installer to fetch the latest managed release
+curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
+```
+
+Update a Homebrew installation with the formula you installed:
+
+```sh
+# Basic formula
+brew update && brew upgrade taplctl
+
+# Semantic-search formula
+brew update && brew upgrade taplctl-semantic
+```
+
+For a source checkout, update the checkout and its dependencies using the
+source workflow. The release CLI wheel is platform-independent, but its Python
+dependencies still need compatible Linux wheels. In particular, musl-based
+systems such as Alpine may require compatible wheels or local build tools;
+installation can fail when those dependencies cannot be installed.
+
 ## Useful Commands
 
 ```sh
@@ -317,6 +370,8 @@ taplctl init --workspace-root /path/to/workspace
 taplctl doctor
 taplctl status
 taplctl validate
+taplctl update --check
+taplctl update
 taplctl search "query"
 taplctl item show --id 1
 taplctl archive list
