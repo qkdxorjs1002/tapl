@@ -356,7 +356,39 @@ function Move-FileAtomically {
         [Parameter(Mandatory = $true)][string]$Destination
     )
     if ([System.IO.File]::Exists($Destination)) {
-        [System.IO.File]::Replace($Source, $Destination, $null)
+        $nativeTypeName = "TaplInstaller.NativeFileOperations"
+        if ($null -eq ([System.Management.Automation.PSTypeName]$nativeTypeName).Type) {
+            Add-Type -TypeDefinition @'
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+namespace TaplInstaller
+{
+    public static class NativeFileOperations
+    {
+        private const int MoveFileReplaceExisting = 0x1;
+        private const int MoveFileWriteThrough = 0x8;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "MoveFileExW", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool MoveFileEx(
+            string existingFileName,
+            string newFileName,
+            int flags
+        );
+
+        public static void ReplaceExisting(string source, string destination)
+        {
+            if (!MoveFileEx(source, destination, MoveFileReplaceExisting | MoveFileWriteThrough))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+    }
+}
+'@ -ErrorAction Stop
+        }
+        [TaplInstaller.NativeFileOperations]::ReplaceExisting($Source, $Destination)
     }
     else {
         [System.IO.File]::Move($Source, $Destination)
