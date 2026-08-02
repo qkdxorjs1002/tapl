@@ -140,6 +140,8 @@ function ViewRenderer({
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
   switch (view.type) {
+    case 'workspace':
+      return <WorkspaceView view={view} send={send} />;
     case 'overview':
       return <OverviewView view={view} layout={layout} send={send} />;
     case 'archive':
@@ -153,7 +155,7 @@ function ViewRenderer({
     case 'searchItem':
       return <SearchItemView result={view.result} detail={view.detail} send={send} />;
     case 'error':
-      return <ErrorView message={view.message} />;
+      return <ErrorView message={view.message} send={send} />;
   }
 }
 
@@ -205,6 +207,11 @@ function OverviewView({
           </div>
           <div className="tapl-command-panel">
             <div className="tapl-command-actions">
+              {view.workspace ? (
+                <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'chooseWorkspace' })}>
+                  {t('changeWorkspace')}
+                </button>
+              ) : null}
               <button className="btn btn-primary btn-sm" type="button" onClick={() => send({ command: 'refresh' })}>
                 {t('refresh')}
               </button>
@@ -212,6 +219,7 @@ function OverviewView({
                 {t('debug')}
               </button>
             </div>
+            {view.workspace ? <p className="tapl-workspace-path" title={view.workspace}>{view.workspace}</p> : null}
             <SearchForm defaultQuery={searchQuery} send={send} />
             <ProgressMeter
               label={t('runProgress')}
@@ -257,6 +265,55 @@ function OverviewView({
         </aside>
       </section>
     </>
+  );
+}
+
+function WorkspaceView({
+  view,
+  send
+}: {
+  view: Extract<WebviewView, { type: 'workspace' }>;
+  send: (message: WebviewCommand) => void;
+}): JSX.Element {
+  const { t } = useI18n();
+  const [workspace, setWorkspace] = useState(view.workspace);
+  useEffect(() => setWorkspace(view.workspace), [view.workspace]);
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (workspace.trim()) {
+      send({ command: 'selectWorkspace', workspace: workspace.trim() });
+    }
+  };
+
+  return (
+    <section className="tapl-workspace-shell" aria-labelledby="workspace-title">
+      <div className="tapl-workspace-orbit" aria-hidden="true" />
+      <div className="tapl-workspace-card">
+        <div className="tapl-workspace-mark" aria-hidden="true">T</div>
+        <p className="tapl-eyebrow">{t('localViewer')}</p>
+        <h1 id="workspace-title" className="m-0 text-3xl font-semibold">{t('chooseWorkspace')}</h1>
+        <p className="tapl-muted m-0 leading-6">{t('workspaceHelp')}</p>
+        <form className="tapl-workspace-form" onSubmit={submit}>
+          <label className="tapl-workspace-label" htmlFor="tapl-workspace-path">{t('workspacePath')}</label>
+          <div className="join flex w-full min-w-0">
+            <input
+              id="tapl-workspace-path"
+              className="input input-bordered join-item min-w-0 flex-1"
+              value={workspace}
+              placeholder={t('workspacePlaceholder')}
+              autoComplete="off"
+              autoFocus
+              onChange={(event) => setWorkspace(event.target.value)}
+            />
+            <button className="btn btn-primary join-item" type="submit" disabled={!workspace.trim()}>
+              {t('openWorkspace')}
+            </button>
+          </div>
+        </form>
+        {view.message ? <p className="tapl-workspace-message" role="status">{view.message}</p> : null}
+        <p className="tapl-workspace-hint"><code>{t('workspaceSetupHint')}</code></p>
+      </div>
+    </section>
   );
 }
 
@@ -448,12 +505,18 @@ function SearchItemView({
   );
 }
 
-function ErrorView({ message }: { message: string }): JSX.Element {
+function ErrorView({ message, send }: { message: string; send: (message: WebviewCommand) => void }): JSX.Element {
   const { t } = useI18n();
   return (
-    <Card title={t('taplUnavailable')}>
-      <p className="text-error">{message}</p>
-    </Card>
+    <div className="tapl-stack max-w-3xl">
+      <Card title={t('taplUnavailable')}>
+        <p className="text-error m-0" role="alert">{message}</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button className="btn btn-primary btn-sm" type="button" onClick={() => send({ command: 'refresh' })}>{t('refresh')}</button>
+          <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>{t('back')}</button>
+        </div>
+      </Card>
+    </div>
   );
 }
 

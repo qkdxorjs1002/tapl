@@ -24,6 +24,7 @@ from . import (
     searchd,
     updater,
     validation,
+    viewer,
 )
 
 
@@ -256,7 +257,7 @@ def should_skip_auto_install(args: argparse.Namespace) -> bool:
     command = getattr(args, "command", None)
     if args.db is not None or args.config is not None:
         return True
-    if command in {None, "init", "install", "update", "hook-event"}:
+    if command in {None, "init", "install", "update", "hook-event", "viewer"}:
         return True
     return command == "searchd" and getattr(args, "searchd_command", None) == "run"
 
@@ -460,6 +461,22 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--check", action="store_true", help="Check for an update without installing it.")
     add_agent_output_args(update)
     update.set_defaults(handler=cmd_update)
+
+    viewer_cmd = sub.add_parser(
+        "viewer",
+        help="Serve the workflow viewer in a local web browser.",
+        description=(
+            "Serve the workflow viewer on 127.0.0.1. The current initialized "
+            "workspace is selected automatically; otherwise choose one in the browser."
+        ),
+    )
+    viewer_cmd.add_argument(
+        "--port",
+        type=viewer_port_arg,
+        default=viewer.DEFAULT_PORT,
+        help=f"Local TCP port. Defaults to {viewer.DEFAULT_PORT}.",
+    )
+    viewer_cmd.set_defaults(handler=cmd_viewer)
 
     status = sub.add_parser("status", help="Show active workflow state.")
     add_agent_output_args(status)
@@ -909,6 +926,13 @@ def positive_int_arg(value: str) -> int:
     return parsed
 
 
+def viewer_port_arg(value: str) -> int:
+    try:
+        return viewer.parse_port(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def non_negative_int_arg(value: str) -> int:
     try:
         parsed = int(value)
@@ -977,6 +1001,21 @@ def cmd_update(args: argparse.Namespace) -> int:
         print(agent_output(payload))
     else:
         print(humanize_update(payload))
+    return 0
+
+
+def cmd_viewer(args: argparse.Namespace) -> int:
+    """Serve the shared workflow viewer without creating a workspace database."""
+
+    workspace = None if args.db is not None else viewer.existing_workspace()
+    selected_db = args.db.expanduser().resolve() if args.db is not None else None
+    if workspace is not None:
+        selected_db = workspace / db.DEFAULT_DB_RELATIVE
+    viewer.serve(
+        port=args.port,
+        default_db=selected_db,
+        default_workspace=workspace,
+    )
     return 0
 
 

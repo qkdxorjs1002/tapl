@@ -33,7 +33,7 @@ context가 사라진 뒤의 재개를 가능하게 합니다.
 직접 쓰는 명령을 사람이 실행할 필요가 없습니다.
 
 상태는 `.tapl/tapl.db`에 저장됩니다. 그래서 다음 Codex session, hook, 사용자,
-VS Code viewer가 같은 run을 확인할 수 있습니다.
+브라우저 또는 VS Code viewer가 같은 run을 확인할 수 있습니다.
 
 ## 왜 필요한지
 
@@ -136,7 +136,30 @@ taplctl init --workspace-root /path/to/workspace
 중첩 repository를 의도적으로 독립 관리할 때는 그 위치에 별도
 `.tapl/tapl.db`를 초기화합니다.
 
-### 6. 선택 가능한 VS Code viewer
+### 6. 브라우저 및 선택 가능한 VS Code viewer
+
+초기화된 workspace에서 함께 제공되는 브라우저 viewer를 실행하세요.
+
+```sh
+taplctl viewer
+# tapl viewer: http://127.0.0.1:8000
+
+# 8000 포트를 사용 중이면 다른 로컬 포트 지정
+taplctl viewer --port 9000
+```
+
+출력된 URL을 브라우저에서 여세요. 서버는 로컬 loopback interface에서만
+수신하고 브라우저를 자동으로 열지 않으며 viewer의 읽기 작업만 제공합니다.
+foreground 서버는 `Ctrl+C`로 종료합니다.
+
+workspace 안에서 실행하면 가장 가까운 `.tapl/tapl.db`가 우선합니다. Homebrew
+로그인 서비스처럼 workspace 밖에서 시작하면 페이지에서 초기화된 workspace
+폴더를 입력할 수 있고, 성공한 최근 경로를 해당 브라우저에 기억합니다. 하위
+명령 앞에서 DB를 직접 선택할 수도 있습니다.
+
+```sh
+taplctl --db /path/to/workspace/.tapl/tapl.db viewer
+```
 
 `vscode-extension/`의 VS Code extension은 같은 state를 다음 명령으로 읽습니다.
 
@@ -235,11 +258,12 @@ batch가 active인 동안에는 두 번째 batch를 시작하지 마세요.
   5.1 이상 또는 PowerShell 7.
 - 함께 제공하는 formula로 설치할 경우 Homebrew.
 - Source 개발 또는 build를 할 경우 `uv`.
-- Workflow viewer를 사용할 경우에만 VS Code.
+- `taplctl viewer`용 웹 브라우저. VS Code는 선택 가능한 extension에만 필요합니다.
 
 ### Linux (`curl | sh`)
 
-독립형 설치 프로그램은 Linux를 지원하며 `taplctl` CLI만 설치합니다.
+독립형 설치 프로그램은 Linux를 지원하며 함께 제공되는 브라우저 viewer를 포함한
+`taplctl` CLI를 설치합니다.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
@@ -258,7 +282,8 @@ curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh |
 
 ### Windows (`irm | iex`)
 
-PowerShell 설치 프로그램은 Windows 10과 11을 지원하며 `taplctl` CLI만 설치합니다.
+PowerShell 설치 프로그램은 Windows 10과 11을 지원하며 함께 제공되는 브라우저
+viewer를 포함한 `taplctl` CLI를 설치합니다.
 
 ```powershell
 irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
@@ -303,11 +328,26 @@ brew install taplctl
 brew install taplctl-semantic
 ```
 
-`taplctl-semantic`을 선택했다면 semantic search 모델을 미리 로딩해둘 수 있습니다.
+설치한 formula에 맞춰 브라우저 viewer를 로그인 시 자동 시작할 수 있습니다.
 
 ```sh
+brew services start taplctl
+# 또는
 brew services start taplctl-semantic
 ```
+
+두 formula service 모두 `taplctl viewer`를 `127.0.0.1:8000`에서 실행합니다.
+해당 URL을 열고 첫 방문 시 workspace를 선택하세요. Semantic formula의 Homebrew
+service는 의도적으로 `searchd`를 시작하지 않습니다. Semantic model을 미리
+로딩하려면 별도로 실행하세요.
+
+```sh
+taplctl searchd start
+taplctl searchd status
+```
+
+8000 포트가 사용 중이면 Homebrew service를 중지한 뒤
+`taplctl viewer --port PORT`를 수동 실행하세요.
 
 ### Codex hook 설정
 
@@ -403,6 +443,8 @@ taplctl init --workspace-root /path/to/workspace
 taplctl doctor
 taplctl status
 taplctl validate
+taplctl viewer
+taplctl viewer --port 9000
 taplctl update --check
 taplctl update
 taplctl search "query"
@@ -410,6 +452,8 @@ taplctl item show --id 1
 taplctl archive list
 taplctl archive show --id <id>
 taplctl reindex
+taplctl searchd start
+taplctl searchd status
 
 # 고급 workflow 보정/디버깅
 taplctl run set --help

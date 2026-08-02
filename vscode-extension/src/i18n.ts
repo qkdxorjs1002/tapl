@@ -149,6 +149,14 @@ const EN_MESSAGES = {
   workItemsInOrder: '{count} work items in execution order',
   workflowRecords: 'Workflow records',
   workspace: 'workspace',
+  changeWorkspace: 'Change workspace',
+  chooseWorkspace: 'Choose a workspace',
+  localViewer: 'Local viewer',
+  openWorkspace: 'Open workspace',
+  workspaceHelp: 'Enter a folder that already contains .tapl/tapl.db. The path stays in this browser.',
+  workspacePath: 'Workspace path',
+  workspacePlaceholder: '/path/to/workspace',
+  workspaceSetupHint: 'Not initialized yet? Run taplctl init --workspace-root /path/to/workspace.',
   approvedTasksAppear: 'Approved tasks will appear here in execution order.'
 } as const;
 
@@ -304,6 +312,14 @@ const KO_MESSAGES: Record<TranslationKey, string> = {
   workItemsInOrder: '실행 순서대로 작업 {count}개',
   workflowRecords: '워크플로 기록',
   workspace: '워크스페이스',
+  changeWorkspace: '워크스페이스 변경',
+  chooseWorkspace: '워크스페이스 선택',
+  localViewer: '로컬 뷰어',
+  openWorkspace: '워크스페이스 열기',
+  workspaceHelp: '.tapl/tapl.db가 이미 있는 폴더를 입력하세요. 경로는 이 브라우저에만 저장됩니다.',
+  workspacePath: '워크스페이스 경로',
+  workspacePlaceholder: '/path/to/workspace',
+  workspaceSetupHint: '아직 초기화하지 않았다면 taplctl init --workspace-root /path/to/workspace 를 실행하세요.',
   approvedTasksAppear: '승인된 작업이 실행 순서대로 여기에 표시됩니다.'
 };
 

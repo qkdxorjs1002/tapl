@@ -125,6 +125,15 @@ jobs:
           package_json.write_text(json.dumps(package_data, indent=2) + "\n")
           PY
 
+      - name: Build shared viewer assets
+        working-directory: vscode-extension
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm install --package-lock=false
+          npm run compile
+
       - name: Build Python wheel
         working-directory: tapl
         shell: bash
@@ -142,8 +151,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          npm install --package-lock=false
-          npm run compile
           npm exec -- vsce package \
             --allow-missing-repository \
             --out "../release-dist/tapl-workflow-viewer-${RELEASE_VERSION}.vsix"
@@ -314,22 +321,25 @@ jobs:
             end
           end
 
-          def searchd_service_block(indent)
+          def viewer_service_block(indent)
             [
               "#{indent}service do\n",
-              "#{indent}  run [opt_bin/\"taplctl\", \"searchd\", \"run\"]\n",
+              "#{indent}  run [opt_bin/\"taplctl\", \"viewer\"]\n",
               "#{indent}  keep_alive true\n",
+              "#{indent}  restart_delay 5\n",
+              "#{indent}  log_path var/\"log/taplctl-viewer.log\"\n",
+              "#{indent}  error_log_path var/\"log/taplctl-viewer.log\"\n",
               "#{indent}end\n",
             ]
           end
 
-          def upsert_searchd_service_block(lines, install_indent)
+          def upsert_viewer_service_block(lines, install_indent)
             service_start = lines.index { |line| line.match?(/^#{Regexp.escape(install_indent)}service\s+do\s*$/) }
             if service_start
               service_end = find_block_end(lines, service_start, install_indent)
               raise "Could not find end of service block" unless service_end
 
-              lines[service_start..service_end] = searchd_service_block(install_indent)
+              lines[service_start..service_end] = viewer_service_block(install_indent)
               return
             end
 
@@ -340,7 +350,7 @@ jobs:
             raise "Could not find end of install block for service insertion" unless install_end
 
             insert_index = install_end + 1
-            block = ["\n", *searchd_service_block(install_indent)]
+            block = ["\n", *viewer_service_block(install_indent)]
             block << "\n" unless lines[insert_index]&.match?(/^\s*$/)
             lines.insert(insert_index, *block)
           end
@@ -417,7 +427,7 @@ jobs:
               ]
             end
 
-            upsert_searchd_service_block(lines, install_indent)
+            upsert_viewer_service_block(lines, install_indent)
 
             File.write(file, lines.join)
           end

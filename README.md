@@ -33,7 +33,7 @@ work progresses, and validates the run before Codex stops. You usually do not
 need to run the workflow-writing commands yourself.
 
 The state lives in `.tapl/tapl.db`, so the next Codex session, a hook, you, or
-the VS Code viewer can inspect the same run.
+the browser or VS Code viewer can inspect the same run.
 
 ## Why This Exists
 
@@ -139,7 +139,30 @@ taplctl init --workspace-root /path/to/workspace
 An intentionally independent nested repository can initialize its own
 `.tapl/tapl.db`.
 
-### 6. Optional VS Code viewer
+### 6. Browser and optional VS Code viewers
+
+Start the bundled browser viewer from an initialized workspace:
+
+```sh
+taplctl viewer
+# tapl viewer: http://127.0.0.1:8000
+
+# Choose another local port when 8000 is busy
+taplctl viewer --port 9000
+```
+
+Open the printed URL in a browser. The server listens only on the local
+loopback interface, does not open the browser automatically, and exposes only
+viewer read operations. Stop a foreground server with `Ctrl+C`.
+
+When the command starts inside a workspace, its nearest `.tapl/tapl.db` wins.
+When it starts without one—such as a Homebrew login service—the page asks for
+an initialized workspace folder and remembers the last successful path in that
+browser. An explicit database can also be selected before the subcommand:
+
+```sh
+taplctl --db /path/to/workspace/.tapl/tapl.db viewer
+```
 
 The VS Code extension in `vscode-extension/` reads the same state through:
 
@@ -239,11 +262,12 @@ batch while the current batch remains active.
   PowerShell 5.1 or newer, or PowerShell 7.
 - Homebrew, if installing with the bundled formula.
 - `uv`, if developing or building from source.
-- VS Code, only if you want the optional workflow viewer.
+- A web browser for `taplctl viewer`; VS Code only for the optional extension.
 
 ### Linux (`curl | sh`)
 
-The standalone installer supports Linux and installs only the `taplctl` CLI:
+The standalone installer supports Linux and installs the `taplctl` CLI with
+the bundled browser viewer:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
@@ -263,8 +287,8 @@ to your shell configuration for future shells. Once `taplctl` resolves in your
 
 ### Windows (`irm | iex`)
 
-The PowerShell installer supports Windows 10 and 11 and installs only the
-`taplctl` CLI:
+The PowerShell installer supports Windows 10 and 11 and installs the `taplctl`
+CLI with the bundled browser viewer:
 
 ```powershell
 irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
@@ -313,12 +337,26 @@ brew install taplctl
 brew install taplctl-semantic
 ```
 
-If you chose `taplctl-semantic`, you can keep the semantic search model
-pre-loaded:
+Start the browser viewer automatically at login with the formula you installed:
 
 ```sh
+brew services start taplctl
+# or
 brew services start taplctl-semantic
 ```
+
+Both formula services run `taplctl viewer` on `127.0.0.1:8000`. Open that URL
+and choose a workspace on the first visit. The semantic formula's Homebrew
+service intentionally does not start `searchd`; start it separately when you
+want a pre-loaded semantic model:
+
+```sh
+taplctl searchd start
+taplctl searchd status
+```
+
+If port 8000 is occupied, stop the Homebrew service and run
+`taplctl viewer --port PORT` manually.
 
 ### Configure Codex hooks
 
@@ -418,6 +456,8 @@ taplctl init --workspace-root /path/to/workspace
 taplctl doctor
 taplctl status
 taplctl validate
+taplctl viewer
+taplctl viewer --port 9000
 taplctl update --check
 taplctl update
 taplctl search "query"
@@ -425,6 +465,8 @@ taplctl item show --id 1
 taplctl archive list
 taplctl archive show --id <id>
 taplctl reindex
+taplctl searchd start
+taplctl searchd status
 
 # Advanced workflow repair/debugging
 taplctl run set --help

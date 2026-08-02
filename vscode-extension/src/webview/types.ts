@@ -131,7 +131,8 @@ export interface TaplItemDetail extends TaplItem {
 }
 
 export type WebviewView =
-  | { type: 'overview'; status: TaplStatus; archives: TaplArchive[]; searchQuery: string }
+  | { type: 'workspace'; workspace: string; message?: string }
+  | { type: 'overview'; status: TaplStatus; archives: TaplArchive[]; searchQuery: string; workspace?: string }
   | { type: 'archive'; archive: TaplArchive; detail?: TaplArchiveDetail }
   | { type: 'archiveEvents'; archive: TaplArchive; detail?: TaplArchiveDetail }
   | { type: 'debug'; status: TaplStatus }
@@ -140,12 +141,14 @@ export type WebviewView =
   | { type: 'error'; message: string };
 
 export type HostMessage =
-  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout }
-  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout }
+  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string }
+  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string }
   | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout };
 
 export type WebviewCommand =
   | { command: 'ready' }
+  | { command: 'chooseWorkspace' }
+  | { command: 'selectWorkspace'; workspace: string }
   | { command: 'refresh' }
   | { command: 'back' }
   | { command: 'debug' }

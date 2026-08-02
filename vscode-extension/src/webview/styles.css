@@ -11,7 +11,9 @@
   --rounded-badge: 999px;
   --tapl-tech-blue: #0066ff;
   --tapl-tech-cyan: #00ffff;
-  --tapl-page-bg: var(--vscode-sideBar-background, var(--vscode-panel-background, var(--vscode-editor-background)));
+  --tapl-page-bg: var(--vscode-sideBar-background, var(--vscode-panel-background, var(--vscode-editor-background, #090d16)));
+  --tapl-foreground: var(--vscode-editor-foreground, #f1f5f9);
+  --tapl-font: var(--vscode-font-family, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
   --tapl-muted: var(--vscode-descriptionForeground, #9ca3af);
   --tapl-panel: color-mix(in srgb, var(--vscode-sideBar-background, var(--tapl-page-bg)) 92%, var(--tapl-tech-blue) 8%);
   --tapl-surface: color-mix(in srgb, var(--vscode-editorWidget-background, var(--tapl-panel)) 96%, var(--tapl-tech-blue) 4%);
@@ -49,12 +51,12 @@ body {
   min-width: 0;
   margin: 0;
   padding: 22px;
-  color: var(--vscode-editor-foreground);
+  color: var(--tapl-foreground);
   background:
     radial-gradient(circle at 2% -8%, color-mix(in srgb, var(--tapl-tech-blue) 13%, transparent), transparent 30rem),
     radial-gradient(circle at 98% 4%, color-mix(in srgb, var(--tapl-tech-cyan) 5%, transparent), transparent 24rem),
     var(--tapl-page-bg);
-  font-family: var(--vscode-font-family);
+  font-family: var(--tapl-font);
 }
 
 #root {
@@ -70,7 +72,7 @@ input {
 .btn-primary {
   border: 0;
   background: linear-gradient(135deg, var(--vscode-button-background, var(--tapl-tech-blue)), color-mix(in srgb, var(--vscode-button-background, var(--tapl-tech-blue)) 76%, var(--tapl-tech-cyan) 24%));
-  color: var(--vscode-button-foreground);
+  color: var(--vscode-button-foreground, #ffffff);
   box-shadow: 0 8px 20px color-mix(in srgb, var(--tapl-accent) 24%, transparent);
 }
 
@@ -92,8 +94,8 @@ input {
 }
 
 .input {
-  background: var(--vscode-input-background);
-  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background, #121827);
+  color: var(--vscode-input-foreground, var(--tapl-foreground));
   border-color: color-mix(in srgb, var(--vscode-input-border, var(--tapl-border-control)) 70%, transparent);
   box-shadow: var(--tapl-shadow-inset);
 }
@@ -190,6 +192,70 @@ pre {
 
 .tapl-command-actions {
   @apply justify-end;
+}
+
+.tapl-workspace-path {
+  @apply m-0 truncate text-right text-[11px];
+  color: var(--tapl-muted);
+}
+
+.tapl-workspace-shell {
+  @apply relative isolate grid min-h-[calc(100vh-44px)] place-items-center overflow-hidden rounded-3xl p-6;
+  background:
+    radial-gradient(circle at 20% 18%, color-mix(in srgb, var(--tapl-tech-blue) 22%, transparent), transparent 25rem),
+    radial-gradient(circle at 82% 78%, color-mix(in srgb, var(--tapl-tech-cyan) 10%, transparent), transparent 24rem),
+    color-mix(in srgb, var(--tapl-page-bg) 90%, #05070c 10%);
+}
+
+.tapl-workspace-orbit {
+  position: absolute;
+  z-index: -1;
+  width: min(68vw, 760px);
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in srgb, var(--tapl-accent) 18%, transparent);
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 72px color-mix(in srgb, var(--tapl-accent) 3%, transparent),
+    0 0 0 144px color-mix(in srgb, var(--tapl-tech-cyan) 2%, transparent);
+}
+
+.tapl-workspace-card {
+  @apply grid w-full max-w-2xl gap-5 rounded-3xl p-7;
+  background: color-mix(in srgb, var(--tapl-surface) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tapl-accent) 20%, transparent);
+  box-shadow: var(--tapl-shadow);
+  backdrop-filter: blur(20px);
+}
+
+.tapl-workspace-mark {
+  @apply grid h-12 w-12 place-items-center rounded-2xl text-xl font-black;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--tapl-tech-blue), color-mix(in srgb, var(--tapl-tech-blue) 70%, var(--tapl-tech-cyan) 30%));
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--tapl-accent) 34%, transparent);
+}
+
+.tapl-workspace-form {
+  @apply grid gap-2;
+}
+
+.tapl-workspace-label {
+  @apply text-xs font-semibold;
+  color: var(--tapl-foreground);
+}
+
+.tapl-workspace-message,
+.tapl-workspace-hint {
+  @apply m-0 rounded-xl px-3 py-2 text-xs leading-5;
+}
+
+.tapl-workspace-message {
+  color: color-mix(in srgb, var(--tapl-warning) 80%, var(--tapl-foreground));
+  background: color-mix(in srgb, var(--tapl-warning) 10%, transparent);
+}
+
+.tapl-workspace-hint {
+  color: var(--tapl-muted);
+  background: color-mix(in srgb, var(--tapl-surface-muted) 72%, transparent);
 }
 
 .tapl-search {
@@ -944,6 +1010,24 @@ pre {
 
   .tapl-step-card {
     min-height: 112px;
+  }
+
+  .tapl-workspace-shell {
+    min-height: calc(100vh - 24px);
+    padding: 10px;
+  }
+
+  .tapl-workspace-card {
+    padding: 18px;
+  }
+
+  .tapl-workspace-form .join {
+    display: grid;
+  }
+
+  .tapl-workspace-form .join-item {
+    width: 100%;
+    border-radius: var(--rounded-btn);
   }
 }
 

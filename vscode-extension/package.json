@@ -21,9 +21,9 @@
   ],
   "main": "./out/extension.js",
   "scripts": {
-    "compile": "tsc -p ./ && vite build",
+    "compile": "tsc -p ./ && npm run compile:webview",
     "compile:extension": "tsc -p ./",
-    "compile:webview": "vite build",
+    "compile:webview": "vite build && node scripts/sync-viewer-assets.mjs",
     "watch": "tsc -watch -p ./",
     "watch:webview": "vite build --watch",
     "package": "vsce package --allow-missing-repository --out tapl-workflow-viewer-$npm_package_version.vsix"
