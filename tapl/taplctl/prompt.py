@@ -186,16 +186,16 @@ AGENT_ITEM_FIELDS = {
     "finding": ("body", "impact", "related_ids"),
 }
 
-CONTEXT_INJECTION_PROMPT_TEMPLATE = """# Workflow
+MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is the workflow system for this workspace. Use the `tapl_*` MCP tools instead of constructing or executing `taplctl` shell commands. Call `tapl_get_status` and `tapl_get_next` before non-trivial work or whenever state is uncertain. These server instructions, tool descriptions, and JSON schemas are the authoritative workflow and field contract; do not call CLI `--help` to rediscover them. The `taplctl` CLI remains a manual repair fallback only when this MCP server is unavailable.
+
+# Workflow
 
 Write workflow records and reports in the user's language unless asked otherwise. Keep them short, practical, and current. Do not add unstated requirements or expand scope without explicit user approval.
 
 ## Role Boundaries
 
-- This template contains invariant workflow policy only. Use the packet's Next Actions section for current-state steps, and use `taplctl <command> <subcommand> --help` for command syntax, field contracts, status values, stable id rules, and examples.
-- Workflow state lives in the repo-local TAPL database through `taplctl`.
-- Use `taplctl ... --agent` for agent-readable output.
-- Prefer high-level lifecycle commands and `taplctl next --agent`; use low-level `set` commands only for repair/debug or when a recipe says so.
+- Workflow state lives in the repo-local TAPL database behind these tools.
+- Prefer high-level lifecycle tools and `tapl_get_next`; use the CLI only for manual repair when MCP is unavailable.
 - ${lifecycle_recipe_guidance}
 - Do not modify source, tests, docs, configs, migrations, generated files, or other durable project artifacts before execution approval.
 - TAPL run, plan, task, finding, approval, and archive records may be created or updated before execution approval.
@@ -253,143 +253,39 @@ When work finishes, report briefly:
 - remaining risks or blocked work,
 - whether the TAPL run was archived.
 
-Record the final result in the active run before archiving."""
+Record the final result with `tapl_finish_run` before archiving with `tapl_finish_archive`."""
 
-SESSION_START_GUIDANCE_TEMPLATE = """# Workflow
+CONTEXT_INJECTION_PROMPT_TEMPLATE = """# TAPL MCP
 
-Write workflow records and reports in the user's language unless asked otherwise. Keep them short, practical, and current. Do not add unstated requirements or expand scope without explicit user approval.
+Use the installed `tapl_*` MCP tools for workflow state. The MCP server instructions, tool descriptions, and input schemas contain the authoritative workflow policy and field contracts. Call `tapl_get_next` for the current safe action. Do not run `taplctl --help`; use the CLI only as a manual fallback when the MCP server is unavailable."""
 
-SessionStart is bootstrap only; wait for a concrete user request before creating plan/task records.
+SESSION_START_GUIDANCE_TEMPLATE = """# TAPL MCP
 
-${taplctl_execution_guidance}
+SessionStart is bootstrap only; wait for a concrete user request before creating workflow records. Use the installed `tapl_*` MCP tools and their server instructions; the CLI is a manual fallback only."""
 
-${taplctl_command_guidance}"""
+STOP_GUIDANCE_TEMPLATE = """# TAPL MCP
 
-STOP_GUIDANCE_TEMPLATE = """${taplctl_command_guidance}
+Use `tapl_get_next` to settle remaining tasks or batches. When work is verified, record the result with `tapl_finish_run`, archive eligible work with `tapl_finish_archive`, and report changed behavior, verification, remaining risk, and archive status."""
 
-## 8. Completion Report
+ROOT_HELP_TEMPLATE = """Manual CLI fallback:
+  Agent workflow guidance and structured field contracts are provided by the `tapl-mcp` server.
+  Use this CLI for human operation, diagnostics, or repair when MCP is unavailable.
+  Subcommand `--help` output documents flags only; it is not the agent workflow prompt."""
 
-When work finishes, report briefly:
+SEARCH_HELP_TEMPLATE = """Manual CLI fallback for TAPL history search.
+Use the `tapl_search_history` and `tapl_get_item` MCP tools for agent workflows."""
 
-- changed files and behavior,
-- verification commands and results,
-- remaining risks or blocked work,
-- whether the TAPL run was archived.
+PLAN_SET_HELP_TEMPLATE = """Manual CLI fallback for plan record repair.
+Use the typed `tapl_apply_plan` MCP tool for agent workflows; command options below document CLI fields."""
 
-Record the final result with `taplctl run finish --result '<result summary>' --agent` before archiving.
+TASK_SET_HELP_TEMPLATE = """Manual CLI fallback for task record repair.
+Use the typed TAPL task MCP tools for agent workflows; command options below document CLI fields."""
 
-## 7. Archiving
+FINDING_ADD_HELP_TEMPLATE = """Manual CLI fallback for finding record repair.
+Use the typed `tapl_add_finding` MCP tool for agent workflows; command options below document CLI fields."""
 
-Archive the active run when no actionable tasks remain, the workflow is superseded, the user chooses to archive or discard remaining work, or the active run is stale.
-
-Use:
-
-`taplctl archive finish --slug '<timestamp-task-slug>' --summary '<summary>' --agent`
-
-Use `taplctl search`, `taplctl item show`, `taplctl archive list`, and `taplctl archive show` as lookup tools instead of maintaining filesystem indexes."""
-
-ROOT_HELP_TEMPLATE = """Workflow guidance:
-  Use `taplctl status --agent` to inspect state before non-trivial work.
-  Use `taplctl next --agent` for the safest next lifecycle command and `taplctl recipe all --agent` for copyable command skeletons.
-  ${lifecycle_recipe_guidance}
-  ${history_search_guidance}
-  ${workflow_order_guidance}
-  Stage progression: ${workflow_stage_progression_guidance}
-  ${task_execution_order_guidance}
-  Use `taplctl <command> <subcommand> --help` for field-writing rules.
-  ${structured_record_guidance}
-  ${custom_fields_guidance}
-  Use `taplctl validate --agent` after updates to catch missing plan/task details."""
-
-SEARCH_HELP_TEMPLATE = """History search rules:
-  ${history_search_guidance}
-  Keep queries compact and task-specific; include likely file names, feature names,
-  workflows, error text, or decision keywords when helpful.
-  Search output is summarized. When a relevant result may affect the work and the
-  snippet is insufficient, inspect the full record with `taplctl item show --id <id> --agent`.
-
-Examples:
-  taplctl search 'workflow dashboard search page' --agent
-  taplctl search 'plan task approval lifecycle' --limit 5 --agent
-  taplctl item show --id 123 --agent"""
-
-PLAN_SET_HELP_TEMPLATE = """Plan writing rules:
-  Agent recipe: prefer `taplctl plan apply --stdin-json --agent` for normal workflow updates.
-  ${structured_record_guidance}
-  ${stable_id_guidance}
-  Write or update the plan before executable task records; downstream tasks should derive from this record.
-  ${plan_format_guidance}
-  ${plan_key_label_guidance}
-  Pass plan content through field arguments; tapl renders the durable Markdown body from a template.
-  Summary should be a compact trace such as `REQ-001: approach, files, risks, validation`.
-  Existing plan updates are partial: omitted fields keep the stored values.
-  ${custom_fields_guidance}
-  Status is free-form; common values are Draft, Finalized, Imported, and Superseded.
-
-Field contract:
-${plan_field_contract}
-
-Example:
-  taplctl plan set --id PLAN-001 --title 'Plan title' \\
-    --summary 'REQ-001: approach, affected files, risks, validation' \\
-    --objective 'Implement requested behavior' \\
-    --requirements-trace 'REQ-001: field-based plan records' \\
-    --validation 'Run focused tests' --status Finalized --agent"""
-
-TASK_SET_HELP_TEMPLATE = """Task writing rules:
-  Agent recipes: prefer `taplctl task create --stdin-json --agent`, `taplctl task start TASK-001 --agent`, `taplctl task complete TASK-001 --verification '<check>' --result '<result>' --agent`, and `taplctl task block TASK-001 --blocker '<blocker>' --next-action '<next action>' --agent`.
-  ${structured_record_guidance_task}
-  ${stable_id_guidance}
-  ${task_plan_dependency_guidance}
-  ${task_execution_order_guidance}
-  Existing task updates are partial: pass --id plus only changed fields;
-  omitted fields keep their stored values. New task creation requires --title and --status.
-  ${custom_fields_guidance}
-  ${task_fields_guidance}
-  Split tasks by meaningful implementation or verification step.
-  Status values: ${status_values}. Quote multi-word statuses, e.g. --status 'In Progress'.
-  Keep task text in the user's language unless asked otherwise.
-
-Required field sets:
-  ${task_required_field_summary}
-
-Field contract:
-${task_field_contract}
-
-Example:
-  taplctl task set --id TASK-001 --title 'Implement change' \\
-    --status 'In Progress' --spec-id PLAN-001 --goal 'Make requested behavior work' \\
-    --action 'Edit the relevant files' \\
-    --verification 'Run focused tests' --agent
-  taplctl task set --id TASK-001 --status Completed --result 'Focused tests passed' --agent"""
-
-FINDING_ADD_HELP_TEMPLATE = """Finding writing rules:
-  ${markdown_finding_guidance}
-  Add only decision-relevant facts; include source and impact when they affect
-  requirements, plan, tasks, or verification.
-
-Field contract:
-${finding_field_contract}
-
-Example:
-  taplctl finding add --title 'Finding title' --source 'Source' \\
-    --finding 'What was learned' --impact 'Why it matters' --agent"""
-
-APPROVAL_SET_HELP_TEMPLATE = """Approval writing rules:
-  Agent recipe: prefer `taplctl approval approve --prompt '<approved scope>' --source explicit_user --agent`.
-  Record explicit user decisions for residual-run handling, planning clarification,
-  or execution scope. Execution approval is normally set after task design/task create
-  and before starting or continuing task execution. Set --source explicit_user when
-  the request itself explicitly allowed execution, or --source request_user_input when
-  continuing was approved through the request_user_input tool. The prompt should
-  describe the approved decision/scope, not just `yes`.
-
-Field contract:
-${approval_field_contract}
-
-Example:
-  taplctl approval set --decision approved \\
-    --prompt 'Execute TASK-001 from PLAN-001' --source explicit_user --agent"""
+APPROVAL_SET_HELP_TEMPLATE = """Manual CLI fallback for approval record repair.
+Use `tapl_approve_execution` or `tapl_reject_execution` for agent workflows; command options below document CLI fields."""
 
 
 def render_template(template: str, **variables: Any) -> str:
@@ -536,11 +432,11 @@ def invalid_task_id_remediation() -> str:
 
 
 def invalid_task_spec_id_remediation() -> str:
-    return "Set --spec-id to a stored numeric plan/spec id such as `PLAN-001` or `SPEC-001`."
+    return "Set `spec_id` to a stored numeric plan/spec id such as `PLAN-001` or `SPEC-001`."
 
 
 def missing_plan_remediation() -> str:
-    return "Create or update a plan with `taplctl plan apply --stdin-json --agent` before durable edits."
+    return "Create or update a plan with `tapl_apply_plan` before durable edits."
 
 
 def sparse_plan_remediation() -> str:
@@ -560,7 +456,7 @@ def multiple_tasks_in_progress_remediation() -> str:
     return (
         "For sequential work, complete, block, or skip the current task before starting another. "
         "For intentional parallel work, return the tasks to Pending, declare the parallel/subagent "
-        "contract and exclusive owned_paths, then use `taplctl task dispatch`."
+        "contract and exclusive owned_paths, then use `tapl_dispatch_tasks`."
     )
 
 
@@ -621,8 +517,8 @@ def owned_path_overlap_remediation() -> str:
 
 def stale_execution_batch_remediation(batch_id: str) -> str:
     return (
-        f"Inspect batch {batch_id}, settle every active execution by its execution_id, or run "
-        f"`taplctl batch recover --id {batch_id} --agent` before continuing."
+        f"Inspect batch {batch_id}, settle every active execution by its execution_id, or use "
+        "`tapl_recover_batch` before continuing."
     )
 
 
@@ -636,13 +532,13 @@ def execution_batch_contract_remediation(batch_id: str) -> str:
 def execution_task_state_remediation() -> str:
     return (
         "Do not edit a batch-managed task status directly; settle it with "
-        "`task complete|block|skip --execution-id <id>` or recover its batch."
+        "`tapl_complete_task`, `tapl_block_task`, or `tapl_skip_task` using the execution_id, or recover its batch."
     )
 
 
 def parallel_task_missing_execution_remediation() -> str:
     return (
-        "Return the task to Pending through batch recovery, then use `taplctl task dispatch`; "
+        "Return the task to Pending through `tapl_recover_batch`, then use `tapl_dispatch_tasks`; "
         "parallel tasks must not be started with the sequential task start command."
     )
 
@@ -664,9 +560,8 @@ def execution_approval_rejected_remediation() -> str:
 
 def execution_approval_missing_remediation() -> str:
     return (
-        "Before starting or continuing task execution, set execution approval with "
-        "`taplctl approval approve --prompt '<approved scope>' --source explicit_user --agent` "
-        "for explicit execution requests, or `--source request_user_input` for tool-confirmed continuation."
+        "Before starting or continuing task execution, use `tapl_approve_execution` with source "
+        "`explicit_user` for explicit execution requests or `request_user_input` for tool-confirmed continuation."
     )
 
 
@@ -675,11 +570,11 @@ def task_granularity_remediation() -> str:
 
 
 def summarize_request_next_action() -> str:
-    return "Summarize request: `taplctl run summarize --summary '<request summary>' --agent`."
+    return "Summarize the request with `tapl_summarize_run`."
 
 
 def create_plan_next_action() -> str:
-    return "Create or update plan state with `taplctl plan apply --stdin-json --agent` before task design."
+    return "Create or update plan state with `tapl_apply_plan` before task design."
 
 
 def decide_after_plan_next_action() -> str:
@@ -689,24 +584,22 @@ def decide_after_plan_next_action() -> str:
         "execution approval, or durable edits. If planning was requested without execution, use "
         "request_user_input to ask whether to continue. If execution, edits, testing, or verification were "
         "explicitly requested, create executable tasks and record execution approval with "
-        "`taplctl approval approve --prompt '<approved scope>' --source explicit_user --agent` "
+        "`tapl_approve_execution` using source `explicit_user` "
         "before task execution."
     )
 
 
 def approval_rejected_next_action() -> str:
     return (
-        "Approval rejected; resolve scope, then set `taplctl approval approve "
-        "--prompt '<approved scope>' --source explicit_user --agent` before continuing, or use "
-        "`--source request_user_input` if approval came from request_user_input."
+        "Approval rejected; resolve scope, then use `tapl_approve_execution` with source `explicit_user` "
+        "before continuing, or source `request_user_input` if approval came from that tool."
     )
 
 
 def approval_missing_next_action() -> str:
     return (
-        "Before task execution, set execution approval: `taplctl approval approve "
-        "--prompt '<approved scope>' --source explicit_user --agent` when the user explicitly requested execution, "
-        "or use `--source request_user_input` when the user approved continuing through request_user_input."
+        "Before task execution, use `tapl_approve_execution` with source `explicit_user` when the user explicitly "
+        "requested execution, or source `request_user_input` when the user approved continuing through that tool."
     )
 
 
@@ -764,7 +657,7 @@ def continue_task_next_action(label: str) -> str:
 
 def dispatch_parallel_tasks_next_action(labels: str) -> str:
     return (
-        f"Dispatch ready parallel tasks atomically: `taplctl task dispatch {labels} --agent`. "
+        f"Dispatch ready parallel tasks atomically with `tapl_dispatch_tasks` for {labels}. "
         "Then the root agent must spawn one SubAgent per manifest execution concurrently."
     )
 
@@ -773,7 +666,7 @@ def continue_parallel_batch_next_action(batch_id: str, assignments: str) -> str:
     return (
         f"Continue active batch {batch_id}. Root agent only: keep TAPL writes centralized, run one "
         f"SubAgent per task concurrently, and settle each result with its exact execution id "
-        f"using `taplctl task complete|block|skip <TASK> --execution-id <ID> --agent`. "
+        "using `tapl_complete_task`, `tapl_block_task`, or `tapl_skip_task` with the exact execution id. "
         f"Assignments: {assignments}. If any spawn did not start, recover or cancel the whole batch."
     )
 
@@ -869,8 +762,15 @@ def stop_guidance() -> str:
 
 
 def user_prompt_submit_guidance(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
+    del subagents
+    return render(CONTEXT_INJECTION_PROMPT_TEMPLATE)
+
+
+def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
+    """Render the complete invariant workflow policy once at MCP initialization."""
+
     return render(
-        CONTEXT_INJECTION_PROMPT_TEMPLATE,
+        MCP_SERVER_INSTRUCTIONS_TEMPLATE,
         subagent_delegation_guidance=subagent_delegation_guidance(subagents),
     )
 
@@ -884,22 +784,21 @@ def context_execution_approval_guidance() -> str:
 
 
 def taplctl_execution_guidance() -> str:
-    return "Workflow state lives in the repo-local TAPL database through `taplctl`."
+    return "Workflow state lives in the repo-local TAPL database behind the installed `tapl_*` MCP tools."
 
 
 def taplctl_command_guidance() -> str:
     return (
-        "Use `taplctl ... --agent` for agent-readable output. "
-        "Check `taplctl <command> <subcommand> --help` when syntax is uncertain."
+        "Use the installed `tapl_*` MCP tools and their typed schemas for agent workflows. "
+        "The `taplctl` CLI is a manual fallback only when MCP is unavailable."
     )
 
 
 def external_findings_guidance() -> str:
     return (
-        "When external search or documentation review affects the task, add only decision-relevant findings: "
-        "`taplctl finding add --title '<title>' --source '<source>' --finding '<finding>' "
-        "--impact '<impact>' --related-ids '<ids>' --agent`. Do not store raw search dumps, "
-        "long candidate lists, or stale findings."
+        "When external search or documentation review affects the task, add only decision-relevant findings "
+        "with `tapl_add_finding`, including source and impact. Do not store raw search dumps, long candidate "
+        "lists, or stale findings."
     )
 
 
@@ -909,7 +808,7 @@ def plan_detail_guidance() -> str:
 
 def planning_approval_guidance() -> str:
     guidance = (
-        "Before `taplctl plan apply --stdin-json --agent`, use request_user_input Tool early for unclear planning "
+        "Before finalizing with `tapl_apply_plan`, use request_user_input Tool early for unclear planning "
         "methods, material scope/risk/API/UX/data/compat, or tradeoffs. Ask short, focused "
         "questions with 2-3 mutually exclusive options, and continue with follow-ups until "
         "the plan is materially clear."
@@ -947,9 +846,8 @@ def markdown_record_guidance(subject: str = "plan, task, and finding content") -
 
 def structured_record_guidance(subject: str = "plan and task content") -> str:
     return (
-        f"Pass {subject} through high-level lifecycle commands, using --stdin-json or "
-        "--json-file for long values; tapl renders the stored Markdown body from templates "
-        "during record merge."
+        f"Pass {subject} through the typed MCP tool fields; TAPL renders the stored Markdown body "
+        "from templates during record merge."
     )
 
 
@@ -967,7 +865,7 @@ def custom_fields_guidance() -> str:
         "copy a fact already represented on the source plan, or duplicate "
         "the same key and value across sibling tasks merely for convenience. If separate tasks genuinely need distinct facts "
         "that use the same label, keep them with task-specific values or context. Before writing a patch, inspect the "
-        "record's existing `custom_fields` with `taplctl status` or `taplctl item show`. Keep at most one field for each fact, decision, "
+        "record's existing `custom_fields` with `tapl_get_status` or `tapl_get_item`. Keep at most one field for each fact, decision, "
         "constraint, or path; if an existing field has the same meaning, update its exact stored key instead of adding "
         "a synonymous label or duplicate value. For new fields, write concise natural-language labels and human-readable "
         "string values in the user's language; avoid snake_case and other code-style tokens. When the record being "
@@ -989,11 +887,10 @@ def stable_id_guidance() -> str:
 
 def workflow_order_guidance() -> str:
     return (
-        "Lifecycle order: inspect status -> resolve residual run direction with user approval -> "
-        "analyze/search and clarify until unblocked -> `taplctl plan apply --stdin-json --agent` -> "
-        "`taplctl task create --stdin-json --agent` -> `taplctl approval approve --prompt '<approved scope>' --source explicit_user --agent` -> "
-        "`taplctl task start/complete/block/skip` for sequential work or `taplctl task dispatch` plus "
-        "execution-id settlement for parallel work -> `taplctl run finish` -> allow eligible `taplctl archive finish`."
+        "Lifecycle order: `tapl_get_status`/`tapl_get_next` -> resolve residual run direction with user approval -> "
+        "`tapl_search_history` and clarify until unblocked -> `tapl_summarize_run` -> `tapl_apply_plan` -> "
+        "`tapl_create_task` -> `tapl_approve_execution` -> sequential start and settlement tools or "
+        "`tapl_dispatch_tasks` plus execution-id settlement -> `tapl_finish_run` -> `tapl_finish_archive`."
     )
 
 
@@ -1010,9 +907,9 @@ def workflow_stage_progression_guidance() -> str:
 def history_search_guidance() -> str:
     return (
         "Before planning non-trivial work, search relevant prior TAPL history with "
-        "`taplctl search '<compact request query>' --agent`; use relevant results as context "
+        "`tapl_search_history`; use relevant results as context "
         "and ignore unrelated matches. If a result may affect the work and its snippet is "
-        "insufficient, inspect it with `taplctl item show --id <id> --agent`. During execution, "
+        "insufficient, inspect it with `tapl_get_item`. During execution, "
         "search again when prior TAPL history may answer a question about previous decisions, "
         "implementation patterns, failures, or tradeoffs."
     )
@@ -1020,11 +917,10 @@ def history_search_guidance() -> str:
 
 def lifecycle_recipe_guidance() -> str:
     return (
-        "Primary lifecycle commands: `taplctl run summarize`, `taplctl plan apply --stdin-json`, "
-        "`taplctl task create --stdin-json`, `taplctl approval approve`, `taplctl task start`, "
-        "`taplctl task dispatch`, `taplctl task complete`, `taplctl task block`, `taplctl task skip`, "
-        "`taplctl batch cancel`, `taplctl batch recover`, `taplctl run finish`, and `taplctl archive finish`. "
-        "Use low-level `set` commands only for repair/debug or when a recipe says so."
+        "Primary lifecycle tools: `tapl_summarize_run`, `tapl_apply_plan`, `tapl_create_task`, "
+        "`tapl_approve_execution`, `tapl_start_task`, `tapl_dispatch_tasks`, `tapl_complete_task`, "
+        "`tapl_block_task`, `tapl_skip_task`, `tapl_cancel_batch`, `tapl_recover_batch`, "
+        "`tapl_finish_run`, and `tapl_finish_archive`."
     )
 
 
@@ -1032,20 +928,19 @@ def task_plan_dependency_guidance() -> str:
     return (
         "Create or update executable task records only after the source plan/spec exists; "
         "tasks derive from the stored plan/spec and should not represent planning or task-design work; "
-        "set --spec-id to the stored numeric plan/spec id, e.g. `PLAN-001` or `SPEC-001`."
+        "set `spec_id` to the stored numeric plan/spec id, e.g. `PLAN-001` or `SPEC-001`."
     )
 
 
 def task_execution_order_guidance() -> str:
     return (
-        "Execute planned tasks one at a time in task order when they are sequential: use "
-        "`taplctl task start TASK-001 --agent` "
+        "Execute planned tasks one at a time in task order when they are sequential: use `tapl_start_task` "
         "immediately before work, then complete, block, or skip it before another sequential task. "
         "Tasks explicitly declared as execution_mode=parallel, executor_kind=subagent, in the same "
         "parallel_group, with completed dependencies and exclusive owned_paths may run concurrently only "
-        "after atomic `taplctl task dispatch`. The root agent is the sole TAPL state writer: it must spawn "
+        "after atomic `tapl_dispatch_tasks`. The root agent is the sole TAPL state writer: it must spawn "
         "one SubAgent per dispatched task concurrently, keep each worker inside its owned_paths, and settle "
-        "each task with the exact manifest execution_id via `taplctl task complete|block|skip --execution-id`. "
+        "each task with the exact manifest execution_id via the complete, block, or skip MCP tool. "
         "Record the actual delegated model and reasoning effort in task custom_fields. If any SubAgent spawn "
         "fails or the root is interrupted, recover or cancel the batch before retrying; never leave a partial "
         "batch or start another batch around it."
@@ -1098,9 +993,9 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
         "have the root agent execute the task without a SubAgent.\n"
         "- For parallel delegation, tasks must explicitly use `execution_mode=parallel`, `executor_kind=subagent`, "
         "the same non-empty `parallel_group`, completed dependencies, and exclusive `owned_paths`; dispatch them "
-        "atomically with `taplctl task dispatch`. The root agent must spawn one SubAgent per manifest execution "
+        "atomically with `tapl_dispatch_tasks`. The root agent must spawn one SubAgent per manifest execution "
         "concurrently, keep each worker inside its owned_paths, and settle every task with its exact manifest "
-        "`execution_id` via `taplctl task complete|block|skip --execution-id`. Recover or cancel the batch if any "
+        "`execution_id` via `tapl_complete_task`, `tapl_block_task`, or `tapl_skip_task`. Recover or cancel the batch if any "
         "spawn fails or the root is interrupted.\n"
         "- During settlement, record the actual runtime model and reasoning effort used—not merely the requested "
         "pair—in that task's `custom_fields`; omit it when no SubAgent was used."
@@ -1112,26 +1007,25 @@ def task_granularity_guidance() -> str:
 
 
 def task_required_fields() -> str:
-    fields = ", ".join(task_required_field_flags("Pending"))
+    fields = ", ".join(task_required_field_names("Pending"))
     return f"Each executable task must include {fields} when applicable."
 
 
 def task_format_guidance() -> str:
-    fields = task_required_field_flags("Pending")
+    fields = task_required_field_names("Pending")
     return (
         f"Executable implementation/verification tasks should include {', '.join(fields)}, "
-        f"completed tasks should include {', '.join(task_required_field_flags('Completed'))}; "
-        f"blocked tasks should include {', '.join(task_required_field_flags('Blocked'))}. "
+        f"completed tasks should include {', '.join(task_required_field_names('Completed'))}; "
+        f"blocked tasks should include {', '.join(task_required_field_names('Blocked'))}. "
         "When updating an existing task, pass only changed fields; omitted fields keep stored values."
     )
 
 
 def execution_approval_guidance() -> str:
     base = (
-        "After task design/task create and before starting or continuing task execution, set execution approval with "
-        "`taplctl approval approve --prompt '<approved scope>' --source explicit_user --agent` "
-        "when the user explicitly requested execution; use `--source request_user_input` when approval came from "
-        "request_user_input."
+        "After task design/task creation and before starting or continuing task execution, use "
+        "`tapl_approve_execution` with source `explicit_user` when the user explicitly requested execution; "
+        "use source `request_user_input` when approval came from that tool."
     )
     return base + " Missing execution approval is always a validation error."
 

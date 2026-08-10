@@ -80,7 +80,12 @@ def install_user(
     previous_version = installed_version(version_path)
     files = [
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
-        *install_static_codex_templates(target, force=force, dry_run=dry_run),
+        *install_static_codex_templates(
+            target,
+            taplctl_command=command,
+            force=force,
+            dry_run=dry_run,
+        ),
         *remove_deprecated_codex_templates(target, dry_run=dry_run),
         write_tapl_config(
             tapl_config_path,
@@ -125,7 +130,12 @@ def install_repo(
 
     files = [
         install_hooks(hooks_path, taplctl_command=command, mode=mode, dry_run=dry_run),
-        *install_static_codex_templates(root / ".codex", force=force, dry_run=dry_run),
+        *install_static_codex_templates(
+            root / ".codex",
+            taplctl_command=command,
+            force=force,
+            dry_run=dry_run,
+        ),
         *remove_deprecated_codex_templates(root / ".codex", dry_run=dry_run),
         write_tapl_config(
             config_path,
@@ -549,7 +559,13 @@ enabled = true
 """
 
 
-def install_static_codex_templates(target: Path, *, force: bool, dry_run: bool) -> list[dict[str, str]]:
+def install_static_codex_templates(
+    target: Path,
+    *,
+    taplctl_command: str,
+    force: bool,
+    dry_run: bool,
+) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
     for relative in CODEX_STATIC_TEMPLATE_FILES:
         text = codex_template_text(*relative.parts)
@@ -557,10 +573,25 @@ def install_static_codex_templates(target: Path, *, force: bool, dry_run: bool) 
             continue
         path = target / relative
         if relative == Path("config.toml"):
+            text = retarget_codex_mcp_config(text, taplctl_command=taplctl_command)
             results.append(merge_codex_config(path, text, force=force, dry_run=dry_run))
         else:
             results.append(write_text_if_needed(path, text, force=force, dry_run=dry_run))
     return results
+
+
+def retarget_codex_mcp_config(template: str, *, taplctl_command: str) -> str:
+    """Use the same resolved taplctl executable for hooks and the MCP launcher."""
+
+    data = tomllib.loads(template)
+    mcp_servers = data.get("mcp_servers")
+    if not isinstance(mcp_servers, dict):
+        raise ValueError("tapl Codex config template must contain an mcp_servers table")
+    tapl = mcp_servers.get("tapl")
+    if not isinstance(tapl, dict):
+        raise ValueError("tapl Codex config template must contain mcp_servers.tapl")
+    tapl["command"] = taplctl_command
+    return dump_toml(data)
 
 
 def remove_deprecated_codex_templates(target: Path, *, dry_run: bool) -> list[dict[str, str]]:

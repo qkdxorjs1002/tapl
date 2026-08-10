@@ -19,18 +19,19 @@ inside your repositories.
 
 ## How does it work?
 
-The point is not another prompt template. The point is that a normal Codex CLI
-request now has state around it. The capture-style image below mirrors the
+The point is not another prompt template. TAPL exposes typed MCP tools backed by
+the existing CLI and repo-local state, so Codex receives the workflow contract
+once from the MCP server instead of repeatedly reading CLI help. The capture-style image below mirrors the
 commands `tapl` recorded around this README rewrite.
 
 <p align="center">
   <img src="assets/tapl-codex-iterm-demo.svg" alt="Terminal-style capture of Codex CLI using tapl state before editing README files" />
 </p>
 
-After installation, keep using Codex normally. `tapl` gives Codex a
-repo-local workflow state before tool calls, records plans and tasks as the
-work progresses, and validates the run before Codex stops. You usually do not
-need to run the workflow-writing commands yourself.
+After installation, keep using Codex normally. The TAPL MCP server gives Codex
+typed workflow tools and invariant guidance. Hooks add only concise current-state
+context and enforce durable-edit boundaries. You usually do not need to run the
+workflow-writing commands yourself.
 
 The state lives in `.tapl/tapl.db`, so the next Codex session, a hook, you, or
 the browser or VS Code viewer can inspect the same run.
@@ -47,15 +48,15 @@ than the latest prompt:
 - What did the agent learn during implementation?
 - Can a later session search that history instead of rediscovering it?
 
-`tapl` answers those questions with one global CLI and one repo-local SQLite
-database.
+`tapl` answers those questions with one global CLI, a typed MCP facade, and one
+repo-local SQLite database.
 
 ## Features
 
 After installation, this workflow runs automatically during normal Codex CLI
-use. Hooks call `taplctl`, lifecycle context tells Codex what state to record,
-and you can inspect or validate that state when you want to understand what
-Codex is doing.
+use. MCP tools map structured calls to `taplctl`, while hooks return concise
+lifecycle state. You can inspect or validate that state when you want to
+understand what Codex is doing.
 
 ### 1. Check the current Codex run
 
@@ -77,16 +78,15 @@ normal human-facing mode.
 
 ### 2. Let Codex record plans and tasks
 
-Plans and tasks are first-class records, not loose Markdown notes.
-Codex receives lifecycle guidance from `tapl`, writes plan/task content through
-structured CLI fields, and `tapl` renders stable Markdown bodies for stored
-records.
+Plans and tasks are first-class records, not loose Markdown notes. Codex receives
+lifecycle guidance from the MCP server, writes plan/task content through typed
+MCP tool fields, and `tapl` renders stable Markdown bodies for stored records.
 
-For normal use, ask Codex to do the work and let the installed hooks keep the
-records current. If you are debugging or manually repairing workflow state, the
-field rules and required field sets are available in command help. `--config`
-controls search behavior only; task help and validation always use TAPL's fixed
-workflow policy:
+For normal use, ask Codex to do the work and let the installed MCP server and
+hooks keep the records current. MCP tool descriptions and JSON schemas are the
+authoritative agent field contract. CLI help remains available for human
+operation, diagnostics, and manual repair; it documents flags rather than the
+agent workflow prompt:
 
 ```sh
 taplctl plan set --help
@@ -119,8 +119,8 @@ dependencies are installed. Use `taplctl archive list` and
 - `Stop`
 
 Those hooks call `taplctl hook-event`, load the current workflow state, and
-return concise lifecycle context. The agent interprets intent; hooks guard the
-boundary.
+return concise lifecycle context. The MCP server owns invariant guidance and
+typed tool contracts; hooks guard the current-state boundary.
 
 ### 5. One CLI, workspace-local state
 
@@ -372,6 +372,10 @@ taplctl install repo
 taplctl validate
 ```
 
+The installer also adds an enabled `mcp_servers.tapl` entry that launches
+`taplctl mcp`. Restart Codex after installation so the new stdio server is
+loaded.
+
 The first time Codex asks for confirmation after installation, trust the
 installed hook.
 
@@ -384,7 +388,8 @@ Install merge policy:
 - `hooks.json` is managed-merged. Existing non-tapl hooks are preserved; tapl
   managed hooks are replaced.
 - `.codex/config.toml` is TOML-merged. Existing user values win, and missing
-  tapl template keys are added.
+  tapl template keys are added, including the TAPL MCP server. The MCP launcher
+  reuses the resolved `taplctl` executable used by hooks.
 - tapl runtime `config.toml` (`.tapl/config.toml` or `~/.tapl/config.toml`) is
   created on first install. When the installed tapl version changes, tapl asks
   whether to overwrite it with updated defaults or keep existing values and add
@@ -468,7 +473,7 @@ taplctl reindex
 taplctl searchd start
 taplctl searchd status
 
-# Advanced workflow repair/debugging
+# Advanced manual workflow repair/debugging (flag help only)
 taplctl run set --help
 taplctl plan set --help
 taplctl task set --help
@@ -487,8 +492,8 @@ snippet is not enough context, use its numeric `id` with
 
 TAPL loads the repo-local `.tapl/config.toml` before `~/.tapl/config.toml`, so
 the repository configuration takes precedence when both files exist. Configure
-whether TAPL injects its delegation policy and the model/reasoning allowlist
-into the agent prompt as follows:
+whether TAPL includes its delegation policy and the model/reasoning allowlist
+in the MCP server instructions as follows:
 
 ```toml
 [subagents]
@@ -500,16 +505,16 @@ enabled = true
 "gpt-5.6-luna" = ["high", "xhigh"]
 ```
 
-When enabled, the injected policy tells the root agent to assess the complexity
+When enabled, the MCP policy tells the root agent to assess the complexity
 of every executable task and delegate it using an efficient configured
-model/reasoning pair. To disable that TAPL-provided prompt content, set:
+model/reasoning pair. To disable that TAPL-provided MCP instruction content, set:
 
 ```toml
 [subagents]
 enabled = false
 ```
 
-With `enabled = false`, TAPL injects neither its SubAgent delegation policy
+With `enabled = false`, TAPL includes neither its SubAgent delegation policy
 nor its model/reasoning allowlist. This setting does not remove separate
 delegation instructions from another source, such as `AGENTS.md`.
 
@@ -522,8 +527,8 @@ intersection is empty, the root agent executes the task directly.
 Plan/task workflow policy is fixed rather than configurable. TAPL always asks
 for a very detailed plan, explicit user confirmation before plan finalization,
 independently split edit/migration/verification tasks, and recorded execution
-approval before durable edits. `taplctl task set --help` always shows the same
-required task field set.
+approval before durable edits. The MCP server instructions and typed tool
+schemas expose this fixed policy; CLI help is only a manual fallback.
 
 ## Source Layout
 

@@ -19,18 +19,18 @@ context가 사라진 뒤의 재개를 가능하게 합니다.
 
 ## 어떻게 동작하나요?
 
-핵심은 또 하나의 prompt template이 아닙니다. 평범한 Codex CLI 요청 주변에
-상태가 생기는 것입니다. 아래 capture-style 이미지는 이번 README 재작성 중
+핵심은 또 하나의 prompt template이 아닙니다. TAPL은 기존 CLI와 repo-local
+state 위에 typed MCP tool을 제공하므로, Codex는 CLI help를 반복해서 읽지 않고
+MCP 서버에서 workflow 계약을 한 번 전달받습니다. 아래 capture-style 이미지는 이번 README 재작성 중
 `tapl`이 기록한 명령 흐름을 반영합니다.
 
 <p align="center">
   <img src="assets/tapl-codex-iterm-demo.svg" alt="README 파일을 편집하기 전에 tapl state를 사용하는 Codex CLI terminal-style 캡처" />
 </p>
 
-설치 후에는 Codex를 평소처럼 사용하면 됩니다. `tapl`은 tool call
-전에 repo-local workflow state를 Codex에게 전달하고, 작업 중 plan/task를
-기록하며, Codex가 멈추기 전에 run 상태를 검증합니다. 보통은 workflow record를
-직접 쓰는 명령을 사람이 실행할 필요가 없습니다.
+설치 후에는 Codex를 평소처럼 사용하면 됩니다. TAPL MCP 서버가 typed workflow
+tool과 고정 가이던스를 제공하고, hook은 현재 상태와 durable-edit 경계만 짧게
+전달합니다. 보통은 workflow record를 직접 쓰는 명령을 사람이 실행할 필요가 없습니다.
 
 상태는 `.tapl/tapl.db`에 저장됩니다. 그래서 다음 Codex session, hook, 사용자,
 브라우저 또는 VS Code viewer가 같은 run을 확인할 수 있습니다.
@@ -47,14 +47,13 @@ Codex session은 일을 잘합니다. 하지만 긴 개발 작업에는 마지�
 - 구현 중 무엇을 배웠나?
 - 다음 session이 그 history를 검색할 수 있나?
 
-`tapl`은 하나의 전역 CLI와 repo-local SQLite DB로 이 질문에 답합니다.
+`tapl`은 하나의 전역 CLI, typed MCP facade, repo-local SQLite DB로 이 질문에 답합니다.
 
 ## 기능
 
-설치 후에는 이 workflow가 Codex 사용 중 자동으로 실행됩니다. Hook이
-`taplctl`을 호출하고, lifecycle context가 Codex에게 어떤 state를 기록해야
-하는지 알려줍니다. 사용자는 Codex가 무엇을 기록했는지 확인하거나 검증하고
-싶을 때만 CLI를 보면 됩니다.
+설치 후에는 이 workflow가 Codex 사용 중 자동으로 실행됩니다. MCP tool이
+structured call을 `taplctl`로 매핑하고, hook은 짧은 lifecycle state를 반환합니다.
+사용자는 Codex가 무엇을 기록했는지 확인하거나 검증하고 싶을 때만 CLI를 보면 됩니다.
 
 ### 1. 현재 Codex run 확인
 
@@ -76,15 +75,13 @@ Codex가 효율적으로 읽을 수 있는 간결한 출력을 위해 `--agent`�
 ### 2. Plan과 task는 Codex가 기록하게 두기
 
 Plan과 task는 흩어진 Markdown 메모가 아니라 first-class record입니다.
-Codex는 `tapl` lifecycle guidance를 받고, structured CLI field로 plan/task
-내용을 기록합니다. `tapl`은 저장된 record의 Markdown body를 안정적인 템플릿으로
-렌더링합니다.
+Codex는 MCP 서버에서 lifecycle guidance를 받고 typed MCP tool field로 plan/task
+내용을 기록합니다. `tapl`은 저장된 record의 Markdown body를 안정적인 템플릿으로 렌더링합니다.
 
-일반적인 사용에서는 Codex에게 작업을 요청하고, 설치된 hook이 record를 최신
-상태로 유지하게 두면 됩니다. Workflow state를 디버깅하거나 수동으로 보정해야
-할 때는 command help에서 필드 규칙과 required field set을 확인할 수 있습니다.
-`--config`는 검색 동작에만 적용되고, task help와 validation은 항상 TAPL의 고정
-workflow 정책을 사용합니다.
+일반적인 사용에서는 Codex에게 작업을 요청하고, 설치된 MCP 서버와 hook이 record를
+최신 상태로 유지하게 두면 됩니다. Agent가 따르는 필드 계약은 MCP tool description과
+JSON schema가 기준입니다. CLI help는 사람이 직접 운영·진단·복구할 때 사용하는
+flag 설명만 제공하며 agent workflow prompt 역할은 하지 않습니다.
 
 ```sh
 taplctl plan set --help
@@ -117,7 +114,8 @@ search도 사용할 수 있습니다. 완료된 run은 `taplctl archive list`와
 - `Stop`
 
 Hook은 `taplctl hook-event`를 호출하고 현재 workflow state를 읽은 뒤, 짧은
-lifecycle context를 반환합니다. Agent는 의도를 해석하고, hook은 경계를 지킵니다.
+lifecycle context를 반환합니다. 고정 가이던스와 typed tool 계약은 MCP 서버가
+담당하고, hook은 현재 상태의 경계를 지킵니다.
 
 ### 5. 하나의 CLI, workspace-local state
 
@@ -363,6 +361,9 @@ taplctl install repo
 taplctl validate
 ```
 
+설치 프로그램은 `taplctl mcp`를 실행하는 활성화된 `mcp_servers.tapl` 항목도
+추가합니다. 새 stdio 서버가 로드되도록 설치 후 Codex를 재시작하세요.
+
 설치 후 Codex가 처음 확인을 요청할 때 설치된 hook을 trust 해주세요.
 
 <p align="center">
@@ -374,7 +375,8 @@ taplctl validate
 - `hooks.json`은 managed merge를 합니다. 기존 non-tapl hook은 보존하고, tapl이
   관리하는 hook만 교체합니다.
 - `.codex/config.toml`은 TOML 병합을 합니다. 기존 사용자 값이 우선하고,
-  tapl template에만 있는 누락 key를 추가합니다.
+  tapl template에만 있는 누락 key와 TAPL MCP 서버 설정을 추가합니다. MCP
+  launcher는 hook과 동일하게 resolve된 `taplctl` 실행 경로를 사용합니다.
 - tapl runtime `config.toml`(`.tapl/config.toml` 또는 `~/.tapl/config.toml`)은
   최초 설치 때 생성합니다. 설치된 tapl version이 바뀌면 updated default로
   덮어쓸지, 기존 값을 유지하면서 누락된 default key만 추가할지 묻습니다.
@@ -455,7 +457,7 @@ taplctl reindex
 taplctl searchd start
 taplctl searchd status
 
-# 고급 workflow 보정/디버깅
+# 고급 수동 workflow 보정/디버깅(flag help only)
 taplctl run set --help
 taplctl plan set --help
 taplctl task set --help
@@ -474,7 +476,7 @@ taplctl archive create --help
 
 TAPL은 repo-local `.tapl/config.toml`을 `~/.tapl/config.toml`보다 먼저 읽으므로,
 두 파일이 모두 있으면 repository 설정이 우선합니다. TAPL이 위임 정책과
-model/reasoning allowlist를 agent prompt에 주입할지 다음과 같이 설정합니다.
+model/reasoning allowlist를 MCP 서버 지침에 포함할지 다음과 같이 설정합니다.
 
 ```toml
 [subagents]
@@ -486,9 +488,9 @@ enabled = true
 "gpt-5.6-luna" = ["high", "xhigh"]
 ```
 
-활성화하면 주입되는 정책은 root agent가 모든 실행 작업의 복잡도를 판단하고,
+활성화하면 MCP 정책은 root agent가 모든 실행 작업의 복잡도를 판단하고,
 설정된 model/reasoning 조합 중 효율적인 조합으로 해당 작업을 SubAgent에게
-위임하도록 합니다. TAPL이 제공하는 prompt 내용을 끄려면 다음처럼 설정합니다.
+위임하도록 합니다. TAPL이 제공하는 MCP 지침 내용을 끄려면 다음처럼 설정합니다.
 
 ```toml
 [subagents]
@@ -496,7 +498,7 @@ enabled = false
 ```
 
 `enabled = false`이면 TAPL은 SubAgent 위임 정책과 model/reasoning allowlist를
-모두 주입하지 않습니다. 이 설정은 `AGENTS.md`처럼 다른 출처에 있는 별도의
+MCP 서버 지침에 포함하지 않습니다. 이 설정은 `AGENTS.md`처럼 다른 출처에 있는 별도의
 위임 지시까지 제거하지는 않습니다.
 
 설정한 model 목록은 정책상 allowlist일 뿐이며, runtime에 model을 설치하거나
@@ -507,8 +509,8 @@ enabled = false
 
 Plan/task workflow 정책은 config로 바꿀 수 없습니다. TAPL은 항상 매우 상세한
 계획, 계획 확정 전의 명시적 사용자 승인, 독립된 edit·migration·verification 단위의
-작업 분할, durable edit 전의 실행 승인 기록을 요구합니다. `taplctl task set --help`는
-항상 같은 required task field set을 보여줍니다.
+작업 분할, durable edit 전의 실행 승인 기록을 요구합니다. 이 고정 정책은 MCP
+서버 지침과 typed tool schema가 제공하며 CLI help는 수동 fallback일 뿐입니다.
 
 ## 소스 구조
 

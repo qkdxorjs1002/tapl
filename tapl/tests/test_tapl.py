@@ -5,6 +5,7 @@ import concurrent.futures
 import hashlib
 import io
 import argparse
+import asyncio
 import json
 import os
 import shlex
@@ -19,6 +20,9 @@ import warnings
 from pathlib import Path
 from unittest import mock
 
+from mcp import Client
+from mcp.client.stdio import StdioServerParameters, stdio_client
+
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -31,6 +35,7 @@ from taplctl import (
     db as tapl_db,
     embeddings as tapl_embeddings,
     install as tapl_install,
+    mcp_server as tapl_mcp,
     prompt as tapl_prompt,
     updater as tapl_updater,
 )
@@ -134,6 +139,211 @@ class TaplCliTests(unittest.TestCase):
         version = self.run_taplctl("--version")
         self.assertEqual(version.returncode, 0, version.stderr)
         self.assertEqual(version.stdout.strip(), f"taplctl {expected_version}")
+
+    def test_mcp_tools_expose_typed_high_level_contracts(self) -> None:
+        server = tapl_mcp.create_server(workspace_root=ROOT)
+        tools = asyncio.run(server.list_tools())
+        by_name = {tool.name: tool for tool in tools}
+
+        self.assertEqual(len(tools), 20)
+        self.assertIn("tapl_get_status", by_name)
+        self.assertIn("tapl_apply_plan", by_name)
+        self.assertIn("tapl_create_task", by_name)
+        self.assertIn("tapl_finish_archive", by_name)
+        self.assertTrue(by_name["tapl_get_status"].annotations.read_only_hint)
+        self.assertFalse(by_name["tapl_create_task"].annotations.read_only_hint)
+        self.assertFalse(by_name["tapl_create_task"].annotations.open_world_hint)
+
+        task_schema = by_name["tapl_create_task"].input_schema
+        self.assertEqual(
+            set(task_schema["required"]),
+            {"task_id", "title", "spec_id", "goal", "action", "verification"},
+        )
+        self.assertEqual(task_schema["properties"]["task_id"]["pattern"], r"^TASK-\d{3,}$")
+        self.assertEqual(
+            task_schema["properties"]["execution_mode"]["enum"],
+            ["sequential", "parallel"],
+        )
+        self.assertNotIn("workspace", task_schema["properties"])
+
+    def test_mcp_tools_map_to_cli_json_and_hide_shell_recipes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            (workspace / ".git").mkdir(parents=True)
+            tapl_db.initialize_workspace(workspace)
+            server = tapl_mcp.create_server(workspace_root=workspace)
+
+            async def exercise() -> tuple[object, object, object]:
+                async with Client(server) as client:
+                    summarized = await client.call_tool(
+                        "tapl_summarize_run",
+                        {"summary": "MCP structured workflow"},
+                    )
+                    status = await client.call_tool("tapl_get_status", {})
+                    next_action = await client.call_tool("tapl_get_next", {})
+                    return summarized, status, next_action
+
+            summarized, status, next_action = asyncio.run(exercise())
+            self.assertFalse(summarized.is_error)
+            self.assertEqual(
+                summarized.structured_content["active_run"]["request_summary"],
+                "MCP structured workflow",
+            )
+            self.assertEqual(
+                status.structured_content["active_run"]["request_summary"],
+                "MCP structured workflow",
+            )
+            recommendation = next_action.structured_content["recommendations"][0]
+            self.assertEqual(recommendation["tool"], "tapl_apply_plan")
+            self.assertNotIn("command", recommendation)
+
+    def test_mcp_cli_errors_are_returned_as_actionable_tool_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            (workspace / ".git").mkdir(parents=True)
+            tapl_db.initialize_workspace(workspace)
+            server = tapl_mcp.create_server(workspace_root=workspace)
+
+            async def exercise() -> object:
+                async with Client(server) as client:
+                    return await client.call_tool("tapl_get_item", {"item_id": 999})
+
+            result = asyncio.run(exercise())
+            self.assertTrue(result.is_error)
+            self.assertIn("item not found: 999", result.content[0].text)
+
+    def test_taplctl_mcp_stdio_entrypoint_negotiates_and_calls_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            (workspace / ".git").mkdir(parents=True)
+            tapl_db.initialize_workspace(workspace)
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=["-m", "taplctl", "mcp"],
+                cwd=workspace,
+            )
+
+            async def exercise() -> tuple[object, object]:
+                async with Client(stdio_client(params)) as client:
+                    tools = await client.list_tools()
+                    result = await client.call_tool(
+                        "tapl_summarize_run",
+                        {"summary": "stdio MCP smoke test"},
+                    )
+                    return tools, result
+
+            tools, result = asyncio.run(exercise())
+            self.assertEqual(len(tools.tools), 20)
+            self.assertFalse(result.is_error)
+            self.assertEqual(
+                result.structured_content["active_run"]["request_summary"],
+                "stdio MCP smoke test",
+            )
+
+    def test_mcp_tools_complete_a_sequential_workflow_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            (workspace / ".git").mkdir(parents=True)
+            tapl_db.initialize_workspace(workspace)
+            server = tapl_mcp.create_server(workspace_root=workspace)
+
+            async def exercise() -> list[object]:
+                async with Client(server) as client:
+                    calls = [
+                        await client.call_tool("tapl_summarize_run", {"summary": "MCP lifecycle"}),
+                        await client.call_tool(
+                            "tapl_apply_plan",
+                            {
+                                "plan_id": "PLAN-001",
+                                "title": "MCP lifecycle plan",
+                                "summary": "REQ-001: exercise the typed MCP lifecycle.",
+                                "objective": "Verify the MCP facade end to end.",
+                                "requirements_trace": "REQ-001: map typed calls to taplctl JSON.",
+                                "selected_approach": "Use the in-memory MCP client against a temporary workspace.",
+                                "affected_files": "Temporary TAPL database only.",
+                                "execution_order": "Plan, task, approve, execute, verify, archive.",
+                                "risks": "Subprocess mapping could diverge from the CLI contract.",
+                                "validation": "Require every MCP result to succeed.",
+                                "status": "Finalized",
+                            },
+                        ),
+                        await client.call_tool(
+                            "tapl_create_task",
+                            {
+                                "task_id": "TASK-001",
+                                "title": "Exercise MCP lifecycle",
+                                "spec_id": "PLAN-001",
+                                "goal": "Complete one sequential MCP-managed task.",
+                                "action": "Call the typed lifecycle tools in order.",
+                                "verification": "All returned tool results are successful.",
+                            },
+                        ),
+                        await client.call_tool(
+                            "tapl_create_task",
+                            {
+                                "task_id": "TASK-002",
+                                "title": "Verify MCP lifecycle",
+                                "spec_id": "PLAN-001",
+                                "goal": "Validate the completed MCP-managed state.",
+                                "action": "Run TAPL validation after implementation settlement.",
+                                "verification": "tapl_validate_state succeeds.",
+                                "depends_on": ["TASK-001"],
+                            },
+                        ),
+                        await client.call_tool(
+                            "tapl_approve_execution",
+                            {"prompt": "Execute TASK-001 from PLAN-001", "source": "explicit_user"},
+                        ),
+                        await client.call_tool("tapl_start_task", {"task_id": "TASK-001"}),
+                        await client.call_tool(
+                            "tapl_add_finding",
+                            {
+                                "title": "MCP mapping exercised",
+                                "source": "automated test",
+                                "finding": "Typed calls reached the CLI JSON handlers.",
+                                "impact": "The facade follows the existing lifecycle implementation.",
+                                "related_ids": "PLAN-001, TASK-001",
+                            },
+                        ),
+                        await client.call_tool(
+                            "tapl_complete_task",
+                            {
+                                "task_id": "TASK-001",
+                                "verification": "Every prior MCP call succeeded.",
+                                "result": "Sequential workflow completed.",
+                            },
+                        ),
+                        await client.call_tool("tapl_start_task", {"task_id": "TASK-002"}),
+                        await client.call_tool("tapl_validate_state", {}),
+                        await client.call_tool(
+                            "tapl_complete_task",
+                            {
+                                "task_id": "TASK-002",
+                                "verification": "The MCP lifecycle state validated successfully.",
+                                "result": "Verification task completed.",
+                            },
+                        ),
+                        await client.call_tool("tapl_validate_state", {}),
+                        await client.call_tool(
+                            "tapl_finish_run",
+                            {"result": "MCP sequential lifecycle verified."},
+                        ),
+                        await client.call_tool(
+                            "tapl_finish_archive",
+                            {"slug": "mcp-sequential-lifecycle", "summary": "End-to-end MCP lifecycle."},
+                        ),
+                        await client.call_tool("tapl_get_status", {}),
+                    ]
+                    return calls
+
+            calls = asyncio.run(exercise())
+            failures = [
+                call.content[0].text
+                for call in calls
+                if call.is_error
+            ]
+            self.assertEqual(failures, [])
+            self.assertIsNone(calls[-1].structured_content["active_run"])
 
     def test_workspace_db_takes_priority_over_nested_git(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -495,8 +705,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(missing_approval.returncode, 1)
             self.assertIn("<tapl_output>", missing_approval.stdout)
             self.assertIn("<code>execution_approval_missing</code>", missing_approval.stdout)
-            self.assertIn("taplctl approval approve", missing_approval.stdout)
-            self.assertIn("--agent", missing_approval.stdout)
+            self.assertIn("tapl_approve_execution", missing_approval.stdout)
             self.assertNotIn("<config>", missing_approval.stdout)
 
             approval = self.run_cli(
@@ -545,7 +754,8 @@ class TaplCliTests(unittest.TestCase):
             context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--agent")
             self.assertEqual(context.returncode, 0, context.stderr)
             self.assertIn("<tapl_context>", context.stdout)
-            self.assertIn("taplctl &lt;command&gt; &lt;subcommand&gt; --help", context.stdout)
+            self.assertIn("tapl_get_next", context.stdout)
+            self.assertIn("Do not run `taplctl --help`", context.stdout)
             self.assertNotIn("taplctl status --agent", context.stdout)
             self.assertNotIn("taplctl approval set --help", context.stdout)
             self.assertNotIn("taplctl approval set --decision approved", context.stdout)
@@ -1058,7 +1268,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertIn("user-selected-merge", semantic_text)
             conn.close()
 
-    def test_custom_fields_help_and_context_require_history_judgment_user_language_and_deduplication(self) -> None:
+    def test_custom_fields_guidance_lives_in_mcp_instructions_not_cli_help_or_hook(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
             plan_help = self.run_cli(db_path, "plan", "apply", "--help")
@@ -1067,36 +1277,17 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
             for output in (plan_help.stdout, task_help.stdout):
                 self.assertIn("--custom-fields", output)
-                self.assertIn("proactively populate `custom_fields`", output)
-                self.assertIn("AGENTS.md and the user do not explicitly request", output)
-                self.assertIn("metadata shared by the run or multiple tasks", output)
-                self.assertIn("on the plan instead of copying it to every task", output)
-                self.assertIn("a task's `custom_fields` only with metadata unique to that task", output)
-                self.assertIn("owned files or interfaces", output)
-                self.assertIn("task was actually delegated to a subagent", output)
-                self.assertIn("model and reasoning effort", output)
-                self.assertIn("`서브 에이전트 모델`: `gpt-5.6-sol (xhigh)`", output)
-                self.assertIn("`SubAgent Model`: `gpt-5.6-sol (xhigh)`", output)
-                self.assertIn("omit this field when no subagent was used", output)
-                self.assertIn("fact already represented on the source plan", output)
-                self.assertIn("same key and value across sibling tasks", output)
-                self.assertIn("task-specific values or context", output)
-                self.assertIn("natural-language labels", output)
-                self.assertIn("string values in the user's language", output)
-                self.assertIn("avoid snake_case", output)
-                self.assertIn("inspect the record's existing `custom_fields`", output)
-                self.assertIn("one field for each fact, decision, constraint, or path", output)
-                self.assertIn("synonymous label or duplicate value", output)
-                self.assertIn("clearest, most specific label as the canonical key", output)
-                self.assertIn("top-level nulls for the obsolete alias keys", output)
-                self.assertIn("file paths, commands, API names", output)
-                self.assertIn("when the distinction is unclear, preserve them or ask", output)
-                self.assertIn("Do not copy standard fields", output)
-                self.assertIn("top-level null value deletes", output)
+                self.assertIn("Manual CLI fallback", output)
+                self.assertNotIn("proactively populate `custom_fields`", output)
 
             context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             self.assertEqual(context.returncode, 0, context.stderr)
-            guidance = "\n".join(json.loads(context.stdout)["workflow_guidance"])
+            hook_guidance = "\n".join(json.loads(context.stdout)["workflow_guidance"])
+            self.assertIn("MCP server instructions", hook_guidance)
+            self.assertNotIn("proactively populate `custom_fields`", hook_guidance)
+
+            server = tapl_mcp.create_server(workspace_root=ROOT)
+            guidance = server.instructions
             self.assertIn("proactively populate `custom_fields`", guidance)
             self.assertIn("future search, review, handoff, or decision reconstruction", guidance)
             self.assertIn("even when AGENTS.md and the user do not explicitly request", guidance)
@@ -2180,11 +2371,10 @@ searchd_start_timeout_ms = 1
             self.assertEqual(payload["instructions"], [])
             self.assertEqual(payload["validation_issues"], [])
             session_guidance = "\n".join(payload["workflow_guidance"])
-            self.assertIn("# Workflow", session_guidance)
-            self.assertIn("Workflow state lives in the repo-local TAPL database", session_guidance)
+            self.assertIn("# TAPL MCP", session_guidance)
+            self.assertIn("installed `tapl_*` MCP tools", session_guidance)
             self.assertIn("SessionStart is bootstrap only", session_guidance)
-            self.assertNotIn("At the start of every non-trivial user request", session_guidance)
-            self.assertNotIn("taplctl search '<compact prompt query>' --agent", session_guidance)
+            self.assertNotIn("taplctl --help", session_guidance)
             self.assertEqual(payload["next_actions"], [])
 
             status = self.run_cli(db_path, "status", "--json")
@@ -2201,10 +2391,10 @@ searchd_start_timeout_ms = 1
                 [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)],
             )
             manual_guidance = "\n".join(manual_payload["workflow_guidance"])
-            self.assertIn("## Role Boundaries", manual_guidance)
-            self.assertNotIn("Plan fields:", manual_guidance)
-            self.assertNotIn("Task required fields:", manual_guidance)
-            self.assertNotIn("Use numeric stable ids only", manual_guidance)
+            self.assertIn("# TAPL MCP", manual_guidance)
+            self.assertIn("Call `tapl_get_next`", manual_guidance)
+            self.assertIn("Do not run `taplctl --help`", manual_guidance)
+            self.assertNotIn("## Role Boundaries", manual_guidance)
 
             prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
             prompt_payload = json.loads(prompt_context.stdout)
@@ -2215,51 +2405,30 @@ searchd_start_timeout_ms = 1
                 prompt_payload["workflow_guidance"],
                 [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)],
             )
-            self.assertIn("${planning_approval_guidance}", tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)
-            self.assertNotIn("## 9. Command Shapes", tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)
             prompt_guidance = "\n".join(prompt_payload["workflow_guidance"])
-            self.assertIn("Write workflow records and reports in the user's language", prompt_guidance)
-            self.assertIn("Do not add unstated requirements", prompt_guidance)
-            self.assertIn("Do not modify source, tests, docs, configs", prompt_guidance)
-            self.assertIn("Use the packet's Next Actions section for current-state steps", prompt_guidance)
-            self.assertIn("Use only the records needed for the current task", prompt_guidance)
-            self.assertIn("Planning must happen before implementation", prompt_guidance)
-            self.assertIn("## Role Boundaries", prompt_guidance)
-            self.assertIn("## Planning", prompt_guidance)
-            self.assertIn("## Tasks And Execution", prompt_guidance)
-            self.assertIn("## Records And History", prompt_guidance)
-            self.assertIn("## Completion Report", prompt_guidance)
-            self.assertIn("Before finalizing the plan", prompt_guidance)
-            self.assertIn('Fixed plan detail (`plan_detail = "very_detailed"`)', prompt_guidance)
-            self.assertIn('Fixed planning approval (`planning_approval_level = "more"`)', prompt_guidance)
-            self.assertIn('Fixed task granularity (`task_granularity = "very_granular"`)', prompt_guidance)
-            self.assertIn("Fixed execution approval (`require_execution_approval = true`)", prompt_guidance)
-            self.assertIn("Tasks are executable implementation or verification work", prompt_guidance)
-            self.assertIn("taplctl <command> <subcommand> --help", prompt_guidance)
-            self.assertNotIn("At the start of every non-trivial user request", prompt_guidance)
-            self.assertNotIn("If the active run contains remaining actionable work", prompt_guidance)
-            self.assertNotIn("Set the current request summary", prompt_guidance)
-            self.assertIn("taplctl search '<compact request query>' --agent", prompt_guidance)
-            self.assertIn("taplctl item show --id <id> --agent", prompt_guidance)
-            self.assertIn("ignore unrelated matches", prompt_guidance)
-            self.assertIn("During execution, search again", prompt_guidance)
-            self.assertNotIn("taplctl plan set --help", prompt_guidance)
-            self.assertNotIn("taplctl task set --help", prompt_guidance)
-            self.assertNotIn("Plan fields: --id", prompt_guidance)
-            self.assertNotIn("Task fields:", prompt_guidance)
-            self.assertNotIn("Use numeric stable ids only", prompt_guidance)
-            self.assertIn("Execute planned tasks one at a time in task order", prompt_guidance)
-            self.assertIn("request_user_input", prompt_guidance)
-            self.assertIn("batch up to three short questions", prompt_guidance)
-            self.assertIn("autoResolutionMs=240000", prompt_guidance)
-            self.assertIn("omit it only when explicit user input is required", prompt_guidance)
-            self.assertIn("only active work is In Progress", prompt_guidance)
-            self.assertNotIn("taplctl finding add --help", prompt_guidance)
-            self.assertIn("derived from the stored plan", prompt_guidance)
-            self.assertIn("When work finishes, report briefly", prompt_guidance)
-            self.assertNotIn("## 9. Command Shapes", prompt_guidance)
-            self.assertNotIn("taplctl approval set --decision approved", prompt_guidance)
-            self.assertNotIn("taplctl approval set --help", prompt_guidance)
+            self.assertIn("MCP server instructions", prompt_guidance)
+            self.assertIn("Call `tapl_get_next`", prompt_guidance)
+            self.assertIn("Do not run `taplctl --help`", prompt_guidance)
+            self.assertNotIn("Planning must happen before implementation", prompt_guidance)
+            server_guidance = tapl_mcp.create_server(workspace_root=ROOT).instructions
+            self.assertIn("Planning must happen before implementation", server_guidance)
+            self.assertIn("## Role Boundaries", server_guidance)
+            self.assertIn("## Planning", server_guidance)
+            self.assertIn("## Tasks And Execution", server_guidance)
+            self.assertIn("## Records And History", server_guidance)
+            self.assertIn("## Completion Report", server_guidance)
+            self.assertIn("Before finalizing the plan", server_guidance)
+            self.assertIn('Fixed plan detail (`plan_detail = "very_detailed"`)', server_guidance)
+            self.assertIn('Fixed planning approval (`planning_approval_level = "more"`)', server_guidance)
+            self.assertIn('Fixed task granularity (`task_granularity = "very_granular"`)', server_guidance)
+            self.assertIn("Fixed execution approval (`require_execution_approval = true`)", server_guidance)
+            self.assertIn("`tapl_search_history`", server_guidance)
+            self.assertIn("`tapl_get_item`", server_guidance)
+            self.assertIn("ignore unrelated matches", server_guidance)
+            self.assertIn("During execution, search again", server_guidance)
+            self.assertIn("Execute planned tasks one at a time in task order", server_guidance)
+            self.assertIn("request_user_input", server_guidance)
+            self.assertIn("only active work is In Progress", server_guidance)
             self.assertNotIn("quote every argument", prompt_instructions)
             self.assertIn("Create an active workflow run", "\n".join(prompt_payload["next_actions"]))
 
@@ -2319,7 +2488,7 @@ searchd_start_timeout_ms = 1
             self.assertIn("If the user limited work to planning/reporting", plan_only_actions)
             self.assertIn("If planning was requested without execution", plan_only_actions)
             self.assertIn("If execution, edits, testing, or verification were explicitly requested", plan_only_actions)
-            self.assertIn("--source explicit_user", plan_only_actions)
+            self.assertIn("source `explicit_user`", plan_only_actions)
             self.assertNotIn("Plan-only request detected", plan_only_actions)
 
             legacy_planning_config = Path(tmp) / "legacy-planning.toml"
@@ -2367,24 +2536,24 @@ searchd_start_timeout_ms = 1
             self.assertIn("defer the existing run", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("merge the work into one plan", "\n".join(active_prompt_payload["next_actions"]))
             self.assertIn("Continue only TASK-001", "\n".join(active_prompt_payload["next_actions"]))
-            approval_index = next(index for index, action in enumerate(active_actions) if "approval approve" in action)
+            approval_index = next(index for index, action in enumerate(active_actions) if "tapl_approve_execution" in action)
             continue_index = next(index for index, action in enumerate(active_actions) if "Continue only TASK-001" in action)
             self.assertLess(approval_index, continue_index)
 
             text = self.run_cli(db_path, "context", "--event", "SessionStart")
             self.assertEqual(text.returncode, 0, text.stderr)
             self.assertIn("tapl context:", text.stdout)
-            self.assertIn("# Workflow", text.stdout)
-            self.assertIn("Workflow state lives in the repo-local TAPL database", text.stdout)
+            self.assertIn("# TAPL MCP", text.stdout)
+            self.assertIn("installed `tapl_*` MCP tools", text.stdout)
             self.assertIn("SessionStart is bootstrap only", text.stdout)
-            self.assertNotIn("At the start of every non-trivial user request", text.stdout)
+            self.assertNotIn("taplctl --help", text.stdout)
 
             stop_context = self.run_cli(db_path, "context", "--event", "Stop", "--json")
             stop_payload = json.loads(stop_context.stdout)
             stop_instructions = "\n".join(stop_payload["instructions"])
             self.assertEqual(stop_payload["instructions"], [])
-            self.assertIn("Record the final result", "\n".join(stop_payload["workflow_guidance"]))
-            self.assertIn("archive finish", "\n".join(stop_payload["workflow_guidance"]))
+            self.assertIn("record the result with `tapl_finish_run`", "\n".join(stop_payload["workflow_guidance"]))
+            self.assertIn("`tapl_finish_archive`", "\n".join(stop_payload["workflow_guidance"]))
             self.assertNotIn("At the start of every non-trivial user request", "\n".join(stop_payload["workflow_guidance"]))
             self.assertNotIn("Completion reports should", stop_instructions)
             self.assertNotIn("Archive summaries should", stop_instructions)
@@ -2392,17 +2561,11 @@ searchd_start_timeout_ms = 1
             prompt_text = self.run_cli(db_path, "context", "--event", "UserPromptSubmit")
             self.assertEqual(prompt_text.returncode, 0, prompt_text.stderr)
             self.assertIn("tapl context:", prompt_text.stdout)
-            self.assertIn("# Workflow", prompt_text.stdout)
-            self.assertIn("Write workflow records and reports in the user's language", prompt_text.stdout)
-            self.assertIn("search relevant prior TAPL history", prompt_text.stdout)
-            self.assertIn("taplctl search '<compact request query>' --agent", prompt_text.stdout)
-            self.assertIn("execution approval", prompt_text.stdout)
-            self.assertIn("Execute planned tasks one at a time in task order", prompt_text.stdout)
-            self.assertNotIn("taplctl finding add --help", prompt_text.stdout)
-            self.assertIn("taplctl <command> <subcommand> --help", prompt_text.stdout)
-            self.assertNotIn("Use numeric stable ids only", prompt_text.stdout)
-            self.assertNotIn("## 9. Command Shapes", prompt_text.stdout)
-            self.assertNotIn("quote every argument", prompt_text.stdout)
+            self.assertIn("# TAPL MCP", prompt_text.stdout)
+            self.assertIn("MCP server instructions", prompt_text.stdout)
+            self.assertIn("Call `tapl_get_next`", prompt_text.stdout)
+            self.assertIn("Do not run `taplctl --help`", prompt_text.stdout)
+            self.assertNotIn("Planning must happen before implementation", prompt_text.stdout)
 
     def test_command_help_exposes_field_guidance(self) -> None:
         self.assertEqual(tapl_prompt.command_help_epilog(), tapl_prompt.render(tapl_prompt.ROOT_HELP_TEMPLATE))
@@ -2420,31 +2583,18 @@ searchd_start_timeout_ms = 1
 
             root_help = self.run_cli(db_path, "--help")
             self.assertEqual(root_help.returncode, 0, root_help.stderr)
-            self.assertIn("taplctl <command> <subcommand> --help", root_help.stdout)
-            self.assertIn("taplctl validate --agent", root_help.stdout)
-            self.assertNotIn("taplctl validate --json", root_help.stdout)
-            self.assertIn("Lifecycle order", root_help.stdout)
-            self.assertIn("resolve residual run direction", root_help.stdout)
-            self.assertIn("clarify until unblocked", root_help.stdout)
-            self.assertIn("taplctl search '<compact request query>' --agent", root_help.stdout)
-            self.assertIn("taplctl item show --id <id> --agent", root_help.stdout)
-            self.assertIn("taplctl next --agent", root_help.stdout)
-            self.assertIn("taplctl recipe all --agent", root_help.stdout)
-            self.assertIn("taplctl plan apply --stdin-json --agent", root_help.stdout)
-            self.assertIn("taplctl task create --stdin-json --agent", root_help.stdout)
-            self.assertIn("taplctl approval approve", root_help.stdout)
-            self.assertIn("Execute planned tasks one at a time", root_help.stdout)
-            self.assertIn("high-level lifecycle commands", root_help.stdout)
-            self.assertIn("--stdin-json", root_help.stdout)
+            self.assertIn("Manual CLI fallback", root_help.stdout)
+            self.assertIn("`tapl-mcp` server", root_help.stdout)
+            self.assertIn("human operation, diagnostics, or repair", root_help.stdout)
+            self.assertNotIn("Lifecycle order", root_help.stdout)
+            self.assertNotIn("taplctl <command> <subcommand> --help", root_help.stdout)
 
             search_help = self.run_cli(db_path, "search", "--help")
             self.assertEqual(search_help.returncode, 0, search_help.stderr)
-            self.assertIn("History search rules", search_help.stdout)
-            self.assertIn("taplctl search '<compact request query>' --agent", search_help.stdout)
-            self.assertIn("ignore unrelated matches", search_help.stdout)
-            self.assertIn("During execution, search again", search_help.stdout)
-            self.assertIn("taplctl item show --id <id> --agent", search_help.stdout)
-            self.assertIn("taplctl search 'workflow dashboard search page' --agent", search_help.stdout)
+            self.assertIn("Manual CLI fallback", search_help.stdout)
+            self.assertIn("`tapl_search_history`", search_help.stdout)
+            self.assertIn("`tapl_get_item`", search_help.stdout)
+            self.assertNotIn("History search rules", search_help.stdout)
 
             run_help = self.run_cli(db_path, "run", "set", "--help")
             self.assertEqual(run_help.returncode, 0, run_help.stderr)
@@ -2455,58 +2605,34 @@ searchd_start_timeout_ms = 1
 
             plan_help = self.run_cli(db_path, "plan", "set", "--help")
             self.assertEqual(plan_help.returncode, 0, plan_help.stderr)
-            self.assertIn("Plan writing rules", plan_help.stdout)
-            self.assertIn("taplctl plan apply --stdin-json --agent", plan_help.stdout)
-            self.assertIn("Plan records should include objective", plan_help.stdout)
-            self.assertIn("Keep plan section labels in English", plan_help.stdout)
-            self.assertIn("Affected files/interfaces", plan_help.stdout)
-            self.assertIn("Approval needs", plan_help.stdout)
-            self.assertIn("before executable task records", plan_help.stdout)
-            self.assertIn("high-level lifecycle commands", plan_help.stdout)
-            self.assertIn("Use numeric stable ids only", plan_help.stdout)
+            self.assertIn("Manual CLI fallback", plan_help.stdout)
+            self.assertIn("`tapl_apply_plan`", plan_help.stdout)
+            self.assertNotIn("Plan writing rules", plan_help.stdout)
             self.assertIn("PLAN-001", plan_help.stdout)
             self.assertIn("--objective", plan_help.stdout)
             self.assertIn("--requirements-trace", plan_help.stdout)
             self.assertIn("--selected-approach", plan_help.stdout)
             self.assertIn("--notes", plan_help.stdout)
             self.assertIn("--agent", plan_help.stdout)
-            self.assertIn("Field contract", plan_help.stdout)
-            self.assertIn("--objective (required for detailed plans)", plan_help.stdout)
-            self.assertIn("--validation (required for detailed plans)", plan_help.stdout)
+            self.assertNotIn("Field contract", plan_help.stdout)
             self.assertNotIn("--body", plan_help.stdout)
 
             task_help = self.run_cli(db_path, "task", "set", "--help")
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
             self.assertIn("--agent", task_help.stdout)
-            self.assertIn("Task writing rules", task_help.stdout)
-            self.assertIn("taplctl task create --stdin-json --agent", task_help.stdout)
-            self.assertIn("taplctl task start TASK-001 --agent", task_help.stdout)
-            self.assertIn("Use numeric stable ids only", task_help.stdout)
-            self.assertIn("Existing task updates are partial", task_help.stdout)
-            self.assertIn("New task creation requires --title and --status", task_help.stdout)
-            self.assertIn("--status 'In Progress'", task_help.stdout)
-            self.assertIn("Execute planned tasks one at a time", task_help.stdout)
-            self.assertIn("source plan/spec exists", task_help.stdout)
-            self.assertIn("not represent planning or task-design work", task_help.stdout)
-            self.assertIn("Executable implementation/verification tasks", task_help.stdout)
-            self.assertIn("high-level lifecycle commands", task_help.stdout)
-            self.assertIn("Required field sets", task_help.stdout)
-            self.assertIn("executable task: --spec-id, --goal, --action, --verification", task_help.stdout)
-            self.assertIn("--blocker (required for blocked tasks)", task_help.stdout)
-            self.assertIn("--next-action (required for blocked tasks)", task_help.stdout)
+            self.assertIn("Manual CLI fallback", task_help.stdout)
+            self.assertIn("typed TAPL task MCP tools", task_help.stdout)
+            self.assertNotIn("Task writing rules", task_help.stdout)
+            self.assertIn("--status", task_help.stdout)
+            self.assertIn("--spec-id", task_help.stdout)
+            self.assertIn("--blocker", task_help.stdout)
+            self.assertIn("--next-action", task_help.stdout)
 
             approval_help = self.run_cli(db_path, "approval", "set", "--help")
             self.assertEqual(approval_help.returncode, 0, approval_help.stderr)
-            self.assertIn("Approval writing rules", approval_help.stdout)
-            self.assertIn("taplctl approval approve --prompt", approval_help.stdout)
-            self.assertIn("residual-run handling", approval_help.stdout)
-            self.assertIn("planning clarification", approval_help.stdout)
-            self.assertIn("execution scope", approval_help.stdout)
-            self.assertIn("before starting or", approval_help.stdout)
-            self.assertIn("continuing task execution", approval_help.stdout)
-            self.assertIn("approved decision/scope", approval_help.stdout)
-            self.assertIn("Field contract", approval_help.stdout)
-            self.assertIn("--decision (CLI required)", approval_help.stdout)
+            self.assertIn("Manual CLI fallback", approval_help.stdout)
+            self.assertIn("`tapl_approve_execution`", approval_help.stdout)
+            self.assertNotIn("Approval writing rules", approval_help.stdout)
             self.assertIn("--decision", approval_help.stdout)
             self.assertIn("--prompt", approval_help.stdout)
             self.assertIn("--source", approval_help.stdout)
@@ -2517,9 +2643,10 @@ searchd_start_timeout_ms = 1
             self.assertEqual(finding_help.returncode, 0, finding_help.stderr)
             self.assertIn("Add a finding", finding_help.stdout)
             self.assertIn("Why the finding matters", finding_help.stdout)
-            self.assertIn("Finding writing rules", finding_help.stdout)
-            self.assertIn("Field contract", finding_help.stdout)
-            self.assertIn("--title (CLI required)", finding_help.stdout)
+            self.assertIn("Manual CLI fallback", finding_help.stdout)
+            self.assertIn("`tapl_add_finding`", finding_help.stdout)
+            self.assertNotIn("Finding writing rules", finding_help.stdout)
+            self.assertIn("--title", finding_help.stdout)
 
             for args in (
                 ("init", "--help"),
@@ -2535,7 +2662,7 @@ searchd_start_timeout_ms = 1
                 help_result = self.run_cli(db_path, *args)
                 self.assertEqual(help_result.returncode, 0, help_result.stderr)
                 self.assertIn("--agent", help_result.stdout)
-            self.assertIn("Markdown form", finding_help.stdout)
+            self.assertNotIn("Markdown form", finding_help.stdout)
 
             hook_help = self.run_cli(db_path, "hook-event", "--help")
             self.assertEqual(hook_help.returncode, 0, hook_help.stderr)
@@ -2620,11 +2747,14 @@ searchd_start_timeout_ms = 1
                 db_path,
                 "approval",
                 "approve",
-                "--prompt",
-                "Execute TASK-001 from PLAN-001",
-                "--source",
-                "explicit_user",
+                "--stdin-json",
                 "--agent",
+                input_text=json.dumps(
+                    {
+                        "prompt": "Execute TASK-001 from PLAN-001",
+                        "source": "explicit_user",
+                    }
+                ),
             )
             self.assertEqual(approved.returncode, 0, approved.stderr)
             self.assertIn("<operation>approval_approve</operation>", approved.stdout)
@@ -2669,10 +2799,10 @@ searchd_start_timeout_ms = 1
             db_path = Path(tmp) / "tapl.db"
             task_help = self.run_cli(db_path, "task", "set", "--help")
             self.assertEqual(task_help.returncode, 0, task_help.stderr)
-            self.assertIn(
-                "executable task: --spec-id, --goal, --action, --verification; completed task",
-                task_help.stdout,
-            )
+            self.assertIn("--spec-id", task_help.stdout)
+            self.assertIn("--verification", task_help.stdout)
+            self.assertNotIn("executable task:", task_help.stdout)
+            self.assertIn("typed TAPL task MCP tools", task_help.stdout)
 
     def test_prompt_field_contract_helpers_use_invariant_rules(self) -> None:
         self.assertEqual(
@@ -2751,6 +2881,17 @@ searchd_start_timeout_ms = 1
             self.assertNotIn("SessionStart", hooks["hooks"])
             self.assertNotIn("tapl_hook.py", json.dumps(hooks))
             self.assertTrue((codex_home / "config.toml").exists())
+            codex_config = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
+            self.assertEqual(
+                codex_config["mcp_servers"]["tapl"],
+                {
+                    "command": "taplctl",
+                    "args": ["mcp"],
+                    "enabled": True,
+                    "required": False,
+                    "default_tools_approval_mode": "auto",
+                },
+            )
             self.assertEqual(payload["tapl_config"], str(base / "home" / ".tapl" / "config.toml"))
             tapl_config_data = tomllib.loads(
                 (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8")
@@ -2787,6 +2928,9 @@ approval_policy = "on-request"
 
 [features]
 multi_agent = false
+
+[mcp_servers.existing]
+command = "existing-mcp"
 """.lstrip(),
                 encoding="utf-8",
             )
@@ -2819,6 +2963,10 @@ multi_agent = false
             self.assertEqual(parsed["personality"], "pragmatic")
             self.assertNotIn("multi_agent", parsed["features"])
             self.assertTrue(parsed["features"]["default_mode_request_user_input"])
+            self.assertEqual(parsed["mcp_servers"]["existing"]["command"], "existing-mcp")
+            self.assertEqual(parsed["mcp_servers"]["tapl"]["command"], "taplctl")
+            self.assertEqual(parsed["mcp_servers"]["tapl"]["args"], ["mcp"])
+            self.assertEqual(parsed["mcp_servers"]["tapl"]["default_tools_approval_mode"], "auto")
             self.assertFalse((agents_dir / "senior-worker.toml").exists())
 
     def test_install_user_force_applies_managed_codex_config_values_only(self) -> None:
@@ -2863,6 +3011,8 @@ experimental = true
             self.assertNotIn("multi_agent", parsed["features"])
             self.assertTrue(parsed["features"]["experimental"])
             self.assertTrue(parsed["features"]["default_mode_request_user_input"])
+            self.assertEqual(parsed["mcp_servers"]["tapl"]["command"], "taplctl")
+            self.assertEqual(parsed["mcp_servers"]["tapl"]["args"], ["mcp"])
 
     def test_install_repo_writes_hooks_config_and_db(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2936,6 +3086,10 @@ experimental = true
                 pre_tool_commands,
             )
             self.assertTrue((repo / ".codex" / "config.toml").exists())
+            codex_config = tomllib.loads((repo / ".codex" / "config.toml").read_text(encoding="utf-8"))
+            self.assertEqual(codex_config["mcp_servers"]["tapl"]["command"], "/opt/tapl/bin/taplctl")
+            self.assertEqual(codex_config["mcp_servers"]["tapl"]["args"], ["mcp"])
+            self.assertFalse(codex_config["mcp_servers"]["tapl"]["required"])
             self.assertFalse((repo / ".codex" / "agents").exists())
             tapl_config_data = tomllib.loads((repo / ".tapl" / "config.toml").read_text())
             self.assertNotIn("plan-task-execute", tapl_config_data)
@@ -3208,7 +3362,8 @@ keep = true
             self.assertEqual(blocked.returncode, 2)
             self.assertIn("durable edit requires", blocked.stderr)
             self.assertIn("Workflow state lives in the repo-local TAPL database", blocked.stderr)
-            self.assertIn("Use `taplctl ... --agent`", blocked.stderr)
+            self.assertIn("installed `tapl_*` MCP tools", blocked.stderr)
+            self.assertIn("manual fallback only", blocked.stderr)
 
             self.run_cli(
                 db_path,
@@ -3338,7 +3493,7 @@ keep = true
             )
             self.assertEqual(blocked.returncode, 2)
             self.assertIn("missing_plan", blocked.stderr)
-            self.assertIn("taplctl plan apply", blocked.stderr)
+            self.assertIn("tapl_apply_plan", blocked.stderr)
 
     def test_hook_observe_warns_for_fixed_very_granular_single_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3395,29 +3550,21 @@ keep = true
             )
             self.assertEqual(event.returncode, 0, event.stderr)
             self.assertIn("tapl context:", event.stdout)
-            self.assertIn("# Workflow", event.stdout)
-            self.assertIn("taplctl <command> <subcommand> --help", event.stdout)
-            self.assertIn("execution approval", event.stdout)
-            self.assertNotIn("taplctl status --agent", event.stdout)
-            self.assertIn("taplctl search '<compact request query>' --agent", event.stdout)
-            self.assertIn("taplctl item show --id <id> --agent", event.stdout)
-            self.assertIn("ignore unrelated matches", event.stdout)
-            self.assertIn("During execution, search again", event.stdout)
-            self.assertNotIn("At the start of every non-trivial user request", event.stdout)
-            self.assertIn("Before planning non-trivial work", event.stdout)
-            self.assertIn("snippet is insufficient", event.stdout)
-            self.assertIn("Planning must happen before implementation", event.stdout)
-            self.assertIn('Fixed plan detail (`plan_detail = "very_detailed"`)', event.stdout)
-            self.assertNotIn("taplctl plan set --help", event.stdout)
-            self.assertNotIn("Plan fields: --id", event.stdout)
-            self.assertNotIn("Task fields:", event.stdout)
-            self.assertNotIn("taplctl finding add --help", event.stdout)
+            self.assertIn("# TAPL MCP", event.stdout)
+            self.assertIn("MCP server instructions", event.stdout)
+            self.assertIn("Call `tapl_get_next`", event.stdout)
+            self.assertIn("Do not run `taplctl --help`", event.stdout)
+            self.assertNotIn("Planning must happen before implementation", event.stdout)
             self.assertIn("## Next Actions", event.stdout)
-            self.assertNotIn("## 9. Command Shapes", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
-            self.assertIn("### SubAgent Delegation", event.stdout)
-            self.assertIn("`gpt-5.6-sol`: `xhigh`, `max`", event.stdout)
-            self.assertIn("`gpt-5.6-luna`: `high`, `xhigh`", event.stdout)
+            self.assertIn("`tapl_apply_plan`", event.stdout)
+            self.assertNotIn("### SubAgent Delegation", event.stdout)
+
+            server_guidance = tapl_mcp.create_server(workspace_root=ROOT).instructions
+            self.assertIn("Planning must happen before implementation", server_guidance)
+            self.assertIn("### SubAgent Delegation", server_guidance)
+            self.assertIn("`gpt-5.6-sol`: `xhigh`, `max`", server_guidance)
+            self.assertIn("`gpt-5.6-luna`: `high`, `xhigh`", server_guidance)
 
             event_json = self.run_cli(
                 db_path,
@@ -3482,17 +3629,23 @@ enabled = false
                 },
             )
             guidance = "\n".join(context_payload["workflow_guidance"])
-            self.assertIn("### SubAgent Delegation", guidance)
-            self.assertIn("`gpt-5.6-luna`: `xhigh`", guidance)
-            self.assertIn("`future-runtime-model`: `custom-effort`", guidance)
-            self.assertIn("actually supported by the current SubAgent runtime", guidance)
+            self.assertIn("MCP server instructions", guidance)
+            self.assertNotIn("### SubAgent Delegation", guidance)
+
+            enabled_instructions = tapl_prompt.mcp_server_instructions(
+                subagents=tapl_config.load(enabled_config).subagents,
+            )
+            self.assertIn("### SubAgent Delegation", enabled_instructions)
+            self.assertIn("`gpt-5.6-luna`: `xhigh`", enabled_instructions)
+            self.assertIn("`future-runtime-model`: `custom-effort`", enabled_instructions)
+            self.assertIn("actually supported by the current SubAgent runtime", enabled_instructions)
             self.assertLess(
-                guidance.index("## Tasks And Execution"),
-                guidance.index("### SubAgent Delegation"),
+                enabled_instructions.index("## Tasks And Execution"),
+                enabled_instructions.index("### SubAgent Delegation"),
             )
             self.assertLess(
-                guidance.index("### SubAgent Delegation"),
-                guidance.index("Fixed execution approval (`require_execution_approval = true`)"),
+                enabled_instructions.index("### SubAgent Delegation"),
+                enabled_instructions.index("Fixed execution approval (`require_execution_approval = true`)"),
             )
 
             status = self.run_cli(
@@ -3526,8 +3679,8 @@ enabled = false
                 hook_payload["context"]["config"]["subagents"],
                 context_payload["config"]["subagents"],
             )
-            self.assertIn("### SubAgent Delegation", hook_payload["message"])
-            self.assertIn("`gpt-5.6-luna`: `xhigh`", hook_payload["message"])
+            self.assertIn("MCP server instructions", hook_payload["message"])
+            self.assertNotIn("### SubAgent Delegation", hook_payload["message"])
 
             disabled_context = self.run_cli(
                 db_path,
@@ -3555,6 +3708,10 @@ enabled = false
                 "### SubAgent Delegation",
                 "\n".join(disabled_payload["workflow_guidance"]),
             )
+            disabled_instructions = tapl_prompt.mcp_server_instructions(
+                subagents=tapl_config.load(disabled_config).subagents,
+            )
+            self.assertNotIn("### SubAgent Delegation", disabled_instructions)
 
             disabled_hook = self.run_cli(
                 db_path,
@@ -3660,12 +3817,13 @@ enabled = false
             guidance = "\n".join(payload["context"]["workflow_guidance"])
             next_actions = "\n".join(payload["context"]["next_actions"])
             self.assertEqual(payload["context"]["prompt_summary"], "Implement isolated workflow")
-            self.assertIn("## Role Boundaries", guidance)
-            self.assertIn("Use the packet's Next Actions section", guidance)
-            self.assertNotIn("At the start of every non-trivial user request", guidance)
-            self.assertNotIn("Plan fields:", guidance)
-            self.assertIn("Summarize request", next_actions)
+            self.assertIn("# TAPL MCP", guidance)
+            self.assertIn("MCP server instructions", guidance)
+            self.assertIn("Do not run `taplctl --help`", guidance)
+            self.assertNotIn("## Role Boundaries", guidance)
+            self.assertIn("tapl_summarize_run", next_actions)
             self.assertIn("Create or update plan state", next_actions)
+            self.assertIn("tapl_apply_plan", next_actions)
             self.assertEqual(payload["context"]["validation_issues"], [])
             self.assertTrue((workspace / ".tapl" / "tapl.db").exists())
 
@@ -3776,7 +3934,7 @@ enabled = false
                 input_text='{"search_query": [{"q": "tapl workflow"}]}',
             )
             self.assertEqual(event.returncode, 0, event.stderr)
-            self.assertIn("taplctl finding add", event.stdout)
+            self.assertIn("tapl_add_finding", event.stdout)
             self.assertIn("decision-relevant", event.stdout)
             self.assertIn("Do not store raw search dumps", event.stdout)
 
@@ -3821,7 +3979,7 @@ enabled = false
                 "New request",
             )
             self.assertIn(
-                "taplctl run summarize --summary",
+                "tapl_summarize_run",
                 "\n".join(prompt_payload["context"]["next_actions"]),
             )
 

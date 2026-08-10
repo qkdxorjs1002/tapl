@@ -4,6 +4,7 @@ version = "0.2.1"
 description = "Codex workflow harness backed by repo-local SQLite state."
 requires-python = ">=3.11"
 dependencies = [
+  "mcp>=2,<3",
   "numpy>=1.26",
   "sentence-transformers>=5.0.0",
   "sqlite-vec>=0.1.6",
@@ -21,6 +22,7 @@ Repository = "https://github.com/qkdxorjs1002/REPLTA.MD"
 
 [project.scripts]
 taplctl = "taplctl.cli:main"
+tapl-mcp = "taplctl.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]

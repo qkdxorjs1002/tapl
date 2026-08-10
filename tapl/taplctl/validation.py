@@ -750,7 +750,7 @@ def has_any(text: str, needles: tuple[str, ...]) -> bool:
 
 def guidance() -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "field_contract_source": "Use `taplctl <command> <subcommand> --help` for exact field contracts and examples.",
+        "field_contract_source": "Use TAPL MCP tool descriptions and input schemas for exact field contracts.",
         "stable_ids": stable_id_guidance(),
         "fixed_plan_policy": plan_detail_guidance(),
         "fixed_task_policy": task_granularity_guidance(),
@@ -773,7 +773,7 @@ def task_granularity_guidance() -> str:
 
 
 def execution_approval_validation_guidance() -> str:
-    return "Missing execution approval is always a validation error; use `taplctl approval approve --help` for the high-level command."
+    return "Missing execution approval is always a validation error; use `tapl_approve_execution`."
 
 
 def task_granularity_remediation() -> str:

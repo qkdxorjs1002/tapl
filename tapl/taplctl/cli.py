@@ -20,6 +20,7 @@ from . import (
     hooks,
     importer,
     install as tapl_install,
+    mcp_server,
     prompt as tapl_prompt,
     searchd,
     updater,
@@ -57,33 +58,7 @@ def plan_set_epilog() -> str:
 
 
 def task_set_epilog() -> str:
-    text = tapl_prompt.task_set_epilog(
-        statuses=db.TASK_STATUSES,
-    )
-    text = text.replace(
-        (
-            "Execute planned tasks one at a time in task order: use "
-            "`taplctl task start TASK-001 --agent` immediately before work, then use "
-            "`taplctl task complete`, `taplctl task block`, or `taplctl task skip` "
-            "before starting another task."
-        ),
-        (
-            "Execute sequential tasks one at a time with `taplctl task start`; "
-            "for independent subagent work, declare the same --parallel-group with "
-            "--execution-mode parallel, --executor-kind subagent, and disjoint "
-            "--owned-path values, then use `taplctl task dispatch TASK-001 TASK-002 --agent`."
-        ),
-    )
-    text = text.replace("--id (CLI required):", "--id (required via CLI flag or JSON):")
-    return text + (
-        "\n  Parallel task fields: --execution-mode sequential|parallel, "
-        "--executor-kind main|subagent, --parallel-group GROUP, repeated "
-        "--owned-path PATH, and repeated --depends-on TASK-ID."
-        "\n  Parallel lifecycle: dispatch two or more compatible Pending tasks; "
-        "complete/block/skip requires the exact --execution-id from the dispatch "
-        "manifest and settles the active execution atomically; "
-        "`taplctl batch recover BATCH-ID` recovers interrupted work."
-    )
+    return tapl_prompt.task_set_epilog(statuses=db.TASK_STATUSES)
 
 
 def finding_add_epilog() -> str:
@@ -257,7 +232,7 @@ def should_skip_auto_install(args: argparse.Namespace) -> bool:
     command = getattr(args, "command", None)
     if args.db is not None or args.config is not None:
         return True
-    if command in {None, "init", "install", "update", "hook-event", "viewer"}:
+    if command in {None, "init", "install", "update", "hook-event", "viewer", "mcp"}:
         return True
     return command == "searchd" and getattr(args, "searchd_command", None) == "run"
 
@@ -477,6 +452,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Local TCP port. Defaults to {viewer.DEFAULT_PORT}.",
     )
     viewer_cmd.set_defaults(handler=cmd_viewer)
+
+    mcp = sub.add_parser(
+        "mcp",
+        help="Run the TAPL MCP stdio server.",
+        description="Run the workspace-bound TAPL MCP server over standard input and output.",
+    )
+    mcp.set_defaults(handler=cmd_mcp)
 
     status = sub.add_parser("status", help="Show active workflow state.")
     add_agent_output_args(status)
@@ -988,6 +970,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "schema": db.get_meta(conn),
     }
     emit(payload, args.json, args.agent)
+    return 0
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    """Run the MCP transport without emitting non-protocol output."""
+
+    del args
+    mcp_server.create_server().run()
     return 0
 
 
@@ -2158,7 +2148,16 @@ def cmd_approval_set(args: argparse.Namespace) -> int:
 
 
 def cmd_approval_approve(args: argparse.Namespace) -> int:
-    merge_json_fields(args, ("kind", "prompt", "source"), aliases={"prompt": ("scope", "approval_prompt")})
+    merge_json_fields(
+        args,
+        ("kind", "prompt", "source"),
+        aliases={"prompt": ("scope", "approval_prompt")},
+        cli_defaults={
+            "kind": db.DEFAULT_APPROVAL_KIND,
+            "prompt": "",
+            "source": db.DEFAULT_APPROVAL_SOURCE,
+        },
+    )
     args.decision = "approved"
     if not require_arg(args, "prompt", "--prompt", command="approval approve"):
         return 1
@@ -2167,7 +2166,16 @@ def cmd_approval_approve(args: argparse.Namespace) -> int:
 
 
 def cmd_approval_reject(args: argparse.Namespace) -> int:
-    merge_json_fields(args, ("kind", "prompt", "source"), aliases={"prompt": ("scope", "approval_prompt")})
+    merge_json_fields(
+        args,
+        ("kind", "prompt", "source"),
+        aliases={"prompt": ("scope", "approval_prompt")},
+        cli_defaults={
+            "kind": db.DEFAULT_APPROVAL_KIND,
+            "prompt": "",
+            "source": db.DEFAULT_APPROVAL_SOURCE,
+        },
+    )
     args.decision = "rejected"
     if not require_arg(args, "prompt", "--prompt", command="approval reject"):
         return 1
