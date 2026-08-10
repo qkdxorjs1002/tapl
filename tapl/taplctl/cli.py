@@ -20,7 +20,6 @@ from . import (
     hooks,
     importer,
     install as tapl_install,
-    mcp_server,
     prompt as tapl_prompt,
     searchd,
     updater,
@@ -977,6 +976,15 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     """Run the MCP transport without emitting non-protocol output."""
 
     del args
+    try:
+        from . import mcp_server
+    except ModuleNotFoundError as exc:
+        missing = exc.name or "an MCP runtime dependency"
+        raise RuntimeError(
+            f"TAPL MCP runtime dependency {missing!r} is missing. "
+            "Reinstall the Homebrew formula with `brew reinstall taplctl` "
+            "(or `taplctl-semantic`), or install `mcp==2.0.0` in this Python environment."
+        ) from exc
     mcp_server.create_server().run()
     return 0
 

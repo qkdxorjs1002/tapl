@@ -63,14 +63,19 @@ class ViewerTests(unittest.TestCase):
         self.assertTrue((viewer.ASSET_ROOT / "assets" / "index.css").is_file())
 
     def test_release_build_syncs_assets_before_wheel_and_writes_viewer_service(self) -> None:
-        workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml").read_text(
+        repo_root = Path(__file__).resolve().parents[2]
+        workflow = (repo_root / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        formula_updater = (repo_root / ".github" / "scripts" / "update_homebrew_formula.rb").read_text(
             encoding="utf-8"
         )
         self.assertLess(workflow.index("- name: Build shared viewer assets"), workflow.index("- name: Build Python wheel"))
-        self.assertIn('run [opt_bin/\\"taplctl\\", \\"viewer\\"]', workflow)
-        self.assertNotIn('run [opt_bin/\\"taplctl\\", \\"searchd\\", \\"run\\"]', workflow)
-        self.assertIn('restart_delay 5', workflow)
-        self.assertIn('log_path var/\\"log/taplctl-viewer.log\\"', workflow)
+        self.assertIn(".github/scripts/update_homebrew_formula.rb", workflow)
+        self.assertIn('run [opt_bin/\\"taplctl\\", \\"viewer\\"]', formula_updater)
+        self.assertNotIn('run [opt_bin/\\"taplctl\\", \\"searchd\\", \\"run\\"]', formula_updater)
+        self.assertIn('restart_delay 5', formula_updater)
+        self.assertIn('log_path var/\\"log/taplctl-viewer.log\\"', formula_updater)
 
     def test_workspace_selection_requires_existing_database(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -337,6 +337,11 @@ brew install taplctl
 brew install taplctl-semantic
 ```
 
+Both formulas install the pinned MCP runtime from release-hosted wheel bundles;
+the semantic formula additionally installs the optional embedding and vector
+search stack. Homebrew installation does not resolve Python packages from PyPI
+at install time.
+
 Start the browser viewer automatically at login with the formula you installed:
 
 ```sh
@@ -410,6 +415,9 @@ uv sync
 uv run taplctl --version
 uv build
 ```
+
+Use `uv sync --extra semantic` when developing or running the optional semantic
+search features from a source checkout.
 
 ### Updates
 

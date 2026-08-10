@@ -143,6 +143,74 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --wheel --outdir ../release-dist
 
+      - name: Build MCP runtime wheelhouses
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mcp_requirement="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          project = tomllib.loads(Path("tapl/pyproject.toml").read_text(encoding="utf-8"))["project"]
+          matches = [item for item in project["dependencies"] if item.startswith("mcp==")]
+          if len(matches) != 1:
+              raise SystemExit("tapl must pin exactly one mcp== runtime dependency")
+          print(matches[0])
+          PY
+          )"
+
+          targets=(macos-arm64 macos-x86_64 linux-arm64 linux-x86_64)
+          platforms=(macosx_11_0_arm64 macosx_10_13_x86_64 manylinux2014_aarch64 manylinux2014_x86_64)
+          for index in "${!targets[@]}"; do
+            target="${targets[index]}"
+            platform="${platforms[index]}"
+            wheelhouse="${RUNNER_TEMP}/taplctl-mcp-runtime-${target}"
+            archive="release-dist/taplctl-mcp-runtime-${RELEASE_VERSION}-${target}.tar.gz"
+
+            rm -rf "${wheelhouse}"
+            mkdir -p "${wheelhouse}"
+            python -m pip download \
+              --disable-pip-version-check \
+              --only-binary=:all: \
+              --platform "${platform}" \
+              --python-version 3.12 \
+              --implementation cp \
+              --dest "${wheelhouse}" \
+              "${mcp_requirement}"
+
+            python - "${wheelhouse}" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          wheelhouse = Path(sys.argv[1])
+          distributions = {
+              path.name.split("-", 1)[0].lower()
+              for path in wheelhouse.glob("*.whl")
+          }
+          required = {"mcp", "mcp_types", "pydantic", "pydantic_core", "cryptography"}
+          missing = sorted(required - distributions)
+          if missing:
+              raise SystemExit(f"MCP runtime wheelhouse is incomplete: {', '.join(missing)}")
+          for path in wheelhouse.iterdir():
+              if not path.is_file() or re.search(r"\.whl$", path.name) is None:
+                  raise SystemExit(f"unexpected MCP runtime asset: {path.name}")
+          PY
+
+            tar \
+              --sort=name \
+              --mtime='UTC 1970-01-01' \
+              --owner=0 \
+              --group=0 \
+              --numeric-owner \
+              -C "${wheelhouse}" \
+              -czf "${archive}" \
+              .
+          done
+
       - name: Build VS Code extension package
         working-directory: vscode-extension
         env:
@@ -195,6 +263,19 @@ jobs:
           echo "wheel_sha256=${wheel_sha256}" >> "${GITHUB_OUTPUT}"
           echo "wheel_url=${wheel_url}" >> "${GITHUB_OUTPUT}"
 
+          for target in macos-arm64 macos-x86_64 linux-arm64 linux-x86_64; do
+            runtime_name="taplctl-mcp-runtime-${RELEASE_VERSION}-${target}.tar.gz"
+            runtime_path="release-dist/${runtime_name}"
+            runtime_sha256="$(sha256sum "${runtime_path}" | awk '{print $1}')"
+            runtime_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${runtime_name}"
+            output_key="${target//-/_}"
+
+            test -f "${runtime_path}"
+            echo "mcp_runtime_${output_key}_name=${runtime_name}" >> "${GITHUB_OUTPUT}"
+            echo "mcp_runtime_${output_key}_sha256=${runtime_sha256}" >> "${GITHUB_OUTPUT}"
+            echo "mcp_runtime_${output_key}_url=${runtime_url}" >> "${GITHUB_OUTPUT}"
+          done
+
           ls -lh release-dist
 
       - name: Validate release assets
@@ -203,6 +284,14 @@ jobs:
           WHEEL_NAME: ${{ steps.assets.outputs.wheel_name }}
           WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
           WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
+          MCP_RUNTIME_MACOS_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
+          MCP_RUNTIME_MACOS_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_sha256 }}
+          MCP_RUNTIME_MACOS_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_url }}
+          MCP_RUNTIME_MACOS_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_sha256 }}
+          MCP_RUNTIME_LINUX_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_url }}
+          MCP_RUNTIME_LINUX_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_sha256 }}
+          MCP_RUNTIME_LINUX_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_url }}
+          MCP_RUNTIME_LINUX_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -214,6 +303,7 @@ jobs:
           import os
           import re
           import sys
+          import tarfile
           from pathlib import Path
 
           manifest_path = Path(sys.argv[1])
@@ -256,6 +346,92 @@ jobs:
               raise SystemExit(
                   f"wheel SHA-256 mismatch: expected {wheel_sha256}, got {actual_sha256}"
               )
+
+          required_runtime_distributions = {
+              "mcp",
+              "mcp_types",
+              "pydantic",
+              "pydantic_core",
+              "cryptography",
+          }
+          runtime_targets = {
+              "macos_arm64": "macos-arm64",
+              "macos_x86_64": "macos-x86_64",
+              "linux_arm64": "linux-arm64",
+              "linux_x86_64": "linux-x86_64",
+          }
+          for target, asset_target in runtime_targets.items():
+              archive_name = f"taplctl-mcp-runtime-{version}-{asset_target}.tar.gz"
+              archive_path = Path("release-dist") / archive_name
+              expected_url = (
+                  f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/"
+                  f"{os.environ['GITHUB_REF_NAME']}/{archive_name}"
+              )
+              runtime_url = os.environ[f"MCP_RUNTIME_{target.upper()}_URL"]
+              runtime_sha256 = os.environ[f"MCP_RUNTIME_{target.upper()}_SHA256"]
+              if runtime_url != expected_url:
+                  raise SystemExit(f"unexpected MCP runtime URL for {target}: {runtime_url}")
+              if re.fullmatch(r"[0-9a-f]{64}", runtime_sha256) is None:
+                  raise SystemExit(f"invalid MCP runtime SHA-256 for {target}")
+              actual_runtime_sha256 = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+              if actual_runtime_sha256 != runtime_sha256:
+                  raise SystemExit(
+                      f"MCP runtime SHA-256 mismatch for {target}: "
+                      f"expected {runtime_sha256}, got {actual_runtime_sha256}"
+                  )
+              with tarfile.open(archive_path, "r:gz") as archive:
+                  wheels = [Path(member.name).name for member in archive.getmembers() if member.isfile()]
+              distributions = {name.split("-", 1)[0].lower() for name in wheels if name.endswith(".whl")}
+              missing = sorted(required_runtime_distributions - distributions)
+              if missing:
+                  raise SystemExit(
+                      f"MCP runtime archive {target} is missing: {', '.join(missing)}"
+                  )
+          PY
+
+      - name: Smoke-test isolated MCP runtime
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          WHEEL_NAME: ${{ steps.assets.outputs.wheel_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          smoke_root="${RUNNER_TEMP}/tapl-mcp-release-smoke"
+          runtime_dir="${smoke_root}/runtime"
+          workspace="${smoke_root}/workspace"
+          rm -rf "${smoke_root}"
+          mkdir -p "${runtime_dir}" "${workspace}"
+          tar -xzf "release-dist/taplctl-mcp-runtime-${RELEASE_VERSION}-linux-x86_64.tar.gz" \
+            -C "${runtime_dir}"
+          python -m venv "${smoke_root}/venv"
+          "${smoke_root}/venv/bin/python" -m pip install \
+            --disable-pip-version-check --no-index --no-deps --no-compile \
+            "${runtime_dir}"/*.whl
+          "${smoke_root}/venv/bin/python" -m pip install \
+            --disable-pip-version-check --no-index --no-deps --no-compile \
+            "release-dist/${WHEEL_NAME}"
+          "${smoke_root}/venv/bin/taplctl" --version
+          "${smoke_root}/venv/bin/taplctl" init --workspace-root "${workspace}" --json
+          "${smoke_root}/venv/bin/python" - "${workspace}" <<'PY'
+          import asyncio
+          import sys
+          from pathlib import Path
+
+          from mcp import Client
+          from taplctl.mcp_server import create_server
+
+          async def main() -> None:
+              server = create_server(workspace_root=Path(sys.argv[1]))
+              async with Client(server) as client:
+                  tools = await client.list_tools()
+                  if len(tools.tools) != 20:
+                      raise SystemExit(f"expected 20 TAPL MCP tools, got {len(tools.tools)}")
+                  result = await client.call_tool("tapl_get_status", {})
+                  if result.is_error:
+                      raise SystemExit("tapl_get_status failed in isolated runtime")
+
+          asyncio.run(main())
           PY
 
       - name: Publish GitHub Release
@@ -286,6 +462,14 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
           WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
+          MCP_RUNTIME_MACOS_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
+          MCP_RUNTIME_MACOS_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_sha256 }}
+          MCP_RUNTIME_MACOS_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_url }}
+          MCP_RUNTIME_MACOS_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_sha256 }}
+          MCP_RUNTIME_LINUX_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_url }}
+          MCP_RUNTIME_LINUX_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_sha256 }}
+          MCP_RUNTIME_LINUX_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_url }}
+          MCP_RUNTIME_LINUX_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -305,135 +489,11 @@ jobs:
             exit 1
           fi
 
-          ruby - "${brew_files[@]}" <<'RUBY'
-          files = ARGV
-          version = ENV.fetch("RELEASE_VERSION")
-          wheel_url = ENV.fetch("WHEEL_URL")
-          wheel_sha256 = ENV.fetch("WHEEL_SHA256")
-
-          def replacement_line(line, content)
-            line.end_with?("\n") ? "#{content}\n" : content
-          end
-
-          def find_block_end(lines, start_index, indent)
-            ((start_index + 1)...lines.length).find do |index|
-              lines[index].match?(/^#{Regexp.escape(indent)}end\s*$/)
-            end
-          end
-
-          def viewer_service_block(indent)
-            [
-              "#{indent}service do\n",
-              "#{indent}  run [opt_bin/\"taplctl\", \"viewer\"]\n",
-              "#{indent}  keep_alive true\n",
-              "#{indent}  restart_delay 5\n",
-              "#{indent}  log_path var/\"log/taplctl-viewer.log\"\n",
-              "#{indent}  error_log_path var/\"log/taplctl-viewer.log\"\n",
-              "#{indent}end\n",
-            ]
-          end
-
-          def upsert_viewer_service_block(lines, install_indent)
-            service_start = lines.index { |line| line.match?(/^#{Regexp.escape(install_indent)}service\s+do\s*$/) }
-            if service_start
-              service_end = find_block_end(lines, service_start, install_indent)
-              raise "Could not find end of service block" unless service_end
-
-              lines[service_start..service_end] = viewer_service_block(install_indent)
-              return
-            end
-
-            install_start = lines.index { |line| line.match?(/^#{Regexp.escape(install_indent)}def install\s*$/) }
-            raise "Could not find install block for service insertion" unless install_start
-
-            install_end = find_block_end(lines, install_start, install_indent)
-            raise "Could not find end of install block for service insertion" unless install_end
-
-            insert_index = install_end + 1
-            block = ["\n", *viewer_service_block(install_indent)]
-            block << "\n" unless lines[insert_index]&.match?(/^\s*$/)
-            lines.insert(insert_index, *block)
-          end
-
-          def update_formula(file, version, wheel_url, wheel_sha256)
-            semantic = File.basename(file) == "taplctl-semantic.rb"
-            text = File.read(file)
-            lines = text.lines
-
-            version_index = lines.index { |line| line.match?(/^(\s*)version\s+["'][^"']+["'](.*)$/) }
-            raise "Could not update version in #{file}" unless version_index
-
-            version_match = lines[version_index].match(/^(\s*)version\s+["'][^"']+["'](.*)$/)
-            lines[version_index] = replacement_line(
-              lines[version_index],
-              "#{version_match[1]}version \"#{version}\"#{version_match[2]}",
-            )
-
-            url_index = lines.index { |line| line.match?(/^(\s*)url\s+["'][^"']+["'](.*)$/) }
-            raise "Could not update url in #{file}" unless url_index
-
-            url_match = lines[url_index].match(/^(\s*)url\s+["'][^"']+["'](.*)$/)
-            url_indent = url_match[1]
-            lines[url_index] = replacement_line(
-              lines[url_index],
-              "#{url_indent}url \"#{wheel_url}\"",
-            )
-
-            sha_index = lines.index { |line| line.match?(/^#{Regexp.escape(url_indent)}sha256\b/) }
-            sha_line = "#{url_indent}sha256 \"#{wheel_sha256}\""
-            if sha_index
-              lines[sha_index] = replacement_line(lines[sha_index], sha_line)
-            else
-              sha_insert_index = version_index > url_index ? version_index + 1 : url_index + 1
-              lines.insert(sha_insert_index, "#{sha_line}\n")
-            end
-
-            install_start = lines.index { |line| line.match?(/^(\s*)def install\s*$/) }
-            raise "Could not find install block in #{file}" unless install_start
-
-            install_indent = lines[install_start].match(/^(\s*)/)[1]
-            install_end = ((install_start + 1)...lines.length).find do |index|
-              lines[index].match?(/^#{Regexp.escape(install_indent)}end\s*$/)
-            end
-            raise "Could not find end of install block in #{file}" unless install_end
-
-            if semantic
-              lines[install_start..install_end] = [
-                "#{install_indent}def install\n",
-                "#{install_indent}  wheel = Pathname.glob(\"*.whl\").first\n",
-                "#{install_indent}  raise \"Could not find taplctl wheel\" unless wheel\n",
-                "\n",
-                "#{install_indent}  wheelhouse = buildpath/\"wheelhouse\"\n",
-                "#{install_indent}  wheelhouse.mkpath\n",
-                "#{install_indent}  resources.each do |resource|\n",
-                "#{install_indent}    resource.stage { wheelhouse.install Dir[\"*.whl\"] }\n",
-                "#{install_indent}  end\n",
-                "\n",
-                "#{install_indent}  virtualenv_create(libexec, \"python3.12\", system_site_packages: false)\n",
-                "#{install_indent}  system \"python3.12\", \"-m\", \"pip\", \"--python=\#{libexec}/bin/python\", \"install\",\n",
-                "#{install_indent}         \"--no-index\", \"--find-links=\#{wheelhouse}\", \"--no-compile\", wheel\n",
-                "#{install_indent}  bin.install_symlink libexec/\"bin/taplctl\"\n",
-                "#{install_indent}end\n",
-              ]
-            else
-              lines[install_start..install_end] = [
-                "#{install_indent}def install\n",
-                "#{install_indent}  wheel = Pathname.glob(\"*.whl\").first\n",
-                "#{install_indent}  raise \"Could not find taplctl wheel\" unless wheel\n",
-                "\n",
-                "#{install_indent}  venv = virtualenv_create(libexec, \"python3.12\", system_site_packages: false)\n",
-                "#{install_indent}  venv.pip_install_and_link wheel\n",
-                "#{install_indent}end\n",
-              ]
-            end
-
-            upsert_viewer_service_block(lines, install_indent)
-
-            File.write(file, lines.join)
-          end
-
-          files.each { |file| update_formula(file, version, wheel_url, wheel_sha256) }
-          RUBY
+          ruby -c .github/scripts/update_homebrew_formula.rb
+          ruby .github/scripts/update_homebrew_formula.rb "${brew_files[@]}"
+          for brew_file in "${brew_files[@]}"; do
+            ruby -c "${brew_file}"
+          done
 
           tap_paths=()
           for brew_file in "${brew_files[@]}"; do
