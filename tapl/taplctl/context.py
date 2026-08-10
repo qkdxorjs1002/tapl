@@ -169,7 +169,13 @@ def next_actions(
     has_plans = bool(state.get("plans"))
     has_tasks = bool(state.get("tasks"))
     if not has_plans:
-        actions.append(tapl_prompt.create_plan_next_action())
+        if str(run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE) == "lightweight":
+            if str(run.get("result_summary") or "").strip():
+                actions.append(tapl_prompt.archive_lightweight_run_next_action())
+            else:
+                actions.append(tapl_prompt.lightweight_run_next_action())
+        else:
+            actions.append(tapl_prompt.create_plan_next_action())
     elif not has_tasks:
         actions.append(tapl_prompt.decide_after_plan_next_action())
     if state.get("incomplete_tasks", 0):
@@ -187,7 +193,11 @@ def covered_validation_issue_codes(state: dict[str, Any], plan_task: dict[str, A
     codes: set[str] = set()
     if not state.get("active_run"):
         return codes
-    if not state.get("plans"):
+    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
+    if (
+        not state.get("plans")
+        and str(run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE) != "lightweight"
+    ):
         codes.add("missing_plan")
     if state.get("incomplete_tasks", 0):
         if approval_next_action(plan_task):

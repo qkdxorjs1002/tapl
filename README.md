@@ -6,11 +6,11 @@
 
 [한국어](README.ko.md)
 
-`tapl` helps Codex CLI keep track of coding work inside a repository. For each
-request, it stores the user's instruction, Codex's plan, tasks, findings,
-approvals, lifecycle events, archives, and searchable history in a repo-local
-SQLite database. Codex still writes the code; `tapl` makes the work visible
-while it is happening and resumable after the chat context is gone.
+`tapl` helps Codex CLI keep track of work inside a repository. It stores the
+user's instruction and lifecycle in a repo-local SQLite database; planned work
+also records Codex's plan, tasks, findings, approvals, events, archives, and
+searchable history. Codex still writes the code; `tapl` makes durable work
+visible while it is happening and resumable after the chat context is gone.
 
 ## Quick Start
 
@@ -68,9 +68,9 @@ taplctl status
 taplctl validate
 ```
 
-`status` shows the active request, plans, tasks, findings, approval state, and
-recent activity. `validate` reports missing plan/task/approval records that may
-make a long Codex session harder to resume.
+`status` shows the active request, workflow mode, plans, tasks, findings,
+approval state, and recent activity. `validate` reports records required by the
+selected workflow mode that may make a long Codex session harder to resume.
 
 For integrations, `--json` remains available. Codex hooks use `--agent`
 internally for compact output that Codex can read efficiently; it is not the
@@ -81,6 +81,19 @@ normal human-facing mode.
 Plans and tasks are first-class records, not loose Markdown notes. Codex receives
 lifecycle guidance from the MCP server, writes plan/task content through typed
 MCP tool fields, and `tapl` renders stable Markdown bodies for stored records.
+
+When summarizing a request, the agent explicitly selects `planned` or
+`lightweight` based on complexity. `planned` is the default and is used for
+planning, durable edits, tests, and verification. `lightweight` is for a direct,
+non-durable answer that does not need persisted plan/task records; it can finish
+and archive immediately. If that work becomes complex, calling
+`tapl_apply_plan` promotes the run to `planned` automatically.
+
+MCP write tools return a compact receipt containing actionable identifiers,
+state, validation issues, and any required parallel execution contract. Each
+receipt also includes the latest recommended MCP action, so the agent usually
+does not need a separate `tapl_get_next` call. The public CLI `--json` output
+keeps its detailed contract for scripts and manual integrations.
 
 For normal use, ask Codex to do the work and let the installed MCP server and
 hooks keep the records current. MCP tool descriptions and JSON schemas are the

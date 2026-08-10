@@ -35,6 +35,13 @@ class FieldSpec:
 RUN_FIELDS = (
     FieldSpec("summary", "--summary", "Short description of the current request.", label="Summary"),
     FieldSpec("result", "--result", "Short description of the completed result.", label="Result"),
+    FieldSpec(
+        "workflow_mode",
+        "--workflow-mode",
+        "Agent-selected run mode: planned for persisted planning/execution, lightweight for direct non-durable answers.",
+        "defaults to planned",
+        "Workflow mode",
+    ),
 )
 PLAN_FIELDS = (
     FieldSpec("id", "--id", "Numeric plan/spec id, e.g. PLAN-001 or SPEC-001.", "defaults to PLAN-001", "Plan id"),
@@ -196,7 +203,6 @@ Write workflow records and reports in the user's language unless asked otherwise
 
 - Workflow state lives in the repo-local TAPL database behind these tools.
 - Prefer high-level lifecycle tools and `tapl_get_next`; use the CLI only for manual repair when MCP is unavailable.
-- ${lifecycle_recipe_guidance}
 - Do not modify source, tests, docs, configs, migrations, generated files, or other durable project artifacts before execution approval.
 - TAPL run, plan, task, finding, approval, and archive records may be created or updated before execution approval.
 - Do not commit, push, rebase, reset, discard changes, or include workflow records in commits unless explicitly requested.
@@ -206,11 +212,11 @@ Write workflow records and reports in the user's language unless asked otherwise
 
 ## Planning
 
+${workflow_mode_guidance}
+
 Planning must happen before implementation. Requirements are captured inside the plan, not in a separate requirements file or request artifact.
 
 Keep the plan current as decisions are made. Mark it finalized only after explicit user confirmation.
-
-Before finalizing the plan, use `request_user_input` proactively for material ambiguity, trade-offs, or choices that affect scope, risk, compatibility, cost, architecture, UX, data model, public interfaces, or implementation direction.
 
 Fixed plan detail (`plan_detail = "very_detailed"`): ${plan_detail_guidance}
 
@@ -238,20 +244,13 @@ Use only the records needed for the current task. Do not create or edit legacy w
 
 ${history_search_guidance}
 
-When external search or documentation review affects the task, store only decision-relevant findings with source and impact.
-
-Do not store raw search dumps, long candidate lists, or stale findings.
+When external search or documentation review affects the task, store only decision-relevant findings with source and impact; never store raw dumps, long candidate lists, or stale findings.
 
 Archive the active run when no actionable tasks remain, the workflow is superseded, the user chooses to archive or discard remaining work, or the active run is stale.
 
 ## Completion Report
 
-When work finishes, report briefly:
-
-- changed files and behavior,
-- verification commands and results,
-- remaining risks or blocked work,
-- whether the TAPL run was archived.
+When work finishes, report changed files/behavior, verification commands/results, remaining risks or blocked work, and whether the TAPL run was archived.
 
 Record the final result with `tapl_finish_run` before archiving with `tapl_finish_archive`."""
 
@@ -318,6 +317,7 @@ def template_variables(**overrides: Any) -> dict[str, str]:
         "custom_fields_guidance": custom_fields_guidance(),
         "stable_id_guidance": stable_id_guidance(),
         "workflow_order_guidance": workflow_order_guidance(),
+        "workflow_mode_guidance": workflow_mode_guidance(),
         "workflow_stage_progression_guidance": workflow_stage_progression_guidance(),
         "task_execution_order_guidance": task_execution_order_guidance(),
         "subagent_delegation_guidance": subagent_delegation_guidance(),
@@ -577,6 +577,18 @@ def create_plan_next_action() -> str:
     return "Create or update plan state with `tapl_apply_plan` before task design."
 
 
+def lightweight_run_next_action() -> str:
+    return (
+        "This run is lightweight: answer directly without plan/task records, then use `tapl_finish_run` and "
+        "`tapl_finish_archive`. If the work becomes complex or needs durable edits, call `tapl_apply_plan`; "
+        "creating the plan promotes the run to planned mode."
+    )
+
+
+def archive_lightweight_run_next_action() -> str:
+    return "The lightweight result is recorded; archive it with `tapl_finish_archive`."
+
+
 def decide_after_plan_next_action() -> str:
     return (
         "Plan is ready and no tasks exist; agent must judge the user's requested scope directly. "
@@ -808,7 +820,7 @@ def plan_detail_guidance() -> str:
 
 def planning_approval_guidance() -> str:
     guidance = (
-        "Before finalizing with `tapl_apply_plan`, use request_user_input Tool early for unclear planning "
+        "Before finalizing the plan with `tapl_apply_plan`, use request_user_input Tool early for unclear planning "
         "methods, material scope/risk/API/UX/data/compat, or tradeoffs. Ask short, focused "
         "questions with 2-3 mutually exclusive options, and continue with follow-ups until "
         "the plan is materially clear."
@@ -853,29 +865,25 @@ def structured_record_guidance(subject: str = "plan and task content") -> str:
 
 def custom_fields_guidance() -> str:
     return (
-        "When creating or updating a plan or task, proactively populate `custom_fields` whenever the current "
-        "context contains metadata that will help future search, review, handoff, or decision reconstruction, even "
-        "when AGENTS.md and the user do not explicitly request recording it. Store metadata shared by the run or "
-        "multiple tasks, including the overall work type, user choices, global constraints, strategy, and decision "
-        "rationale, on the plan instead of copying it to every task. Populate a task's `custom_fields` only with "
-        "metadata unique to that task, such as owned files or interfaces, task-specific constraints, or task-specific "
-        "validation conditions. When a task was actually delegated to a subagent, the root agent must record the actual model and reasoning "
-        "effort used (not merely the requested value) as task-specific metadata during settlement, for example `서브 에이전트 모델`: `gpt-5.6-sol (xhigh)` in Korean "
-        "or `SubAgent Model`: `gpt-5.6-sol (xhigh)` in English; omit this field when no subagent was used. Do not "
-        "copy a fact already represented on the source plan, or duplicate "
-        "the same key and value across sibling tasks merely for convenience. If separate tasks genuinely need distinct facts "
-        "that use the same label, keep them with task-specific values or context. Before writing a patch, inspect the "
-        "record's existing `custom_fields` with `tapl_get_status` or `tapl_get_item`. Keep at most one field for each fact, decision, "
-        "constraint, or path; if an existing field has the same meaning, update its exact stored key instead of adding "
-        "a synonymous label or duplicate value. For new fields, write concise natural-language labels and human-readable "
-        "string values in the user's language; avoid snake_case and other code-style tokens. When the record being "
-        "updated already has redundant aliases, choose the clearest, most specific label as the canonical key and send "
-        "that key's current value plus top-level nulls for the obsolete alias keys in the same patch. Do not consolidate "
-        "fields that represent genuinely different facts; when the distinction is unclear, preserve them or ask the "
-        "user. Preserve exact source text for file paths, commands, API names, stable IDs, and code identifiers, and "
-        "preserve JSON types for non-string values. Do not rename or migrate unrelated existing keys. Do not copy "
-        "standard fields, record transient progress, or invent unsupported facts. Omitted custom fields are preserved; "
-        "provided keys merge at the top level, and a top-level null value deletes that key."
+        "When writing plans/tasks, proactively populate `custom_fields` when context has metadata useful for future search, "
+        "review, handoff, or decision reconstruction, even when AGENTS.md and the user do not explicitly request it. "
+        "Put metadata shared by the run or multiple tasks—work type, user choices, global constraints, strategy, and "
+        "decision rationale—on the plan instead of copying it to every task. Populate a task's `custom_fields` only "
+        "with metadata unique to that task, such as owned files or interfaces, task-specific constraints, or validation. "
+        "When a task was actually delegated to a subagent, the root records the actual model and reasoning effort used, "
+        "not merely requested, during settlement: e.g. `서브 에이전트 모델`: `gpt-5.6-sol (xhigh)` or "
+        "`SubAgent Model`: `gpt-5.6-sol (xhigh)`; omit this field when no subagent was used. Do not copy a fact already "
+        "represented on the source plan or the same key and value across sibling tasks; reuse a label only with "
+        "task-specific values or context. Before a patch, inspect the record's existing `custom_fields` with "
+        "`tapl_get_status` or `tapl_get_item`. Keep one field per fact, decision, constraint, or path; update its exact "
+        "stored key instead of adding a synonymous label or duplicate value. For redundant aliases, choose the clearest, "
+        "most specific label as the canonical key and send its current value plus top-level nulls for the obsolete alias "
+        "keys in one patch. Do not consolidate genuinely different facts; when the distinction is unclear, preserve them "
+        "or ask. New fields use concise natural-language labels and human-readable string values in the user's language; "
+        "avoid snake_case/code-style labels. Preserve exact source text for paths, commands, APIs, stable IDs, and code "
+        "identifiers, plus JSON types for non-strings. Do not rename or migrate unrelated keys, copy standard fields, "
+        "record transient progress, or invent facts. Omitted fields are preserved; provided keys merge at top level; "
+        "top-level null deletes a key."
     )
 
 
@@ -888,9 +896,20 @@ def stable_id_guidance() -> str:
 def workflow_order_guidance() -> str:
     return (
         "Lifecycle order: `tapl_get_status`/`tapl_get_next` -> resolve residual run direction with user approval -> "
-        "`tapl_search_history` and clarify until unblocked -> `tapl_summarize_run` -> `tapl_apply_plan` -> "
+        "`tapl_search_history` and clarify until unblocked -> `tapl_summarize_run` with agent-selected "
+        "`planned` or `lightweight` mode. Lightweight non-durable answers may finish/archive without records and "
+        "are promoted by `tapl_apply_plan` if complexity grows. Planned work continues through `tapl_apply_plan` -> "
         "`tapl_create_task` -> `tapl_approve_execution` -> sequential start and settlement tools or "
         "`tapl_dispatch_tasks` plus execution-id settlement -> `tapl_finish_run` -> `tapl_finish_archive`."
+    )
+
+
+def workflow_mode_guidance() -> str:
+    return (
+        "When calling `tapl_summarize_run`, the agent must select `lightweight` only for a direct, non-durable "
+        "answer whose complexity does not need a persisted plan; select `planned` for complex analysis, planning, "
+        "execution, edits, tests, or verification. A lightweight run may finish/archive without plan or task "
+        "records, and `tapl_apply_plan` promotes it to planned mode when complexity grows."
     )
 
 
@@ -981,24 +1000,17 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
 
     return (
         "### SubAgent Delegation\n\n"
-        "- For every executable task, assess its complexity and difficulty, then delegate it to a SubAgent with an "
-        "efficient, suitable model and reasoning effort. Keep coordination, TAPL record writes, and cross-task "
-        "decisions with the root agent.\n"
-        "- Choose a model and reasoning effort only from the configured pairs below, and only after intersecting them "
-        "with the pairs actually supported by the current SubAgent runtime. Do not request a configured pair that is "
-        "unavailable at runtime; choose the most efficient suitable pair from that intersection.\n"
-        "- Configured available model/reasoning-effort pairs:\n"
+        "- For every executable task, assess complexity/difficulty and delegate with an efficient suitable model and "
+        "reasoning effort; the root retains coordination, TAPL writes, and cross-task decisions.\n"
+        "- Choose only from the intersection of these configured pairs and pairs actually supported by the current "
+        "SubAgent runtime; use the most efficient suitable pair:\n"
         f"{available_models}\n"
-        "- If the runtime/configuration intersection has no usable pair, report that delegation is unavailable and "
-        "have the root agent execute the task without a SubAgent.\n"
-        "- For parallel delegation, tasks must explicitly use `execution_mode=parallel`, `executor_kind=subagent`, "
-        "the same non-empty `parallel_group`, completed dependencies, and exclusive `owned_paths`; dispatch them "
-        "atomically with `tapl_dispatch_tasks`. The root agent must spawn one SubAgent per manifest execution "
-        "concurrently, keep each worker inside its owned_paths, and settle every task with its exact manifest "
-        "`execution_id` via `tapl_complete_task`, `tapl_block_task`, or `tapl_skip_task`. Recover or cancel the batch if any "
-        "spawn fails or the root is interrupted.\n"
-        "- During settlement, record the actual runtime model and reasoning effort used—not merely the requested "
-        "pair—in that task's `custom_fields`; omit it when no SubAgent was used."
+        "- If that intersection is empty, report delegation unavailable and let the root execute without a SubAgent.\n"
+        "- Parallel delegation follows the preceding dispatch/ownership contract: atomically dispatch, concurrently "
+        "spawn one SubAgent per manifest execution, constrain owned_paths, settle by exact execution_id, and recover or "
+        "cancel on spawn failure/interruption.\n"
+        "- At settlement, record the actual runtime model/reasoning effort—not merely requested—in task "
+        "`custom_fields`; omit it when no SubAgent was used."
     )
 
 

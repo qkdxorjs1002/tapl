@@ -47,6 +47,7 @@ CustomFields = Annotated[
     Field(description=tapl_prompt.field_help("task", "custom_fields")),
 ]
 ApprovalSource = Literal["explicit_user", "request_user_input"]
+WorkflowMode = Literal["planned", "lightweight"]
 
 
 class TaplCliError(RuntimeError):
@@ -176,6 +177,153 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "recommendations": recommendations}
 
 
+def select_receipt_fields(value: Any, fields: tuple[str, ...]) -> dict[str, Any]:
+    """Keep only model-actionable identity and state fields from one CLI object."""
+
+    if not isinstance(value, dict):
+        return {}
+    return {
+        field: value[field]
+        for field in fields
+        if field in value and value[field] not in (None, "", [], {})
+    }
+
+
+def compact_validation_receipt(value: Any) -> dict[str, Any]:
+    """Summarize validation without repeating full error and warning collections."""
+
+    if not isinstance(value, dict):
+        return {}
+    issues = value.get("issues") if isinstance(value.get("issues"), list) else []
+    selected_issues = [
+        select_receipt_fields(
+            issue,
+            ("severity", "code", "stable_id", "message", "remediation"),
+        )
+        for issue in issues[:3]
+        if isinstance(issue, dict)
+    ]
+    receipt: dict[str, Any] = {"ok": bool(value.get("ok", not issues))}
+    if issues:
+        receipt["issue_count"] = len(issues)
+        receipt["issues"] = selected_issues
+    return receipt
+
+
+def compact_batch_receipt(payload: dict[str, Any], *, include_contract: bool) -> dict[str, Any]:
+    """Preserve settlement ids and, for dispatch, the contract needed to launch workers."""
+
+    receipt: dict[str, Any] = {}
+    batch = select_receipt_fields(
+        payload.get("batch"),
+        ("batch_id", "id", "state", "parallel_group", "failure_policy"),
+    )
+    if batch:
+        # ``batch_id`` is the public identifier; avoid returning the same value twice.
+        if batch.get("batch_id") == batch.get("id"):
+            batch.pop("id", None)
+        receipt["batch"] = batch
+
+    base_fields = (
+        "execution_id",
+        "task_id",
+        "execution_state",
+        "task_status",
+        "executor_ref",
+        "model",
+        "reasoning_effort",
+        "execution_error",
+    )
+    contract_fields = (
+        "title",
+        "spec_id",
+        "goal",
+        "action",
+        "verification",
+        "execution_mode",
+        "executor_kind",
+        "parallel_group",
+        "owned_paths",
+        "owned_paths_json",
+    )
+    executions = []
+    for execution in payload.get("executions") or []:
+        selected = select_receipt_fields(
+            execution,
+            base_fields + (contract_fields if include_contract else ()),
+        )
+        owned_paths_json = selected.pop("owned_paths_json", None)
+        if owned_paths_json:
+            try:
+                selected["owned_paths"] = json.loads(owned_paths_json)
+            except (TypeError, json.JSONDecodeError):
+                selected["owned_paths"] = owned_paths_json
+        if selected:
+            executions.append(selected)
+    if executions:
+        receipt["executions"] = executions
+    return receipt
+
+
+def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, Any]:
+    """Convert verbose CLI JSON into a compact MCP-facing write receipt."""
+
+    receipt: dict[str, Any] = {
+        "ok": bool(payload.get("ok", True)),
+        "operation": str(payload.get("operation") or operation),
+    }
+    object_fields = (
+        ("active_run", ("id", "slug", "status", "workflow_mode")),
+        ("item", ("id", "stable_id", "kind", "status")),
+        ("approval", ("id", "kind", "decision", "source")),
+        ("archive", ("id", "slug")),
+    )
+    for key, fields in object_fields:
+        selected = select_receipt_fields(payload.get(key), fields)
+        if selected:
+            receipt[key] = selected
+
+    if payload.get("settled_execution_id"):
+        receipt["settled_execution_id"] = payload["settled_execution_id"]
+    receipt.update(
+        compact_batch_receipt(
+            payload,
+            include_contract=receipt["operation"] == "task_dispatch",
+        )
+    )
+    validation_receipt = compact_validation_receipt(payload.get("plan_task_execute"))
+    if validation_receipt:
+        receipt["plan_task_execute"] = validation_receipt
+    return receipt
+
+
+async def run_taplctl_write(
+    workspace_root: Path,
+    *command: str,
+    payload: dict[str, Any] | None = None,
+    operation: str,
+) -> dict[str, Any]:
+    """Execute a write, compact its receipt, and attach the latest safe MCP action."""
+
+    result = await run_taplctl(workspace_root, *command, payload=payload)
+    receipt = mcp_write_receipt(result, operation=operation)
+    try:
+        next_payload = await run_taplctl(workspace_root, "next")
+        receipt["recommendations"] = mcp_next_recommendations(next_payload).get(
+            "recommendations", []
+        )
+    except TaplCliError:
+        # The write already succeeded; a transient advisory failure must not report it as failed.
+        receipt["recommendations"] = [
+            {
+                "name": "inspect-status",
+                "reason": "The write succeeded but the next-action lookup failed; inspect current state.",
+                "tool": "tapl_get_status",
+            }
+        ]
+    return receipt
+
+
 def create_server(
     *,
     workspace_root: Path | None = None,
@@ -250,10 +398,20 @@ def create_server(
     @server.tool(name="tapl_summarize_run", title="Summarize active TAPL run", annotations=WRITE)
     async def summarize_run(
         summary: Annotated[str, Field(description=tapl_prompt.field_help("run", "summary"), min_length=1, max_length=2000)],
+        workflow_mode: Annotated[
+            WorkflowMode,
+            Field(description="Agent-selected workflow complexity: planned or lightweight."),
+        ] = db.DEFAULT_WORKFLOW_MODE,
     ) -> dict[str, Any]:
-        """Create or update the active run request summary before planning durable work."""
+        """Summarize the request and explicitly select planned or lightweight workflow handling."""
 
-        return await run_taplctl(root, "run", "summarize", payload={"summary": summary})
+        return await run_taplctl_write(
+            root,
+            "run",
+            "summarize",
+            payload={"summary": summary, "workflow_mode": workflow_mode},
+            operation="run_summarize",
+        )
 
     @server.tool(name="tapl_apply_plan", title="Create or update TAPL plan", annotations=WRITE)
     async def apply_plan(
@@ -274,7 +432,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Create or partially update the detailed plan. New plans need all detailed fields; omitted update fields are preserved."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "plan",
             "apply",
@@ -294,6 +452,7 @@ def create_server(
                 custom_fields=custom_fields,
                 status=status,
             ),
+            operation="plan_apply",
         )
 
     @server.tool(name="tapl_create_task", title="Create TAPL task", annotations=WRITE)
@@ -313,7 +472,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Create one Pending executable task derived from an existing plan. Split independent edit and verification work."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "task",
             "create",
@@ -331,18 +490,20 @@ def create_server(
                 depends_on=depends_on,
                 custom_fields=custom_fields,
             ),
+            operation="task_create",
         )
 
     @server.tool(name="tapl_start_task", title="Start TAPL task", annotations=WRITE)
     async def start_task(task_id: TaskId, custom_fields: CustomFields = None) -> dict[str, Any]:
         """Mark one dependency-ready sequential task In Progress immediately before its implementation begins."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "task",
             "start",
             task_id,
             payload=compact_payload(custom_fields=custom_fields),
+            operation="task_start",
         )
 
     @server.tool(name="tapl_dispatch_tasks", title="Dispatch parallel TAPL tasks", annotations=WRITE)
@@ -354,7 +515,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Atomically validate and dispatch compatible parallel tasks; retain every returned execution id for settlement."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "task",
             "dispatch",
@@ -364,6 +525,7 @@ def create_server(
                 failure_policy=failure_policy,
                 execution_metadata=execution_metadata,
             ),
+            operation="task_dispatch",
         )
 
     @server.tool(name="tapl_complete_task", title="Complete TAPL task", annotations=WRITE)
@@ -376,7 +538,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Mark a task Completed only after implementation and verification; settle parallel work with its exact execution id."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "task",
             "complete",
@@ -387,6 +549,7 @@ def create_server(
                 execution_id=execution_id,
                 custom_fields=custom_fields,
             ),
+            operation="task_complete",
         )
 
     @server.tool(name="tapl_block_task", title="Block TAPL task", annotations=WRITE)
@@ -400,7 +563,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Mark a task Blocked with a concrete blocker and next action; use instead of leaving inactive work In Progress."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "task",
             "block",
@@ -412,6 +575,7 @@ def create_server(
                 verification=verification,
                 custom_fields=custom_fields,
             ),
+            operation="task_block",
         )
 
     @server.tool(name="tapl_skip_task", title="Skip TAPL task", annotations=WRITE)
@@ -423,12 +587,13 @@ def create_server(
     ) -> dict[str, Any]:
         """Mark work Skipped when it is intentionally out of scope or superseded, preserving the reason."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "task",
             "skip",
             task_id,
             payload=compact_payload(result=result, execution_id=execution_id, custom_fields=custom_fields),
+            operation="task_skip",
         )
 
     @server.tool(name="tapl_cancel_batch", title="Cancel TAPL batch", annotations=WRITE)
@@ -442,7 +607,7 @@ def create_server(
         args = ["batch", "cancel", batch_id, "--reason", reason]
         if block_tasks:
             args.append("--block")
-        return await run_taplctl(root, *args)
+        return await run_taplctl_write(root, *args, operation="batch_cancel")
 
     @server.tool(name="tapl_recover_batch", title="Recover TAPL batch", annotations=WRITE)
     async def recover_batch(
@@ -451,7 +616,15 @@ def create_server(
     ) -> dict[str, Any]:
         """Recover an interrupted batch and return its active tasks to Pending before a safe retry."""
 
-        return await run_taplctl(root, "batch", "recover", batch_id, "--reason", reason)
+        return await run_taplctl_write(
+            root,
+            "batch",
+            "recover",
+            batch_id,
+            "--reason",
+            reason,
+            operation="batch_recover",
+        )
 
     @server.tool(name="tapl_add_finding", title="Record TAPL finding", annotations=WRITE)
     async def add_finding(
@@ -463,7 +636,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Record only a decision-relevant external or implementation finding with its source and impact."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "finding",
             "add",
@@ -477,6 +650,7 @@ def create_server(
             impact,
             "--related-ids",
             related_ids,
+            operation="finding_add",
         )
 
     @server.tool(name="tapl_approve_execution", title="Approve TAPL execution", annotations=WRITE)
@@ -486,11 +660,12 @@ def create_server(
     ) -> dict[str, Any]:
         """Record execution approval only after the user explicitly requested execution or confirmed it through request_user_input."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "approval",
             "approve",
             payload={"kind": db.DEFAULT_APPROVAL_KIND, "prompt": prompt, "source": source},
+            operation="approval_approve",
         )
 
     @server.tool(name="tapl_reject_execution", title="Reject TAPL execution", annotations=WRITE)
@@ -500,11 +675,12 @@ def create_server(
     ) -> dict[str, Any]:
         """Record an explicit execution rejection and keep executable work pending or blocked."""
 
-        return await run_taplctl(
+        return await run_taplctl_write(
             root,
             "approval",
             "reject",
             payload={"kind": db.DEFAULT_APPROVAL_KIND, "prompt": prompt, "source": source},
+            operation="approval_reject",
         )
 
     @server.tool(name="tapl_finish_run", title="Finish TAPL run", annotations=WRITE)
@@ -513,7 +689,13 @@ def create_server(
     ) -> dict[str, Any]:
         """Record the verified final result after no actionable tasks remain and before archiving."""
 
-        return await run_taplctl(root, "run", "finish", payload={"result": result})
+        return await run_taplctl_write(
+            root,
+            "run",
+            "finish",
+            payload={"result": result},
+            operation="run_finish",
+        )
 
     @server.tool(name="tapl_finish_archive", title="Archive TAPL run", annotations=WRITE)
     async def finish_archive(
@@ -522,7 +704,13 @@ def create_server(
     ) -> dict[str, Any]:
         """Archive a completed, superseded, or intentionally deferred run after every task and batch is settled."""
 
-        return await run_taplctl(root, "archive", "finish", payload={"slug": slug, "summary": summary})
+        return await run_taplctl_write(
+            root,
+            "archive",
+            "finish",
+            payload={"slug": slug, "summary": summary},
+            operation="archive_finish",
+        )
 
     return server
 

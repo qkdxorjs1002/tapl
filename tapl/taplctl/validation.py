@@ -32,11 +32,13 @@ def validate_plan_task_execute(
             result["guidance"] = guidance()
         return result
 
+    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
+    workflow_mode = str(run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE)
     plans = state.get("plans", [])
     tasks = state.get("tasks", [])
     issues: list[dict[str, Any]] = []
     issues.extend(validate_stable_ids(plans, tasks))
-    issues.extend(validate_plan_detail(plans))
+    issues.extend(validate_plan_detail(plans, required=workflow_mode != "lightweight"))
     issues.extend(validate_plan_content(plans))
     issues.extend(validate_task_granularity(plans, tasks))
     issues.extend(validate_task_content(tasks))
@@ -148,8 +150,14 @@ def is_numeric_task_id(stable_id: str) -> bool:
     return bool(TASK_ID_PATTERN.fullmatch(stable_id))
 
 
-def validate_plan_detail(plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def validate_plan_detail(
+    plans: list[dict[str, Any]],
+    *,
+    required: bool = True,
+) -> list[dict[str, Any]]:
     body = "\n".join(str(plan.get("body") or plan.get("title") or "") for plan in plans).strip()
+    if not plans and not required:
+        return []
     if not plans:
         return [
             issue(

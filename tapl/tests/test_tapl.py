@@ -165,6 +165,15 @@ class TaplCliTests(unittest.TestCase):
             ["sequential", "parallel"],
         )
         self.assertNotIn("workspace", task_schema["properties"])
+        summarize_schema = by_name["tapl_summarize_run"].input_schema
+        self.assertEqual(
+            summarize_schema["properties"]["workflow_mode"]["enum"],
+            ["planned", "lightweight"],
+        )
+        self.assertEqual(
+            summarize_schema["properties"]["workflow_mode"]["default"],
+            "planned",
+        )
 
     def test_mcp_tools_map_to_cli_json_and_hide_shell_recipes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -177,7 +186,7 @@ class TaplCliTests(unittest.TestCase):
                 async with Client(server) as client:
                     summarized = await client.call_tool(
                         "tapl_summarize_run",
-                        {"summary": "MCP structured workflow"},
+                        {"summary": "MCP structured workflow", "workflow_mode": "planned"},
                     )
                     status = await client.call_tool("tapl_get_status", {})
                     next_action = await client.call_tool("tapl_get_next", {})
@@ -185,10 +194,12 @@ class TaplCliTests(unittest.TestCase):
 
             summarized, status, next_action = asyncio.run(exercise())
             self.assertFalse(summarized.is_error)
-            self.assertEqual(
-                summarized.structured_content["active_run"]["request_summary"],
-                "MCP structured workflow",
-            )
+            summary_receipt = summarized.structured_content
+            self.assertEqual(summary_receipt["operation"], "run_summarize")
+            self.assertEqual(summary_receipt["active_run"]["workflow_mode"], "planned")
+            self.assertNotIn("request_summary", summary_receipt["active_run"])
+            self.assertEqual(summary_receipt["recommendations"][0]["tool"], "tapl_apply_plan")
+            self.assertNotIn("command", summary_receipt["recommendations"][0])
             self.assertEqual(
                 status.structured_content["active_run"]["request_summary"],
                 "MCP structured workflow",
@@ -196,6 +207,105 @@ class TaplCliTests(unittest.TestCase):
             recommendation = next_action.structured_content["recommendations"][0]
             self.assertEqual(recommendation["tool"], "tapl_apply_plan")
             self.assertNotIn("command", recommendation)
+
+    def test_every_mcp_write_tool_routes_through_compact_receipt_with_next(self) -> None:
+        server = tapl_mcp.create_server(workspace_root=ROOT)
+        calls = (
+            ("tapl_summarize_run", {"summary": "Receipt routing"}),
+            ("tapl_apply_plan", {}),
+            (
+                "tapl_create_task",
+                {
+                    "task_id": "TASK-001",
+                    "title": "Route task write",
+                    "spec_id": "PLAN-001",
+                    "goal": "Exercise the write facade.",
+                    "action": "Call the tool.",
+                    "verification": "The compact helper is invoked.",
+                },
+            ),
+            ("tapl_start_task", {"task_id": "TASK-001"}),
+            ("tapl_dispatch_tasks", {"task_ids": ["TASK-001", "TASK-002"]}),
+            (
+                "tapl_complete_task",
+                {"task_id": "TASK-001", "verification": "Verified", "result": "Done"},
+            ),
+            (
+                "tapl_block_task",
+                {"task_id": "TASK-001", "blocker": "Blocked", "next_action": "Resolve"},
+            ),
+            ("tapl_skip_task", {"task_id": "TASK-001", "result": "Superseded"}),
+            ("tapl_cancel_batch", {"batch_id": "BATCH-001", "reason": "Cancelled"}),
+            ("tapl_recover_batch", {"batch_id": "BATCH-001", "reason": "Recover"}),
+            ("tapl_add_finding", {"title": "Finding"}),
+            ("tapl_approve_execution", {"prompt": "Approve"}),
+            ("tapl_reject_execution", {"prompt": "Reject"}),
+            ("tapl_finish_run", {"result": "Finished"}),
+            ("tapl_finish_archive", {"slug": "receipt-routing"}),
+        )
+
+        async def fake_write(
+            workspace_root: Path,
+            *command: str,
+            payload: dict[str, object] | None = None,
+            operation: str,
+        ) -> dict[str, object]:
+            del workspace_root, command, payload
+            return {
+                "ok": True,
+                "operation": operation,
+                "recommendations": [{"tool": "tapl_get_status"}],
+            }
+
+        async def exercise() -> list[object]:
+            async with Client(server) as client:
+                return [await client.call_tool(name, arguments) for name, arguments in calls]
+
+        with mock.patch.object(
+            tapl_mcp,
+            "run_taplctl_write",
+            new=mock.AsyncMock(side_effect=fake_write),
+        ) as write:
+            results = asyncio.run(exercise())
+
+        self.assertEqual(write.await_count, len(calls))
+        self.assertEqual(len(calls), 15)
+        for result in results:
+            self.assertFalse(result.is_error)
+            self.assertIn("operation", result.structured_content)
+            self.assertIn("recommendations", result.structured_content)
+
+    def test_mcp_successful_write_keeps_receipt_when_next_lookup_fails(self) -> None:
+        raw_write = {
+            "ok": True,
+            "active_run": {
+                "id": "run-id",
+                "slug": "active",
+                "status": "active",
+                "workflow_mode": "planned",
+                "request_summary": "Do not echo this body",
+            },
+        }
+        with mock.patch.object(
+            tapl_mcp,
+            "run_taplctl",
+            new=mock.AsyncMock(
+                side_effect=[raw_write, tapl_mcp.TaplCliError("next unavailable")]
+            ),
+        ):
+            receipt = asyncio.run(
+                tapl_mcp.run_taplctl_write(
+                    ROOT,
+                    "run",
+                    "summarize",
+                    payload={"summary": "Compact"},
+                    operation="run_summarize",
+                )
+            )
+
+        self.assertTrue(receipt["ok"])
+        self.assertNotIn("request_summary", receipt["active_run"])
+        self.assertEqual(receipt["recommendations"][0]["tool"], "tapl_get_status")
 
     def test_mcp_cli_errors_are_returned_as_actionable_tool_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -235,10 +345,11 @@ class TaplCliTests(unittest.TestCase):
             tools, result = asyncio.run(exercise())
             self.assertEqual(len(tools.tools), 20)
             self.assertFalse(result.is_error)
-            self.assertEqual(
-                result.structured_content["active_run"]["request_summary"],
-                "stdio MCP smoke test",
-            )
+            receipt = result.structured_content
+            self.assertEqual(receipt["operation"], "run_summarize")
+            self.assertEqual(receipt["active_run"]["workflow_mode"], "planned")
+            self.assertNotIn("request_summary", receipt["active_run"])
+            self.assertEqual(receipt["recommendations"][0]["tool"], "tapl_apply_plan")
 
     def test_mcp_tools_complete_a_sequential_workflow_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -343,7 +454,126 @@ class TaplCliTests(unittest.TestCase):
                 if call.is_error
             ]
             self.assertEqual(failures, [])
+            read_call_indexes = {9, 11, 14}
+            for index, call in enumerate(calls):
+                if index not in read_call_indexes:
+                    self.assertIn("operation", call.structured_content)
+                    self.assertIn("recommendations", call.structured_content)
             self.assertIsNone(calls[-1].structured_content["active_run"])
+
+    def test_mcp_lightweight_run_finishes_without_plan_or_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            (workspace / ".git").mkdir(parents=True)
+            tapl_db.initialize_workspace(workspace)
+            server = tapl_mcp.create_server(workspace_root=workspace)
+
+            async def exercise() -> list[object]:
+                async with Client(server) as client:
+                    summarized = await client.call_tool(
+                        "tapl_summarize_run",
+                        {"summary": "Answer a simple question", "workflow_mode": "lightweight"},
+                    )
+                    finished = await client.call_tool(
+                        "tapl_finish_run",
+                        {"result": "Answered directly."},
+                    )
+                    archived = await client.call_tool(
+                        "tapl_finish_archive",
+                        {"slug": "lightweight-question"},
+                    )
+                    return [summarized, finished, archived]
+
+            summarized, finished, archived = asyncio.run(exercise())
+            self.assertEqual(
+                summarized.structured_content["active_run"]["workflow_mode"],
+                "lightweight",
+            )
+            self.assertEqual(
+                summarized.structured_content["recommendations"][0]["tool"],
+                "tapl_finish_run",
+            )
+            self.assertEqual(
+                finished.structured_content["recommendations"][0]["tool"],
+                "tapl_finish_archive",
+            )
+            self.assertEqual(archived.structured_content["operation"], "archive_finish")
+            for call in (summarized, finished, archived):
+                self.assertFalse(call.is_error)
+                self.assertIn("recommendations", call.structured_content)
+
+    def test_mcp_parallel_receipt_preserves_dispatch_contract_and_settlement_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            (workspace / ".git").mkdir(parents=True)
+            initialized = tapl_db.initialize_workspace(workspace)
+            db_path = Path(initialized["db"])
+            self.create_parallel_fixture(
+                db_path,
+                task_ids=("TASK-001", "TASK-002"),
+                owned_paths=("src/a.py", "src/b.py"),
+            )
+            server = tapl_mcp.create_server(workspace_root=workspace)
+
+            async def exercise() -> tuple[object, list[object]]:
+                async with Client(server) as client:
+                    dispatched = await client.call_tool(
+                        "tapl_dispatch_tasks",
+                        {
+                            "task_ids": ["TASK-001", "TASK-002"],
+                            "batch_id": "BATCH-MCP",
+                            "execution_metadata": {
+                                "TASK-001": {
+                                    "executor_ref": "agent-a",
+                                    "model": "gpt-5.6-terra",
+                                    "reasoning_effort": "high",
+                                }
+                            },
+                        },
+                    )
+                    executions = {
+                        item["task_id"]: item
+                        for item in dispatched.structured_content["executions"]
+                    }
+                    settled = []
+                    for task_id in ("TASK-001", "TASK-002"):
+                        settled.append(
+                            await client.call_tool(
+                                "tapl_complete_task",
+                                {
+                                    "task_id": task_id,
+                                    "execution_id": executions[task_id]["execution_id"],
+                                    "verification": f"Verified {task_id}",
+                                    "result": f"Completed {task_id}",
+                                },
+                            )
+                        )
+                    return dispatched, settled
+
+            dispatched, settled = asyncio.run(exercise())
+            manifest = dispatched.structured_content
+            self.assertEqual(manifest["operation"], "task_dispatch")
+            self.assertEqual(manifest["batch"]["batch_id"], "BATCH-MCP")
+            self.assertNotIn("id", manifest["batch"])
+            self.assertIn("recommendations", manifest)
+            self.assertEqual(len(manifest["executions"]), 2)
+            for execution in manifest["executions"]:
+                self.assertIn("execution_id", execution)
+                self.assertIn("goal", execution)
+                self.assertIn("action", execution)
+                self.assertIn("verification", execution)
+                self.assertIn("owned_paths", execution)
+                self.assertNotIn("started_at", execution)
+                self.assertNotIn("task_item_id", execution)
+
+            execution_ids = {
+                item["task_id"]: item["execution_id"] for item in manifest["executions"]
+            }
+            for task_id, call in zip(("TASK-001", "TASK-002"), settled, strict=True):
+                receipt = call.structured_content
+                self.assertEqual(receipt["settled_execution_id"], execution_ids[task_id])
+                self.assertIn("recommendations", receipt)
+                self.assertNotIn("goal", receipt["executions"][0])
 
     def test_workspace_db_takes_priority_over_nested_git(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -599,6 +829,96 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(validate_agent.returncode, 0, validate_agent.stderr)
             self.assertNotIn(legacy_column, validate_agent.stdout)
 
+    def test_workflow_mode_migrates_defaults_and_promotes_lightweight_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            summarized = self.run_cli(
+                db_path,
+                "run",
+                "summarize",
+                "--summary",
+                "Legacy workflow mode migration",
+                "--json",
+            )
+            self.assertEqual(summarized.returncode, 0, summarized.stderr)
+
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("ALTER TABLE workflow_runs DROP COLUMN workflow_mode")
+                conn.execute("UPDATE meta SET value = '7' WHERE key = 'schema_version'")
+                conn.commit()
+
+            migrated = self.run_cli(db_path, "status", "--json")
+            self.assertEqual(migrated.returncode, 0, migrated.stderr)
+            migrated_payload = json.loads(migrated.stdout)
+            self.assertEqual(migrated_payload["active_run"]["workflow_mode"], "planned")
+            with sqlite3.connect(db_path) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(workflow_runs)")}
+                version = conn.execute(
+                    "SELECT value FROM meta WHERE key = 'schema_version'"
+                ).fetchone()[0]
+            self.assertIn("workflow_mode", columns)
+            self.assertEqual(version, str(tapl_db.SCHEMA_VERSION))
+
+            lightweight = self.run_cli(
+                db_path,
+                "run",
+                "summarize",
+                "--stdin-json",
+                "--json",
+                input_text=json.dumps(
+                    {"summary": "Answer one simple question", "workflow_mode": "lightweight"}
+                ),
+            )
+            self.assertEqual(lightweight.returncode, 0, lightweight.stderr)
+            self.assertEqual(
+                json.loads(lightweight.stdout)["active_run"]["workflow_mode"],
+                "lightweight",
+            )
+            validation = self.run_cli(db_path, "validate", "--json")
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+            self.assertTrue(json.loads(validation.stdout)["plan_task_execute"]["ok"])
+            next_action = self.run_cli(db_path, "next", "--json")
+            self.assertEqual(
+                json.loads(next_action.stdout)["recommendations"][0]["name"],
+                "finish-run",
+            )
+
+            plan_payload = {
+                "id": "PLAN-001",
+                "title": "Promoted plan",
+                "summary": "REQ-001: promote when complexity grows.",
+                "objective": "Promote the lightweight run.",
+                "requirements_trace": "REQ-001: applying a plan changes workflow mode.",
+                "selected_approach": "Persist a detailed plan.",
+                "affected_files": "Temporary database only.",
+                "execution_order": "Apply the plan, then inspect status.",
+                "risks": "Mode could remain lightweight.",
+                "validation": "Status reports planned mode.",
+                "status": "Finalized",
+            }
+            promoted = self.run_cli(
+                db_path,
+                "plan",
+                "apply",
+                "--stdin-json",
+                "--json",
+                input_text=json.dumps(plan_payload),
+            )
+            self.assertEqual(promoted.returncode, 0, promoted.stderr)
+            status = self.status_json(db_path)
+            self.assertEqual(status["active_run"]["workflow_mode"], "planned")  # type: ignore[index]
+
+            invalid = self.run_cli(
+                db_path,
+                "run",
+                "summarize",
+                "--stdin-json",
+                "--json",
+                input_text=json.dumps({"summary": "Bad mode", "workflow_mode": "automatic"}),
+            )
+            self.assertEqual(invalid.returncode, 1)
+            self.assertIn("invalid workflow_mode", json.loads(invalid.stdout)["error"])
+
     def test_agent_output_for_workflow_commands_keeps_json_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
@@ -618,7 +938,10 @@ class TaplCliTests(unittest.TestCase):
             run_error = self.run_cli(db_path, "run", "set", "--agent")
             self.assertEqual(run_error.returncode, 1)
             self.assertIn("<tapl_output>", run_error.stdout)
-            self.assertIn("<error>provide --summary, --result, or both</error>", run_error.stdout)
+            self.assertIn(
+                "<error>provide --summary, --result, --workflow-mode, or a combination</error>",
+                run_error.stdout,
+            )
 
             plan = self.run_cli(
                 db_path,
@@ -1311,6 +1634,46 @@ class TaplCliTests(unittest.TestCase):
             self.assertIn("clearest, most specific label as the canonical key", guidance)
             self.assertIn("top-level nulls for the obsolete alias keys", guidance)
             self.assertIn("when the distinction is unclear, preserve them or ask", guidance)
+
+    def test_mcp_server_instructions_are_compact_and_keep_policy_invariants(self) -> None:
+        instructions = tapl_prompt.mcp_server_instructions(
+            subagents=tapl_config.SubagentsConfig()
+        )
+
+        self.assertLess(len(instructions), 10_000)
+        required_policy = (
+            "Do not modify source, tests, docs, configs, migrations, generated files",
+            "before execution approval",
+            "TAPL run, plan, task, finding, approval, and archive records may be created or updated before execution approval",
+            "Do not commit, push, rebase, reset, discard changes",
+            "Never overwrite user changes",
+            "current-state snapshots, not logs",
+            "agent must select `lightweight` only for a direct, non-durable answer",
+            "`tapl_apply_plan` promotes it to planned mode",
+            "Planning must happen before implementation",
+            "Mark it finalized only after explicit user confirmation",
+            "Before finalizing the plan",
+            'Fixed plan detail (`plan_detail = "very_detailed"`)',
+            'Fixed planning approval (`planning_approval_level = "more"`)',
+            'Fixed task granularity (`task_granularity = "very_granular"`)',
+            "Execute planned tasks one at a time in task order",
+            "exclusive owned_paths",
+            "exact manifest execution_id",
+            "recover or cancel the batch before retrying",
+            "actual runtime model/reasoning effort",
+            'Fixed execution approval (`require_execution_approval = true`)',
+            "only active work is In Progress",
+            "If scope or implementation changes materially",
+            "search relevant prior TAPL history",
+            "ignore unrelated matches",
+            "During execution, search again",
+            "decision-relevant findings with source and impact",
+            "never store raw dumps, long candidate lists, or stale findings",
+            "Archive the active run when no actionable tasks remain",
+            "Record the final result with `tapl_finish_run` before archiving",
+        )
+        for policy in required_policy:
+            self.assertIn(policy, instructions)
 
     def test_task_set_requires_title_and_status_for_new_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4837,7 +5200,7 @@ Legacy archive를 tapl 구조로 옮긴다.
             self.assertEqual(md_items, 0)
             self.assertEqual(old_runs, 0)
 
-    def test_parallel_schema_v7_and_task_parallel_fields(self) -> None:
+    def test_schema_v8_migrates_parallel_and_workflow_mode_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"
             initialized = self.run_cli(db_path, "init", "--json")
@@ -4852,16 +5215,24 @@ Legacy archive를 tapl 구조로 옮긴다.
                 tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
                 task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
                 conn.commit()
-            self.assertEqual(version, "7")
+            self.assertEqual(version, str(tapl_db.SCHEMA_VERSION))
             self.assertTrue({"task_dependencies", "execution_batches", "task_executions"} <= tables)
             self.assertTrue({"execution_mode", "executor_kind", "parallel_group", "owned_paths_json"} <= task_columns)
             payload = self.status_json(db_path)
+            self.assertEqual(payload["active_run"]["workflow_mode"], "planned")  # type: ignore[index]
             tasks = {task["stable_id"]: task for task in payload["tasks"]}  # type: ignore[index]
             self.assertEqual(tasks["TASK-001"]["execution_mode"], "parallel")
             self.assertEqual(tasks["TASK-001"]["owned_paths"], ["src/a.py"])
             with sqlite3.connect(db_path) as conn:
-                conn.execute("UPDATE meta SET value = '8' WHERE key = 'schema_version'")
+                workflow_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(workflow_runs)")
+                }
+                conn.execute(
+                    "UPDATE meta SET value = ? WHERE key = 'schema_version'",
+                    (str(tapl_db.SCHEMA_VERSION + 1),),
+                )
                 conn.commit()
+            self.assertIn("workflow_mode", workflow_columns)
             with self.assertRaisesRegex(RuntimeError, "newer than supported"):
                 tapl_db.connect(db_path)
 

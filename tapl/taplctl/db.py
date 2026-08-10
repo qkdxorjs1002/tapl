@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -31,12 +31,15 @@ APPROVAL_DECISIONS = ("approved", "rejected")
 APPROVAL_SOURCES = ("explicit_user", "request_user_input", "unspecified")
 DEFAULT_APPROVAL_SOURCE = "explicit_user"
 DEFAULT_REQUEST_SUMMARY = "New request"
+WORKFLOW_MODES = ("planned", "lightweight")
+DEFAULT_WORKFLOW_MODE = "planned"
 WORKFLOW_RUN_OUTPUT_FIELDS = (
     "id",
     "slug",
     "status",
     "request_summary",
     "result_summary",
+    "workflow_mode",
     "created_at",
     "updated_at",
     "archived_at",
@@ -140,6 +143,8 @@ def migrate(conn: sqlite3.Connection) -> None:
           status TEXT NOT NULL,
           request_summary TEXT NOT NULL DEFAULT '',
           result_summary TEXT NOT NULL DEFAULT '',
+          workflow_mode TEXT NOT NULL DEFAULT 'planned'
+            CHECK (workflow_mode IN ('planned', 'lightweight')),
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           archived_at TEXT
@@ -290,6 +295,12 @@ def migrate(conn: sqlite3.Connection) -> None:
     )
 
     ensure_column(conn, "workflow_runs", "result_summary", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(
+        conn,
+        "workflow_runs",
+        "workflow_mode",
+        "TEXT NOT NULL DEFAULT 'planned' CHECK (workflow_mode IN ('planned', 'lightweight'))",
+    )
     ensure_column(conn, "approvals", "source", "TEXT NOT NULL DEFAULT 'unspecified'")
     ensure_column(conn, "items", "custom_fields_json", "TEXT NOT NULL DEFAULT '{}'")
     ensure_column(
@@ -409,7 +420,10 @@ def ensure_active_run(
     *,
     slug: str = "active",
     request_summary: str = DEFAULT_REQUEST_SUMMARY,
+    workflow_mode: str = DEFAULT_WORKFLOW_MODE,
 ) -> sqlite3.Row:
+    if workflow_mode not in WORKFLOW_MODES:
+        raise ValueError(f"invalid workflow_mode: {workflow_mode}")
     existing = active_run(conn)
     if existing:
         if request_summary and not existing["request_summary"]:
@@ -426,10 +440,12 @@ def ensure_active_run(
     try:
         conn.execute(
             """
-            INSERT INTO workflow_runs(id, slug, status, request_summary, created_at, updated_at)
-            VALUES(?, ?, 'active', ?, ?, ?)
+            INSERT INTO workflow_runs(
+              id, slug, status, request_summary, workflow_mode, created_at, updated_at
+            )
+            VALUES(?, ?, 'active', ?, ?, ?, ?)
             """,
-            (run_id, slug, request_summary, now, now),
+            (run_id, slug, request_summary, workflow_mode, now, now),
         )
     except sqlite3.IntegrityError:
         existing = active_run(conn)
@@ -445,6 +461,7 @@ def update_active_run_summary(
     *,
     request_summary: str | None = None,
     result_summary: str | None = None,
+    workflow_mode: str | None = None,
 ) -> sqlite3.Row:
     run = active_run(conn)
     if not run:
@@ -456,6 +473,8 @@ def update_active_run_summary(
                 "cannot finish workflow run while an execution batch is active; "
                 "settle every execution or recover/cancel the batch first"
             )
+    if workflow_mode is not None and workflow_mode not in WORKFLOW_MODES:
+        raise ValueError(f"invalid workflow_mode: {workflow_mode}")
 
     updates: list[str] = []
     params: list[Any] = []
@@ -465,6 +484,9 @@ def update_active_run_summary(
     if result_summary is not None:
         updates.append("result_summary = ?")
         params.append(result_summary.strip())
+    if workflow_mode is not None:
+        updates.append("workflow_mode = ?")
+        params.append(workflow_mode)
     if not updates:
         return run
 
@@ -485,15 +507,29 @@ def create_run(
     slug: str,
     status: str,
     request_summary: str = "",
+    workflow_mode: str = DEFAULT_WORKFLOW_MODE,
 ) -> sqlite3.Row:
+    if workflow_mode not in WORKFLOW_MODES:
+        raise ValueError(f"invalid workflow_mode: {workflow_mode}")
     now = utc_now()
     run_id = str(uuid.uuid4())
     conn.execute(
         """
-        INSERT INTO workflow_runs(id, slug, status, request_summary, created_at, updated_at, archived_at)
-        VALUES(?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO workflow_runs(
+          id, slug, status, request_summary, workflow_mode, created_at, updated_at, archived_at
+        )
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (run_id, slug, status, request_summary, now, now, now if status == "archived" else None),
+        (
+            run_id,
+            slug,
+            status,
+            request_summary,
+            workflow_mode,
+            now,
+            now,
+            now if status == "archived" else None,
+        ),
     )
     conn.commit()
     return conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
@@ -843,6 +879,10 @@ def upsert_plan(
             approval_needs,
             notes,
         ),
+    )
+    conn.execute(
+        "UPDATE workflow_runs SET workflow_mode = 'planned', updated_at = ? WHERE id = ?",
+        (utc_now(), item["run_id"]),
     )
     conn.commit()
     return item

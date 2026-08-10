@@ -6,10 +6,10 @@
 
 [English](README.md)
 
-`tapl`은 Codex CLI가 저장소 안에서 진행하는 개발 작업을 놓치지 않도록
-기록합니다. 요청마다 사용자의 지시, Codex의 plan, task, finding, approval,
-lifecycle event, archive, 검색 가능한 history를 repo-local SQLite DB에
-저장합니다. 코드는 여전히 Codex가 쓰고, `tapl`은 작업 중 상태 확인과
+`tapl`은 Codex CLI가 저장소 안에서 진행하는 작업을 놓치지 않도록 기록합니다.
+사용자의 지시와 lifecycle을 repo-local SQLite DB에 저장하고, 계획형 작업에는
+Codex의 plan, task, finding, approval, event, archive, 검색 가능한 history도
+기록합니다. 코드는 여전히 Codex가 쓰고, `tapl`은 durable 작업의 진행 상태 확인과
 context가 사라진 뒤의 재개를 가능하게 합니다.
 
 ## 빠른 시작
@@ -64,9 +64,9 @@ taplctl status
 taplctl validate
 ```
 
-`status`는 active request, plan, task, finding, approval state, recent
-activity를 보여줍니다. `validate`는 긴 Codex session을 나중에 이어가기 어렵게
-만드는 plan/task/approval 누락을 알려줍니다.
+`status`는 active request, workflow mode, plan, task, finding, approval state,
+recent activity를 보여줍니다. `validate`는 선택한 workflow mode에 필요하며 긴
+Codex session을 나중에 이어가기 어렵게 만드는 record 누락을 알려줍니다.
 
 통합 도구에는 `--json` 출력이 그대로 제공됩니다. Codex hook은 내부적으로
 Codex가 효율적으로 읽을 수 있는 간결한 출력을 위해 `--agent`를 사용하지만,
@@ -77,6 +77,17 @@ Codex가 효율적으로 읽을 수 있는 간결한 출력을 위해 `--agent`�
 Plan과 task는 흩어진 Markdown 메모가 아니라 first-class record입니다.
 Codex는 MCP 서버에서 lifecycle guidance를 받고 typed MCP tool field로 plan/task
 내용을 기록합니다. `tapl`은 저장된 record의 Markdown body를 안정적인 템플릿으로 렌더링합니다.
+
+요청을 요약할 때 agent는 복잡도에 따라 `planned` 또는 `lightweight`를 명시적으로
+선택합니다. 기본값인 `planned`는 계획, durable edit, test, verification에
+사용합니다. `lightweight`는 저장할 plan/task가 필요 없는 단순한 비영속 답변용이며,
+바로 결과를 기록하고 archive할 수 있습니다. 진행 중 작업이 복잡해지면
+`tapl_apply_plan` 호출이 run을 `planned`로 자동 승격합니다.
+
+MCP write tool은 실행 가능한 식별자, 상태, validation issue, 필요한 병렬 실행
+계약만 담은 compact receipt를 반환합니다. 각 receipt에는 최신 권장 MCP action도
+포함되므로 agent가 보통 `tapl_get_next`를 별도로 호출할 필요가 없습니다. Script와
+수동 통합을 위한 공개 CLI `--json` 상세 계약은 그대로 유지됩니다.
 
 일반적인 사용에서는 Codex에게 작업을 요청하고, 설치된 MCP 서버와 hook이 record를
 최신 상태로 유지하게 두면 됩니다. Agent가 따르는 필드 계약은 MCP tool description과

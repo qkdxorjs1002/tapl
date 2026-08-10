@@ -87,6 +87,12 @@ def add_json_input_args(parser: argparse.ArgumentParser) -> None:
 def add_run_set_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--summary", default=None, help=tapl_prompt.field_help("run", "summary"))
     parser.add_argument("--result", default=None, help=tapl_prompt.field_help("run", "result"))
+    parser.add_argument(
+        "--workflow-mode",
+        choices=db.WORKFLOW_MODES,
+        default=None,
+        help="Agent-selected run mode: planned or lightweight.",
+    )
     add_agent_output_args(parser)
 
 
@@ -494,6 +500,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Set the current request summary.",
     )
     run_summarize.add_argument("--summary", default=None, help=tapl_prompt.field_help("run", "summary"))
+    run_summarize.add_argument(
+        "--workflow-mode",
+        choices=db.WORKFLOW_MODES,
+        default=None,
+        help="Agent-selected run mode: planned or lightweight.",
+    )
     add_json_input_args(run_summarize)
     add_agent_output_args(run_summarize)
     run_summarize.set_defaults(handler=cmd_run_summarize)
@@ -1538,14 +1550,18 @@ def cmd_context(args: argparse.Namespace) -> int:
 def cmd_run_set(args: argparse.Namespace) -> int:
     merge_json_fields(
         args,
-        ("summary", "result"),
-        aliases={"summary": ("request_summary",), "result": ("result_summary",)},
+        ("summary", "result", "workflow_mode"),
+        aliases={
+            "summary": ("request_summary",),
+            "result": ("result_summary",),
+            "workflow_mode": ("workflow-mode", "planning_mode"),
+        },
     )
-    if args.summary is None and args.result is None:
+    if args.summary is None and args.result is None and args.workflow_mode is None:
         emit(
             {
                 "ok": False,
-                "error": "provide --summary, --result, or both",
+                "error": "provide --summary, --result, --workflow-mode, or a combination",
             },
             args.json,
             args.agent,
@@ -1553,17 +1569,26 @@ def cmd_run_set(args: argparse.Namespace) -> int:
         return 1
     conn = open_conn(args)
     if db.active_run(conn) is None:
-        db.ensure_active_run(conn, request_summary=args.summary or db.DEFAULT_REQUEST_SUMMARY)
+        db.ensure_active_run(
+            conn,
+            request_summary=args.summary or db.DEFAULT_REQUEST_SUMMARY,
+            workflow_mode=args.workflow_mode or db.DEFAULT_WORKFLOW_MODE,
+        )
     run = db.update_active_run_summary(
         conn,
         request_summary=args.summary,
         result_summary=args.result,
+        workflow_mode=args.workflow_mode,
     )
     if args.agent:
         operation = getattr(args, "operation", "run_set")
         updated_fields = tuple(
             field
-            for field, value in (("request_summary", args.summary), ("result_summary", args.result))
+            for field, value in (
+                ("request_summary", args.summary),
+                ("result_summary", args.result),
+                ("workflow_mode", args.workflow_mode),
+            )
             if value is not None
         )
         print(agent_write_receipt(operation, active_run=run, updated_fields=updated_fields))
@@ -1573,7 +1598,14 @@ def cmd_run_set(args: argparse.Namespace) -> int:
 
 
 def cmd_run_summarize(args: argparse.Namespace) -> int:
-    merge_json_fields(args, ("summary",), aliases={"summary": ("request_summary",)})
+    merge_json_fields(
+        args,
+        ("summary", "workflow_mode"),
+        aliases={
+            "summary": ("request_summary",),
+            "workflow_mode": ("workflow-mode", "planning_mode"),
+        },
+    )
     if not require_arg(args, "summary", "--summary", command="run summarize"):
         return 1
     args.result = None
@@ -1586,6 +1618,7 @@ def cmd_run_finish(args: argparse.Namespace) -> int:
     if not require_arg(args, "result", "--result", command="run finish"):
         return 1
     args.summary = None
+    args.workflow_mode = None
     args.operation = "run_finish"
     return cmd_run_set(args)
 
@@ -2325,6 +2358,25 @@ def next_recommendations(state: dict[str, Any], plan_task_execute: dict[str, Any
     plans = state.get("plans") if isinstance(state.get("plans"), list) else []
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
     if not plans:
+        if str(run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE) == "lightweight":
+            if str(run.get("result_summary") or "").strip():
+                return [
+                    recommendation(
+                        "archive-run",
+                        "taplctl archive finish --slug '<timestamp-task-slug>' --summary '<archive summary>' --agent",
+                        "The lightweight result is recorded and ready to archive.",
+                    )
+                ]
+            return [
+                recommendation(
+                    "finish-run",
+                    "taplctl run finish --result '<result summary>' --agent",
+                    (
+                        "The agent selected a lightweight run; answer directly and finish it without plan/task "
+                        "records, or apply a plan first if the work becomes complex or requires durable edits."
+                    ),
+                )
+            ]
         return [
             recommendation(
                 "apply-plan",
