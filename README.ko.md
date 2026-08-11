@@ -508,16 +508,18 @@ enabled = true
 
 활성화하면 MCP 정책은 root agent가 모든 실행 작업의 복잡도를 판단하고,
 설정된 model/reasoning 조합 중 효율적인 조합으로 해당 작업을 SubAgent에게
-위임하도록 합니다. TAPL이 제공하는 MCP 지침 내용을 끄려면 다음처럼 설정합니다.
+위임하도록 합니다. `UserPromptSubmit` 컨텍스트도 그 권위 있는 정책이 승인된 실행
+작업의 위임을 선택하면 별도의 사용자 요청 없이 SubAgent 위임을 명시적으로
+요청합니다. TAPL이 제공하는 이 지시 내용을 끄려면 다음처럼 설정합니다.
 
 ```toml
 [subagents]
 enabled = false
 ```
 
-`enabled = false`이면 TAPL은 SubAgent 위임 정책과 model/reasoning allowlist를
-MCP 서버 지침에 포함하지 않습니다. 이 설정은 `AGENTS.md`처럼 다른 출처에 있는 별도의
-위임 지시까지 제거하지는 않습니다.
+`enabled = false`이면 TAPL은 `UserPromptSubmit` 위임 요청, SubAgent 위임 정책,
+model/reasoning allowlist를 포함하지 않습니다. 이 설정은 `AGENTS.md`처럼 다른
+출처에 있는 별도의 위임 지시까지 제거하지는 않습니다.
 
 설정한 model 목록은 정책상 allowlist일 뿐이며, runtime에 model을 설치하거나
 지원 가능 여부를 보장하지는 않습니다. Root agent는 설정된 model/reasoning

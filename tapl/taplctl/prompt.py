@@ -774,8 +774,9 @@ def stop_guidance() -> str:
 
 
 def user_prompt_submit_guidance(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
-    del subagents
-    return render(CONTEXT_INJECTION_PROMPT_TEMPLATE)
+    guidance = render(CONTEXT_INJECTION_PROMPT_TEMPLATE)
+    delegation_request = subagent_delegation_request_guidance(subagents)
+    return "\n\n".join(part for part in (guidance, delegation_request) if part)
 
 
 def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
@@ -968,6 +969,21 @@ def task_execution_order_guidance() -> str:
 
 def subagents_enabled(subagents: tapl_config.SubagentsConfig | None = None) -> bool:
     return (subagents or tapl_config.SubagentsConfig()).enabled
+
+
+def subagent_delegation_request_guidance(
+    subagents: tapl_config.SubagentsConfig | None = None,
+) -> str:
+    if not subagents_enabled(subagents):
+        return ""
+
+    return (
+        "For this TAPL run, this applicable workflow instruction explicitly requests SubAgent delegation. "
+        "When the authoritative TAPL MCP server instructions select delegation for an approved executable task, "
+        "spawn the required SubAgent(s) without asking the user again, while following all TAPL dispatch, "
+        "ownership, model-selection, and settlement rules. This does not override higher-priority instructions, "
+        "user scope, safety policy, sandboxing, or approval requirements."
+    )
 
 
 def configured_subagent_models(

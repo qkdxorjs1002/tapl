@@ -2751,7 +2751,7 @@ searchd_start_timeout_ms = 1
             self.assertEqual(manual_payload["event"], "Manual")
             self.assertEqual(
                 manual_payload["workflow_guidance"],
-                [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)],
+                [tapl_prompt.user_prompt_submit_guidance()],
             )
             manual_guidance = "\n".join(manual_payload["workflow_guidance"])
             self.assertIn("# TAPL MCP", manual_guidance)
@@ -2766,7 +2766,7 @@ searchd_start_timeout_ms = 1
             self.assertEqual(prompt_payload["validation_issues"], [])
             self.assertEqual(
                 prompt_payload["workflow_guidance"],
-                [tapl_prompt.render(tapl_prompt.CONTEXT_INJECTION_PROMPT_TEMPLATE)],
+                [tapl_prompt.user_prompt_submit_guidance()],
             )
             prompt_guidance = "\n".join(prompt_payload["workflow_guidance"])
             self.assertIn("MCP server instructions", prompt_guidance)
@@ -3994,6 +3994,10 @@ enabled = false
             guidance = "\n".join(context_payload["workflow_guidance"])
             self.assertIn("MCP server instructions", guidance)
             self.assertNotIn("### SubAgent Delegation", guidance)
+            self.assertIn("explicitly requests SubAgent delegation", guidance)
+            self.assertIn("without asking the user again", guidance)
+            self.assertIn("does not override higher-priority instructions", guidance)
+            self.assertEqual(guidance.count("explicitly requests SubAgent delegation"), 1)
 
             enabled_instructions = tapl_prompt.mcp_server_instructions(
                 subagents=tapl_config.load(enabled_config).subagents,
@@ -4044,6 +4048,11 @@ enabled = false
             )
             self.assertIn("MCP server instructions", hook_payload["message"])
             self.assertNotIn("### SubAgent Delegation", hook_payload["message"])
+            self.assertIn("explicitly requests SubAgent delegation", hook_payload["message"])
+            self.assertEqual(
+                hook_payload["message"].count("explicitly requests SubAgent delegation"),
+                1,
+            )
 
             disabled_context = self.run_cli(
                 db_path,
@@ -4071,6 +4080,10 @@ enabled = false
                 "### SubAgent Delegation",
                 "\n".join(disabled_payload["workflow_guidance"]),
             )
+            self.assertNotIn(
+                "explicitly requests SubAgent delegation",
+                "\n".join(disabled_payload["workflow_guidance"]),
+            )
             disabled_instructions = tapl_prompt.mcp_server_instructions(
                 subagents=tapl_config.load(disabled_config).subagents,
             )
@@ -4091,6 +4104,10 @@ enabled = false
             self.assertEqual(disabled_hook.returncode, 0, disabled_hook.stderr)
             disabled_hook_payload = json.loads(disabled_hook.stdout)
             self.assertNotIn("### SubAgent Delegation", disabled_hook_payload["message"])
+            self.assertNotIn(
+                "explicitly requests SubAgent delegation",
+                disabled_hook_payload["message"],
+            )
 
             session = self.run_cli(
                 db_path,

@@ -528,16 +528,20 @@ enabled = true
 
 When enabled, the MCP policy tells the root agent to assess the complexity
 of every executable task and delegate it using an efficient configured
-model/reasoning pair. To disable that TAPL-provided MCP instruction content, set:
+model/reasoning pair. The `UserPromptSubmit` context also explicitly requests
+SubAgent delegation when that authoritative policy selects it for an approved
+executable task, without requiring another user prompt. To disable that
+TAPL-provided instruction content, set:
 
 ```toml
 [subagents]
 enabled = false
 ```
 
-With `enabled = false`, TAPL includes neither its SubAgent delegation policy
-nor its model/reasoning allowlist. This setting does not remove separate
-delegation instructions from another source, such as `AGENTS.md`.
+With `enabled = false`, TAPL includes neither its `UserPromptSubmit` delegation
+request, its SubAgent delegation policy, nor its model/reasoning allowlist. This
+setting does not remove separate delegation instructions from another source,
+such as `AGENTS.md`.
 
 The configured model list is a policy allowlist, not a runtime installation or
 capability guarantee. A root agent must use only the intersection of the
