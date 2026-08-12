@@ -6,405 +6,312 @@
 
 [한국어](README.ko.md)
 
-`tapl` helps Codex CLI keep track of work inside a repository. It stores the
-user's instruction and lifecycle in a repo-local SQLite database; planned work
-also records Codex's plan, tasks, findings, approvals, events, archives, and
-searchable history. Codex still writes the code; `tapl` makes durable work
-visible while it is happening and resumable after the chat context is gone.
+[![GitHub release](https://img.shields.io/github/v/release/qkdxorjs1002/tapl?include_prereleases)](https://github.com/qkdxorjs1002/tapl/releases)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#requirements)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
-## Quick Start
+**Durable workflow memory for Codex.** TAPL keeps the request, plan, approvals, tasks, findings, and history for each repository in one local SQLite database.
 
-Follow [Install Details](#install-details) once, then keep using Codex normally
-inside your repositories.
+You keep asking Codex to work normally. TAPL quietly makes the work visible while it happens, searchable later, and resumable after the chat context is gone.
 
-## How does it work?
+[Get started](#5-minute-quick-start) · [See the workflow](#what-daily-use-feels-like) · [Choose an installation](#installation) · [Open the viewer](#open-the-viewer)
 
-The point is not another prompt template. TAPL exposes typed MCP tools backed by
-the existing CLI and repo-local state, so Codex receives the workflow contract
-once from the MCP server instead of repeatedly reading CLI help. The capture-style image below mirrors the
-commands `tapl` recorded around this README rewrite.
+## Why TAPL?
+
+Long-running agent work often loses the exact context that matters most:
+
+| When this happens | TAPL gives you |
+| --- | --- |
+| A session ends halfway through a change | A durable record of the current plan, completed tasks, and remaining work |
+| You need to know what was approved or edited | Inspectable approvals, lifecycle events, findings, and archives |
+| A later session starts rediscovering old decisions | Repository-local search across completed work instead of starting over |
+
+The result is less prompt archaeology and a clearer answer to: *What is Codex doing, why is it doing it, and where should the next session continue?*
+
+## 5-minute quick start
+
+TAPL v2 is currently in beta, so the fastest setup on macOS uses the prerelease Homebrew channel:
+
+```sh
+brew tap qkdxorjs1002/tap
+brew trust --formula qkdxorjs1002/tap/taplctl@pre
+brew install taplctl@pre
+taplctl install user --taplctl-command "$(brew --prefix taplctl@pre)/libexec/bin/taplctl"
+```
+
+Then:
+
+1. Restart Codex so it loads the TAPL MCP server and hooks.
+2. Trust the installed hook when Codex asks for confirmation the first time.
+3. Open any repository and ask Codex to work as usual.
+
+TAPL creates `.tapl/tapl.db` for the workspace and Codex records durable work through `tapl-mcp`. You do not need to learn workflow-writing CLI commands.
+
+On Linux or Windows, start with the matching option in [Installation](#installation), then use its package-specific command under [Connect TAPL to Codex](#connect-tapl-to-codex).
+
+## What daily use feels like
+
+Ask for the outcome you want:
+
+> Refactor the authentication flow, keep existing behavior, and verify the tests.
+
+Codex plans and executes the work normally. Behind the scenes, TAPL records the approved plan, splits executable work into tasks, keeps findings and validation state, and archives the result. A later session can recover that state directly.
 
 <p align="center">
-  <img src="assets/tapl-codex-iterm-demo.svg" alt="Terminal-style capture of Codex CLI using tapl state before editing README files" />
+  <img src="assets/tapl-codex-iterm-demo.svg" alt="Terminal-style capture of Codex CLI using TAPL state before editing README files" />
 </p>
 
-After installation, keep using Codex normally. The TAPL MCP server gives Codex
-typed workflow tools and invariant guidance. Hooks add only concise current-state
-context and enforce durable-edit boundaries. You usually do not need to run the
-workflow-writing commands yourself.
+The workflow stays simple from your side:
 
-The state lives in `.tapl/tapl.db`, so the next Codex session, a hook, you, or
-the browser or VS Code viewer can inspect the same run.
+1. **Ask Codex normally.** TAPL supplies the workflow contract through MCP.
+2. **Review the plan when needed.** Durable edits still require recorded approval.
+3. **Watch or inspect the work.** Use the browser or optional VS Code viewer.
+4. **Return later.** Codex can resume and search the same repository history.
 
-## Why This Exists
+## What you get
 
-Codex sessions are good at doing work. Long-running engineering work needs more
-than the latest prompt:
+- **Resumable work** — Plans, tasks, approvals, findings, and events survive the current conversation.
+- **Repository-local ownership** — State lives in `.tapl/tapl.db`, beside the work it describes, rather than in loose global notes.
+- **Searchable history** — SQLite full-text search is always available; semantic search is optional.
+- **Visible progress** — The local browser viewer and optional VS Code extension show runs, plans, tasks, and archives.
+- **Safer parallel work** — TAPL validates dependencies and non-overlapping file ownership while the Codex runtime manages the actual SubAgents.
+- **A clean agent interface** — Codex uses typed MCP tools; `taplctl` remains a small management CLI for installation, diagnosis, updates, and viewers.
 
-- What did the user ask for?
-- What plan did the agent choose?
-- Which tasks are still pending?
-- Was durable file editing approved?
-- What did the agent learn during implementation?
-- Can a later session search that history instead of rediscovering it?
+## Installation
 
-`tapl` answers those questions with one global CLI, a typed MCP facade, and one
-repo-local SQLite database.
+Choose one installation path:
 
-## Features
+| Platform / need | Recommended option |
+| --- | --- |
+| macOS, full-text search | Homebrew `taplctl` |
+| macOS, semantic search included | Homebrew `taplctl-semantic` |
+| macOS, newest stable or prerelease | Homebrew `taplctl@pre` |
+| Linux | Standalone `curl \| sh` installer |
+| Windows 10 or 11 | Standalone PowerShell installer |
 
-After installation, the agent workflow runs over the `tapl-mcp` stdio server,
-not through `taplctl`. Its 23 typed tools call `WorkflowApplication` directly
-and cover workflow writes plus status, context, search, item, and archive
-reads. `taplctl` is management-only: `init`, `doctor`, `update`, `install`,
-`viewer`, `reindex`, `searchd`, and `import-md`.
-
-### 1. Native agent workflow over MCP
-
-Tool descriptions and JSON schemas are the authoritative agent workflow
-contract. Ask Codex to work normally; `tapl-mcp` records plans, tasks,
-approvals, execution manifests, searchable history, and archives directly.
-The agent must not use `taplctl` workflow commands or a CLI JSON data plane.
-
-### 2. Let Codex record plans and tasks
-
-Plans and tasks are first-class records, not loose Markdown notes. Codex receives
-lifecycle guidance from the MCP server, writes plan/task content through typed
-MCP tool fields, and `tapl` renders stable Markdown bodies for stored records.
-
-When summarizing a request, the agent explicitly selects `planned` or
-`lightweight` based on complexity. `planned` is the default and is used for
-planning, durable edits, tests, and verification. `lightweight` is for a direct,
-non-durable answer that does not need persisted plan/task records; it can finish
-and archive immediately. If that work becomes complex, calling
-`tapl_apply_plan` promotes the run to `planned` automatically.
-
-MCP write tools return compact receipts with actionable identifiers, state,
-validation issues, and any parallel-execution contract. They also include the
-next recommended MCP action.
-
-### 3. Searchable history for completed work
-
-Past work is archived and searchable through the MCP search, item, and archive
-read tools. SQLite FTS is always available; optional semantic/vector search is
-available when its dependencies are installed.
-
-### 4. Hooks around the Codex lifecycle
-
-`tapl` installs Codex hook wiring for:
-
-- `UserPromptSubmit`
-- `PreToolUse`
-- `PermissionRequest`
-- `PostToolUse`
-- `Stop`
-
-Those hooks run the dedicated `tapl-hook` executable. It returns concise
-current-state context and guards lifecycle boundaries; `tapl-mcp` owns the
-typed workflow tools and invariant guidance.
-
-### 5. One CLI, workspace-local state
-
-Install `taplctl` once. Each Codex workspace keeps its state in
-`.tapl/tapl.db`, which also acts as the workspace anchor. On the first hook
-event, `tapl` explicitly initializes the payload working directory when no
-ancestor database exists. Nested Git repositories then reuse that workspace
-database instead of creating separate history databases.
-
-To select the workspace root manually, run:
-
-```sh
-taplctl init --workspace-root /path/to/workspace
-```
-
-An intentionally independent nested repository can initialize its own
-`.tapl/tapl.db`.
-
-### 6. Browser and optional VS Code viewers
-
-Start the bundled browser viewer from an initialized workspace:
-
-```sh
-taplctl viewer
-# tapl viewer: http://127.0.0.1:8000
-
-# Choose another local port when 8000 is busy
-taplctl viewer --port 9000
-```
-
-Open the printed URL in a browser. The server listens only on the local
-loopback interface, does not open the browser automatically, and reads the
-database through native viewer operations—never a `taplctl` data subprocess.
-Stop a foreground server with `Ctrl+C`.
-
-When the command starts inside a workspace, its nearest `.tapl/tapl.db` wins.
-When it starts without one—such as a Homebrew login service—the page asks for
-an initialized workspace folder and remembers the last successful path in that
-browser.
-
-The VS Code extension keeps a persistent workspace-scoped `tapl-mcp` stdio
-client and uses MCP read tools for its activity-bar view. Set
-`taplWorkflow.taplMcpPath` to the `tapl-mcp` executable when needed.
-`taplWorkflow.taplctlPath` is retained only as a legacy locator for a sibling
-`tapl-mcp`, not as a workflow command path.
-
-### 7. Parallel SubAgent dispatch
-
-TAPL is the repo-local SQLite state store, validator, and execution-manifest
-coordinator. It does **not** spawn workers itself: the Codex/root runtime
-spawns and manages the actual SubAgents. Sequential tasks run on the main
-agent by default; use parallel dispatch only for independent work that can be
-given exclusive file or directory scopes.
-
-Create and dispatch compatible tasks through the MCP tools. Each parallel task
-declares a non-overlapping owned path, and every dependency must already be
-completed. The root agent uses the returned `execution_id` to settle work;
-never use `taplctl` to create, dispatch, settle, search, or inspect workflow
-records. If a worker cannot run, the root agent uses MCP recovery or cancellation
-tools before retrying.
-
-### Compatibility escape hatch
-
-`TAPL_ENABLE_LEGACY_WORKFLOW_CLI=1` temporarily enables the retired workflow
-CLI only for unsupported migration or diagnostic compatibility. It is not a
-normal interface and must not be used by agents, scripts, or viewers.
-
-## Install Details
+After any installation, [connect TAPL to Codex](#connect-tapl-to-codex).
 
 ### Requirements
 
-- Python 3.11 or newer with the `venv` module. The bundled Homebrew formula
-  uses `python@3.12`.
+- Python 3.11 or newer with the `venv` module. Homebrew uses `python@3.12`.
 - SQLite with FTS5 and extension loading support.
-- For the Windows standalone installer: Windows 10 or 11 and either Windows
-  PowerShell 5.1 or newer, or PowerShell 7.
-- Homebrew, if installing with the bundled formula.
-- `uv`, if developing or building from source.
-- A web browser for `taplctl viewer`; VS Code only for the optional extension.
+- Homebrew for a formula installation; `uv` for source development.
+- Windows PowerShell 5.1 or newer, or PowerShell 7, for the Windows installer.
+- A browser for `taplctl viewer`; VS Code only for the optional extension.
 
-### Linux (`curl | sh`)
+The release wheel is platform-independent, but its Python dependencies still need compatible wheels. Uncommon architectures, very new Python releases, and musl-based Linux distributions such as Alpine may require local build tools.
 
-The standalone installer supports Linux and installs the `taplctl` CLI with
-the bundled browser viewer:
+### macOS with Homebrew
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
-```
-
-It requires `curl`, Python 3.11 or newer with the `venv` module, and writable
-installation directories. By default these are
-`${XDG_DATA_HOME:-$HOME/.local/share}/tapl` and
-`${XDG_BIN_HOME:-$HOME/.local/bin}`; set the corresponding XDG variables (or
-`TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR`) if you need different locations.
-
-The installer does not modify your shell startup files or install Codex hooks.
-If it prints a `PATH` export, run that export in the current shell and add it
-to your shell configuration for future shells. Once `taplctl` resolves in your
-`PATH`, run `taplctl install user` (or `taplctl install repo`), as shown in
-[Configure Codex hooks](#configure-codex-hooks).
-
-### Windows (`irm | iex`)
-
-The PowerShell installer supports Windows 10 and 11 and installs the `taplctl`
-CLI with the bundled browser viewer:
-
-```powershell
-irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
-```
-
-It requires Windows PowerShell 5.1 or newer (or PowerShell 7), Python 3.11 or
-newer with the `venv` module, and writable per-user installation directories.
-By default, the managed installation root is `%LOCALAPPDATA%\tapl` and the
-public launcher is `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`. Set
-`TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`, or `TAPL_INSTALL_MANIFEST_URL` to override
-the installation root, launcher directory, or release manifest URL.
-
-The installer adds its launcher directory to the user `PATH` only when it is
-not already present, and also updates the current PowerShell session. New
-processes receive the user `PATH` entry; the system `PATH` is not changed and
-no administrator privileges are required. It does not install Codex hooks
-automatically. Once `taplctl` resolves in `PATH`, run `taplctl install user`
-(or `taplctl install repo`), as shown in [Configure Codex hooks](#configure-codex-hooks).
-
-The installer validates the release manifest and verifies the downloaded wheel
-against its published SHA-256 before activation. As with any `irm | iex`
-command, review the script source if your environment requires a different
-trust process. The CLI wheel itself is platform-independent, but its Python
-dependencies still need wheels compatible with your Windows Python version and
-architecture. Standard supported Windows Python environments normally install
-them through pip; an uncommon architecture or very new Python release can
-require build tools or fail when a compatible dependency wheel is unavailable.
-
-### Homebrew
+Add and trust the tap once:
 
 ```sh
 brew tap qkdxorjs1002/tap
 brew trust --formula qkdxorjs1002/tap/taplctl
 ```
 
-Then install one of the two formulas:
+Install exactly one formula:
 
 ```sh
-# Basic workflow tracking
+# Stable release, full-text search
 brew install taplctl
-```
 
-```sh
-# Workflow tracking with semantic search support
+# Stable release, semantic/vector search dependencies included
 brew install taplctl-semantic
+
+# Newest published release, stable or prerelease
+brew trust --formula qkdxorjs1002/tap/taplctl@pre
+brew install taplctl@pre
 ```
 
-Both formulas install the pinned MCP runtime from release-hosted wheel bundles;
-the semantic formula additionally installs the optional embedding and vector
-search stack. Homebrew installation does not resolve Python packages from PyPI
-at install time.
+`taplctl` and `taplctl-semantic` follow stable releases. `taplctl@pre` follows the newest published release even when that release is a prerelease. All three formulae install the same executables and cannot coexist. Before switching, uninstall the current formula—for example, `brew uninstall taplctl`.
 
-Start the browser viewer automatically at login with the formula you installed:
+Homebrew installs pinned dependencies from release-hosted wheel bundles and does not resolve packages from PyPI during installation.
 
-```sh
-brew services start taplctl
-# or
-brew services start taplctl-semantic
-```
-
-Both formula services run `taplctl viewer` on `127.0.0.1:8000`. Open that URL
-and choose a workspace on the first visit. The semantic formula's Homebrew
-service intentionally does not start `searchd`; start it separately when you
-want a pre-loaded semantic model:
+<details>
+<summary>Linux standalone installer</summary>
 
 ```sh
-taplctl searchd start
-taplctl searchd status
-```
-
-If port 8000 is occupied, stop the Homebrew service and run
-`taplctl viewer --port PORT` manually.
-
-### Configure Codex hooks
-
-After installing `taplctl` by any method, choose how to wire it into Codex:
-
-```sh
-# Most users: install once for your Codex account
-taplctl install user
-
-# Or install only in the current repository
-taplctl install repo
-```
-
-The installer also adds an enabled `mcp_servers.tapl` entry that launches
-`tapl-mcp` and hook entries that launch `tapl-hook`. Restart Codex after
-installation so the generated stdio server and hooks are loaded.
-
-The first time Codex asks for confirmation after installation, trust the
-installed hook.
-
-<p align="center">
-  <img src="assets/tapl-trust-hook.png" alt="Codex trust prompt for the installed tapl hook" />
-</p>
-
-Install merge policy:
-
-- `hooks.json` is managed-merged. Existing non-tapl hooks are preserved; tapl
-  managed hooks are replaced.
-- `.codex/config.toml` is TOML-merged. Existing user values win, and missing
-  tapl template keys are added, including the TAPL `tapl-mcp` server. Generated
-  hook entries invoke `tapl-hook`; neither generated path uses `taplctl` as the
-  workflow data plane.
-- tapl runtime `config.toml` (`.tapl/config.toml` or `~/.tapl/config.toml`) is
-  created on first install. When the installed tapl version changes, tapl asks
-  whether to overwrite it with updated defaults or keep existing values and add
-  missing default keys. Non-interactive hook/JSON refreshes keep existing
-  values and add missing keys.
-- `--force` makes tapl template values win for managed keys while preserving
-  unrelated Codex config keys, and overwrites tapl runtime `config.toml`.
-- `--tapl-config-policy {prompt,overwrite,merge}` selects the tapl runtime
-  config upgrade behavior explicitly.
-- Agent templates are create-or-skip by default and are overwritten with
-  `--force`.
-
-### Source
-
-```sh
-cd tapl
-uv sync
-uv run taplctl --version
-uv build
-```
-
-Use `uv sync --extra semantic` when developing or running the optional semantic
-search features from a source checkout.
-
-### Updates
-
-`taplctl update` manages installations created by the Linux `curl | sh` or
-Windows PowerShell installers. It verifies the release manifest and wheel
-SHA-256 before activating an update. It does not change Homebrew or
-source-checkout installations.
-
-```sh
-# Linux curl-sh installation
-taplctl update --check
-taplctl update
-
-# Equivalent: re-run the installer to fetch the latest managed release
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
 ```
 
-```powershell
-# Windows PowerShell managed installation
-taplctl update --check
-taplctl update
+The installer needs `curl`, Python 3.11+ with `venv`, and writable installation directories. Its defaults are `${XDG_DATA_HOME:-$HOME/.local/share}/tapl` and `${XDG_BIN_HOME:-$HOME/.local/bin}`; override them with the corresponding XDG variables or `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR`.
 
-# Equivalent: re-run the installer to fetch the latest managed release
+It does not modify shell startup files or install Codex hooks. Apply any printed `PATH` export, make it persistent if needed, then connect TAPL to Codex below.
+
+</details>
+
+<details>
+<summary>Windows standalone installer</summary>
+
+```powershell
 irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
 ```
 
-Update a Homebrew installation with the formula you installed:
+The installer supports Windows 10 and 11 with Windows PowerShell 5.1+ or
+PowerShell 7, Python 3.11+ with `venv`, and per-user writable directories. It
+defaults to `%LOCALAPPDATA%\tapl` with a launcher at
+`%LOCALAPPDATA%\tapl\bin\taplctl.cmd`. Override the paths or manifest with
+`TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`, or `TAPL_INSTALL_MANIFEST_URL`.
+
+It updates only the user `PATH`, requires no administrator privileges, validates
+the release manifest, and verifies the wheel SHA-256 before activation. It does
+not install Codex hooks. Review the script first if your environment requires a
+different trust process.
+
+</details>
+
+### Connect TAPL to Codex
+
+Connect with the command for the package you installed. For v2 `@pre`, the
+explicit libexec path gives the installer the dedicated sibling `tapl-mcp` and
+`tapl-hook` executables from the same bundled wheel environment.
+
+Homebrew (`taplctl@pre`):
 
 ```sh
-# Basic formula
-brew update && brew upgrade taplctl
-
-# Semantic-search formula
-brew update && brew upgrade taplctl-semantic
+taplctl install user --taplctl-command "$(brew --prefix taplctl@pre)/libexec/bin/taplctl"
 ```
 
-For a source checkout, update the checkout and its dependencies using the
-source workflow. The release CLI wheel is platform-independent, but its Python
-dependencies still need compatible wheels for the target platform. In
-particular, musl-based Linux systems such as Alpine may require compatible
-wheels or local build tools; the same can apply on Windows for an uncommon
-architecture or very new Python release. Installation can fail when those
-dependencies cannot be installed.
+The same substitution works with the current stable `taplctl` and
+`taplctl-semantic` 1.7 formulae, but they use that release's compatibility
+integration rather than dedicated v2 executables.
 
-## Useful Commands
+Linux standalone installer:
 
 ```sh
-taplctl init --workspace-root /path/to/workspace
-taplctl doctor
-taplctl install user
-taplctl install repo
+taplctl install user --taplctl-command "$(realpath "$(command -v taplctl)")"
+```
+
+Windows standalone installer (PowerShell):
+
+```powershell
+$taplRoot = if ($env:TAPL_INSTALL_ROOT) { $env:TAPL_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA "tapl" }
+$taplInstall = Get-Content -Raw (Join-Path $taplRoot "install.json") | ConvertFrom-Json
+taplctl install user --taplctl-command (Join-Path $taplInstall.venv "Scripts\taplctl.exe")
+```
+
+These commands install for your Codex account. Replace `user` with `repo` to connect only the current repository.
+
+This adds an enabled `mcp_servers.tapl` entry for `tapl-mcp` and Codex lifecycle hooks for `tapl-hook`. Restart Codex afterward. The first time Codex asks for confirmation, trust the installed hook.
+
+<p align="center">
+  <img src="assets/tapl-trust-hook.png" alt="Codex trust prompt for the installed TAPL hook" />
+</p>
+
+## Use TAPL
+
+### Open the viewer
+
+From an initialized workspace:
+
+```sh
 taplctl viewer
-taplctl viewer --port 9000
+# tapl viewer: http://127.0.0.1:8000
+
+taplctl viewer --port 9000  # when port 8000 is busy
+```
+
+The viewer listens only on `127.0.0.1`, does not open a browser automatically,
+and stops with `Ctrl+C`. The nearest `.tapl/tapl.db` is selected. If no workspace
+is available—for example, when started as a Homebrew login service—the page asks
+for an initialized workspace folder and remembers the last successful choice in
+that browser.
+
+Start the installed Homebrew formula automatically at login with
+`brew services start taplctl`, `brew services start taplctl-semantic`, or
+`brew services start taplctl@pre`. Each service serves the viewer on port 8000.
+
+The semantic formula intentionally does not start a preloaded search process.
+Run `taplctl searchd start` and `taplctl searchd status` when you want one.
+
+The optional VS Code extension uses a persistent workspace-scoped `tapl-mcp`
+client. Set `taplWorkflow.taplMcpPath` if it cannot locate the executable.
+`taplWorkflow.taplctlPath` remains only as a legacy locator for a sibling
+`tapl-mcp`, not as a workflow command path.
+
+### Resume and search
+
+Codex reads current state, archive details, and history through typed MCP tools.
+SQLite FTS works in every installation. Install the semantic extra—or the
+`taplctl-semantic` formula—for embedding and vector search, then use
+`taplctl reindex` when an existing workspace needs its index rebuilt.
+
+### Parallel work
+
+TAPL coordinates execution manifests; it does not spawn workers. The Codex/root
+runtime creates and manages SubAgents. Parallel tasks are valid only when their
+dependencies are complete and they own non-overlapping files or directories.
+Sequential tasks remain on the main agent by default.
+
+## How it works
+
+```mermaid
+flowchart LR
+    U[You] --> C[Codex]
+    C --> M[tapl-mcp<br/>typed workflow tools]
+    C --> H[tapl-hook<br/>context and lifecycle guards]
+    M --> D[(.tapl/tapl.db)]
+    H --> D
+    D --> V[Browser / VS Code viewer]
+```
+
+`tapl-mcp` calls the workflow application directly; it does not wrap
+`taplctl` commands or use a CLI JSON data plane. `tapl-hook` adds concise current
+state at Codex lifecycle points and guards durable-edit boundaries. The SQLite
+database is the shared source of truth for Codex, hooks, and viewers.
+
+`taplctl` is management-only: `init`, `doctor`, `update`, `install`, `viewer`,
+`reindex`, `searchd`, and `import-md`. Agents should never use it to create,
+dispatch, settle, search, or inspect workflow records.
+
+## Manage your installation
+
+| Command | Purpose |
+| --- | --- |
+| `taplctl init --workspace-root /path/to/workspace` | Select or initialize a workspace root |
+| `taplctl doctor` | Diagnose installation and workspace problems |
+| `taplctl install SCOPE --taplctl-command PATH` | Install or refresh Codex integration |
+| `taplctl viewer [--port 9000]` | Open the local browser viewer |
+| `taplctl update --check` / `update` | Check or update standalone installations |
+| `taplctl reindex` | Rebuild search indexes |
+| `taplctl searchd start` / `status` | Manage the optional semantic search process |
+| `taplctl import-md PATH` | Import a legacy Markdown workflow |
+
+### Updates
+
+For Linux and Windows standalone installations:
+
+```sh
 taplctl update --check
 taplctl update
-taplctl reindex
-taplctl searchd start
-taplctl searchd status
-taplctl import-md /path/to/legacy-workflow
 ```
 
-Use the `tapl-mcp` tools for workflow state, including status, validation,
-search, item details, and archives. The management CLI is intentionally limited
-to the commands above.
+The updater validates the release manifest and wheel SHA-256. It does not update
+Homebrew or source checkouts. For Homebrew, use `brew update` followed by
+`brew upgrade taplctl`, `brew upgrade taplctl-semantic`, or
+`brew upgrade taplctl@pre`, matching the installed formula.
 
-### SubAgent delegation configuration
+<details>
+<summary>Workspace and installation settings</summary>
 
-TAPL loads the repo-local `.tapl/config.toml` before `~/.tapl/config.toml`, so
-the repository configuration takes precedence when both files exist. Configure
-whether TAPL includes its delegation policy and the model/reasoning allowlist
-in the MCP server instructions as follows:
+TAPL loads repo-local `.tapl/config.toml` before `~/.tapl/config.toml`. A database
+also acts as the workspace anchor: the first hook initializes the payload working
+directory if no ancestor database exists, and nested Git repositories reuse the
+nearest workspace database. Run `taplctl init --workspace-root PATH` inside a
+deliberately independent nested repository to give it separate history.
+
+Installation preserves unrelated Codex settings. `hooks.json` is managed-merged,
+and `.codex/config.toml` is TOML-merged with existing user values taking
+precedence. Runtime config is created on first install; upgrades can prompt to
+overwrite defaults or merge missing keys. Use `--force` for TAPL-managed template
+values to win, or `--tapl-config-policy {prompt,overwrite,merge}` to select the
+runtime config policy explicitly.
+
+</details>
+
+<details>
+<summary>SubAgent delegation settings</summary>
 
 ```toml
 [subagents]
@@ -413,64 +320,34 @@ enabled = true
 [subagents.models]
 "gpt-5.6-sol" = ["xhigh", "max"]
 "gpt-5.6-terra" = ["high", "xhigh", "max"]
-"gpt-5.6-luna" = ["high", "xhigh"]
 ```
 
-When enabled, the MCP policy tells the root agent to assess the complexity
-of every executable task and delegate it using an efficient configured
-model/reasoning pair. The `UserPromptSubmit` context also explicitly requests
-SubAgent delegation when that authoritative policy selects it for an approved
-executable task, without requiring another user prompt. To disable that
-TAPL-provided instruction content, set:
+When enabled, TAPL includes its delegation policy and configured model/reasoning
+allowlist in MCP instructions. The runtime may use only supported pairs in that
+allowlist. Set `enabled = false` to omit TAPL's delegation guidance; this does not
+remove delegation instructions from another source such as `AGENTS.md`.
 
-```toml
-[subagents]
-enabled = false
-```
+Plan and task policy is fixed: executable work uses detailed planning, explicit
+plan confirmation, independently split tasks, and recorded approval before
+durable edits.
 
-With `enabled = false`, TAPL includes neither its `UserPromptSubmit` delegation
-request, its SubAgent delegation policy, nor its model/reasoning allowlist. This
-setting does not remove separate delegation instructions from another source,
-such as `AGENTS.md`.
+</details>
 
-The configured model list is a policy allowlist, not a runtime installation or
-capability guarantee. A root agent must use only the intersection of the
-configured model/reasoning pairs and the pairs its current runtime actually
-supports; unavailable configured pairs must not be selected. If that
-intersection is empty, the root agent executes the task directly.
+### Troubleshooting
 
-Plan/task workflow policy is fixed rather than configurable. TAPL always asks
-for a very detailed plan, explicit user confirmation before plan finalization,
-independently split edit/migration/verification tasks, and recorded execution
-approval before durable edits. The MCP server instructions and typed tool
-schemas expose this fixed policy; CLI help is only a manual fallback.
+| Symptom | What to do |
+| --- | --- |
+| Codex does not see TAPL | Run `taplctl doctor`, repeat the package-specific connect command above, then restart Codex |
+| `taplctl` is not found after standalone install | Apply the installer's printed `PATH` export and add it to your shell profile |
+| The viewer cannot find a workspace | Initialize it or choose a folder that already contains `.tapl/tapl.db` |
+| Port 8000 is busy | Stop the Homebrew service or run `taplctl viewer --port PORT` |
+| A Homebrew formula conflicts | Uninstall the installed TAPL formula before selecting another |
 
-## Source Layout
+`TAPL_ENABLE_LEGACY_WORKFLOW_CLI=1` temporarily exposes the retired workflow CLI
+only for unsupported migration or diagnostics. It is not a normal interface and
+must not be used by agents, scripts, or viewers.
 
-```text
-.
-├── .codex/                    # Repo-local files produced by taplctl install repo
-├── .tapl/config.toml          # Repo-local runtime config
-├── tapl/.codex/               # Codex config and hook templates packaged with taplctl
-├── tapl/.tapl/config.toml     # Default tapl config template
-├── tapl/taplctl/              # Python CLI and workflow harness implementation
-├── tapl/tests/                # Python tests
-├── tapl/pyproject.toml        # taplctl package metadata
-├── vscode-extension/          # Optional VS Code workflow viewer
-├── README.md                  # English README
-└── README.ko.md               # Korean README
-```
-
-Runtime state and local build output are intentionally not part of the source
-contract:
-
-```text
-.tapl/tapl.db
-tapl/.venv/
-tapl/dist/
-```
-
-## Contributor Checks
+## Development
 
 ```sh
 uv --directory tapl sync --extra test
@@ -479,6 +356,8 @@ uv --directory tapl build
 npm --prefix vscode-extension run compile
 git diff --check
 ```
+
+Use `uv --directory tapl sync --extra semantic` when developing semantic search.
 
 ## License
 

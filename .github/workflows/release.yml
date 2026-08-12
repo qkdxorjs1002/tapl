@@ -64,7 +64,6 @@ jobs:
           --github-output "${GITHUB_OUTPUT}"
 
       - name: Require Homebrew tap token
-        if: steps.version.outputs.prerelease == 'false'
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         shell: bash
@@ -472,7 +471,6 @@ jobs:
           fi
 
       - name: Checkout Homebrew tap
-        if: steps.version.outputs.prerelease == 'false'
         uses: actions/checkout@v4
         with:
           repository: qkdxorjs1002/homebrew-tap
@@ -480,9 +478,11 @@ jobs:
           path: homebrew-tap
 
       - name: Update taplctl Homebrew package
-        if: steps.version.outputs.prerelease == 'false'
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.python_version }}
+          RELEASE_PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PRE_FORMULA_TEMPLATE: homebrew-tap/Formula/taplctl.rb
           WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
           WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
           MCP_RUNTIME_MACOS_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
@@ -497,29 +497,34 @@ jobs:
         run: |
           set -euo pipefail
 
-          brew_files=()
-          if [[ -f "homebrew-tap/Formula/taplctl.rb" ]]; then
-            brew_files+=("homebrew-tap/Formula/taplctl.rb")
-          elif [[ -f "homebrew-tap/Casks/taplctl.rb" ]]; then
-            brew_files+=("homebrew-tap/Casks/taplctl.rb")
-          fi
-          if [[ -f "homebrew-tap/Formula/taplctl-semantic.rb" ]]; then
-            brew_files+=("homebrew-tap/Formula/taplctl-semantic.rb")
-          fi
-
-          if [[ "${#brew_files[@]}" -eq 0 ]]; then
-            echo "Could not find Formula/taplctl.rb or Casks/taplctl.rb in qkdxorjs1002/homebrew-tap." >&2
+          if [[ ! -f "${PRE_FORMULA_TEMPLATE}" ]]; then
+            echo "Could not find ${PRE_FORMULA_TEMPLATE} in qkdxorjs1002/homebrew-tap." >&2
             exit 1
           fi
 
+          stable_brew_files=()
+          if [[ "${RELEASE_PRERELEASE}" == "false" ]]; then
+            stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")
+            if [[ -f "homebrew-tap/Formula/taplctl-semantic.rb" ]]; then
+              stable_brew_files+=("homebrew-tap/Formula/taplctl-semantic.rb")
+            fi
+          fi
+
           ruby -c .github/scripts/update_homebrew_formula.rb
-          ruby .github/scripts/update_homebrew_formula.rb "${brew_files[@]}"
-          for brew_file in "${brew_files[@]}"; do
+          ruby .github/scripts/update_homebrew_formula.rb \
+            --pre-formula homebrew-tap/Formula/taplctl-pre.rb \
+            --pre-alias homebrew-tap/Aliases/taplctl@pre \
+            "${stable_brew_files[@]}"
+          ruby -c homebrew-tap/Formula/taplctl-pre.rb
+          for brew_file in "${stable_brew_files[@]}"; do
             ruby -c "${brew_file}"
           done
 
-          tap_paths=()
-          for brew_file in "${brew_files[@]}"; do
+          tap_paths=(
+            "Formula/taplctl-pre.rb"
+            "Aliases/taplctl@pre"
+          )
+          for brew_file in "${stable_brew_files[@]}"; do
             tap_paths+=("${brew_file#homebrew-tap/}")
           done
 
@@ -532,5 +537,9 @@ jobs:
             exit 0
           fi
 
-          git -C homebrew-tap commit -m "taplctl ${RELEASE_VERSION}"
+          release_channel="stable"
+          if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
+            release_channel="prerelease"
+          fi
+          git -C homebrew-tap commit -m "taplctl ${RELEASE_TAG} (${release_channel})"
           git -C homebrew-tap push

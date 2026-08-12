@@ -3,8 +3,24 @@
 # Synchronize release metadata and the platform-specific TAPL MCP runtime in the
 # Homebrew formulas checked out by the release workflow.
 
-files = ARGV
-raise "Pass at least one Homebrew formula path" if files.empty?
+require "fileutils"
+require "optparse"
+require "pathname"
+require "rubygems/version"
+
+options = {}
+parser = OptionParser.new do |opts|
+  opts.on("--pre-formula PATH", "Update or create the rolling prerelease formula") do |path|
+    options[:pre_formula] = path
+  end
+  opts.on("--pre-alias PATH", "Create the taplctl@pre alias for the prerelease formula") do |path|
+    options[:pre_alias] = path
+  end
+end
+
+files = parser.parse(ARGV)
+raise "Pass a Homebrew formula path or --pre-formula PATH" if files.empty? && !options[:pre_formula]
+raise "--pre-alias requires --pre-formula" if options[:pre_alias] && !options[:pre_formula]
 
 version = ENV.fetch("RELEASE_VERSION")
 wheel_url = ENV.fetch("WHEEL_URL")
@@ -37,6 +53,13 @@ RUNTIME_BEGIN = "# taplctl-mcp-runtime-begin"
 RUNTIME_END = "# taplctl-mcp-runtime-end"
 SMOKE_BEGIN = "# taplctl-mcp-smoke-begin"
 SMOKE_END = "# taplctl-mcp-smoke-end"
+PRE_FORMULA_TEMPLATE = ENV["PRE_FORMULA_TEMPLATE"]
+PEP_440_VERSION_PATTERN = '\\d+\\.\\d+\\.\\d+(?:(?:a|b|rc)\\d+)?'
+FORMULA_CONFLICTS = {
+  "taplctl" => %w[taplctl-semantic taplctl-pre],
+  "taplctl-semantic" => %w[taplctl taplctl-pre],
+  "taplctl-pre" => %w[taplctl taplctl-semantic],
+}.freeze
 
 def replacement_line(line, content)
   line.end_with?("\n") ? "#{content}\n" : content
@@ -159,8 +182,66 @@ def smoke_test_block(indent)
   ]
 end
 
-def update_formula(file, version, wheel_url, wheel_sha256, runtime_assets)
+def formula_version(lines, file)
+  version_line = lines.find { |line| line.match?(/^\s*version\s+["'][^"']+["']/) }
+  raise "Could not find version in #{file}" unless version_line
+
+  Gem::Version.new(version_line[/^\s*version\s+["']([^"']+)["']/, 1])
+rescue ArgumentError => error
+  raise "Could not parse version in #{file}: #{error.message}"
+end
+
+def normalize_formula_class(lines, class_name, file)
+  class_index = lines.index { |line| line.match?(/^class\s+\S+\s+<\s+Formula\s*$/) }
+  raise "Could not find formula class in #{file}" unless class_index
+
+  lines[class_index] = replacement_line(lines[class_index], "class #{class_name} < Formula")
+end
+
+def normalize_formula_conflicts(lines, formula_name)
+  conflicts = FORMULA_CONFLICTS[formula_name]
+  return unless conflicts
+
+  known_formula_names = FORMULA_CONFLICTS.keys
+  lines.reject! do |line|
+    match = line.match(/^\s*conflicts_with\s+["']([^"']+)["']/)
+    match && known_formula_names.include?(match[1])
+  end
+
+  dependency_index = lines.rindex { |line| line.match?(/^\s*depends_on\b/) }
+  raise "Could not find dependency block for #{formula_name}" unless dependency_index
+
+  insert_index = dependency_index + 1
+  lines.delete_at(insert_index) while lines[insert_index]&.strip == ""
+  conflict_lines = conflicts.map do |conflict|
+    %(  conflicts_with "#{conflict}", because: "both install the taplctl executable"\n)
+  end
+  lines.insert(insert_index, "\n", *conflict_lines, "\n")
+end
+
+def normalize_version_test(lines)
+  stable_pattern = '\\d+\\.\\d+\\.\\d+\\z'
+  lines.map! do |line|
+    next line unless line.include?("assert_match") && line.include?("taplctl")
+
+    line.sub(stable_pattern, "#{PEP_440_VERSION_PATTERN}\\z")
+  end
+end
+
+def update_formula(file, version, wheel_url, wheel_sha256, runtime_assets, formula_name: nil, class_name: nil)
   lines = File.readlines(file)
+
+  normalize_formula_class(lines, class_name, file) if class_name
+  normalize_formula_conflicts(lines, formula_name) if formula_name
+  normalize_version_test(lines)
+
+  incoming_version = Gem::Version.new(version)
+  current_version = formula_version(lines, file)
+  if incoming_version < current_version
+    warn "Skipping #{file}: #{version} is older than #{current_version}"
+    File.write(file, lines.join)
+    return false
+  end
 
   version_index = lines.index { |line| line.match?(/^(\s*)version\s+[\"'][^\"']+[\"'](.*)$/) }
   raise "Could not update version in #{file}" unless version_index
@@ -208,6 +289,52 @@ def update_formula(file, version, wheel_url, wheel_sha256, runtime_assets)
   upsert_marked_block(lines, SMOKE_BEGIN, SMOKE_END, smoke_lines, test_start + 1)
 
   File.write(file, lines.join)
+  true
 end
 
-files.each { |file| update_formula(file, version, wheel_url, wheel_sha256, runtime_assets) }
+files.each do |file|
+  update_formula(
+    file,
+    version,
+    wheel_url,
+    wheel_sha256,
+    runtime_assets,
+    formula_name: File.basename(file, ".rb"),
+  )
+end
+
+if options[:pre_formula]
+  pre_formula = options[:pre_formula]
+  unless File.exist?(pre_formula)
+    template = PRE_FORMULA_TEMPLATE || files.first
+    raise "PRE_FORMULA_TEMPLATE or a positional formula is required to create #{pre_formula}" unless template
+    raise "Could not find prerelease formula template: #{template}" unless File.file?(template)
+
+    FileUtils.mkdir_p(File.dirname(pre_formula))
+    FileUtils.cp(template, pre_formula)
+  end
+
+  update_formula(
+    pre_formula,
+    version,
+    wheel_url,
+    wheel_sha256,
+    runtime_assets,
+    formula_name: "taplctl-pre",
+    class_name: "TaplctlPre",
+  )
+
+  if options[:pre_alias]
+    pre_alias = options[:pre_alias]
+    FileUtils.mkdir_p(File.dirname(pre_alias))
+    relative_target = Pathname.new(File.expand_path(pre_formula)).relative_path_from(
+      Pathname.new(File.expand_path(File.dirname(pre_alias))),
+    ).to_s
+    if File.symlink?(pre_alias)
+      File.unlink(pre_alias) unless File.readlink(pre_alias) == relative_target
+    elsif File.exist?(pre_alias)
+      raise "Refusing to replace non-symlink prerelease alias: #{pre_alias}"
+    end
+    File.symlink(relative_target, pre_alias) unless File.symlink?(pre_alias)
+  end
+end

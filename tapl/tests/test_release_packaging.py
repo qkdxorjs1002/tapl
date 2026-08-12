@@ -179,6 +179,20 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
             self.assertIn('from taplctl.mcp_server import create_server', formula)
             self.assertIn('run [opt_bin/"taplctl", "viewer"]', formula)
 
+        self.assertEqual(
+            self._conflict_lines(base_after_first),
+            [
+                'conflicts_with "taplctl-semantic", because: "both install the taplctl executable"',
+                'conflicts_with "taplctl-pre", because: "both install the taplctl executable"',
+            ],
+        )
+        self.assertEqual(
+            self._conflict_lines(semantic_after_first),
+            [
+                'conflicts_with "taplctl", because: "both install the taplctl executable"',
+                'conflicts_with "taplctl-pre", because: "both install the taplctl executable"',
+            ],
+        )
         self.assertIn('resource "numpy" do', semantic_after_first)
         for path in (self.base_formula, self.semantic_formula):
             syntax = subprocess.run(
@@ -188,6 +202,10 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(syntax.returncode, 0, syntax.stderr)
+
+    @staticmethod
+    def _conflict_lines(formula: str) -> list[str]:
+        return [line.strip() for line in formula.splitlines() if line.lstrip().startswith("conflicts_with ")]
 
     def _run_updater(self) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()

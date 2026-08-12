@@ -108,7 +108,7 @@ class ReleaseVersionTests(unittest.TestCase):
 
 
 class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
-    def test_workflow_uses_split_versions_and_prerelease_guards(self) -> None:
+    def test_workflow_uses_split_versions_and_rolling_pre_channel(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn("python .github/scripts/release_version.py", workflow)
@@ -117,9 +117,23 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
         self.assertIn("tapl-workflow-viewer-${TAG_VERSION}.vsix", workflow)
         self.assertIn("taplctl-mcp-runtime-${TAG_VERSION}-${target}.tar.gz", workflow)
         self.assertIn('"prerelease": "true" if self.prerelease else "false"', HELPER.read_text())
-        self.assertEqual(
-            workflow.count("if: steps.version.outputs.prerelease == 'false'"),
-            3,
+        self.assertNotIn("if: steps.version.outputs.prerelease == 'false'", workflow)
+        self.assertIn("- name: Require Homebrew tap token\n        env:", workflow)
+        self.assertIn("- name: Checkout Homebrew tap\n        uses:", workflow)
+        self.assertIn("- name: Update taplctl Homebrew package\n        env:", workflow)
+        self.assertIn("--pre-formula homebrew-tap/Formula/taplctl-pre.rb", workflow)
+        self.assertIn("--pre-alias homebrew-tap/Aliases/taplctl@pre", workflow)
+
+        stable_branch = '''if [[ "${RELEASE_PRERELEASE}" == "false" ]]; then'''
+        branch_start = workflow.index(stable_branch)
+        branch_end = workflow.index("\n\n          ruby -c", branch_start)
+        stable_body = workflow[branch_start:branch_end]
+        self.assertIn('stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")', stable_body)
+        self.assertIn('stable_brew_files+=("homebrew-tap/Formula/taplctl-semantic.rb")', stable_body)
+        self.assertNotIn('stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")', workflow[branch_end:])
+        self.assertNotIn(
+            'stable_brew_files+=("homebrew-tap/Formula/taplctl-semantic.rb")',
+            workflow[branch_end:],
         )
         self.assertIn("create_args+=(--prerelease)", workflow)
         self.assertIn("edit_args+=(--prerelease=false)", workflow)

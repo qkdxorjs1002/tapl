@@ -6,406 +6,306 @@
 
 [English](README.md)
 
-`tapl`은 Codex CLI가 저장소 안에서 진행하는 작업을 놓치지 않도록 기록합니다.
-사용자의 지시와 lifecycle을 repo-local SQLite DB에 저장하고, 계획형 작업에는
-Codex의 plan, task, finding, approval, event, archive, 검색 가능한 history도
-기록합니다. 코드는 여전히 Codex가 쓰고, `tapl`은 durable 작업의 진행 상태 확인과
-context가 사라진 뒤의 재개를 가능하게 합니다.
+[![GitHub release](https://img.shields.io/github/v/release/qkdxorjs1002/tapl?include_prereleases)](https://github.com/qkdxorjs1002/tapl/releases)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#필수-환경)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
-## 빠른 시작
+**Codex 작업을 이어 주는 기록.** TAPL은 저장소마다 사용자 요청, 계획, 승인, 작업, 발견 사항, 작업 이력을 하나의 로컬 SQLite 데이터베이스에 보관합니다.
 
-[설치 상세](#설치-상세)를 한 번 따라 한 뒤, repository 안에서 Codex를 평소처럼
-사용하면 됩니다.
+Codex에는 계속 평소처럼 작업을 요청하면 됩니다. TAPL이 진행 중인 작업을 조용히 보이게 하고, 나중에 찾을 수 있게 하며, 대화 맥락이 사라진 뒤에도 이어갈 수 있게 합니다.
 
-## 어떻게 동작하나요?
+[시작하기](#5분-빠른-시작) · [작업 흐름 보기](#매일의-사용-경험) · [설치 선택](#설치) · [viewer 열기](#viewer-열기)
 
-핵심은 또 하나의 prompt template이 아닙니다. TAPL은 기존 CLI와 repo-local
-state 위에 typed MCP tool을 제공하므로, Codex는 CLI help를 반복해서 읽지 않고
-MCP 서버에서 workflow 계약을 한 번 전달받습니다. 아래 capture-style 이미지는 이번 README 재작성 중
-`tapl`이 기록한 명령 흐름을 반영합니다.
+## 왜 TAPL인가요?
+
+오래 걸리는 에이전트 작업에서는 정작 중요한 맥락부터 잃기 쉽습니다.
+
+| 이런 때 | TAPL이 주는 것 |
+| --- | --- |
+| 세션이 변경 중간에 끝남 | 현재 계획, 완료한 작업, 남은 일의 지속되는 기록 |
+| 무엇을 승인하거나 수정했는지 확인해야 함 | 확인 가능한 승인, 수명 주기 이벤트, 발견 사항, 보관 기록 |
+| 다음 세션이 과거 결정을 다시 찾아 헤맴 | 처음부터 시작하지 않는 저장소별 완료 작업 검색 |
+
+그 결과 이전 프롬프트를 뒤지는 시간은 줄고, *Codex가 무엇을, 왜 하고 있으며 다음 세션은 어디서 이어야 하는가?*라는 질문의 답은 선명해집니다.
+
+## 5분 빠른 시작
+
+현재 v2 beta는 macOS에서 Homebrew로 가장 빠르게 시작할 수 있습니다.
+
+```sh
+brew tap qkdxorjs1002/tap
+brew trust --formula qkdxorjs1002/tap/taplctl@pre
+brew install taplctl@pre
+taplctl install user --taplctl-command "$(brew --prefix taplctl@pre)/libexec/bin/taplctl"
+```
+
+그 다음에는 다음만 하면 됩니다.
+
+1. TAPL MCP 서버와 hook을 읽도록 Codex를 재시작합니다.
+2. Codex가 처음 확인을 요청하면 설치된 hook을 신뢰합니다.
+3. 아무 저장소에서나 Codex에게 평소처럼 작업을 요청합니다.
+
+TAPL은 작업 공간에 `.tapl/tapl.db`를 만들고, Codex는 `tapl-mcp`를 통해 계속 남는 작업 기록을 보관합니다. 작업 흐름을 기록하는 CLI 명령을 따로 배울 필요는 없습니다.
+
+Linux와 Windows에서는 [TAPL을 Codex에 연결](#tapl을-codex에-연결)의 운영체제별 명령으로 실제 `taplctl` 실행 파일을 지정하세요.
+
+## 매일의 사용 경험
+
+원하는 결과를 Codex에게 요청하세요.
+
+> 인증 흐름을 리팩터링하고, 기존 동작은 유지하며, 테스트로 검증해 줘.
+
+Codex는 평소처럼 계획하고 작업합니다. 그 뒤에서 TAPL은 승인된 계획을 기록하고, 실행할 일을 작업으로 나누며, 발견 사항과 검증 상태를 보관하고, 결과를 저장합니다. 나중 세션은 이 기록을 직접 이어받을 수 있습니다.
 
 <p align="center">
-  <img src="assets/tapl-codex-iterm-demo.svg" alt="README 파일을 편집하기 전에 tapl state를 사용하는 Codex CLI terminal-style 캡처" />
+  <img src="assets/tapl-codex-iterm-demo.svg" alt="README를 편집하기 전 TAPL 기록을 사용하는 Codex CLI 터미널 화면" />
 </p>
 
-설치 후에는 Codex를 평소처럼 사용하면 됩니다. TAPL MCP 서버가 typed workflow
-tool과 고정 가이던스를 제공하고, hook은 현재 상태와 durable-edit 경계만 짧게
-전달합니다. 보통은 workflow record를 직접 쓰는 명령을 사람이 실행할 필요가 없습니다.
+사용자가 하는 일은 간단합니다.
 
-상태는 `.tapl/tapl.db`에 저장됩니다. 그래서 다음 Codex session, hook, 사용자,
-브라우저 또는 VS Code viewer가 같은 run을 확인할 수 있습니다.
+1. **Codex에게 평소처럼 요청합니다.** TAPL이 MCP로 작업 흐름의 규칙을 제공합니다.
+2. **필요할 때 계획을 검토합니다.** 지속되는 파일 변경에는 여전히 기록된 승인이 필요합니다.
+3. **작업을 지켜보거나 확인합니다.** 브라우저 또는 선택 사항인 VS Code viewer를 사용합니다.
+4. **나중에 돌아옵니다.** Codex가 같은 저장소의 작업 이력을 이어서 찾습니다.
 
-## 왜 필요한지
+## 얻는 것
 
-Codex session은 일을 잘합니다. 하지만 긴 개발 작업에는 마지막 prompt 이상의
-정보가 필요합니다.
+- **이어 할 수 있는 작업** — 계획, 작업, 승인, 발견 사항, 이벤트가 현재 대화보다 오래 남습니다.
+- **저장소 안에 남는 상태** — 상태는 흩어진 전역 메모가 아니라 설명 대상 코드 옆의 `.tapl/tapl.db`에 있습니다.
+- **찾을 수 있는 작업 이력** — SQLite 전문 검색은 항상 쓸 수 있고 시맨틱 검색은 선택 사항입니다.
+- **보이는 진행 상황** — 로컬 브라우저 뷰어와 선택 사항인 VS Code 확장 기능이 실행 기록, 계획, 작업, 보관 기록을 보여 줍니다.
+- **더 안전한 병렬 작업** — Codex 런타임이 실제 SubAgent를 관리하는 동안 TAPL은 의존성과 겹치지 않는 파일 소유 범위를 검증합니다.
+- **분명한 자동화 인터페이스** — Codex는 형식화된 MCP 도구를, `taplctl`은 설치·진단·업데이트·뷰어용 작은 관리 CLI를 사용합니다.
 
-- 사용자가 무엇을 요청했나?
-- agent가 어떤 plan을 골랐나?
-- 아직 남은 task는 무엇인가?
-- durable file edit가 승인됐나?
-- 구현 중 무엇을 배웠나?
-- 다음 session이 그 history를 검색할 수 있나?
+## 설치
 
-`tapl`은 하나의 전역 CLI, typed MCP facade, repo-local SQLite DB로 이 질문에 답합니다.
+상황에 맞는 설치 경로를 고르세요.
 
-## 기능
+| 환경 / 필요 | 권장 방법 |
+| --- | --- |
+| macOS, 전문 검색 | Homebrew `taplctl` |
+| macOS, semantic search 포함 | Homebrew `taplctl-semantic` |
+| macOS, 최신 안정판 또는 prerelease | Homebrew `taplctl@pre` |
+| Linux | 독립형 `curl \| sh` installer |
+| Windows 10 또는 11 | 독립형 PowerShell installer |
 
-설치 후 agent workflow는 `taplctl`이 아니라 `tapl-mcp` stdio 서버로 실행됩니다.
-23개의 typed tool이 `WorkflowApplication`을 직접 호출하며 workflow 작성뿐 아니라
-status, context, search, item, archive read도 제공합니다. `taplctl`은 `init`,
-`doctor`, `update`, `install`, `viewer`, `reindex`, `searchd`, `import-md`만
-제공하는 management-only CLI입니다.
+설치를 마친 뒤에는 [TAPL을 Codex에 연결](#tapl을-codex에-연결)하세요.
 
-### 1. MCP의 native agent workflow
+### 필수 환경
 
-MCP tool description과 JSON schema가 agent workflow의 기준입니다. Codex에게
-평소처럼 작업을 요청하면 `tapl-mcp`가 plan, task, approval, execution manifest,
-검색 가능한 history와 archive를 직접 기록합니다. Agent는 `taplctl` workflow 명령이나
-CLI JSON data plane을 사용하면 안 됩니다.
-
-### 2. Plan과 task는 Codex가 기록하게 두기
-
-Plan과 task는 흩어진 Markdown 메모가 아니라 first-class record입니다.
-Codex는 MCP 서버에서 lifecycle guidance를 받고 typed MCP tool field로 plan/task
-내용을 기록합니다. `tapl`은 저장된 record의 Markdown body를 안정적인 템플릿으로 렌더링합니다.
-
-요청을 요약할 때 agent는 복잡도에 따라 `planned` 또는 `lightweight`를 명시적으로
-선택합니다. 기본값인 `planned`는 계획, durable edit, test, verification에
-사용합니다. `lightweight`는 저장할 plan/task가 필요 없는 단순한 비영속 답변용이며,
-바로 결과를 기록하고 archive할 수 있습니다. 진행 중 작업이 복잡해지면
-`tapl_apply_plan` 호출이 run을 `planned`로 자동 승격합니다.
-
-MCP write tool은 실행 가능한 식별자, 상태, validation issue, 필요한 병렬 실행
-계약만 담은 compact receipt를 반환합니다. 각 receipt에는 최신 권장 MCP action도
-포함되므로 agent가 보통 `tapl_get_next`를 별도로 호출할 필요가 없습니다.
-
-### 3. 검색 가능한 완료 작업 history
-
-지난 작업은 MCP search, item, archive read tool로 검색하고 확인합니다. SQLite FTS는
-기본 제공하며 semantic/vector search는 선택 dependency를 설치했을 때 사용할 수 있습니다.
-
-### 4. Codex lifecycle 주변의 hook
-
-`tapl`은 다음 Codex hook wiring을 설치합니다.
-
-- `UserPromptSubmit`
-- `PreToolUse`
-- `PermissionRequest`
-- `PostToolUse`
-- `Stop`
-
-Hook은 전용 `tapl-hook` executable을 실행합니다. 짧은 current-state context와
-lifecycle boundary는 hook이 담당하고, typed tool과 고정 guidance는 `tapl-mcp`가 담당합니다.
-
-### 5. 하나의 CLI, workspace-local state
-
-`taplctl`은 한 번 설치합니다. 각 Codex workspace는 상태를 `.tapl/tapl.db`에
-저장하며, 이 DB가 workspace 앵커 역할도 합니다. 첫 hook event에서 상위 DB를
-찾지 못하면 payload 작업 폴더를 명시적으로 초기화합니다. 이후 하위 Git
-repository에서 명령을 실행해도 별도 history DB를 만들지 않고 해당 workspace
-DB를 재사용합니다.
-
-Workspace root를 직접 지정하려면 다음 명령을 사용합니다.
-
-```sh
-taplctl init --workspace-root /path/to/workspace
-```
-
-중첩 repository를 의도적으로 독립 관리할 때는 그 위치에 별도
-`.tapl/tapl.db`를 초기화합니다.
-
-### 6. 브라우저 및 선택 가능한 VS Code viewer
-
-초기화된 workspace에서 함께 제공되는 브라우저 viewer를 실행하세요.
-
-```sh
-taplctl viewer
-# tapl viewer: http://127.0.0.1:8000
-
-# 8000 포트를 사용 중이면 다른 로컬 포트 지정
-taplctl viewer --port 9000
-```
-
-출력된 URL을 브라우저에서 여세요. 서버는 로컬 loopback interface에서만
-수신하고 브라우저를 자동으로 열지 않으며 DB를 native viewer operation으로
-직접 읽습니다. `taplctl` data subprocess는 실행하지 않습니다. foreground 서버는
-`Ctrl+C`로 종료합니다.
-
-workspace 안에서 실행하면 가장 가까운 `.tapl/tapl.db`가 우선합니다. Homebrew
-로그인 서비스처럼 workspace 밖에서 시작하면 페이지에서 초기화된 workspace
-폴더를 입력할 수 있고, 성공한 최근 경로를 해당 브라우저에 기억합니다.
-
-`vscode-extension/`은 workspace별 persistent `tapl-mcp` stdio client를 유지하고
-MCP read tool로 activity bar를 구성합니다. 필요하면 `taplWorkflow.taplMcpPath`에
-`tapl-mcp` 실행 파일을 지정하세요. `taplWorkflow.taplctlPath`는 sibling
-`tapl-mcp`를 찾기 위한 legacy locator일 뿐 workflow command path가 아닙니다.
-
-### 7. 병렬 SubAgent dispatch
-
-TAPL은 repo-local SQLite 상태 저장소이자 검증기, execution manifest 조율자입니다.
-실제 SubAgent를 spawn하지는 않습니다. 실제 spawn과 관리는 Codex/root runtime의
-책임입니다. 기본값은 main agent가 수행하는 순차 task이며, 독점적인 파일 또는
-directory 범위를 줄 수 있는 독립 작업에만 병렬 dispatch를 사용하세요.
-
-같은 plan 및 비어 있지 않은 group에 호환되는 `Pending` task를 만듭니다. 병렬
-task마다 `parallel` mode, `subagent` executor, 독점 `owned-path`를 선언해야
-합니다. Dependency는 선택 사항이지만, 선언했다면 dispatch 전에 모두 반드시
-`Completed` 상태여야 합니다.
-
-
-같은 group의 호환되는 `Pending` task를 두 개 이상 원자적으로 dispatch합니다.
-`--batch-id`는 재시도를 식별 가능하게 하고, `--execution-metadata`는 task별
-예정 executor reference, model, reasoning effort를 기록합니다. 명령은 task별
-`execution_id`를 포함하는 manifest row를 출력합니다.
-
-
-Root agent는 이 manifest를 읽고, 반환된 각 task와 `execution_id`마다 서로 다른
-SubAgent를 동시에 spawn하며, 각 worker가 선언한 path 안에서만 작업하게 합니다.
-TAPL state 작성은 root agent만 합니다. Batch가 관리하는 status를 직접 바꾸지
-말고, 각 결과를 정확한 manifest ID로 정산하세요.
-
-
-Dispatch는 완료되지 않은 dependency, 서로 다른 plan 또는 group, 겹치는 path
-(파일과 그 부모 directory의 충돌 포함), 기존 active work와 충돌하는 owned path를
-거부합니다. 한 group의 task는 서로 독립적이어야 하므로 같은 group의 다른 task에
-dependency를 걸지 마세요. Worker 일부를 spawn하지 못했거나 root runtime이
-중단되면, 실행된 task를 정산하고 active batch 전체를 recover 또는 cancel한 뒤에만
-재시도합니다.
-
-Agent는 MCP task 및 dispatch tool로 task를 만들고 dispatch합니다. Root agent는
-반환된 `execution_id`로 결과를 정산하고, retry 전 MCP recovery 또는 cancellation
-tool을 사용합니다. `taplctl`로 workflow record를 만들거나 조회하지 마세요.
-
-### 호환성 escape hatch
-
-`TAPL_ENABLE_LEGACY_WORKFLOW_CLI=1`은 지원되지 않는 migration 또는 diagnostic
-compatibility에만 임시로 retired workflow CLI를 활성화합니다. 일반 interface가
-아니며 agent, script, viewer가 사용하면 안 됩니다.
-
-## 설치 상세
-
-### 필요 환경
-
-- `venv` 모듈이 포함된 Python 3.11 이상. 함께 제공하는 Homebrew formula는
-  `python@3.12`를 사용합니다.
+- `venv` 모듈을 포함한 Python 3.11 이상. Homebrew는 `python@3.12`를 사용합니다.
 - FTS5와 extension loading을 지원하는 SQLite.
-- Windows 독립형 설치 프로그램의 경우 Windows 10 또는 11, 그리고 Windows PowerShell
-  5.1 이상 또는 PowerShell 7.
-- 함께 제공하는 formula로 설치할 경우 Homebrew.
-- Source 개발 또는 build를 할 경우 `uv`.
-- `taplctl viewer`용 웹 브라우저. VS Code는 선택 가능한 extension에만 필요합니다.
+- formula 설치에는 Homebrew, source 개발에는 `uv`.
+- Windows installer에는 Windows PowerShell 5.1 이상 또는 PowerShell 7.
+- `taplctl viewer`에는 browser, 선택 extension에는 VS Code.
 
-### Linux (`curl | sh`)
+release wheel은 platform-independent이지만 Python dependency에는 호환되는 wheel이 필요합니다. 드문 architecture, 아주 새로운 Python release, Alpine 같은 musl Linux는 local build tool이 필요할 수 있습니다.
 
-독립형 설치 프로그램은 Linux를 지원하며 함께 제공되는 브라우저 viewer를 포함한
-`taplctl` CLI를 설치합니다.
+### macOS + Homebrew
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
-```
-
-`curl`, `venv` 모듈이 포함된 Python 3.11 이상, 그리고 쓰기 가능한 설치 디렉터리가
-필요합니다. 기본 설치 경로는 `${XDG_DATA_HOME:-$HOME/.local/share}/tapl` 및
-`${XDG_BIN_HOME:-$HOME/.local/bin}`입니다. 다른 경로가 필요하면 해당 XDG 변수 또는
-`TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`를 설정하세요.
-
-설치 프로그램은 shell 시작 파일이나 Codex hook을 수정하지 않습니다. `PATH` export가
-출력되면 현재 shell에서 실행하고, 이후 shell에도 적용되도록 shell 설정 파일에 추가하세요.
-`PATH`에서 `taplctl`을 찾을 수 있게 되면 [Codex hook 설정](#codex-hook-설정)에 나온 것처럼
-`taplctl install user`(또는 `taplctl install repo`)를 실행하세요.
-
-### Windows (`irm | iex`)
-
-PowerShell 설치 프로그램은 Windows 10과 11을 지원하며 함께 제공되는 브라우저
-viewer를 포함한 `taplctl` CLI를 설치합니다.
-
-```powershell
-irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
-```
-
-Windows PowerShell 5.1 이상 또는 PowerShell 7, `venv` 모듈이 포함된 Python 3.11 이상,
-그리고 쓰기 가능한 사용자별 설치 디렉터리가 필요합니다. 기본 관리 설치 루트는
-`%LOCALAPPDATA%\tapl`이고 공개 launcher는 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다.
-`TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`, `TAPL_INSTALL_MANIFEST_URL`로 각각 설치 루트,
-launcher 디렉터리, release manifest URL을 재정의할 수 있습니다.
-
-설치 프로그램은 launcher 디렉터리가 사용자 `PATH`에 아직 없을 때만 한 번 추가하고,
-현재 PowerShell 세션도 갱신합니다. 새 프로세스에는 사용자 `PATH` 항목이 적용되며,
-시스템 `PATH`는 바꾸지 않고 관리자 권한도 필요하지 않습니다. Codex hook은 자동으로
-설치하지 않습니다. `PATH`에서 `taplctl`을 찾을 수 있게 되면 [Codex hook 설정](#codex-hook-설정)에
-나온 것처럼 `taplctl install user`(또는 `taplctl install repo`)를 실행하세요.
-
-설치 프로그램은 release manifest를 검증하고, 활성화 전에 내려받은 wheel이 공개된
-SHA-256과 일치하는지 확인합니다. `irm | iex` 명령을 사용할 때는 환경의 신뢰 절차에 맞게
-script source도 검토하세요. CLI wheel 자체는 platform-independent이지만 Python 의존성은
-Windows Python version 및 architecture와 호환되는 wheel이 필요합니다. 일반적인 지원 Windows
-Python 환경에서는 pip가 이를 설치하지만, 드문 architecture 또는 아주 새로운 Python release에서는
-호환 wheel이 없어 build tool이 필요하거나 설치에 실패할 수 있습니다.
-
-### Homebrew
+tap을 한 번 추가하고 trust합니다.
 
 ```sh
 brew tap qkdxorjs1002/tap
 brew trust --formula qkdxorjs1002/tap/taplctl
 ```
 
-그 다음 두 formula 중 하나만 설치합니다.
+formula는 정확히 하나만 설치하세요.
 
 ```sh
-# 기본 workflow tracking
+# 안정 release, 전문 검색
 brew install taplctl
-```
 
-```sh
-# Semantic search 지원 포함
+# 안정 release, semantic/vector search dependency 포함
 brew install taplctl-semantic
+
+# 공개된 최신 release: 안정판 또는 prerelease
+brew trust --formula qkdxorjs1002/tap/taplctl@pre
+brew install taplctl@pre
 ```
 
-두 formula 모두 release에 포함된 wheel bundle에서 고정된 MCP runtime을 설치합니다.
-Semantic formula는 여기에 선택 기능인 embedding 및 vector search stack을 추가합니다.
-Homebrew 설치 중에는 PyPI에서 Python package 의존성을 해석하지 않습니다.
+`taplctl`과 `taplctl-semantic`은 안정 release만 따릅니다. `taplctl@pre`는 prerelease여도 공개된 가장 최신 release를 따릅니다. 세 formula는 같은 executable을 설치하므로 함께 설치할 수 없습니다. 바꾸려면 먼저 현재 formula를 제거하세요. 예: `brew uninstall taplctl`.
 
-설치한 formula에 맞춰 브라우저 viewer를 로그인 시 자동 시작할 수 있습니다.
+Homebrew는 release-hosted wheel bundle의 고정 dependency를 설치하며, 설치 중 PyPI에서 package를 해석하지 않습니다.
 
-```sh
-brew services start taplctl
-# 또는
-brew services start taplctl-semantic
-```
-
-두 formula service 모두 `taplctl viewer`를 `127.0.0.1:8000`에서 실행합니다.
-해당 URL을 열고 첫 방문 시 workspace를 선택하세요. Semantic formula의 Homebrew
-service는 의도적으로 `searchd`를 시작하지 않습니다. Semantic model을 미리
-로딩하려면 별도로 실행하세요.
+<details>
+<summary>Linux 독립형 installer</summary>
 
 ```sh
-taplctl searchd start
-taplctl searchd status
-```
-
-8000 포트가 사용 중이면 Homebrew service를 중지한 뒤
-`taplctl viewer --port PORT`를 수동 실행하세요.
-
-### Codex hook 설정
-
-어떤 방식으로 `taplctl`을 설치했든, 다음 중 Codex에 연결할 범위를 선택하세요.
-
-```sh
-# 대부분의 사용자: 내 Codex 계정에 한 번 설치
-taplctl install user
-
-# 또는 현재 repository에만 설치
-taplctl install repo
-```
-
-설치 프로그램은 `tapl-mcp`를 실행하는 활성화된 `mcp_servers.tapl` 항목과
-`tapl-hook` hook entry를 추가합니다. 생성된 stdio 서버와 hook이 로드되도록
-설치 후 Codex를 재시작하세요.
-
-설치 후 Codex가 처음 확인을 요청할 때 설치된 hook을 trust 해주세요.
-
-<p align="center">
-  <img src="assets/tapl-trust-hook.png" alt="설치된 tapl hook에 대한 Codex trust prompt" />
-</p>
-
-설치 병합 정책:
-
-- `hooks.json`은 managed merge를 합니다. 기존 non-tapl hook은 보존하고, tapl이
-  관리하는 hook만 교체합니다.
-- `.codex/config.toml`은 TOML 병합을 합니다. 기존 사용자 값이 우선하고,
-  tapl template에만 있는 누락 key와 TAPL `tapl-mcp` 서버 설정을 추가합니다.
-  생성된 hook entry는 `tapl-hook`을 실행하며 workflow data plane에 `taplctl`을
-  사용하지 않습니다.
-- tapl runtime `config.toml`(`.tapl/config.toml` 또는 `~/.tapl/config.toml`)은
-  최초 설치 때 생성합니다. 설치된 tapl version이 바뀌면 updated default로
-  덮어쓸지, 기존 값을 유지하면서 누락된 default key만 추가할지 묻습니다.
-  hook/JSON 같은 non-interactive refresh에서는 기존 값을 유지하고 누락 key만
-  추가합니다.
-- `--force`는 managed key에 대해 tapl template 값을 우선하게 하되, 관련 없는
-  Codex config key는 보존하고 tapl runtime `config.toml`은 덮어씁니다.
-- `--tapl-config-policy {prompt,overwrite,merge}`로 tapl runtime config upgrade
-  동작을 명시할 수 있습니다.
-- Agent template은 기본적으로 create-or-skip이며, `--force`를 주면 덮어씁니다.
-
-### Source
-
-```sh
-cd tapl
-uv sync
-uv run taplctl --version
-uv build
-```
-
-Source checkout에서 선택 기능인 semantic search를 개발하거나 실행할 때는
-`uv sync --extra semantic`을 사용하세요.
-
-### 업데이트
-
-`taplctl update`는 Linux `curl | sh` 또는 Windows PowerShell 설치 프로그램으로 설치한
-경우를 관리합니다. 업데이트를 활성화하기 전에 release manifest와 wheel SHA-256을 검증합니다.
-Homebrew 또는 source checkout으로 설치한 경우에는 변경하지 않습니다.
-
-```sh
-# Linux curl-sh 설치
-taplctl update --check
-taplctl update
-
-# 동일한 방법: 설치 프로그램을 다시 실행해 최신 관리 release 가져오기
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
 ```
 
-```powershell
-# Windows PowerShell managed 설치
-taplctl update --check
-taplctl update
+installer에는 `curl`, Python 3.11+와 `venv`, 쓰기 가능한 install directory가 필요합니다. 기본값은 `${XDG_DATA_HOME:-$HOME/.local/share}/tapl`과 `${XDG_BIN_HOME:-$HOME/.local/bin}`입니다. 해당 XDG 변수 또는 `TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`로 바꿀 수 있습니다.
 
-# 동일한 방법: 설치 프로그램을 다시 실행해 최신 managed release 가져오기
+shell startup file이나 Codex hook은 수정하지 않습니다. 출력된 `PATH` export를 적용하고 필요하면 영구적으로 설정한 뒤, 아래에서 TAPL을 Codex에 연결하세요.
+
+</details>
+
+<details>
+<summary>Windows 독립형 installer</summary>
+
+```powershell
 irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
 ```
 
-Homebrew 설치는 설치한 formula에 맞게 업데이트하세요.
+installer는 Windows 10/11, Windows PowerShell 5.1+ 또는 PowerShell 7, Python 3.11+와 `venv`, 쓰기 가능한 user directory를 지원합니다. 기본값은 `%LOCALAPPDATA%\tapl`, launcher는 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다. `TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`, `TAPL_INSTALL_MANIFEST_URL`로 경로나 manifest를 바꿀 수 있습니다.
+
+user `PATH`만 갱신하고 administrator 권한은 필요하지 않습니다. activation 전에 release manifest를 검증하고 wheel SHA-256을 확인합니다. Codex hook은 자동 설치하지 않습니다. 별도의 신뢰 절차가 필요한 환경이라면 script를 먼저 검토하세요.
+
+</details>
+
+### TAPL을 Codex에 연결
+
+설치한 패키지에 맞는 명령으로 연결하세요. v2 `@pre`에서는 아래처럼 `libexec`의
+명시적 경로를 써야 같은 번들 wheel 환경에 들어 있는 전용 `tapl-mcp`와 `tapl-hook`을
+찾습니다.
+
+현재 v2 beta Homebrew formula(`taplctl@pre`):
 
 ```sh
-# 기본 formula
-brew update && brew upgrade taplctl
-
-# Semantic search formula
-brew update && brew upgrade taplctl-semantic
+taplctl install user --taplctl-command "$(brew --prefix taplctl@pre)/libexec/bin/taplctl"
 ```
 
-Source checkout은 source workflow로 checkout과 의존성을 업데이트하세요. Release CLI
-wheel은 platform-independent이지만, Python 의존성에는 대상 platform과 호환되는 wheel이
-여전히 필요합니다. 특히 Alpine처럼 musl 기반인 Linux 시스템에서는 호환되는 wheel 또는
-로컬 build tool이 필요할 수 있습니다. Windows에서도 드문 architecture 또는 아주 새로운
-Python release에서는 같은 상황이 발생할 수 있으며, 의존성을 설치하지 못하면 설치에 실패할 수
-있습니다.
+현재 안정 `taplctl` 또는 `taplctl-semantic` 1.7 formula에도 위 명령의
+`taplctl@pre`를 바꿔 넣을 수 있습니다. 다만 이 formula는 v2 전용 실행 파일이 아니라
+해당 release의 호환 통합 경로를 사용합니다.
 
-## 자주 쓰는 명령
+Linux 독립형 설치:
 
 ```sh
-taplctl init --workspace-root /path/to/workspace
-taplctl doctor
-taplctl install user
-taplctl install repo
+taplctl install user --taplctl-command "$(realpath "$(command -v taplctl)")"
+```
+
+Windows 독립형 설치:
+
+```powershell
+$taplRoot = if ($env:TAPL_INSTALL_ROOT) { $env:TAPL_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA "tapl" }
+$taplInstall = Get-Content -Raw (Join-Path $taplRoot "install.json") | ConvertFrom-Json
+taplctl install user --taplctl-command (Join-Path $taplInstall.venv "Scripts\taplctl.exe")
+```
+
+위 명령은 Codex 계정 전체에 연결합니다. 현재 저장소에만 연결하려면 `user`를 `repo`로
+바꾸세요.
+
+이 명령은 `tapl-mcp`를 위한 활성화된 `mcp_servers.tapl` entry와 `tapl-hook` Codex
+lifecycle hook을 추가합니다. 이후 Codex를 재시작하세요. Codex가 처음 확인을 요청하면
+설치된 hook을 신뢰합니다.
+
+<p align="center">
+  <img src="assets/tapl-trust-hook.png" alt="설치된 TAPL hook에 대한 Codex trust prompt" />
+</p>
+
+## TAPL 사용하기
+
+### Viewer 열기
+
+초기화된 workspace에서 실행합니다.
+
+```sh
 taplctl viewer
-taplctl viewer --port 9000
+# tapl viewer: http://127.0.0.1:8000
+
+taplctl viewer --port 9000  # 8000 포트가 사용 중일 때
+```
+
+viewer는 `127.0.0.1`에서만 listen하고 browser를 자동으로 열지 않으며 `Ctrl+C`로
+종료합니다. 가장 가까운 `.tapl/tapl.db`가 선택됩니다. Homebrew login service처럼
+workspace 없이 시작했다면 페이지가 초기화된 workspace folder를 물어보고, 성공한 최근
+선택을 그 browser에 기억합니다.
+
+설치한 Homebrew formula를 login 때 자동 시작하려면 `brew services start taplctl`,
+`brew services start taplctl-semantic`, 또는 `brew services start taplctl@pre`를
+사용하세요. 모든 service는 8000 포트에서 viewer를 제공합니다.
+
+semantic formula는 preloaded search process를 의도적으로 시작하지 않습니다. 필요하면
+`taplctl searchd start`와 `taplctl searchd status`를 실행하세요.
+
+선택 VS Code extension은 workspace별 persistent `tapl-mcp` client를 사용합니다.
+executable을 못 찾으면 `taplWorkflow.taplMcpPath`를 설정하세요.
+`taplWorkflow.taplctlPath`는 sibling `tapl-mcp`를 찾는 legacy locator일 뿐 workflow
+command path가 아닙니다.
+
+### 재개와 검색
+
+Codex는 typed MCP tool로 current state, archive detail, history를 읽습니다. SQLite FTS는
+모든 설치에서 동작합니다. embedding/vector search에는 semantic extra 또는
+`taplctl-semantic` formula를 설치하고, 기존 workspace의 index를 다시 만들 때는
+`taplctl reindex`를 사용하세요.
+
+### 병렬 작업
+
+TAPL은 execution manifest를 조율하지만 worker를 spawn하지는 않습니다. Codex/root
+runtime이 SubAgent를 만들고 관리합니다. 병렬 task는 dependency가 완료되고 서로 겹치지
+않는 file 또는 directory를 소유할 때만 유효합니다. 기본적으로 순차 task는 main agent가
+수행합니다.
+
+## 동작 방식
+
+```mermaid
+flowchart LR
+    U[사용자] --> C[Codex]
+    C --> M[tapl-mcp<br/>typed workflow tools]
+    C --> H[tapl-hook<br/>context와 lifecycle guard]
+    M --> D[(.tapl/tapl.db)]
+    H --> D
+    D --> V[Browser / VS Code viewer]
+```
+
+`tapl-mcp`는 workflow application을 직접 호출하며 `taplctl` command나 CLI JSON data
+plane을 감싸지 않습니다. `tapl-hook`은 Codex lifecycle 지점에서 간결한 current state를
+더하고 durable-edit boundary를 지킵니다. SQLite database는 Codex, hook, viewer가 공유하는
+source of truth입니다.
+
+`taplctl`은 management-only입니다. 제공하는 것은 `init`, `doctor`, `update`, `install`,
+`viewer`, `reindex`, `searchd`, `import-md`뿐입니다. agent는 workflow record를 만들거나,
+dispatch·정산·검색·조회하려고 이 CLI를 사용해서는 안 됩니다.
+
+## 설치 관리
+
+| 명령 | 용도 |
+| --- | --- |
+| `taplctl init --workspace-root /path/to/workspace` | workspace root 선택 또는 초기화 |
+| `taplctl doctor` | 설치와 workspace 문제 진단 |
+| `taplctl install SCOPE --taplctl-command PATH` | Codex integration 설치 또는 갱신 |
+| `taplctl viewer [--port 9000]` | local browser viewer 열기 |
+| `taplctl update --check` / `update` | 독립형 설치 업데이트 확인 또는 실행 |
+| `taplctl reindex` | search index 다시 만들기 |
+| `taplctl searchd start` / `status` | 선택 semantic search process 관리 |
+| `taplctl import-md PATH` | legacy Markdown workflow 가져오기 |
+
+### 업데이트
+
+Linux와 Windows 독립형 설치:
+
+```sh
 taplctl update --check
 taplctl update
-taplctl reindex
-taplctl searchd start
-taplctl searchd status
-taplctl import-md /path/to/legacy-workflow
 ```
 
-workflow state, validation, search, item detail, archive는 `tapl-mcp` tool을
-사용하세요. Management CLI는 위 명령으로 의도적으로 제한됩니다.
+updater는 release manifest와 wheel SHA-256을 검증합니다. Homebrew와 source checkout은
+업데이트하지 않습니다. Homebrew라면 설치한 formula에 맞춰 `brew update` 후
+`brew upgrade taplctl`, `brew upgrade taplctl-semantic`, 또는 `brew upgrade taplctl@pre`를
+사용하세요.
 
-### SubAgent 위임 설정
+<details>
+<summary>Workspace와 설치 설정</summary>
 
-TAPL은 repo-local `.tapl/config.toml`을 `~/.tapl/config.toml`보다 먼저 읽으므로,
-두 파일이 모두 있으면 repository 설정이 우선합니다. TAPL이 위임 정책과
-model/reasoning allowlist를 MCP 서버 지침에 포함할지 다음과 같이 설정합니다.
+TAPL은 `.tapl/config.toml`을 `~/.tapl/config.toml`보다 먼저 읽습니다. database는
+workspace anchor 역할도 합니다. 상위 database가 없으면 첫 hook이 payload working
+directory를 초기화하고, nested Git repository는 가장 가까운 workspace database를
+재사용합니다. 의도적으로 독립된 nested repository에는 그 안에서
+`taplctl init --workspace-root PATH`를 실행해 별도 history를 만드세요.
+
+installation은 관련 없는 Codex setting을 보존합니다. `hooks.json`은 managed merge되고,
+`.codex/config.toml`은 기존 user value를 우선하는 TOML merge입니다. runtime config는 첫
+install에 생성됩니다. upgrade 때 default overwrite 또는 누락 key merge를 물을 수
+있습니다. TAPL managed template value를 우선하려면 `--force`를, runtime config policy를
+명시하려면 `--tapl-config-policy {prompt,overwrite,merge}`를 사용하세요.
+
+</details>
+
+<details>
+<summary>SubAgent delegation 설정</summary>
 
 ```toml
 [subagents]
@@ -414,60 +314,33 @@ enabled = true
 [subagents.models]
 "gpt-5.6-sol" = ["xhigh", "max"]
 "gpt-5.6-terra" = ["high", "xhigh", "max"]
-"gpt-5.6-luna" = ["high", "xhigh"]
 ```
 
-활성화하면 MCP 정책은 root agent가 모든 실행 작업의 복잡도를 판단하고,
-설정된 model/reasoning 조합 중 효율적인 조합으로 해당 작업을 SubAgent에게
-위임하도록 합니다. `UserPromptSubmit` 컨텍스트도 그 권위 있는 정책이 승인된 실행
-작업의 위임을 선택하면 별도의 사용자 요청 없이 SubAgent 위임을 명시적으로
-요청합니다. TAPL이 제공하는 이 지시 내용을 끄려면 다음처럼 설정합니다.
+활성화하면 TAPL은 delegation policy와 model/reasoning allowlist를 MCP instruction에
+포함합니다. runtime은 이 allowlist 중 실제 지원하는 pair만 사용할 수 있습니다.
+`enabled = false`로 TAPL의 delegation guidance를 빼도 `AGENTS.md` 같은 다른 source의
+delegation instruction은 제거되지 않습니다.
 
-```toml
-[subagents]
-enabled = false
-```
+plan/task policy는 고정입니다. 실행 작업은 상세 plan, 명시적인 plan confirmation,
+독립적으로 나뉜 task, durable edit 전의 기록된 approval을 사용합니다.
 
-`enabled = false`이면 TAPL은 `UserPromptSubmit` 위임 요청, SubAgent 위임 정책,
-model/reasoning allowlist를 포함하지 않습니다. 이 설정은 `AGENTS.md`처럼 다른
-출처에 있는 별도의 위임 지시까지 제거하지는 않습니다.
+</details>
 
-설정한 model 목록은 정책상 allowlist일 뿐이며, runtime에 model을 설치하거나
-지원 가능 여부를 보장하지는 않습니다. Root agent는 설정된 model/reasoning
-조합과 현재 runtime이 실제 지원하는 조합의 교집합만 사용해야 하며, 지원하지
-않는 설정 조합을 선택해서는 안 됩니다. 이 교집합이 비어 있으면 root agent가
-해당 작업을 직접 실행합니다.
+### 문제 해결
 
-Plan/task workflow 정책은 config로 바꿀 수 없습니다. TAPL은 항상 매우 상세한
-계획, 계획 확정 전의 명시적 사용자 승인, 독립된 edit·migration·verification 단위의
-작업 분할, durable edit 전의 실행 승인 기록을 요구합니다. 이 고정 정책은 MCP
-서버 지침과 typed tool schema가 제공하며 CLI help는 수동 fallback일 뿐입니다.
+| 증상 | 할 일 |
+| --- | --- |
+| Codex가 TAPL을 찾지 못함 | `taplctl doctor` 실행, 위 환경별 연결 명령으로 갱신 후 Codex 재시작 |
+| 독립형 설치 뒤 `taplctl`을 찾지 못함 | installer가 출력한 `PATH` export를 적용하고 shell profile에 추가 |
+| viewer가 workspace를 찾지 못함 | 초기화하거나 `.tapl/tapl.db`가 있는 folder를 선택 |
+| 8000 포트 사용 중 | Homebrew service를 멈추거나 `taplctl viewer --port PORT` 실행 |
+| Homebrew formula 충돌 | 다른 formula를 선택하기 전에 설치된 TAPL formula 제거 |
 
-## 소스 구조
+`TAPL_ENABLE_LEGACY_WORKFLOW_CLI=1`은 지원되지 않는 migration 또는 diagnostic에만
+retired workflow CLI를 임시로 노출합니다. 일반 interface가 아니며 agent, script,
+viewer가 사용해서는 안 됩니다.
 
-```text
-.
-├── .codex/                    # taplctl install repo가 생성하는 repo-local 파일
-├── .tapl/config.toml          # Repo-local runtime config
-├── tapl/.codex/               # taplctl package에 포함되는 Codex config/hook template
-├── tapl/.tapl/config.toml     # 기본 tapl config template
-├── tapl/taplctl/              # Python CLI와 workflow harness 구현
-├── tapl/tests/                # Python tests
-├── tapl/pyproject.toml        # taplctl package metadata
-├── vscode-extension/          # Optional VS Code workflow viewer
-├── README.md                  # English README
-└── README.ko.md               # Korean README
-```
-
-Runtime state와 local build output은 source contract에 포함하지 않습니다.
-
-```text
-.tapl/tapl.db
-tapl/.venv/
-tapl/dist/
-```
-
-## Contributor 검증
+## 개발
 
 ```sh
 uv --directory tapl sync --extra test
@@ -476,6 +349,8 @@ uv --directory tapl build
 npm --prefix vscode-extension run compile
 git diff --check
 ```
+
+semantic search를 개발할 때는 `uv --directory tapl sync --extra semantic`을 사용하세요.
 
 ## 라이선스
 
