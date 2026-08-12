@@ -3660,6 +3660,7 @@ keep = true
             (repo / ".tapl" / "config.toml").write_text("[search]\nmax_results = 5\n", encoding="utf-8")
             (home / ".tapl" / "version").write_text("0.0.0\n", encoding="utf-8")
             (repo / ".tapl" / "version").write_text("0.0.0\n", encoding="utf-8")
+            tapl_db.initialize_workspace(repo)
 
             original_stdin = sys.stdin
             try:
@@ -3691,6 +3692,68 @@ keep = true
             self.assertNotIn("plan_task_execute", user_config)
             self.assertNotIn("plan-task-execute", repo_config)
             self.assertNotIn("plan_task_execute", repo_config)
+
+    def test_auto_install_skips_uninitialized_repo_but_refreshes_stale_user(self) -> None:
+        def add_install_evidence(scope: Path, evidence: str) -> Path:
+            if evidence == "version":
+                path = scope / ".tapl" / "version"
+                path.parent.mkdir(parents=True)
+                path.write_text("0.0.0\n", encoding="utf-8")
+                return path
+            if evidence == "config":
+                path = scope / ".tapl" / "config.toml"
+                path.parent.mkdir(parents=True)
+                path.write_text("[search]\nmax_results = 4\n", encoding="utf-8")
+                return path
+            if evidence == "hook":
+                path = scope / ".codex" / "hooks.json"
+                path.parent.mkdir(parents=True)
+                path.write_text(
+                    json.dumps(
+                        {
+                            "hooks": {
+                                "UserPromptSubmit": [
+                                    {
+                                        "hooks": [
+                                            {
+                                                "type": "command",
+                                                "command": "taplctl hook-event --event UserPromptSubmit --mode observe",
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return path
+            self.fail(f"unknown install evidence: {evidence}")
+
+        for evidence in ("version", "config", "hook"):
+            with self.subTest(evidence=evidence), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                home = base / "home"
+                repo = base / "repo"
+                repo.mkdir()
+                user_evidence = add_install_evidence(home, evidence)
+                repo_evidence = add_install_evidence(repo, evidence)
+                repo_evidence_before = repo_evidence.read_bytes()
+
+                results = tapl_install.auto_install_if_needed(start=repo, home=home)
+
+                self.assertEqual([result["install"] for result in results], ["user"])
+                self.assertEqual(
+                    (home / ".tapl" / "version").read_text(encoding="utf-8").strip(),
+                    __version__,
+                )
+                self.assertTrue(user_evidence.exists())
+                self.assertEqual(repo_evidence.read_bytes(), repo_evidence_before)
+                self.assertFalse((repo / tapl_db.DEFAULT_DB_RELATIVE).exists())
+                self.assertNotEqual(
+                    tapl_install.installed_version(repo / ".tapl" / "version"),
+                    __version__,
+                )
 
     def test_auto_install_does_not_treat_repo_db_as_install_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

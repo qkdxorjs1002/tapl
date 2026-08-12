@@ -203,8 +203,13 @@ def user_scope_needs_install(home: Path) -> bool:
 
 
 def repo_scope_needs_install(root: Path) -> bool:
+    db_path = root / db.DEFAULT_DB_RELATIVE
     version_path = root / VERSION_RELATIVE
-    return scope_has_repo_install(root) and installed_version(version_path) != __version__
+    return (
+        db_path.is_file()
+        and scope_has_repo_install(root)
+        and installed_version(version_path) != __version__
+    )
 
 
 def scope_has_user_install(home: Path) -> bool:
