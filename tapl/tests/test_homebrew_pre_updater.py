@@ -72,6 +72,9 @@ class HomebrewPrereleaseFormulaUpdaterTests(unittest.TestCase):
             r"assert_match(/taplctl \d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?\z/",
             formula_after_first,
         )
+        self.assertIn('bin.install_symlink libexec/"bin/tapl-mcp"', formula_after_first)
+        self.assertIn('bin.install_symlink libexec/"bin/tapl-hook"', formula_after_first)
+        self.assertIn('assert_path_exists bin/"tapl-hook"', formula_after_first)
         self.assertTrue(self.pre_alias.is_symlink())
         self.assertEqual(self.pre_alias.readlink(), Path("../Formula/taplctl-pre.rb"))
 

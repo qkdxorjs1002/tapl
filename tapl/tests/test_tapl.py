@@ -1075,7 +1075,7 @@ class TaplCliTests(unittest.TestCase):
             self.assertEqual(context.returncode, 0, context.stderr)
             self.assertIn("<tapl_context>", context.stdout)
             self.assertIn("tapl_get_next", context.stdout)
-            self.assertIn("Do not run `taplctl --help`", context.stdout)
+            self.assertNotIn("taplctl", context.stdout)
             self.assertNotIn("taplctl status --agent", context.stdout)
             self.assertNotIn("taplctl approval set --help", context.stdout)
             self.assertNotIn("taplctl approval set --decision approved", context.stdout)
@@ -2753,7 +2753,7 @@ searchd_start_timeout_ms = 1
             manual_guidance = "\n".join(manual_payload["workflow_guidance"])
             self.assertIn("# TAPL MCP", manual_guidance)
             self.assertIn("Call `tapl_get_next`", manual_guidance)
-            self.assertIn("Do not run `taplctl --help`", manual_guidance)
+            self.assertNotIn("taplctl", manual_guidance)
             self.assertNotIn("## Role Boundaries", manual_guidance)
 
             prompt_context = self.run_cli(db_path, "context", "--event", "UserPromptSubmit", "--json")
@@ -2768,9 +2768,10 @@ searchd_start_timeout_ms = 1
             prompt_guidance = "\n".join(prompt_payload["workflow_guidance"])
             self.assertIn("MCP server instructions", prompt_guidance)
             self.assertIn("Call `tapl_get_next`", prompt_guidance)
-            self.assertIn("Do not run `taplctl --help`", prompt_guidance)
+            self.assertNotIn("taplctl", prompt_guidance)
             self.assertNotIn("Planning must happen before implementation", prompt_guidance)
             server_guidance = tapl_mcp.create_server(workspace_root=ROOT).instructions
+            self.assertNotIn("taplctl", server_guidance)
             self.assertIn("Planning must happen before implementation", server_guidance)
             self.assertIn("## Role Boundaries", server_guidance)
             self.assertIn("## Planning", server_guidance)
@@ -2924,7 +2925,7 @@ searchd_start_timeout_ms = 1
             self.assertIn("# TAPL MCP", prompt_text.stdout)
             self.assertIn("MCP server instructions", prompt_text.stdout)
             self.assertIn("Call `tapl_get_next`", prompt_text.stdout)
-            self.assertIn("Do not run `taplctl --help`", prompt_text.stdout)
+            self.assertNotIn("taplctl", prompt_text.stdout)
             self.assertNotIn("Planning must happen before implementation", prompt_text.stdout)
 
     def test_command_help_exposes_field_guidance(self) -> None:
@@ -3785,7 +3786,7 @@ keep = true
             self.assertIn("durable edit requires", blocked.stderr)
             self.assertIn("Workflow state lives in the repo-local TAPL database", blocked.stderr)
             self.assertIn("installed `tapl_*` MCP tools", blocked.stderr)
-            self.assertIn("manual fallback only", blocked.stderr)
+            self.assertNotIn("taplctl", blocked.stderr)
 
             self.run_cli(
                 db_path,
@@ -3975,7 +3976,7 @@ keep = true
             self.assertIn("# TAPL MCP", event.stdout)
             self.assertIn("MCP server instructions", event.stdout)
             self.assertIn("Call `tapl_get_next`", event.stdout)
-            self.assertIn("Do not run `taplctl --help`", event.stdout)
+            self.assertNotIn("taplctl", event.stdout)
             self.assertNotIn("Planning must happen before implementation", event.stdout)
             self.assertIn("## Next Actions", event.stdout)
             self.assertIn("Create or update plan state", event.stdout)
@@ -4258,7 +4259,7 @@ enabled = false
             self.assertEqual(payload["context"]["prompt_summary"], "Implement isolated workflow")
             self.assertIn("# TAPL MCP", guidance)
             self.assertIn("MCP server instructions", guidance)
-            self.assertIn("Do not run `taplctl --help`", guidance)
+            self.assertNotIn("taplctl", guidance)
             self.assertNotIn("## Role Boundaries", guidance)
             self.assertIn("tapl_summarize_run", next_actions)
             self.assertIn("Create or update plan state", next_actions)

@@ -168,6 +168,7 @@ def install_block(indent)
     "#{indent}         \"--no-index\", \"--no-deps\", \"--no-compile\", wheel\n",
     "#{indent}  bin.install_symlink libexec/\"bin/taplctl\"\n",
     "#{indent}  bin.install_symlink libexec/\"bin/tapl-mcp\"\n",
+    "#{indent}  bin.install_symlink libexec/\"bin/tapl-hook\"\n",
     "#{indent}end\n",
   ]
 end
@@ -176,6 +177,7 @@ def smoke_test_block(indent)
   [
     "#{indent}  #{SMOKE_BEGIN}\n",
     "#{indent}  assert_path_exists bin/\"tapl-mcp\"\n",
+    "#{indent}  assert_path_exists bin/\"tapl-hook\"\n",
     "#{indent}  system libexec/\"bin/python\", \"-c\",\n",
     "#{indent}         \"from mcp.server import MCPServer; from taplctl.mcp_server import create_server; assert create_server()\"\n",
     "#{indent}  #{SMOKE_END}\n",

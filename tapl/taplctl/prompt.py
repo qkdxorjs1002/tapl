@@ -193,7 +193,7 @@ AGENT_ITEM_FIELDS = {
     "finding": ("body", "impact", "related_ids"),
 }
 
-MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is the workflow system for this workspace. Its `tapl_*` MCP tools call the repo-local workflow application directly; do not construct or execute `taplctl` shell commands for agent workflows. Call `tapl_get_status` and `tapl_get_next` before non-trivial work or whenever state is uncertain, and use `tapl_get_context` when lifecycle guidance is needed. These server instructions, tool descriptions, and JSON schemas are the authoritative workflow and field contract; do not call CLI `--help` to rediscover them. The `taplctl` CLI remains a manual repair fallback only when this MCP server is unavailable.
+MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is the workflow system for this workspace. Its `tapl_*` MCP tools call the repo-local workflow application directly. Call `tapl_get_status` and `tapl_get_next` before non-trivial work or whenever state is uncertain, and use `tapl_get_context` when lifecycle guidance is needed. These server instructions, tool descriptions, and JSON schemas are the authoritative workflow and field contract.
 
 # Workflow
 
@@ -202,7 +202,7 @@ Write workflow records and reports in the user's language unless asked otherwise
 ## Role Boundaries
 
 - Workflow state lives in the repo-local TAPL database behind the in-process workflow application used by these tools.
-- Prefer high-level lifecycle tools and `tapl_get_next`; use the CLI only for manual repair when MCP is unavailable.
+- Use high-level lifecycle tools and `tapl_get_next` to manage workflow state.
 - Do not modify source, tests, docs, configs, migrations, generated files, or other durable project artifacts before execution approval.
 - TAPL run, plan, task, finding, approval, and archive records may be created or updated before execution approval.
 - Do not commit, push, rebase, reset, discard changes, or include workflow records in commits unless explicitly requested.
@@ -256,11 +256,11 @@ Record the final result with `tapl_finish_run` before archiving with `tapl_finis
 
 CONTEXT_INJECTION_PROMPT_TEMPLATE = """# TAPL MCP
 
-Use the installed `tapl_*` MCP tools for workflow state. The MCP server instructions, tool descriptions, and input schemas contain the authoritative workflow policy and field contracts. Call `tapl_get_next` for the current safe action. Do not run `taplctl --help`; use the CLI only as a manual fallback when the MCP server is unavailable."""
+Use the installed `tapl_*` MCP tools for workflow state. The MCP server instructions, tool descriptions, and input schemas contain the authoritative workflow policy and field contracts. Call `tapl_get_next` for the current safe action."""
 
 SESSION_START_GUIDANCE_TEMPLATE = """# TAPL MCP
 
-SessionStart is bootstrap only; wait for a concrete user request before creating workflow records. Use the installed `tapl_*` MCP tools and their server instructions; the CLI is a manual fallback only."""
+SessionStart is bootstrap only; wait for a concrete user request before creating workflow records. Use the installed `tapl_*` MCP tools and their server instructions."""
 
 STOP_GUIDANCE_TEMPLATE = """# TAPL MCP
 
@@ -801,10 +801,7 @@ def taplctl_execution_guidance() -> str:
 
 
 def taplctl_command_guidance() -> str:
-    return (
-        "Use the installed `tapl_*` MCP tools and their typed schemas for agent workflows. "
-        "The `taplctl` CLI is a manual fallback only when MCP is unavailable."
-    )
+    return "Use the installed `tapl_*` MCP tools and their typed schemas for agent workflows."
 
 
 def external_findings_guidance() -> str:

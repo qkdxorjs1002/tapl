@@ -163,9 +163,10 @@ different trust process.
 
 ### Connect TAPL to Codex
 
-Connect with the command for the package you installed. For v2 `@pre`, the
-explicit libexec path gives the installer the dedicated sibling `tapl-mcp` and
-`tapl-hook` executables from the same bundled wheel environment.
+Connect with the command for the package you installed. For the currently
+published v2 `@pre`, the explicit libexec path lets the installer find the
+dedicated sibling `tapl-mcp` and `tapl-hook` executables even though
+`tapl-hook` is not linked into Homebrew's public `bin` directory.
 
 Homebrew (`taplctl@pre`):
 
@@ -175,7 +176,8 @@ taplctl install user --taplctl-command "$(brew --prefix taplctl@pre)/libexec/bin
 
 The same substitution works with the current stable `taplctl` and
 `taplctl-semantic` 1.7 formulae, but they use that release's compatibility
-integration rather than dedicated v2 executables.
+integration rather than dedicated v2 executables. Future formula updates link
+`tapl-hook` directly as well, after which `taplctl install user` is sufficient.
 
 Linux standalone installer:
 

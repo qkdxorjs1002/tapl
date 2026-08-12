@@ -176,6 +176,8 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
             self.assertIn('resource("mcp-runtime").stage', formula)
             self.assertIn('"--no-index", "--no-deps", "--no-compile"', formula)
             self.assertIn('bin.install_symlink libexec/"bin/tapl-mcp"', formula)
+            self.assertIn('bin.install_symlink libexec/"bin/tapl-hook"', formula)
+            self.assertIn('assert_path_exists bin/"tapl-hook"', formula)
             self.assertIn('from taplctl.mcp_server import create_server', formula)
             self.assertIn('run [opt_bin/"taplctl", "viewer"]', formula)
 

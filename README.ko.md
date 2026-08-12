@@ -156,9 +156,10 @@ user `PATH`만 갱신하고 administrator 권한은 필요하지 않습니다. a
 
 ### TAPL을 Codex에 연결
 
-설치한 패키지에 맞는 명령으로 연결하세요. v2 `@pre`에서는 아래처럼 `libexec`의
-명시적 경로를 써야 같은 번들 wheel 환경에 들어 있는 전용 `tapl-mcp`와 `tapl-hook`을
-찾습니다.
+설치한 패키지에 맞는 명령으로 연결하세요. 현재 공개된 v2 `@pre`에서는
+`tapl-hook`이 Homebrew의 public `bin` directory에 연결되지 않으므로, 명시적인
+`libexec` 경로를 사용해야 installer가 같은 패키지의 `tapl-mcp`와 `tapl-hook`을
+찾을 수 있습니다.
 
 현재 v2 beta Homebrew formula(`taplctl@pre`):
 
@@ -168,7 +169,8 @@ taplctl install user --taplctl-command "$(brew --prefix taplctl@pre)/libexec/bin
 
 현재 안정 `taplctl` 또는 `taplctl-semantic` 1.7 formula에도 위 명령의
 `taplctl@pre`를 바꿔 넣을 수 있습니다. 다만 이 formula는 v2 전용 실행 파일이 아니라
-해당 release의 호환 통합 경로를 사용합니다.
+해당 release의 호환 통합 경로를 사용합니다. 이후 formula update에서는 `tapl-hook`도
+직접 연결하므로 그때부터는 `taplctl install user`만으로 충분합니다.
 
 Linux 독립형 설치:
 
