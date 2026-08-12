@@ -191,7 +191,7 @@ try:
         raise ValueError
     if not isinstance(metadata.get("wheel_url"), str) or not metadata["wheel_url"]:
         raise ValueError
-    if not isinstance(metadata.get("version"), str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", metadata["version"]) is None:
+    if not isinstance(metadata.get("version"), str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?", metadata["version"]) is None:
         raise ValueError
     if not isinstance(metadata.get("wheel_sha256"), str) or re.fullmatch(r"[0-9a-fA-F]{64}", metadata["wheel_sha256"]) is None:
         raise ValueError
@@ -277,7 +277,7 @@ if manifest.get("schema_version") != 1 or isinstance(manifest.get("schema_versio
     raise SystemExit("unsupported release manifest schema_version")
 
 version = manifest.get("version")
-if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?", version) is None:
     raise SystemExit("invalid release manifest version")
 
 wheel = manifest.get("wheel")
@@ -328,9 +328,29 @@ PY
 
     version_order=$("$python_bin" - "$managed_version" "$manifest_version" <<'PY'
 import sys
+import re
 
-installed = tuple(int(part) for part in sys.argv[1].split("."))
-published = tuple(int(part) for part in sys.argv[2].split("."))
+version_re = re.compile(
+    r"(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)"
+    r"(?:(?P<stage>a|b|rc)(?P<serial>[0-9]+))?"
+)
+stage_rank = {"a": 0, "b": 1, "rc": 2, None: 3}
+
+def version_key(value):
+    match = version_re.fullmatch(value)
+    if match is None:
+        raise ValueError("invalid version")
+    stage = match.group("stage")
+    return (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+        stage_rank[stage],
+        int(match.group("serial")) if stage is not None else 0,
+    )
+
+installed = version_key(sys.argv[1])
+published = version_key(sys.argv[2])
 if installed > published:
     print("newer")
 elif installed < published:

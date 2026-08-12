@@ -4,21 +4,19 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import subprocess
-import sys
+import sqlite3
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
-from . import db
+from . import config, db, embeddings, validation
 
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 MAX_REQUEST_BYTES = 64 * 1024
-COMMAND_TIMEOUT_SECONDS = 15
 ASSET_ROOT = Path(__file__).with_name("_viewer")
 INDEX_PATH = Path("src/webview/index.html")
 DEFAULT_STATUS: dict[str, Any] = {
@@ -74,30 +72,205 @@ def workspace_database(workspace: str | Path) -> tuple[Path, Path]:
     return root, db_path
 
 
-def run_cli_json(db_path: Path, args: list[str]) -> dict[str, Any]:
-    completed = subprocess.run(
-        [sys.executable, "-m", "taplctl", "--db", str(db_path), *args],
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=COMMAND_TIMEOUT_SECONDS,
-    )
-    if completed.returncode != 0:
-        detail = completed.stderr.strip() or completed.stdout.strip() or "taplctl command failed"
-        raise ViewerError(detail)
-    try:
-        payload = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise ViewerError("taplctl returned invalid JSON") from exc
-    if not isinstance(payload, dict):
-        raise ViewerError("taplctl returned a non-object JSON response")
-    if payload.get("ok") is False:
-        raise ViewerError(str(payload.get("error") or "taplctl command failed"))
-    return payload
+class NativeJsonRunner:
+    """Run the viewer's small, read-only protocol directly against a database.
+
+    ``ViewerApplication`` retains the command-shaped ``JsonRunner`` seam so its
+    browser protocol remains straightforward to test.  This implementation maps
+    those commands to the application/database read APIs rather than starting a
+    second ``taplctl`` process for every browser request.
+    """
+
+    def __call__(self, db_path: Path, args: list[str]) -> dict[str, Any]:
+        try:
+            return self._run(db_path, args)
+        except ViewerError:
+            raise
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            raise ViewerError(f"Could not read TAPL state: {exc}") from exc
+
+    def _run(self, db_path: Path, args: list[str]) -> dict[str, Any]:
+        if not args:
+            raise ViewerError("Missing viewer data request.")
+
+        command = args[0]
+        if command == "status":
+            return self._status(
+                db_path,
+                full="--full" in args,
+                include_events="--include-events" in args,
+            )
+        if args[:2] == ["archive", "list"]:
+            return self._archive_list(db_path, args)
+        if args[:2] == ["archive", "show"]:
+            archive_id = self._option(args, "--id")
+            if not archive_id:
+                raise ViewerError("Missing archive id.")
+            return self._archive_show(db_path, archive_id)
+        if args[:2] == ["item", "show"]:
+            raw_item_id = self._option(args, "--id")
+            try:
+                item_id = int(raw_item_id) if raw_item_id is not None else None
+            except ValueError as exc:
+                raise ViewerError("Invalid item id.") from exc
+            if item_id is None:
+                raise ViewerError("Missing item id.")
+            return self._item_show(db_path, item_id)
+        if command == "search" and len(args) >= 2:
+            return self._search(db_path, args[1])
+        raise ViewerError(f"Unsupported viewer data request: {' '.join(args)}")
+
+    @staticmethod
+    def _option(args: list[str], name: str) -> str | None:
+        try:
+            return args[args.index(name) + 1]
+        except (ValueError, IndexError):
+            return None
+
+    @staticmethod
+    def _workspace_for_database(db_path: Path) -> Path | None:
+        resolved = db_path.expanduser().resolve()
+        if resolved.parent.name == db.DEFAULT_DB_RELATIVE.parent.name:
+            workspace = resolved.parent.parent
+            if resolved == workspace / db.DEFAULT_DB_RELATIVE:
+                return workspace
+        return None
+
+    def _settings(self, db_path: Path) -> config.TaplConfig:
+        # A bare --db path is supported by the viewer even when it is not below
+        # a workspace.  In that case use the normal config discovery fallback.
+        return config.load(start=self._workspace_for_database(db_path))
+
+    def _connection(self, db_path: Path) -> sqlite3.Connection:
+        return db.connect(db_path)
+
+    def _status(self, db_path: Path, *, full: bool, include_events: bool) -> dict[str, Any]:
+        conn = self._connection(db_path)
+        try:
+            state = db.status_payload(conn)
+            state["plan_task_execute"] = validation.validate_plan_task_execute(conn)
+        finally:
+            conn.close()
+        state["config"] = self._settings(db_path).as_dict()
+        return self._status_output(state, full=full, include_events=include_events)
+
+    @staticmethod
+    def _status_output(
+        state: dict[str, Any], *, full: bool, include_events: bool, events_limit: int = 12
+    ) -> dict[str, Any]:
+        """Match the JSON object emitted by ``taplctl status``."""
+
+        plans = list(state.get("plans") or [])
+        tasks = list(state.get("tasks") or [])
+        findings = list(state.get("findings") or [])
+        item_fields = (
+            "id",
+            "stable_id",
+            "kind",
+            "title",
+            "status",
+            "source",
+            "archived", "created_at", "updated_at", "custom_fields",
+        )
+        event_fields = (
+            "id",
+            "run_id",
+            "event_type",
+            "tool_name",
+            "mode",
+            "message",
+            "created_at",
+        )
+
+        def compact(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            return [{key: item[key] for key in item_fields if key in item} for item in items]
+
+        payload: dict[str, Any] = {
+            "schema": state.get("schema") or {},
+            "active_run": state.get("active_run"),
+            "task_counts": state.get("task_counts") or {},
+            "incomplete_tasks": state.get("incomplete_tasks", 0),
+            "counts": {
+                "plans": len(plans),
+                "tasks": len(tasks),
+                "findings": len(findings),
+                "archives": int(
+                    state.get("archive_count") or len(state.get("archives") or [])
+                ),
+                "active_batches": len(state.get("active_batches") or []),
+                "active_executions": len(state.get("active_executions") or []),
+            },
+            "plans": plans if full else compact(plans),
+            "tasks": tasks if full else compact(tasks),
+            "findings": findings if full else compact(findings),
+            "active_batches": list(state.get("active_batches") or []),
+            "active_executions": list(state.get("active_executions") or []),
+        }
+        for key in ("config", "plan_task_execute", "approvals"):
+            if key in state:
+                payload[key] = state[key]
+        if include_events:
+            payload["recent_events"] = [
+                {key: event[key] for key in event_fields if key in event}
+                for event in list(state.get("recent_events") or [])[:max(events_limit, 0)]
+            ]
+        return payload
+
+    def _archive_list(self, db_path: Path, args: list[str]) -> dict[str, Any]:
+        raw_limit = self._option(args, "--limit")
+        try:
+            limit = int(raw_limit) if raw_limit is not None else None
+        except ValueError as exc:
+            raise ViewerError("Invalid archive limit.") from exc
+        conn = self._connection(db_path)
+        try:
+            return {"ok": True, "archives": db.list_archives(conn, limit=limit)}
+        finally:
+            conn.close()
+
+    def _archive_show(self, db_path: Path, archive_id: str) -> dict[str, Any]:
+        conn = self._connection(db_path)
+        try:
+            detail = db.archive_detail(conn, archive_id)
+        finally:
+            conn.close()
+        if detail is None:
+            raise ViewerError(f"archive not found: {archive_id}")
+        return {"ok": True, **detail}
+
+    def _item_show(self, db_path: Path, item_id: int) -> dict[str, Any]:
+        conn = self._connection(db_path)
+        try:
+            item = db.item_detail(conn, item_id)
+        finally:
+            conn.close()
+        if item is None:
+            raise ViewerError(f"item not found: {item_id}")
+        return {"ok": True, "item": item}
+
+    def _search(self, db_path: Path, query: str) -> dict[str, Any]:
+        settings = self._settings(db_path)
+        conn = self._connection(db_path)
+        try:
+            payload = embeddings.search(
+                conn,
+                query,
+                limit=settings.search.max_results,
+                search_config=settings.search,
+            )
+        finally:
+            conn.close()
+        return {"ok": True, **payload}
+
+
+def run_native_json(db_path: Path, args: list[str]) -> dict[str, Any]:
+    """Compatibility-friendly function form of :class:`NativeJsonRunner`."""
+
+    return NativeJsonRunner()(db_path, args)
 
 
 class ViewerApplication:
-    """Map a small read-only browser protocol to existing taplctl JSON commands."""
+    """Map a small read-only browser protocol to native TAPL read operations."""
 
     def __init__(
         self,
@@ -110,7 +283,7 @@ class ViewerApplication:
         self.default_db = default_db.expanduser().resolve() if default_db else None
         self.default_workspace = default_workspace.expanduser().resolve() if default_workspace else None
         self.asset_root = (asset_root or ASSET_ROOT).resolve()
-        self.json_runner = json_runner or run_cli_json
+        self.json_runner = json_runner or run_native_json
 
     def resolve_database(self, raw_workspace: object) -> tuple[Path | None, Path]:
         if isinstance(raw_workspace, str) and raw_workspace.strip():
@@ -148,7 +321,7 @@ class ViewerApplication:
                 "workspace": raw_workspace if isinstance(raw_workspace, str) else "",
                 "message": str(exc),
             }
-        except (ViewerError, subprocess.TimeoutExpired) as exc:
+        except ViewerError as exc:
             return self._error_message(str(exc), locale=locale, layout=layout)
 
         return {
@@ -218,7 +391,7 @@ class ViewerApplication:
                 "title": str(detail.get("title") or detail.get("stable_id") or item_id),
                 "status": detail.get("status"),
                 "source": detail.get("source"),
-                "search_source": "taplctl",
+                "search_source": "native",
             }
             return {"type": "searchItem", "result": result, "detail": detail}
         raise ViewerError(f"Unsupported viewer command: {command}")

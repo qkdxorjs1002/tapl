@@ -8,8 +8,7 @@ default_mode_request_user_input = true
 hooks = true
 
 [mcp_servers.tapl]
-command = "taplctl"
-args = ["mcp"]
+command = "tapl-mcp"
 enabled = true
 required = false
 default_tools_approval_mode = "auto"

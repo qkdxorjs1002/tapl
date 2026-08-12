@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -17,6 +18,9 @@ TAPL_ROOT = REPOSITORY_ROOT / "tapl"
 PYPROJECT = TAPL_ROOT / "pyproject.toml"
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
 FORMULA_UPDATER = REPOSITORY_ROOT / ".github" / "scripts" / "update_homebrew_formula.rb"
+VSCODE_PACKAGE = REPOSITORY_ROOT / "vscode-extension" / "package.json"
+VSCODE_IGNORE = REPOSITORY_ROOT / "vscode-extension" / ".vscodeignore"
+VSCODE_BUNDLE_SCRIPT = REPOSITORY_ROOT / "vscode-extension" / "scripts" / "bundle-extension.mjs"
 
 
 class PythonPackagingContractTests(unittest.TestCase):
@@ -36,17 +40,39 @@ class PythonPackagingContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertRegex(result.stdout.strip(), r"^taplctl \d+\.\d+\.\d+$")
+        self.assertRegex(
+            result.stdout.strip(),
+            r"^taplctl \d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?$",
+        )
 
-    def test_mcp_command_reports_actionable_missing_runtime(self) -> None:
+    def test_retired_mcp_cli_command_points_to_dedicated_entrypoint(self) -> None:
         result = self._run_with_mcp_import_blocked(
             "import taplctl.cli as cli; raise SystemExit(cli.main(['mcp']))",
         )
 
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("TAPL MCP runtime dependency 'mcp' is missing", result.stderr)
-        self.assertIn("brew reinstall taplctl", result.stderr)
-        self.assertIn("mcp==2.0.0", result.stderr)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("`taplctl mcp` is no longer a public command", result.stderr)
+        self.assertIn("`tapl-mcp`", result.stderr)
+        self.assertNotIn("MCP runtime dependency", result.stderr)
+
+    def test_vscode_package_bundles_the_mcp_client_runtime(self) -> None:
+        package = json.loads(VSCODE_PACKAGE.read_text(encoding="utf-8"))
+        self.assertEqual(package["dependencies"]["@modelcontextprotocol/sdk"], "1.30.0")
+        self.assertEqual(package["dependencies"]["zod"], "4.4.3")
+        compile_script = package["scripts"]["compile:extension"]
+        self.assertIn("node scripts/bundle-extension.mjs", compile_script)
+        self.assertIn("--no-dependencies", package["scripts"]["package"])
+        bundle_script = VSCODE_BUNDLE_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("external: ['vscode']", bundle_script)
+        self.assertIn("node_modules/ajv/dist/runtime/uri.js", bundle_script)
+        self.assertIn("node_modules/ajv-formats/dist/formats.js", bundle_script)
+
+        ignored_paths = {
+            line.strip()
+            for line in VSCODE_IGNORE.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        self.assertIn("node_modules/**", ignored_paths)
 
     def _run_with_mcp_import_blocked(self, statement: str) -> subprocess.CompletedProcess[str]:
         script = textwrap.dedent(
@@ -68,6 +94,7 @@ class PythonPackagingContractTests(unittest.TestCase):
             """
         )
         env = os.environ.copy()
+        env.pop("TAPL_ENABLE_LEGACY_WORKFLOW_CLI", None)
         env["PYTHONPATH"] = str(TAPL_ROOT)
         return subprocess.run(
             [sys.executable, "-c", script],

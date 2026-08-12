@@ -156,7 +156,7 @@ declare module 'vscode' {
       readDirectory(uri: Uri): Thenable<[string, FileType][]>;
       readFile(uri: Uri): Thenable<Uint8Array>;
     };
-    export function getConfiguration(section?: string): WorkspaceConfiguration;
+    export function getConfiguration(section?: string, scope?: Uri | null): WorkspaceConfiguration;
     export function onDidChangeConfiguration(listener: (event: ConfigurationChangeEvent) => unknown): Disposable;
     export function createFileSystemWatcher(globPattern: RelativePattern): FileSystemWatcher;
   }
@@ -183,22 +183,7 @@ declare const process: {
   platform: string;
 };
 
-declare module 'child_process' {
-  export interface ExecFileOptions {
-    cwd?: string;
-    timeout?: number;
-    maxBuffer?: number;
-    env?: Record<string, string | undefined>;
-  }
-
-  export function execFile(
-    command: string,
-    args: readonly string[],
-    options: ExecFileOptions,
-    callback: (error: Error | null, stdout: string, stderr: string) => void
-  ): void;
-}
-
 declare module 'path' {
+  export function dirname(path: string): string;
   export function join(...paths: string[]): string;
 }

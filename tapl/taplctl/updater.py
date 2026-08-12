@@ -27,7 +27,10 @@ from urllib import request as urllib_request
 from urllib.parse import urlsplit
 
 
-_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+_VERSION_RE = re.compile(
+    r"(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)"
+    r"(?:(?P<stage>a|b|rc)(?P<serial>[0-9]+))?"
+)
 _SHA256_RE = re.compile(r"[0-9a-fA-F]{64}")
 _WHEEL_NAME_RE = re.compile(r"[A-Za-z0-9_.+-]+")
 _MAX_MANIFEST_BYTES = 1024 * 1024
@@ -80,7 +83,7 @@ class _Installation:
 @dataclass(frozen=True)
 class _Manifest:
     version: str
-    version_key: tuple[int, int, int]
+    version_key: tuple[int, int, int, int, int]
     wheel_url: str
     wheel_sha256: str
     wheel_name: str
@@ -516,9 +519,27 @@ def _fetch_manifest(url: str, *, opener: UrlOpener | None, timeout: float) -> _M
     )
 
 
-def _version_key(version: str) -> tuple[int, int, int]:
-    major, minor, patch = version.split(".")
-    return int(major), int(minor), int(patch)
+def _version_key(version: str) -> tuple[int, int, int, int, int]:
+    """Return an ordering key for the supported canonical Python versions.
+
+    Release segments always dominate prerelease stages.  Within one release,
+    alpha sorts before beta, beta before release candidate, and every
+    prerelease sorts before the final release.
+    """
+
+    match = _VERSION_RE.fullmatch(version)
+    if match is None:
+        raise ValueError("invalid version")
+    stage = match.group("stage")
+    stage_rank = {"a": 0, "b": 1, "rc": 2, None: 3}[stage]
+    serial = int(match.group("serial")) if stage is not None else 0
+    return (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+        stage_rank,
+        serial,
+    )
 
 
 def _check_payload(

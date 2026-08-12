@@ -145,8 +145,11 @@ class TaplCliTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         by_name = {tool.name: tool for tool in tools}
 
-        self.assertEqual(len(tools), 20)
+        self.assertEqual(len(tools), 23)
         self.assertIn("tapl_get_status", by_name)
+        self.assertIn("tapl_get_context", by_name)
+        self.assertIn("tapl_list_archives", by_name)
+        self.assertIn("tapl_get_archive", by_name)
         self.assertIn("tapl_apply_plan", by_name)
         self.assertIn("tapl_create_task", by_name)
         self.assertIn("tapl_finish_archive", by_name)
@@ -245,12 +248,13 @@ class TaplCliTests(unittest.TestCase):
         )
 
         async def fake_write(
-            workspace_root: Path,
-            *command: str,
-            payload: dict[str, object] | None = None,
+            application: object,
+            method: object,
+            *args: object,
             operation: str,
+            **kwargs: object,
         ) -> dict[str, object]:
-            del workspace_root, command, payload
+            del application, method, args, kwargs
             return {
                 "ok": True,
                 "operation": operation,
@@ -263,7 +267,7 @@ class TaplCliTests(unittest.TestCase):
 
         with mock.patch.object(
             tapl_mcp,
-            "run_taplctl_write",
+            "call_application_write",
             new=mock.AsyncMock(side_effect=fake_write),
         ) as write:
             results = asyncio.run(exercise())
@@ -286,22 +290,15 @@ class TaplCliTests(unittest.TestCase):
                 "request_summary": "Do not echo this body",
             },
         }
-        with mock.patch.object(
-            tapl_mcp,
-            "run_taplctl",
-            new=mock.AsyncMock(
-                side_effect=[raw_write, tapl_mcp.TaplCliError("next unavailable")]
-            ),
-        ):
-            receipt = asyncio.run(
-                tapl_mcp.run_taplctl_write(
-                    ROOT,
-                    "run",
-                    "summarize",
-                    payload={"summary": "Compact"},
-                    operation="run_summarize",
-                )
+        application = mock.Mock()
+        application.get_next.side_effect = RuntimeError("next unavailable")
+        receipt = asyncio.run(
+            tapl_mcp.call_application_write(
+                application,
+                lambda: raw_write,
+                operation="run_summarize",
             )
+        )
 
         self.assertTrue(receipt["ok"])
         self.assertNotIn("request_summary", receipt["active_run"])
@@ -322,14 +319,14 @@ class TaplCliTests(unittest.TestCase):
             self.assertTrue(result.is_error)
             self.assertIn("item not found: 999", result.content[0].text)
 
-    def test_taplctl_mcp_stdio_entrypoint_negotiates_and_calls_tools(self) -> None:
+    def test_tapl_mcp_stdio_entrypoint_negotiates_and_calls_tools(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
             (workspace / ".git").mkdir(parents=True)
             tapl_db.initialize_workspace(workspace)
             params = StdioServerParameters(
                 command=sys.executable,
-                args=["-m", "taplctl", "mcp"],
+                args=["-m", "taplctl.mcp_server"],
                 cwd=workspace,
             )
 
@@ -343,7 +340,7 @@ class TaplCliTests(unittest.TestCase):
                     return tools, result
 
             tools, result = asyncio.run(exercise())
-            self.assertEqual(len(tools.tools), 20)
+            self.assertEqual(len(tools.tools), 23)
             self.assertFalse(result.is_error)
             receipt = result.structured_content
             self.assertEqual(receipt["operation"], "run_summarize")
@@ -3240,7 +3237,7 @@ searchd_start_timeout_ms = 1
 
             hooks = json.loads((codex_home / "hooks.json").read_text(encoding="utf-8"))
             prompt_hook = hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
-            self.assertEqual(prompt_hook, "taplctl hook-event --event UserPromptSubmit --mode observe")
+            self.assertEqual(prompt_hook, "tapl-hook --event UserPromptSubmit --mode observe")
             self.assertNotIn("SessionStart", hooks["hooks"])
             self.assertNotIn("tapl_hook.py", json.dumps(hooks))
             self.assertTrue((codex_home / "config.toml").exists())
@@ -3248,8 +3245,7 @@ searchd_start_timeout_ms = 1
             self.assertEqual(
                 codex_config["mcp_servers"]["tapl"],
                 {
-                    "command": "taplctl",
-                    "args": ["mcp"],
+                    "command": "tapl-mcp",
                     "enabled": True,
                     "required": False,
                     "default_tools_approval_mode": "auto",
@@ -3327,8 +3323,8 @@ command = "existing-mcp"
             self.assertNotIn("multi_agent", parsed["features"])
             self.assertTrue(parsed["features"]["default_mode_request_user_input"])
             self.assertEqual(parsed["mcp_servers"]["existing"]["command"], "existing-mcp")
-            self.assertEqual(parsed["mcp_servers"]["tapl"]["command"], "taplctl")
-            self.assertEqual(parsed["mcp_servers"]["tapl"]["args"], ["mcp"])
+            self.assertEqual(parsed["mcp_servers"]["tapl"]["command"], "tapl-mcp")
+            self.assertNotIn("args", parsed["mcp_servers"]["tapl"])
             self.assertEqual(parsed["mcp_servers"]["tapl"]["default_tools_approval_mode"], "auto")
             self.assertFalse((agents_dir / "senior-worker.toml").exists())
 
@@ -3374,8 +3370,8 @@ experimental = true
             self.assertNotIn("multi_agent", parsed["features"])
             self.assertTrue(parsed["features"]["experimental"])
             self.assertTrue(parsed["features"]["default_mode_request_user_input"])
-            self.assertEqual(parsed["mcp_servers"]["tapl"]["command"], "taplctl")
-            self.assertEqual(parsed["mcp_servers"]["tapl"]["args"], ["mcp"])
+            self.assertEqual(parsed["mcp_servers"]["tapl"]["command"], "tapl-mcp")
+            self.assertNotIn("args", parsed["mcp_servers"]["tapl"])
 
     def test_install_repo_writes_hooks_config_and_db(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3445,13 +3441,13 @@ experimental = true
             pre_tool_commands = [hook["command"] for entry in hooks["hooks"]["PreToolUse"] for hook in entry["hooks"]]
             self.assertIn("echo keep", pre_tool_commands)
             self.assertIn(
-                "/opt/tapl/bin/taplctl hook-event --event PreToolUse --mode observe",
+                "/opt/tapl/bin/tapl-hook --event PreToolUse --mode observe",
                 pre_tool_commands,
             )
             self.assertTrue((repo / ".codex" / "config.toml").exists())
             codex_config = tomllib.loads((repo / ".codex" / "config.toml").read_text(encoding="utf-8"))
-            self.assertEqual(codex_config["mcp_servers"]["tapl"]["command"], "/opt/tapl/bin/taplctl")
-            self.assertEqual(codex_config["mcp_servers"]["tapl"]["args"], ["mcp"])
+            self.assertEqual(codex_config["mcp_servers"]["tapl"]["command"], "/opt/tapl/bin/tapl-mcp")
+            self.assertNotIn("args", codex_config["mcp_servers"]["tapl"])
             self.assertFalse(codex_config["mcp_servers"]["tapl"]["required"])
             self.assertFalse((repo / ".codex" / "agents").exists())
             tapl_config_data = tomllib.loads((repo / ".tapl" / "config.toml").read_text())
@@ -5653,6 +5649,65 @@ class TaplUpdaterTests(unittest.TestCase):
                     self.assertEqual(payload["current_version"], "1.0.0")
                     self.assertEqual(payload["latest_version"], latest)
                     self.assertEqual(payload["update_available"], expected_available)
+
+    def test_check_for_update_orders_canonical_python_prereleases(self) -> None:
+        cases = (
+            ("1.9.9", "2.0.0b1", "update-available", True),
+            ("2.0.0a9", "2.0.0b1", "update-available", True),
+            ("2.0.0b1", "2.0.0b2", "update-available", True),
+            ("2.0.0b2", "2.0.0rc1", "update-available", True),
+            ("2.0.0rc1", "2.0.0", "update-available", True),
+            ("2.0.0", "2.0.0rc9", "current-newer", False),
+            ("2.0.0b10", "2.0.0b2", "current-newer", False),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for index, (current, latest, status, available) in enumerate(cases):
+                with self.subTest(current=current, latest=latest):
+                    fixture = self.create_curl_sh_fixture(
+                        Path(tmp) / str(index), version=current
+                    )
+                    wheel = b"release wheel"
+                    payload = tapl_updater.check_for_update(
+                        **self.updater_kwargs(
+                            fixture,
+                            opener=self.opener(
+                                {self.manifest_url: self.manifest(latest, wheel)}
+                            ),
+                        )
+                    )
+                    self.assertEqual(payload["status"], status)
+                    self.assertEqual(payload["update_available"], available)
+
+    def test_update_versions_reject_noncanonical_prerelease_formats(self) -> None:
+        invalid_versions = (
+            "2.0.0-beta1",
+            "2.0.0beta1",
+            "2.0.0b",
+            "2.0.0rc",
+            "2.0.0RC1",
+            "v2.0.0b1",
+            "2.0",
+            "2.0.0.post1",
+            "2.0.0b1 ",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = self.create_curl_sh_fixture(Path(tmp))
+            for version in invalid_versions:
+                with self.subTest(version=version):
+                    with self.assertRaises(tapl_updater.UpdateError) as raised:
+                        tapl_updater.check_for_update(
+                            **self.updater_kwargs(
+                                fixture,
+                                opener=self.opener(
+                                    {
+                                        self.manifest_url: self.manifest(
+                                            version, b"release wheel"
+                                        )
+                                    }
+                                ),
+                            )
+                        )
+                    self.assertEqual(raised.exception.code, "invalid_manifest")
 
     def test_check_for_update_redacts_tokenized_urls_without_changing_metadata(self) -> None:
         manifest_url = (

@@ -1,5 +1,3 @@
-import * as childProcess from 'child_process';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import {
   resolveLocale,
@@ -9,6 +7,11 @@ import {
   type TranslationKey,
   type TranslationParams
 } from './i18n';
+import {
+  TaplMcpClientPool,
+  taplMcpCommandCandidates,
+  type TaplMcpWorkspace
+} from './taplMcpClient';
 
 type NodeKind = 'overview' | 'task' | 'archive' | 'empty';
 type DisplayLayout = 'auto' | 'small' | 'medium' | 'large';
@@ -29,6 +32,14 @@ interface TaplStatus {
   active_executions?: TaplExecution[];
   recent_events: TaplEvent[];
   schema: Record<string, string>;
+  counts?: {
+    plans?: number;
+    tasks?: number;
+    findings?: number;
+    archives?: number;
+    active_batches?: number;
+    active_executions?: number;
+  };
 }
 
 interface TaplExecution {
@@ -142,11 +153,6 @@ interface TaplItemDetail extends TaplItem {
   impact?: string;
 }
 
-interface ExecResult {
-  stdout: string;
-  stderr: string;
-}
-
 interface WorkflowTab {
   id: string;
   label: string;
@@ -184,15 +190,11 @@ type HostWebviewMessage =
 
 const COMMAND_PREFIX = "taplWorkflow";
 const TAPL_DB_WATCH_DEBOUNCE_MS = 2000;
-const TAPLCTL_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+const TAPL_MCP_PATH_SETTING = "taplMcpPath";
 const TAPLCTL_PATH_SETTING = "taplctlPath";
 const LANGUAGE_SETTING = "language";
 const LAYOUT_SETTING = "layout";
-const COMMON_TAPLCTL_COMMANDS = [
-  "taplctl",
-  "/opt/homebrew/bin/taplctl",
-  "/usr/local/bin/taplctl"
-];
+let taplMcpClients: TaplMcpClientPool | undefined;
 
 function localize(key: TranslationKey, params?: TranslationParams): string {
   return translate(displayLocale(), key, params);
@@ -257,6 +259,7 @@ const READABLE_BLOCK_LABEL_PATTERN = new RegExp(
 );
 
 export function activate(context: vscode.ExtensionContext): void {
+  taplMcpClients = new TaplMcpClientPool();
   const activeProvider = new ActiveProvider();
   const archiveProvider = new ArchiveProvider();
   const webviewManager = new WorkflowWebviewManager(context.extensionUri);
@@ -273,6 +276,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     debouncedRefresh,
+    { dispose: () => taplMcpClients?.invalidate() },
     vscode.window.registerTreeDataProvider(`${COMMAND_PREFIX}.active`, activeProvider),
     vscode.window.registerTreeDataProvider(`${COMMAND_PREFIX}.archives`, archiveProvider),
     vscode.commands.registerCommand(`${COMMAND_PREFIX}.refresh`, refreshAll),
@@ -289,6 +293,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (
+        event.affectsConfiguration(`${COMMAND_PREFIX}.${TAPL_MCP_PATH_SETTING}`)
+        || event.affectsConfiguration(`${COMMAND_PREFIX}.${TAPLCTL_PATH_SETTING}`)
+      ) {
+        taplMcpClients?.invalidate();
+        refreshAll();
+        return;
+      }
+      if (
         !event.affectsConfiguration(`${COMMAND_PREFIX}.${LANGUAGE_SETTING}`)
         && !event.affectsConfiguration(`${COMMAND_PREFIX}.${LAYOUT_SETTING}`)
       ) {
@@ -298,8 +310,7 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  const root = getWorkspaceRoot();
-  if (root) {
+  for (const root of vscode.workspace.workspaceFolders ?? []) {
     for (const pattern of ['.tapl/tapl.db', '.tapl/tapl.db-wal', '.tapl/tapl.db-shm']) {
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, pattern));
       context.subscriptions.push(
@@ -312,8 +323,10 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 }
 
-export function deactivate(): void {
-  // Disposables are owned by the extension context.
+export async function deactivate(): Promise<void> {
+  const clients = taplMcpClients;
+  taplMcpClients = undefined;
+  await clients?.dispose();
 }
 
 class WorkflowNode extends vscode.TreeItem {
@@ -374,7 +387,7 @@ class ActiveProvider implements vscode.TreeDataProvider<WorkflowNode> {
     if (!root) {
       return [emptyNode(localize('openWorkspaceFolder'))];
     }
-    const result = await safeTapl(['status', '--json']);
+    const result = await safeStatus();
     if (!result.ok) {
       return [emptyNode(result.error)];
     }
@@ -582,13 +595,13 @@ class WorkflowWebviewManager {
       return { type: 'searchItem', result: this.currentView.result, detail: this.currentView.detail };
     }
     if (this.currentView.type === 'debug') {
-      const status = await safeTapl(['status', '--json', '--include-events']);
+      const status = await safeStatus({ includeEvents: true });
       if (!status.ok) {
         return { type: 'error', message: status.error };
       }
       return { type: 'debug', status: status.value };
     }
-    const status = await safeTapl(['status', '--json', '--full']);
+    const status = await safeStatus({ full: true });
     if (!status.ok) {
       return { type: 'error', message: status.error };
     }
@@ -650,7 +663,7 @@ class WorkflowWebviewManager {
       : {
           mode: 'error',
           query: trimmed,
-          results: [{ stable_id: 'ERROR', kind: 'error', title: result.error, search_source: 'taplctl' }]
+          results: [{ stable_id: 'ERROR', kind: 'error', title: result.error, search_source: 'tapl-mcp' }]
         };
     this.lastSearch = search;
     await this.navigate(
@@ -1615,95 +1628,87 @@ function formatTimestamp(value: unknown): string {
   ].join(' ');
 }
 
-async function safeTapl(args: string[]): Promise<{ ok: true; value: TaplStatus } | { ok: false; error: string }> {
-  const result = await runTapl(args);
+async function safeStatus(
+  options: { full?: boolean; includeEvents?: boolean; eventsLimit?: number } = {},
+  root = getWorkspaceRoot()
+): Promise<{ ok: true; value: TaplStatus } | { ok: false; error: string }> {
+  const result = await callTaplMcp('tapl_get_status', {
+    full: options.full ?? false,
+    include_events: options.includeEvents ?? false,
+    events_limit: options.eventsLimit ?? 12
+  }, root);
   if (!result.ok) {
     return result;
   }
-  try {
-    return { ok: true, value: { ...DEFAULT_STATUS, ...JSON.parse(result.value.stdout) } };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : localize('failedParseTaplctlJson') };
-  }
+  return {
+    ok: true,
+    value: {
+      ...DEFAULT_STATUS,
+      ...(result.value as unknown as TaplStatus)
+    }
+  };
 }
 
 async function safeArchives(limit?: number): Promise<{ ok: true; value: TaplArchive[] } | { ok: false; error: string }> {
-  const args = ['archive', 'list', '--json'];
-  if (limit !== undefined) {
-    args.push('--limit', String(limit));
-  }
-  const result = await runTapl(args);
+  const result = await callTaplMcp('tapl_list_archives', limit === undefined ? {} : { limit });
   if (!result.ok) {
     return result;
   }
-  try {
-    const payload = JSON.parse(result.value.stdout) as { archives?: TaplArchive[] };
-    return { ok: true, value: payload.archives ?? [] };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : localize('failedParseArchiveJson') };
+  const payload = result.value as { ok?: boolean; error?: string; archives?: TaplArchive[] };
+  if (payload.ok === false) {
+    return { ok: false, error: payload.error ?? localize('failedLoadArchiveDetail') };
   }
+  return { ok: true, value: Array.isArray(payload.archives) ? payload.archives : [] };
 }
 
 async function safeArchiveDetail(archiveId: string): Promise<{ ok: true; value: TaplArchiveDetail } | { ok: false; error: string }> {
-  const result = await runTapl(['archive', 'show', '--id', archiveId, '--json']);
+  const result = await callTaplMcp('tapl_get_archive', { archive_id: archiveId });
   if (!result.ok) {
     return result;
   }
-  try {
-    const payload = JSON.parse(result.value.stdout) as {
-      ok?: boolean;
-      error?: string;
-      archive?: TaplArchive;
-      items?: TaplItem[];
-      events?: TaplEvent[];
-    };
-    if (payload.ok === false) {
-      return { ok: false, error: payload.error ?? localize('failedLoadArchiveDetail') };
-    }
-    if (!payload.archive) {
-      return { ok: false, error: localize('missingArchiveDetail') };
-    }
-    return {
-      ok: true,
-      value: {
-        archive: payload.archive,
-        items: payload.items ?? [],
-        events: payload.events ?? []
-      }
-    };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : localize('failedParseArchiveDetailJson') };
+  const payload = result.value as {
+    ok?: boolean;
+    error?: string;
+    archive?: TaplArchive;
+    items?: TaplItem[];
+    events?: TaplEvent[];
+  };
+  if (payload.ok === false) {
+    return { ok: false, error: payload.error ?? localize('failedLoadArchiveDetail') };
   }
+  if (!payload.archive) {
+    return { ok: false, error: localize('missingArchiveDetail') };
+  }
+  return {
+    ok: true,
+    value: {
+      archive: payload.archive,
+      items: Array.isArray(payload.items) ? payload.items : [],
+      events: Array.isArray(payload.events) ? payload.events : []
+    }
+  };
 }
 
 async function safeItemDetail(itemId: number): Promise<{ ok: true; value: TaplItemDetail } | { ok: false; error: string }> {
-  const result = await runTapl(['item', 'show', '--id', String(itemId), '--json']);
+  const result = await callTaplMcp('tapl_get_item', { item_id: itemId });
   if (!result.ok) {
     return result;
   }
-  try {
-    const payload = JSON.parse(result.value.stdout) as {
-      ok?: boolean;
-      error?: string;
-      item?: TaplItemDetail;
-    };
-    if (payload.ok === false) {
-      return { ok: false, error: payload.error ?? localize('failedLoadItemDetail') };
-    }
-    if (!payload.item) {
-      return { ok: false, error: localize('missingItemDetail') };
-    }
-    return { ok: true, value: payload.item };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : localize('failedParseItemDetailJson') };
+  const payload = result.value as { ok?: boolean; error?: string; item?: TaplItemDetail };
+  if (payload.ok === false) {
+    return { ok: false, error: payload.error ?? localize('failedLoadItemDetail') };
   }
+  if (!payload.item) {
+    return { ok: false, error: localize('missingItemDetail') };
+  }
+  return { ok: true, value: payload.item };
 }
 
 async function enrichTaskDetail(detail: TaplItemDetail): Promise<TaplItemDetail> {
   if (detail.kind !== 'task') {
     return detail;
   }
-  const status = await safeTapl(['status', '--json', '--full']);
+  const status = await safeStatus({ full: true });
   if (!status.ok) {
     return detail;
   }
@@ -1723,56 +1728,43 @@ async function enrichTaskDetail(detail: TaplItemDetail): Promise<TaplItemDetail>
 }
 
 async function searchTapl(query: string): Promise<{ ok: true; value: TaplSearchPayload } | { ok: false; error: string }> {
-  const result = await runTapl(['search', query, '--json']);
+  const result = await callTaplMcp('tapl_search_history', { query });
   if (!result.ok) {
     return result;
   }
-  try {
-    return { ok: true, value: JSON.parse(result.value.stdout) as TaplSearchPayload };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : localize('failedParseSearchJson') };
-  }
+  return { ok: true, value: result.value as unknown as TaplSearchPayload };
 }
 
-async function runTapl(args: string[]): Promise<{ ok: true; value: ExecResult } | { ok: false; error: string }> {
-  const root = getWorkspaceRoot();
+async function callTaplMcp(
+  tool: 'tapl_get_status' | 'tapl_get_item' | 'tapl_search_history' | 'tapl_list_archives' | 'tapl_get_archive',
+  args: Record<string, unknown>,
+  root: vscode.WorkspaceFolder | undefined = getWorkspaceRoot()
+): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false; error: string }> {
   if (!root) {
     return { ok: false, error: localize('openWorkspaceToUseTapl') };
   }
-
-  const commands = taplctlCommandCandidates();
-  const failures: string[] = [];
-  for (const command of commands) {
-    const result = await execFile(command, args, root.uri.fsPath);
-    if (result.ok) {
-      return result;
-    }
-    failures.push(`${command}: ${result.error}`);
-    if (!result.commandNotFound) {
-      return { ok: false, error: localize('taplctlFailedUsing', { command, error: result.error }) };
-    }
+  try {
+    const clients = taplMcpClients ??= new TaplMcpClientPool();
+    return { ok: true, value: await clients.callTool(taplMcpWorkspace(root), tool, args) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      error: `${message} Configure ${COMMAND_PREFIX}.${TAPL_MCP_PATH_SETTING} with the tapl-mcp executable path if it is not on PATH.`
+    };
   }
-
-  return {
-    ok: false,
-    error: [
-      localize('unableExecuteTaplctl'),
-      localize('triedCommands', { commands: commands.join(', ') }),
-      localize('setTaplctlPath', { setting: `${COMMAND_PREFIX}.${TAPLCTL_PATH_SETTING}` }),
-      failures.length ? localize('lastError', { error: failures[failures.length - 1] }) : ''
-    ].filter(Boolean).join(' ')
-  };
 }
 
-function taplctlCommandCandidates(): string[] {
-  const configured = vscode.workspace
-    .getConfiguration(COMMAND_PREFIX)
-    .get<string>(TAPLCTL_PATH_SETTING, '')
-    .trim();
-  return uniqueStrings([
-    configured || undefined,
-    ...COMMON_TAPLCTL_COMMANDS
-  ]);
+function taplMcpWorkspace(root: vscode.WorkspaceFolder): TaplMcpWorkspace {
+  const configuration = vscode.workspace.getConfiguration(COMMAND_PREFIX, root.uri);
+  return {
+    key: root.uri.fsPath,
+    cwd: root.uri.fsPath,
+    commands: taplMcpCommandCandidates(
+      configuration.get<string>(TAPL_MCP_PATH_SETTING, ''),
+      configuration.get<string>(TAPLCTL_PATH_SETTING, '')
+    )
+  };
 }
 
 function displayLocale(): SupportedLocale {
@@ -1792,48 +1784,6 @@ function displayLayout(): DisplayLayout {
   return configured === 'small' || configured === 'medium' || configured === 'large'
     ? configured
     : 'auto';
-}
-
-function uniqueStrings(values: Array<string | undefined>): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const value of values) {
-    if (!value || seen.has(value)) {
-      continue;
-    }
-    seen.add(value);
-    result.push(value);
-  }
-  return result;
-}
-
-function taplctlExecutionEnv(): Record<string, string | undefined> {
-  const delimiter = process.platform === 'win32' ? ';' : ':';
-  const pathValue = [
-    process.env.PATH,
-    '/opt/homebrew/bin',
-    '/usr/local/bin'
-  ].filter(Boolean).join(delimiter);
-  return {
-    ...process.env,
-    PATH: pathValue
-  };
-}
-
-function execFile(command: string, args: string[], cwd: string): Promise<{ ok: true; value: ExecResult } | { ok: false; error: string; commandNotFound: boolean }> {
-  return new Promise((resolve) => {
-    childProcess.execFile(command, args, { cwd, timeout: 10000, maxBuffer: TAPLCTL_MAX_BUFFER_BYTES, env: taplctlExecutionEnv() }, (error, stdout, stderr) => {
-      if (error) {
-        resolve({ ok: false, error: stderr || error.message, commandNotFound: isCommandNotFound(error) });
-        return;
-      }
-      resolve({ ok: true, value: { stdout, stderr } });
-    });
-  });
-}
-
-function isCommandNotFound(error: Error): boolean {
-  return (error as Error & { code?: string }).code === 'ENOENT';
 }
 
 function getWorkspaceRoot(): vscode.WorkspaceFolder | undefined {

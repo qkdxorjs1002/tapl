@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -34,14 +35,88 @@ AGENT_HELP = "Print agent-optimized XML-like output."
 DRY_RUN_HELP = "Preview changes without writing files."
 JSON_FILE_HELP = "Read command fields from a JSON object file. CLI flags override JSON fields."
 STDIN_JSON_HELP = "Read command fields from a JSON object on stdin. CLI flags override JSON fields."
+LEGACY_WORKFLOW_CLI_ENV = "TAPL_ENABLE_LEGACY_WORKFLOW_CLI"
+MANAGEMENT_COMMANDS = frozenset(
+    {"init", "doctor", "update", "install", "viewer", "reindex", "searchd", "import-md"}
+)
+REMOVED_WORKFLOW_COMMANDS = frozenset(
+    {
+        "mcp",
+        "status",
+        "validate",
+        "context",
+        "run",
+        "plan",
+        "task",
+        "batch",
+        "finding",
+        "approval",
+        "item",
+        "archive",
+        "search",
+        "next",
+        "recipe",
+        "hook-event",
+    }
+)
 
 
 class TaplArgumentParser(argparse.ArgumentParser):
+    def parse_args(
+        self,
+        args: list[str] | None = None,
+        namespace: argparse.Namespace | None = None,
+    ) -> argparse.Namespace:
+        self.tapl_argv = list(sys.argv[1:] if args is None else args)
+        return super().parse_args(args, namespace)
+
     def error(self, message: str) -> None:
-        suggestion = command_error_suggestion(message, getattr(self, "tapl_argv", sys.argv[1:]))
+        argv = getattr(self, "tapl_argv", sys.argv[1:])
+        removed_command = requested_top_level_command(argv)
+        if (
+            not getattr(
+                self,
+                "legacy_workflow_cli_enabled",
+                os.environ.get(LEGACY_WORKFLOW_CLI_ENV) == "1",
+            )
+            and removed_command in REMOVED_WORKFLOW_COMMANDS
+        ):
+            if removed_command == "mcp":
+                guidance = "run the dedicated `tapl-mcp` server executable"
+            elif removed_command == "hook-event":
+                guidance = "use the dedicated `tapl-hook` executable for Codex hooks"
+            else:
+                guidance = "use the TAPL tools exposed by the `tapl-mcp` MCP server"
+            message = (
+                f"`taplctl {removed_command}` is no longer a public command; "
+                f"Agent workflows are MCP-only. Please {guidance}."
+            )
+            super().error(message)
+
+        suggestion = command_error_suggestion(message, argv)
         if suggestion:
             message = f"{message}\n\nDid you mean: {suggestion}"
         super().error(message)
+
+
+def requested_top_level_command(argv: list[str]) -> str | None:
+    """Return the root command while skipping taplctl's global option values."""
+
+    skip_value = False
+    for token in argv:
+        if skip_value:
+            skip_value = False
+            continue
+        if token in {"--db", "--config"}:
+            skip_value = True
+            continue
+        if token.startswith("--db=") or token.startswith("--config="):
+            continue
+        if token == "--":
+            continue
+        if not token.startswith("-"):
+            return token
+    return None
 
 
 def command_help_epilog() -> str:
@@ -405,6 +480,34 @@ def require_arg(args: argparse.Namespace, field: str, flag: str, *, command: str
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the public management CLI parser.
+
+    Workflow command implementations remain available temporarily for controlled
+    compatibility testing, but they are not registered on the public parser.
+    """
+
+    parser = _build_legacy_parser()
+    parser.legacy_workflow_cli_enabled = os.environ.get(LEGACY_WORKFLOW_CLI_ENV) == "1"
+    if parser.legacy_workflow_cli_enabled:
+        return parser
+
+    parser.description = "Manage TAPL installation, health, indexing, imports, and local services."
+    parser.epilog = (
+        "Agent workflow operations are MCP-only. Run `tapl-mcp` and use its TAPL MCP tools."
+    )
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for command in tuple(action.choices):
+            if command not in MANAGEMENT_COMMANDS:
+                del action.choices[command]
+        action._choices_actions = [
+            choice for choice in action._choices_actions if choice.dest in MANAGEMENT_COMMANDS
+        ]
+    return parser
+
+
+def _build_legacy_parser() -> argparse.ArgumentParser:
     parser = TaplArgumentParser(
         prog="taplctl",
         description="Manage tapl workflow state for agent planning, execution, and validation.",
@@ -892,7 +995,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def add_install_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--taplctl-command", default=None, help="Command used by generated Codex hooks.")
+    parser.add_argument(
+        "--taplctl-command",
+        default=None,
+        help="taplctl executable used to locate sibling tapl-mcp and tapl-hook commands.",
+    )
     parser.add_argument("--mode", choices=("observe", "enforce"), default=tapl_install.DEFAULT_HOOK_MODE, help="Hook handling mode.")
     parser.add_argument(
         "--tapl-config-policy",

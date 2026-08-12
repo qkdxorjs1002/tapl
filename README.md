@@ -53,28 +53,18 @@ repo-local SQLite database.
 
 ## Features
 
-After installation, this workflow runs automatically during normal Codex CLI
-use. MCP tools map structured calls to `taplctl`, while hooks return concise
-lifecycle state. You can inspect or validate that state when you want to
-understand what Codex is doing.
+After installation, the agent workflow runs over the `tapl-mcp` stdio server,
+not through `taplctl`. Its 23 typed tools call `WorkflowApplication` directly
+and cover workflow writes plus status, context, search, item, and archive
+reads. `taplctl` is management-only: `init`, `doctor`, `update`, `install`,
+`viewer`, `reindex`, `searchd`, and `import-md`.
 
-### 1. Check the current Codex run
+### 1. Native agent workflow over MCP
 
-Use these commands when you want to see what Codex has recorded for the current
-repository:
-
-```sh
-taplctl status
-taplctl validate
-```
-
-`status` shows the active request, workflow mode, plans, tasks, findings,
-approval state, and recent activity. `validate` reports records required by the
-selected workflow mode that may make a long Codex session harder to resume.
-
-For integrations, `--json` remains available. Codex hooks use `--agent`
-internally for compact output that Codex can read efficiently; it is not the
-normal human-facing mode.
+Tool descriptions and JSON schemas are the authoritative agent workflow
+contract. Ask Codex to work normally; `tapl-mcp` records plans, tasks,
+approvals, execution manifests, searchable history, and archives directly.
+The agent must not use `taplctl` workflow commands or a CLI JSON data plane.
 
 ### 2. Let Codex record plans and tasks
 
@@ -89,37 +79,15 @@ non-durable answer that does not need persisted plan/task records; it can finish
 and archive immediately. If that work becomes complex, calling
 `tapl_apply_plan` promotes the run to `planned` automatically.
 
-MCP write tools return a compact receipt containing actionable identifiers,
-state, validation issues, and any required parallel execution contract. Each
-receipt also includes the latest recommended MCP action, so the agent usually
-does not need a separate `tapl_get_next` call. The public CLI `--json` output
-keeps its detailed contract for scripts and manual integrations.
-
-For normal use, ask Codex to do the work and let the installed MCP server and
-hooks keep the records current. MCP tool descriptions and JSON schemas are the
-authoritative agent field contract. CLI help remains available for human
-operation, diagnostics, and manual repair; it documents flags rather than the
-agent workflow prompt:
-
-```sh
-taplctl plan set --help
-taplctl task set --help
-taplctl approval set --help
-```
+MCP write tools return compact receipts with actionable identifiers, state,
+validation issues, and any parallel-execution contract. They also include the
+next recommended MCP action.
 
 ### 3. Searchable history for completed work
 
-Past work is archived and searchable.
-
-```sh
-taplctl search "workflow dashboard"
-taplctl search "workflow dashboard" --limit 5
-taplctl item show --id 1
-```
-
-Search uses SQLite FTS, with optional semantic/vector search when the semantic
-dependencies are installed. Use `taplctl archive list` and
-`taplctl archive show --id <id>` to inspect completed runs.
+Past work is archived and searchable through the MCP search, item, and archive
+read tools. SQLite FTS is always available; optional semantic/vector search is
+available when its dependencies are installed.
 
 ### 4. Hooks around the Codex lifecycle
 
@@ -131,9 +99,9 @@ dependencies are installed. Use `taplctl archive list` and
 - `PostToolUse`
 - `Stop`
 
-Those hooks call `taplctl hook-event`, load the current workflow state, and
-return concise lifecycle context. The MCP server owns invariant guidance and
-typed tool contracts; hooks guard the current-state boundary.
+Those hooks run the dedicated `tapl-hook` executable. It returns concise
+current-state context and guards lifecycle boundaries; `tapl-mcp` owns the
+typed workflow tools and invariant guidance.
 
 ### 5. One CLI, workspace-local state
 
@@ -165,29 +133,20 @@ taplctl viewer --port 9000
 ```
 
 Open the printed URL in a browser. The server listens only on the local
-loopback interface, does not open the browser automatically, and exposes only
-viewer read operations. Stop a foreground server with `Ctrl+C`.
+loopback interface, does not open the browser automatically, and reads the
+database through native viewer operations—never a `taplctl` data subprocess.
+Stop a foreground server with `Ctrl+C`.
 
 When the command starts inside a workspace, its nearest `.tapl/tapl.db` wins.
 When it starts without one—such as a Homebrew login service—the page asks for
 an initialized workspace folder and remembers the last successful path in that
-browser. An explicit database can also be selected before the subcommand:
+browser.
 
-```sh
-taplctl --db /path/to/workspace/.tapl/tapl.db viewer
-```
-
-The VS Code extension in `vscode-extension/` reads the same state through:
-
-```sh
-taplctl status --json
-taplctl archive list --json
-taplctl search --json
-taplctl item show --id <id> --json
-```
-
-It gives you an activity-bar view over active runs, plans, tasks, findings,
-archives, and search results.
+The VS Code extension keeps a persistent workspace-scoped `tapl-mcp` stdio
+client and uses MCP read tools for its activity-bar view. Set
+`taplWorkflow.taplMcpPath` to the `tapl-mcp` executable when needed.
+`taplWorkflow.taplctlPath` is retained only as a legacy locator for a sibling
+`tapl-mcp`, not as a workflow command path.
 
 ### 7. Parallel SubAgent dispatch
 
@@ -197,72 +156,18 @@ spawns and manages the actual SubAgents. Sequential tasks run on the main
 agent by default; use parallel dispatch only for independent work that can be
 given exclusive file or directory scopes.
 
-Create compatible `Pending` tasks in one plan and one non-empty group. Each
-parallel task must declare `parallel` mode, the `subagent` executor, and its
-exclusive owned paths. Dependencies are optional, but every listed dependency
-must already be `Completed` before dispatch.
+Create and dispatch compatible tasks through the MCP tools. Each parallel task
+declares a non-overlapping owned path, and every dependency must already be
+completed. The root agent uses the returned `execution_id` to settle work;
+never use `taplctl` to create, dispatch, settle, search, or inspect workflow
+records. If a worker cannot run, the root agent uses MCP recovery or cancellation
+tools before retrying.
 
-```sh
-# TASK-004 is already Completed. These two tasks own separate paths.
-taplctl task create --id TASK-005 --title 'Add focused tests' --status Pending \
-  --spec-id PLAN-001 --goal 'Cover parallel dispatch behavior' \
-  --action 'Add focused CLI tests' --verification 'Run the focused test suite' \
-  --execution-mode parallel --executor-kind subagent --parallel-group dispatch-docs \
-  --owned-path tapl/tests/test_tapl.py --owned-path tapl/tests/fixtures \
-  --depends-on TASK-004 --agent
+### Compatibility escape hatch
 
-taplctl task create --id TASK-006 --title 'Document parallel dispatch' --status Pending \
-  --spec-id PLAN-001 --goal 'Document the supported workflow' \
-  --action 'Update the user documentation' --verification 'Review the README examples' \
-  --execution-mode parallel --executor-kind subagent --parallel-group dispatch-docs \
-  --owned-path README.md --depends-on TASK-004 --agent
-```
-
-Dispatch two or more compatible `Pending` tasks in the same group atomically.
-`--batch-id` makes a retry identifiable, and `--execution-metadata` records
-the intended executor reference, model, and reasoning effort for every task.
-The command prints one manifest row per task, including its `execution_id`.
-
-```sh
-taplctl task dispatch TASK-005 TASK-006 --batch-id docs-20260727 \
-  --execution-metadata '{
-    "TASK-005": {"executor_ref": "tests-worker", "model": "gpt-5.6-terra", "reasoning_effort": "high"},
-    "TASK-006": {"executor_ref": "docs-worker", "model": "gpt-5.6-terra", "reasoning_effort": "high"}
-  }' --agent
-```
-
-The root agent reads that manifest, concurrently spawns a different SubAgent
-for each returned task and `execution_id`, and keeps each worker within its
-declared paths. Only the root agent writes TAPL state. It settles each result
-with the exact manifest ID—never by directly editing a batch-managed status:
-
-```sh
-taplctl task complete TASK-005 --execution-id <execution-id-for-TASK-005> \
-  --verification 'uv run python -m unittest tests.test_tapl' \
-  --result 'Focused dispatch coverage passed' --agent
-taplctl task block TASK-006 --execution-id <execution-id-for-TASK-006> \
-  --verification 'README review' --blocker 'Required product decision is unavailable' \
-  --next-action 'Obtain the decision and redispatch the task' --agent
-taplctl task skip TASK-006 --execution-id <execution-id-for-TASK-006> \
-  --result 'No longer needed after the plan changed' --agent
-```
-
-Dispatch rejects tasks with unmet dependencies, mixed plans or groups, paths
-that overlap (including a file and its parent directory), or other active work
-that conflicts with their owned paths. Tasks in one group must be independent;
-do not make one depend on another member of that same group. If any worker
-cannot be spawned, or the root runtime is interrupted, settle what ran and
-recover or cancel the entire active batch before retrying:
-
-```sh
-taplctl batch recover docs-20260727 --reason 'Root runtime interrupted' --agent
-taplctl batch cancel docs-20260727 --block \
-  --reason 'One worker could not be started' --agent
-```
-
-Use `taplctl status --agent` to inspect active batches and execution IDs, and
-`taplctl next --agent` for the safest follow-up command. Do not start a second
-batch while the current batch remains active.
+`TAPL_ENABLE_LEGACY_WORKFLOW_CLI=1` temporarily enables the retired workflow
+CLI only for unsupported migration or diagnostic compatibility. It is not a
+normal interface and must not be used by agents, scripts, or viewers.
 
 ## Install Details
 
@@ -295,8 +200,8 @@ installation directories. By default these are
 The installer does not modify your shell startup files or install Codex hooks.
 If it prints a `PATH` export, run that export in the current shell and add it
 to your shell configuration for future shells. Once `taplctl` resolves in your
-`PATH`, run `taplctl install user` (or `taplctl install repo`) and then
-`taplctl validate`, as shown in [Configure Codex hooks](#configure-codex-hooks).
+`PATH`, run `taplctl install user` (or `taplctl install repo`), as shown in
+[Configure Codex hooks](#configure-codex-hooks).
 
 ### Windows (`irm | iex`)
 
@@ -319,8 +224,7 @@ not already present, and also updates the current PowerShell session. New
 processes receive the user `PATH` entry; the system `PATH` is not changed and
 no administrator privileges are required. It does not install Codex hooks
 automatically. Once `taplctl` resolves in `PATH`, run `taplctl install user`
-(or `taplctl install repo`) and then `taplctl validate`, as shown in
-[Configure Codex hooks](#configure-codex-hooks).
+(or `taplctl install repo`), as shown in [Configure Codex hooks](#configure-codex-hooks).
 
 The installer validates the release manifest and verifies the downloaded wheel
 against its published SHA-256 before activation. As with any `irm | iex`
@@ -386,13 +290,11 @@ taplctl install user
 
 # Or install only in the current repository
 taplctl install repo
-
-taplctl validate
 ```
 
 The installer also adds an enabled `mcp_servers.tapl` entry that launches
-`taplctl mcp`. Restart Codex after installation so the new stdio server is
-loaded.
+`tapl-mcp` and hook entries that launch `tapl-hook`. Restart Codex after
+installation so the generated stdio server and hooks are loaded.
 
 The first time Codex asks for confirmation after installation, trust the
 installed hook.
@@ -406,8 +308,9 @@ Install merge policy:
 - `hooks.json` is managed-merged. Existing non-tapl hooks are preserved; tapl
   managed hooks are replaced.
 - `.codex/config.toml` is TOML-merged. Existing user values win, and missing
-  tapl template keys are added, including the TAPL MCP server. The MCP launcher
-  reuses the resolved `taplctl` executable used by hooks.
+  tapl template keys are added, including the TAPL `tapl-mcp` server. Generated
+  hook entries invoke `tapl-hook`; neither generated path uses `taplctl` as the
+  workflow data plane.
 - tapl runtime `config.toml` (`.tapl/config.toml` or `~/.tapl/config.toml`) is
   created on first install. When the installed tapl version changes, tapl asks
   whether to overwrite it with updated defaults or keep existing values and add
@@ -480,34 +383,21 @@ dependencies cannot be installed.
 ```sh
 taplctl init --workspace-root /path/to/workspace
 taplctl doctor
-taplctl status
-taplctl validate
+taplctl install user
+taplctl install repo
 taplctl viewer
 taplctl viewer --port 9000
 taplctl update --check
 taplctl update
-taplctl search "query"
-taplctl item show --id 1
-taplctl archive list
-taplctl archive show --id <id>
 taplctl reindex
 taplctl searchd start
 taplctl searchd status
-
-# Advanced manual workflow repair/debugging (flag help only)
-taplctl run set --help
-taplctl plan set --help
-taplctl task set --help
-taplctl finding add --help
-taplctl approval set --help
-taplctl archive create --help
+taplctl import-md /path/to/legacy-workflow
 ```
 
-`taplctl search` returns 7 results by default. Set `[search] max_results` in
-`.tapl/config.toml` or `~/.tapl/config.toml` to change the default, and use
-`--limit` for one-off overrides. When a search result is relevant and the
-snippet is not enough context, use its numeric `id` with
-`taplctl item show --id <id>` before relying on the full record details.
+Use the `tapl-mcp` tools for workflow state, including status, validation,
+search, item details, and archives. The management CLI is intentionally limited
+to the commands above.
 
 ### SubAgent delegation configuration
 
@@ -588,7 +478,6 @@ uv --directory tapl run --extra test python -m unittest discover -s tests
 uv --directory tapl build
 npm --prefix vscode-extension run compile
 git diff --check
-taplctl validate
 ```
 
 ## License

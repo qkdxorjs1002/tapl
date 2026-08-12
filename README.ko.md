@@ -51,26 +51,18 @@ Codex session은 일을 잘합니다. 하지만 긴 개발 작업에는 마지�
 
 ## 기능
 
-설치 후에는 이 workflow가 Codex 사용 중 자동으로 실행됩니다. MCP tool이
-structured call을 `taplctl`로 매핑하고, hook은 짧은 lifecycle state를 반환합니다.
-사용자는 Codex가 무엇을 기록했는지 확인하거나 검증하고 싶을 때만 CLI를 보면 됩니다.
+설치 후 agent workflow는 `taplctl`이 아니라 `tapl-mcp` stdio 서버로 실행됩니다.
+23개의 typed tool이 `WorkflowApplication`을 직접 호출하며 workflow 작성뿐 아니라
+status, context, search, item, archive read도 제공합니다. `taplctl`은 `init`,
+`doctor`, `update`, `install`, `viewer`, `reindex`, `searchd`, `import-md`만
+제공하는 management-only CLI입니다.
 
-### 1. 현재 Codex run 확인
+### 1. MCP의 native agent workflow
 
-현재 repository에서 Codex가 기록한 내용을 보고 싶을 때는 다음 명령을 사용합니다.
-
-```sh
-taplctl status
-taplctl validate
-```
-
-`status`는 active request, workflow mode, plan, task, finding, approval state,
-recent activity를 보여줍니다. `validate`는 선택한 workflow mode에 필요하며 긴
-Codex session을 나중에 이어가기 어렵게 만드는 record 누락을 알려줍니다.
-
-통합 도구에는 `--json` 출력이 그대로 제공됩니다. Codex hook은 내부적으로
-Codex가 효율적으로 읽을 수 있는 간결한 출력을 위해 `--agent`를 사용하지만,
-일반 사용자가 따라 실행하는 모드는 아닙니다.
+MCP tool description과 JSON schema가 agent workflow의 기준입니다. Codex에게
+평소처럼 작업을 요청하면 `tapl-mcp`가 plan, task, approval, execution manifest,
+검색 가능한 history와 archive를 직접 기록합니다. Agent는 `taplctl` workflow 명령이나
+CLI JSON data plane을 사용하면 안 됩니다.
 
 ### 2. Plan과 task는 Codex가 기록하게 두기
 
@@ -86,33 +78,12 @@ Codex는 MCP 서버에서 lifecycle guidance를 받고 typed MCP tool field로 p
 
 MCP write tool은 실행 가능한 식별자, 상태, validation issue, 필요한 병렬 실행
 계약만 담은 compact receipt를 반환합니다. 각 receipt에는 최신 권장 MCP action도
-포함되므로 agent가 보통 `tapl_get_next`를 별도로 호출할 필요가 없습니다. Script와
-수동 통합을 위한 공개 CLI `--json` 상세 계약은 그대로 유지됩니다.
-
-일반적인 사용에서는 Codex에게 작업을 요청하고, 설치된 MCP 서버와 hook이 record를
-최신 상태로 유지하게 두면 됩니다. Agent가 따르는 필드 계약은 MCP tool description과
-JSON schema가 기준입니다. CLI help는 사람이 직접 운영·진단·복구할 때 사용하는
-flag 설명만 제공하며 agent workflow prompt 역할은 하지 않습니다.
-
-```sh
-taplctl plan set --help
-taplctl task set --help
-taplctl approval set --help
-```
+포함되므로 agent가 보통 `tapl_get_next`를 별도로 호출할 필요가 없습니다.
 
 ### 3. 검색 가능한 완료 작업 history
 
-지난 작업은 archive로 남기고 검색할 수 있습니다.
-
-```sh
-taplctl search "workflow dashboard"
-taplctl search "workflow dashboard" --limit 5
-taplctl item show --id 1
-```
-
-Search는 SQLite FTS를 사용하고, semantic dependency를 설치하면 semantic/vector
-search도 사용할 수 있습니다. 완료된 run은 `taplctl archive list`와
-`taplctl archive show --id <id>`로 확인합니다.
+지난 작업은 MCP search, item, archive read tool로 검색하고 확인합니다. SQLite FTS는
+기본 제공하며 semantic/vector search는 선택 dependency를 설치했을 때 사용할 수 있습니다.
 
 ### 4. Codex lifecycle 주변의 hook
 
@@ -124,9 +95,8 @@ search도 사용할 수 있습니다. 완료된 run은 `taplctl archive list`와
 - `PostToolUse`
 - `Stop`
 
-Hook은 `taplctl hook-event`를 호출하고 현재 workflow state를 읽은 뒤, 짧은
-lifecycle context를 반환합니다. 고정 가이던스와 typed tool 계약은 MCP 서버가
-담당하고, hook은 현재 상태의 경계를 지킵니다.
+Hook은 전용 `tapl-hook` executable을 실행합니다. 짧은 current-state context와
+lifecycle boundary는 hook이 담당하고, typed tool과 고정 guidance는 `tapl-mcp`가 담당합니다.
 
 ### 5. 하나의 CLI, workspace-local state
 
@@ -158,29 +128,18 @@ taplctl viewer --port 9000
 ```
 
 출력된 URL을 브라우저에서 여세요. 서버는 로컬 loopback interface에서만
-수신하고 브라우저를 자동으로 열지 않으며 viewer의 읽기 작업만 제공합니다.
-foreground 서버는 `Ctrl+C`로 종료합니다.
+수신하고 브라우저를 자동으로 열지 않으며 DB를 native viewer operation으로
+직접 읽습니다. `taplctl` data subprocess는 실행하지 않습니다. foreground 서버는
+`Ctrl+C`로 종료합니다.
 
 workspace 안에서 실행하면 가장 가까운 `.tapl/tapl.db`가 우선합니다. Homebrew
 로그인 서비스처럼 workspace 밖에서 시작하면 페이지에서 초기화된 workspace
-폴더를 입력할 수 있고, 성공한 최근 경로를 해당 브라우저에 기억합니다. 하위
-명령 앞에서 DB를 직접 선택할 수도 있습니다.
+폴더를 입력할 수 있고, 성공한 최근 경로를 해당 브라우저에 기억합니다.
 
-```sh
-taplctl --db /path/to/workspace/.tapl/tapl.db viewer
-```
-
-`vscode-extension/`의 VS Code extension은 같은 state를 다음 명령으로 읽습니다.
-
-```sh
-taplctl status --json
-taplctl archive list --json
-taplctl search --json
-taplctl item show --id <id> --json
-```
-
-Activity bar에서 active run, plan, task, finding, archive, search result를 볼
-수 있습니다.
+`vscode-extension/`은 workspace별 persistent `tapl-mcp` stdio client를 유지하고
+MCP read tool로 activity bar를 구성합니다. 필요하면 `taplWorkflow.taplMcpPath`에
+`tapl-mcp` 실행 파일을 지정하세요. `taplWorkflow.taplctlPath`는 sibling
+`tapl-mcp`를 찾기 위한 legacy locator일 뿐 workflow command path가 아닙니다.
 
 ### 7. 병렬 SubAgent dispatch
 
@@ -194,50 +153,18 @@ task마다 `parallel` mode, `subagent` executor, 독점 `owned-path`를 선언�
 합니다. Dependency는 선택 사항이지만, 선언했다면 dispatch 전에 모두 반드시
 `Completed` 상태여야 합니다.
 
-```sh
-# TASK-004는 이미 Completed 상태입니다. 아래 두 task는 별도 path를 소유합니다.
-taplctl task create --id TASK-005 --title '집중 테스트 추가' --status Pending \
-  --spec-id PLAN-001 --goal '병렬 dispatch 동작을 검증한다' \
-  --action '집중 CLI 테스트를 추가한다' --verification '집중 테스트 suite를 실행한다' \
-  --execution-mode parallel --executor-kind subagent --parallel-group dispatch-docs \
-  --owned-path tapl/tests/test_tapl.py --owned-path tapl/tests/fixtures \
-  --depends-on TASK-004 --agent
-
-taplctl task create --id TASK-006 --title '병렬 dispatch 문서화' --status Pending \
-  --spec-id PLAN-001 --goal '지원되는 workflow를 문서화한다' \
-  --action '사용자 문서를 갱신한다' --verification 'README 예시를 검토한다' \
-  --execution-mode parallel --executor-kind subagent --parallel-group dispatch-docs \
-  --owned-path README.md --depends-on TASK-004 --agent
-```
 
 같은 group의 호환되는 `Pending` task를 두 개 이상 원자적으로 dispatch합니다.
 `--batch-id`는 재시도를 식별 가능하게 하고, `--execution-metadata`는 task별
 예정 executor reference, model, reasoning effort를 기록합니다. 명령은 task별
 `execution_id`를 포함하는 manifest row를 출력합니다.
 
-```sh
-taplctl task dispatch TASK-005 TASK-006 --batch-id docs-20260727 \
-  --execution-metadata '{
-    "TASK-005": {"executor_ref": "tests-worker", "model": "gpt-5.6-terra", "reasoning_effort": "high"},
-    "TASK-006": {"executor_ref": "docs-worker", "model": "gpt-5.6-terra", "reasoning_effort": "high"}
-  }' --agent
-```
 
 Root agent는 이 manifest를 읽고, 반환된 각 task와 `execution_id`마다 서로 다른
 SubAgent를 동시에 spawn하며, 각 worker가 선언한 path 안에서만 작업하게 합니다.
 TAPL state 작성은 root agent만 합니다. Batch가 관리하는 status를 직접 바꾸지
 말고, 각 결과를 정확한 manifest ID로 정산하세요.
 
-```sh
-taplctl task complete TASK-005 --execution-id <TASK-005의-execution-id> \
-  --verification 'uv run python -m unittest tests.test_tapl' \
-  --result '집중 dispatch 테스트를 통과했다' --agent
-taplctl task block TASK-006 --execution-id <TASK-006의-execution-id> \
-  --verification 'README 검토' --blocker '필요한 제품 결정이 없다' \
-  --next-action '결정을 받은 뒤 task를 다시 dispatch한다' --agent
-taplctl task skip TASK-006 --execution-id <TASK-006의-execution-id> \
-  --result 'Plan 변경 후 더 이상 필요하지 않다' --agent
-```
 
 Dispatch는 완료되지 않은 dependency, 서로 다른 plan 또는 group, 겹치는 path
 (파일과 그 부모 directory의 충돌 포함), 기존 active work와 충돌하는 owned path를
@@ -246,15 +173,15 @@ dependency를 걸지 마세요. Worker 일부를 spawn하지 못했거나 root r
 중단되면, 실행된 task를 정산하고 active batch 전체를 recover 또는 cancel한 뒤에만
 재시도합니다.
 
-```sh
-taplctl batch recover docs-20260727 --reason 'Root runtime이 중단되었다' --agent
-taplctl batch cancel docs-20260727 --block \
-  --reason '한 worker를 시작할 수 없다' --agent
-```
+Agent는 MCP task 및 dispatch tool로 task를 만들고 dispatch합니다. Root agent는
+반환된 `execution_id`로 결과를 정산하고, retry 전 MCP recovery 또는 cancellation
+tool을 사용합니다. `taplctl`로 workflow record를 만들거나 조회하지 마세요.
 
-`taplctl status --agent`로 active batch와 execution ID를 확인하고,
-`taplctl next --agent`로 가장 안전한 다음 lifecycle 명령을 확인하세요. 현재
-batch가 active인 동안에는 두 번째 batch를 시작하지 마세요.
+### 호환성 escape hatch
+
+`TAPL_ENABLE_LEGACY_WORKFLOW_CLI=1`은 지원되지 않는 migration 또는 diagnostic
+compatibility에만 임시로 retired workflow CLI를 활성화합니다. 일반 interface가
+아니며 agent, script, viewer가 사용하면 안 됩니다.
 
 ## 설치 상세
 
@@ -286,8 +213,7 @@ curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh |
 설치 프로그램은 shell 시작 파일이나 Codex hook을 수정하지 않습니다. `PATH` export가
 출력되면 현재 shell에서 실행하고, 이후 shell에도 적용되도록 shell 설정 파일에 추가하세요.
 `PATH`에서 `taplctl`을 찾을 수 있게 되면 [Codex hook 설정](#codex-hook-설정)에 나온 것처럼
-`taplctl install user`(또는 `taplctl install repo`)를 실행한 다음 `taplctl validate`를
-실행하세요.
+`taplctl install user`(또는 `taplctl install repo`)를 실행하세요.
 
 ### Windows (`irm | iex`)
 
@@ -308,8 +234,7 @@ launcher 디렉터리, release manifest URL을 재정의할 수 있습니다.
 현재 PowerShell 세션도 갱신합니다. 새 프로세스에는 사용자 `PATH` 항목이 적용되며,
 시스템 `PATH`는 바꾸지 않고 관리자 권한도 필요하지 않습니다. Codex hook은 자동으로
 설치하지 않습니다. `PATH`에서 `taplctl`을 찾을 수 있게 되면 [Codex hook 설정](#codex-hook-설정)에
-나온 것처럼 `taplctl install user`(또는 `taplctl install repo`)를 실행한 다음
-`taplctl validate`를 실행하세요.
+나온 것처럼 `taplctl install user`(또는 `taplctl install repo`)를 실행하세요.
 
 설치 프로그램은 release manifest를 검증하고, 활성화 전에 내려받은 wheel이 공개된
 SHA-256과 일치하는지 확인합니다. `irm | iex` 명령을 사용할 때는 환경의 신뢰 절차에 맞게
@@ -372,12 +297,11 @@ taplctl install user
 
 # 또는 현재 repository에만 설치
 taplctl install repo
-
-taplctl validate
 ```
 
-설치 프로그램은 `taplctl mcp`를 실행하는 활성화된 `mcp_servers.tapl` 항목도
-추가합니다. 새 stdio 서버가 로드되도록 설치 후 Codex를 재시작하세요.
+설치 프로그램은 `tapl-mcp`를 실행하는 활성화된 `mcp_servers.tapl` 항목과
+`tapl-hook` hook entry를 추가합니다. 생성된 stdio 서버와 hook이 로드되도록
+설치 후 Codex를 재시작하세요.
 
 설치 후 Codex가 처음 확인을 요청할 때 설치된 hook을 trust 해주세요.
 
@@ -390,8 +314,9 @@ taplctl validate
 - `hooks.json`은 managed merge를 합니다. 기존 non-tapl hook은 보존하고, tapl이
   관리하는 hook만 교체합니다.
 - `.codex/config.toml`은 TOML 병합을 합니다. 기존 사용자 값이 우선하고,
-  tapl template에만 있는 누락 key와 TAPL MCP 서버 설정을 추가합니다. MCP
-  launcher는 hook과 동일하게 resolve된 `taplctl` 실행 경로를 사용합니다.
+  tapl template에만 있는 누락 key와 TAPL `tapl-mcp` 서버 설정을 추가합니다.
+  생성된 hook entry는 `tapl-hook`을 실행하며 workflow data plane에 `taplctl`을
+  사용하지 않습니다.
 - tapl runtime `config.toml`(`.tapl/config.toml` 또는 `~/.tapl/config.toml`)은
   최초 설치 때 생성합니다. 설치된 tapl version이 바뀌면 updated default로
   덮어쓸지, 기존 값을 유지하면서 누락된 default key만 추가할지 묻습니다.
@@ -461,34 +386,20 @@ Python release에서는 같은 상황이 발생할 수 있으며, 의존성을 �
 ```sh
 taplctl init --workspace-root /path/to/workspace
 taplctl doctor
-taplctl status
-taplctl validate
+taplctl install user
+taplctl install repo
 taplctl viewer
 taplctl viewer --port 9000
 taplctl update --check
 taplctl update
-taplctl search "query"
-taplctl item show --id 1
-taplctl archive list
-taplctl archive show --id <id>
 taplctl reindex
 taplctl searchd start
 taplctl searchd status
-
-# 고급 수동 workflow 보정/디버깅(flag help only)
-taplctl run set --help
-taplctl plan set --help
-taplctl task set --help
-taplctl finding add --help
-taplctl approval set --help
-taplctl archive create --help
+taplctl import-md /path/to/legacy-workflow
 ```
 
-`taplctl search`는 기본 7개 결과를 반환합니다. 기본값은 `.tapl/config.toml` 또는
-`~/.tapl/config.toml`의 `[search] max_results`로 바꿀 수 있고, 한 번만 바꿀
-때는 `--limit`을 사용합니다. 검색 결과가 관련 있고 snippet만으로 맥락이
-부족하면, 결과의 numeric `id`를 `taplctl item show --id <id>`에 넘겨
-전체 record detail을 확인한 뒤 사용합니다.
+workflow state, validation, search, item detail, archive는 `tapl-mcp` tool을
+사용하세요. Management CLI는 위 명령으로 의도적으로 제한됩니다.
 
 ### SubAgent 위임 설정
 
@@ -564,7 +475,6 @@ uv --directory tapl run --extra test python -m unittest discover -s tests
 uv --directory tapl build
 npm --prefix vscode-extension run compile
 git diff --check
-taplctl validate
 ```
 
 ## 라이선스

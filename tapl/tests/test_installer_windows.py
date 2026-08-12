@@ -24,6 +24,19 @@ if str(PACKAGE_ROOT) not in sys.path:
 from taplctl import updater as tapl_updater
 
 
+class PowerShellInstallerStaticTests(unittest.TestCase):
+    def test_prerelease_validation_and_ordering_are_powershell_51_compatible(self) -> None:
+        source = INSTALLER.read_text(encoding="utf-8")
+
+        version_pattern = (
+            "^[0-9]+\\.[0-9]+\\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$"
+        )
+        self.assertGreaterEqual(source.count(version_pattern), 2)
+        self.assertIn("function Compare-SemVer {", source)
+        self.assertIn("$stageRanks = @{ a = 0; b = 1; rc = 2; stable = 3 }", source)
+        self.assertNotIn("[System.Management.Automation.SemanticVersion]", source)
+
+
 class _FixtureHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args: object, directory: str, requests: list[str], **kwargs: object) -> None:
         self._requests = requests
@@ -365,6 +378,46 @@ class PowerShellInstallerTests(unittest.TestCase):
         self.assertIn("is newer than published release 1.0.0", downgrade.stdout)
         self.assertEqual(self.requests, ["/taplctl-install-manifest.json"])
         self.assert_preserved(state)
+
+    def test_prerelease_versions_upgrade_in_python_order_without_downgrade(self) -> None:
+        self.install_initial_release("1.9.9")
+
+        for version in ("2.0.0b1", "2.0.0b2", "2.0.0rc1", "2.0.0"):
+            with self.subTest(version=version):
+                updated = self.install_release(version)
+                self.assertEqual(updated.returncode, 0, updated.stderr)
+                self.assert_active_release(version)
+
+        state = self.preserved_state()
+        self.requests.clear()
+        wheel, sha256 = self.build_wheel("2.0.0rc2")
+        self.write_manifest("2.0.0rc2", wheel, sha256)
+        downgrade = self.run_installer()
+
+        self.assertEqual(downgrade.returncode, 0, downgrade.stderr)
+        self.assertIn("is newer than published release 2.0.0rc2", downgrade.stdout)
+        self.assertEqual(self.requests, ["/taplctl-install-manifest.json"])
+        self.assert_preserved(state)
+
+    def test_manifest_rejects_noncanonical_prerelease_versions(self) -> None:
+        self.install_initial_release()
+        state = self.preserved_state()
+        wheel, sha256 = self.build_wheel("2.0.0b1")
+        for version in (
+            "2.0.0-beta1",
+            "2.0.0beta1",
+            "2.0.0b",
+            "2.0.0rc",
+            "2.0.0RC1",
+            "v2.0.0b1",
+            "2.0.0.post1",
+        ):
+            with self.subTest(version=version):
+                self.write_manifest(version, wheel, sha256)
+                failed = self.run_installer()
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("release manifest validation failed", failed.stderr)
+                self.assert_preserved(state)
 
     def test_invalid_manifest_and_checksum_preserve_an_existing_installation(self) -> None:
         self.install_initial_release()

@@ -12,5 +12,6 @@ tailwind.config.cjs
 postcss.config.cjs
 *.vsix
 node_modules/**
+!out/node_modules/**
 README.ko.md
 AGENTS.md

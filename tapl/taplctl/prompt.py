@@ -193,7 +193,7 @@ AGENT_ITEM_FIELDS = {
     "finding": ("body", "impact", "related_ids"),
 }
 
-MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is the workflow system for this workspace. Use the `tapl_*` MCP tools instead of constructing or executing `taplctl` shell commands. Call `tapl_get_status` and `tapl_get_next` before non-trivial work or whenever state is uncertain. These server instructions, tool descriptions, and JSON schemas are the authoritative workflow and field contract; do not call CLI `--help` to rediscover them. The `taplctl` CLI remains a manual repair fallback only when this MCP server is unavailable.
+MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is the workflow system for this workspace. Its `tapl_*` MCP tools call the repo-local workflow application directly; do not construct or execute `taplctl` shell commands for agent workflows. Call `tapl_get_status` and `tapl_get_next` before non-trivial work or whenever state is uncertain, and use `tapl_get_context` when lifecycle guidance is needed. These server instructions, tool descriptions, and JSON schemas are the authoritative workflow and field contract; do not call CLI `--help` to rediscover them. The `taplctl` CLI remains a manual repair fallback only when this MCP server is unavailable.
 
 # Workflow
 
@@ -201,7 +201,7 @@ Write workflow records and reports in the user's language unless asked otherwise
 
 ## Role Boundaries
 
-- Workflow state lives in the repo-local TAPL database behind these tools.
+- Workflow state lives in the repo-local TAPL database behind the in-process workflow application used by these tools.
 - Prefer high-level lifecycle tools and `tapl_get_next`; use the CLI only for manual repair when MCP is unavailable.
 - Do not modify source, tests, docs, configs, migrations, generated files, or other durable project artifacts before execution approval.
 - TAPL run, plan, task, finding, approval, and archive records may be created or updated before execution approval.

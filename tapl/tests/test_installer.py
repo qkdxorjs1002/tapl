@@ -305,6 +305,56 @@ exec "$TAPL_TEST_REAL_PYTHON" "$@"
         self.assertNotEqual(new_metadata["venv"], old_metadata["venv"])
         self.assertTrue(Path(str(old_metadata["venv"])).is_dir())
 
+    def test_prerelease_versions_upgrade_in_python_order_without_downgrade(self) -> None:
+        self.install_initial_release("1.9.9")
+
+        for version in ("2.0.0b1", "2.0.0b2", "2.0.0rc1", "2.0.0"):
+            with self.subTest(version=version):
+                updated = self.install_release(version)
+                self.assertEqual(updated.returncode, 0, updated.stderr)
+                self.assert_active_release(version)
+
+        metadata_path = self.install_root / "install.json"
+        preserved_metadata = metadata_path.read_text(encoding="utf-8")
+        preserved_link = os.readlink(self.bin_dir / "taplctl")
+        preserved_versions = sorted(
+            path.name for path in (self.install_root / "versions").iterdir()
+        )
+        prerelease_wheel, prerelease_sha256 = self.build_wheel("2.0.0rc2")
+        self.write_manifest("2.0.0rc2", prerelease_wheel, prerelease_sha256)
+
+        downgrade = self.run_installer()
+
+        self.assertEqual(downgrade.returncode, 0, downgrade.stderr)
+        self.assertIn(
+            "installed taplctl 2.0.0 is newer than published release 2.0.0rc2",
+            downgrade.stdout,
+        )
+        self.assert_existing_installation_is_preserved(preserved_metadata, preserved_link)
+        self.assertEqual(
+            sorted(path.name for path in (self.install_root / "versions").iterdir()),
+            preserved_versions,
+        )
+
+    def test_manifest_rejects_noncanonical_prerelease_versions(self) -> None:
+        self.install_initial_release()
+        valid_wheel, valid_sha256 = self.build_wheel("2.0.0b1")
+        invalid_versions = (
+            "2.0.0-beta1",
+            "2.0.0beta1",
+            "2.0.0b",
+            "2.0.0rc",
+            "2.0.0RC1",
+            "v2.0.0b1",
+            "2.0.0.post1",
+        )
+        for version in invalid_versions:
+            with self.subTest(version=version):
+                self.write_manifest(version, valid_wheel, valid_sha256)
+                failed = self.run_installer()
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("release manifest validation failed", failed.stderr)
+
     def test_older_manifest_is_a_noop_when_managed_install_is_newer(self) -> None:
         self.install_initial_release("1.1.0")
         metadata_path = self.install_root / "install.json"

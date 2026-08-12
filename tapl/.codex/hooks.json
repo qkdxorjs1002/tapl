@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "taplctl hook-event --event UserPromptSubmit --mode observe"
+            "command": "tapl-hook --event UserPromptSubmit --mode observe"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "taplctl hook-event --event PreToolUse --mode observe"
+            "command": "tapl-hook --event PreToolUse --mode observe"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "taplctl hook-event --event PermissionRequest --mode observe"
+            "command": "tapl-hook --event PermissionRequest --mode observe"
           }
         ]
       }
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "taplctl hook-event --event PostToolUse --mode observe"
+            "command": "tapl-hook --event PostToolUse --mode observe"
           }
         ]
       }
@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "taplctl hook-event --event Stop --mode observe"
+            "command": "tapl-hook --event Stop --mode observe"
           }
         ]
       }

@@ -41,7 +41,13 @@ DEPRECATED_CODEX_TEMPLATE_FILES: tuple[Path, ...] = (
     Path("agents/senior-worker.toml"),
     Path("agents/specialist-worker.toml"),
 )
-DEPRECATED_CODEX_CONFIG_PATHS = (("features", "multi_agent"),)
+DEPRECATED_CODEX_CONFIG_PATHS = (
+    ("features", "multi_agent"),
+    # TAPL owns its launcher. Remove legacy launcher fields before merging so
+    # upgrades cannot retain `taplctl mcp` beside the dedicated executable.
+    ("mcp_servers", "tapl", "command"),
+    ("mcp_servers", "tapl", "args"),
+)
 DEPRECATED_TAPL_CONFIG_KEYS = (
     "use_level_subagent",
     "use-level-subagent",
@@ -278,6 +284,22 @@ def resolved_taplctl_command(command: str | None) -> str:
     return "taplctl"
 
 
+def sibling_tapl_command(taplctl_command: str, sibling: str) -> str:
+    """Derive an installed sibling executable from a taplctl command/path."""
+
+    suffix = ".exe" if taplctl_command.lower().endswith("taplctl.exe") else ""
+    taplctl_name = f"taplctl{suffix}"
+    if taplctl_command == taplctl_name:
+        return f"{sibling}{suffix}"
+    for separator in ("/", "\\"):
+        marker = f"{separator}{taplctl_name}"
+        if taplctl_command.endswith(marker):
+            return f"{taplctl_command[:-len(taplctl_name)]}{sibling}{suffix}"
+    # Compound compatibility launchers such as `python -m taplctl` do not
+    # identify a sibling bin directory. Prefer the dedicated command on PATH.
+    return sibling
+
+
 def build_hooks_config(*, taplctl_command: str, mode: str) -> dict[str, Any]:
     template = template_hooks_config(taplctl_command=taplctl_command, mode=mode)
     if template is not None:
@@ -301,7 +323,8 @@ def build_hooks_config(*, taplctl_command: str, mode: str) -> dict[str, Any]:
 
 
 def hook_command(*, taplctl_command: str, event: str, mode: str) -> str:
-    return f"{shlex.quote(taplctl_command)} hook-event --event {shlex.quote(event)} --mode {shlex.quote(mode)}"
+    hook = sibling_tapl_command(taplctl_command, "tapl-hook")
+    return f"{shlex.quote(hook)} --event {shlex.quote(event)} --mode {shlex.quote(mode)}"
 
 
 def template_hooks_config(*, taplctl_command: str, mode: str) -> dict[str, Any] | None:
@@ -339,7 +362,7 @@ def retarget_hooks_config(template: dict[str, Any], *, taplctl_command: str, mod
 
 
 def is_tapl_hook_command(command: str) -> bool:
-    return "taplctl" in command and "hook-event" in command
+    return "tapl-hook" in command or ("taplctl" in command and "hook-event" in command)
 
 
 def merge_hooks(existing: dict[str, Any], managed: dict[str, Any]) -> dict[str, Any]:
@@ -394,7 +417,9 @@ def is_tapl_hook_command_entry(hook: Any) -> bool:
         return False
     command = hook.get("command")
     return isinstance(command, str) and (
-        "tapl_hook.py" in command or ("taplctl" in command and "hook-event" in command)
+        "tapl_hook.py" in command
+        or "tapl-hook" in command
+        or ("taplctl" in command and "hook-event" in command)
     )
 
 
@@ -586,7 +611,7 @@ def install_static_codex_templates(
 
 
 def retarget_codex_mcp_config(template: str, *, taplctl_command: str) -> str:
-    """Use the same resolved taplctl executable for hooks and the MCP launcher."""
+    """Retarget the managed MCP server to the dedicated sibling executable."""
 
     data = tomllib.loads(template)
     mcp_servers = data.get("mcp_servers")
@@ -595,7 +620,8 @@ def retarget_codex_mcp_config(template: str, *, taplctl_command: str) -> str:
     tapl = mcp_servers.get("tapl")
     if not isinstance(tapl, dict):
         raise ValueError("tapl Codex config template must contain mcp_servers.tapl")
-    tapl["command"] = taplctl_command
+    tapl["command"] = sibling_tapl_command(taplctl_command, "tapl-mcp")
+    tapl.pop("args", None)
     return dump_toml(data)
 
 

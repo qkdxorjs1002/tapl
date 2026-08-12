@@ -58,19 +58,13 @@ jobs:
 
       - name: Resolve release version
         id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          version="${GITHUB_REF_NAME}"
-          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tags must use x.y.z format. Got: ${version}" >&2
-            exit 1
-          fi
-
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+        run: >-
+          python .github/scripts/release_version.py
+          "${GITHUB_REF_NAME}"
+          --github-output "${GITHUB_OUTPUT}"
 
       - name: Require Homebrew tap token
+        if: steps.version.outputs.prerelease == 'false'
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         shell: bash
@@ -94,7 +88,8 @@ jobs:
 
       - name: Sync package versions
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -105,13 +100,14 @@ jobs:
           import re
           from pathlib import Path
 
-          version = os.environ["RELEASE_VERSION"]
+          python_version = os.environ["PYTHON_VERSION"]
+          tag_version = os.environ["TAG_VERSION"]
 
           pyproject = Path("tapl/pyproject.toml")
           pyproject_text = pyproject.read_text()
           pyproject_text, pyproject_count = re.subn(
               r'(?m)^version = "[^"]+"$',
-              f'version = "{version}"',
+              f'version = "{python_version}"',
               pyproject_text,
               count=1,
           )
@@ -121,7 +117,7 @@ jobs:
 
           package_json = Path("vscode-extension/package.json")
           package_data = json.loads(package_json.read_text())
-          package_data["version"] = version
+          package_data["version"] = tag_version
           package_json.write_text(json.dumps(package_data, indent=2) + "\n")
           PY
 
@@ -145,7 +141,7 @@ jobs:
 
       - name: Build MCP runtime wheelhouses
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -168,7 +164,7 @@ jobs:
             target="${targets[index]}"
             platform="${platforms[index]}"
             wheelhouse="${RUNNER_TEMP}/taplctl-mcp-runtime-${target}"
-            archive="release-dist/taplctl-mcp-runtime-${RELEASE_VERSION}-${target}.tar.gz"
+            archive="release-dist/taplctl-mcp-runtime-${TAG_VERSION}-${target}.tar.gz"
 
             rm -rf "${wheelhouse}"
             mkdir -p "${wheelhouse}"
@@ -214,25 +210,27 @@ jobs:
       - name: Build VS Code extension package
         working-directory: vscode-extension
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
 
           npm exec -- vsce package \
+            --no-dependencies \
             --allow-missing-repository \
-            --out "../release-dist/tapl-workflow-viewer-${RELEASE_VERSION}.vsix"
+            --out "../release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix"
 
       - name: Prepare release assets
         id: assets
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
 
-          wheel_path="release-dist/taplctl-${RELEASE_VERSION}-py3-none-any.whl"
-          vsix_path="release-dist/tapl-workflow-viewer-${RELEASE_VERSION}.vsix"
+          wheel_path="release-dist/taplctl-${PYTHON_VERSION}-py3-none-any.whl"
+          vsix_path="release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix"
 
           test -f "${wheel_path}"
           test -f "${vsix_path}"
@@ -242,7 +240,7 @@ jobs:
           wheel_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${wheel_name}"
           manifest_path="release-dist/taplctl-install-manifest.json"
 
-          python - "${manifest_path}" "${RELEASE_VERSION}" "${wheel_url}" "${wheel_sha256}" <<'PY'
+          python - "${manifest_path}" "${PYTHON_VERSION}" "${wheel_url}" "${wheel_sha256}" <<'PY'
           import json
           import sys
           from pathlib import Path
@@ -264,7 +262,7 @@ jobs:
           echo "wheel_url=${wheel_url}" >> "${GITHUB_OUTPUT}"
 
           for target in macos-arm64 macos-x86_64 linux-arm64 linux-x86_64; do
-            runtime_name="taplctl-mcp-runtime-${RELEASE_VERSION}-${target}.tar.gz"
+            runtime_name="taplctl-mcp-runtime-${TAG_VERSION}-${target}.tar.gz"
             runtime_path="release-dist/${runtime_name}"
             runtime_sha256="$(sha256sum "${runtime_path}" | awk '{print $1}')"
             runtime_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${runtime_name}"
@@ -280,7 +278,8 @@ jobs:
 
       - name: Validate release assets
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
           WHEEL_NAME: ${{ steps.assets.outputs.wheel_name }}
           WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
           WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
@@ -297,7 +296,7 @@ jobs:
           set -euo pipefail
 
           sh -n install.sh
-          python - "release-dist/taplctl-install-manifest.json" "release-dist/${WHEEL_NAME}" "${RELEASE_VERSION}" "${WHEEL_URL}" "${WHEEL_SHA256}" <<'PY'
+          python - "release-dist/taplctl-install-manifest.json" "release-dist/${WHEEL_NAME}" "${PYTHON_VERSION}" "${WHEEL_URL}" "${WHEEL_SHA256}" <<'PY'
           import hashlib
           import json
           import os
@@ -310,7 +309,11 @@ jobs:
           wheel_path = Path(sys.argv[2])
           version, wheel_url, wheel_sha256 = sys.argv[3:]
 
-          if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+          if re.fullmatch(
+              r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+              r"(?:(?:a|b|rc)(?:0|[1-9][0-9]*))?",
+              version,
+          ) is None:
               raise SystemExit("invalid release version")
           if re.fullmatch(r"[0-9a-f]{64}", wheel_sha256) is None:
               raise SystemExit("invalid wheel SHA-256")
@@ -361,7 +364,9 @@ jobs:
               "linux_x86_64": "linux-x86_64",
           }
           for target, asset_target in runtime_targets.items():
-              archive_name = f"taplctl-mcp-runtime-{version}-{asset_target}.tar.gz"
+              archive_name = (
+                  f"taplctl-mcp-runtime-{os.environ['TAG_VERSION']}-{asset_target}.tar.gz"
+              )
               archive_path = Path("release-dist") / archive_name
               expected_url = (
                   f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/"
@@ -391,7 +396,8 @@ jobs:
 
       - name: Smoke-test isolated MCP runtime
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
           WHEEL_NAME: ${{ steps.assets.outputs.wheel_name }}
         shell: bash
         run: |
@@ -402,7 +408,7 @@ jobs:
           workspace="${smoke_root}/workspace"
           rm -rf "${smoke_root}"
           mkdir -p "${runtime_dir}" "${workspace}"
-          tar -xzf "release-dist/taplctl-mcp-runtime-${RELEASE_VERSION}-linux-x86_64.tar.gz" \
+          tar -xzf "release-dist/taplctl-mcp-runtime-${TAG_VERSION}-linux-x86_64.tar.gz" \
             -C "${runtime_dir}"
           python -m venv "${smoke_root}/venv"
           "${smoke_root}/venv/bin/python" -m pip install \
@@ -411,7 +417,11 @@ jobs:
           "${smoke_root}/venv/bin/python" -m pip install \
             --disable-pip-version-check --no-index --no-deps --no-compile \
             "release-dist/${WHEEL_NAME}"
-          "${smoke_root}/venv/bin/taplctl" --version
+          installed_version="$("${smoke_root}/venv/bin/taplctl" --version)"
+          if [[ "${installed_version}" != "taplctl ${PYTHON_VERSION}" ]]; then
+            echo "Expected taplctl ${PYTHON_VERSION}, got ${installed_version}" >&2
+            exit 1
+          fi
           "${smoke_root}/venv/bin/taplctl" init --workspace-root "${workspace}" --json
           "${smoke_root}/venv/bin/python" - "${workspace}" <<'PY'
           import asyncio
@@ -425,8 +435,8 @@ jobs:
               server = create_server(workspace_root=Path(sys.argv[1]))
               async with Client(server) as client:
                   tools = await client.list_tools()
-                  if len(tools.tools) != 20:
-                      raise SystemExit(f"expected 20 TAPL MCP tools, got {len(tools.tools)}")
+                  if len(tools.tools) != 23:
+                      raise SystemExit(f"expected 23 TAPL MCP tools, got {len(tools.tools)}")
                   result = await client.call_tool("tapl_get_status", {})
                   if result.is_error:
                       raise SystemExit("tapl_get_status failed in isolated runtime")
@@ -437,20 +447,32 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_PRERELEASE: ${{ steps.version.outputs.prerelease }}
           RELEASE_TAG: ${{ github.ref_name }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
 
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            edit_args=(--title "taplctl ${TAG_VERSION}")
+            if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
+              edit_args+=(--prerelease)
+            else
+              edit_args+=(--prerelease=false)
+            fi
+            gh release edit "${RELEASE_TAG}" "${edit_args[@]}"
             gh release upload "${RELEASE_TAG}" release-dist/* --clobber
           else
-            gh release create "${RELEASE_TAG}" release-dist/* \
-              --title "taplctl ${RELEASE_TAG}" \
-              --generate-notes
+            create_args=(--title "taplctl ${TAG_VERSION}" --generate-notes)
+            if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
+              create_args+=(--prerelease)
+            fi
+            gh release create "${RELEASE_TAG}" release-dist/* "${create_args[@]}"
           fi
 
       - name: Checkout Homebrew tap
+        if: steps.version.outputs.prerelease == 'false'
         uses: actions/checkout@v4
         with:
           repository: qkdxorjs1002/homebrew-tap
@@ -458,8 +480,9 @@ jobs:
           path: homebrew-tap
 
       - name: Update taplctl Homebrew package
+        if: steps.version.outputs.prerelease == 'false'
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_VERSION: ${{ steps.version.outputs.python_version }}
           WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
           WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
           MCP_RUNTIME_MACOS_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
