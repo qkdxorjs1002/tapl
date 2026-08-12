@@ -501,40 +501,6 @@ def update_active_run_summary(
     return active_run(conn)  # type: ignore[return-value]
 
 
-def create_run(
-    conn: sqlite3.Connection,
-    *,
-    slug: str,
-    status: str,
-    request_summary: str = "",
-    workflow_mode: str = DEFAULT_WORKFLOW_MODE,
-) -> sqlite3.Row:
-    if workflow_mode not in WORKFLOW_MODES:
-        raise ValueError(f"invalid workflow_mode: {workflow_mode}")
-    now = utc_now()
-    run_id = str(uuid.uuid4())
-    conn.execute(
-        """
-        INSERT INTO workflow_runs(
-          id, slug, status, request_summary, workflow_mode, created_at, updated_at, archived_at
-        )
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            run_id,
-            slug,
-            status,
-            request_summary,
-            workflow_mode,
-            now,
-            now,
-            now if status == "archived" else None,
-        ),
-    )
-    conn.commit()
-    return conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
-
-
 def upsert_item(
     conn: sqlite3.Connection,
     *,
@@ -2394,10 +2360,6 @@ def search_word(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[d
         (like, like, like, like, like, limit),
     ).fetchall()
     return [search_row(row, "word") for row in rows]
-
-
-def search_fts(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[dict[str, Any]]:
-    return search_bm25(conn, query, limit=limit)
 
 
 def build_fts_query(query: str) -> str:

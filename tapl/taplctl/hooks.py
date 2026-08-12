@@ -258,7 +258,6 @@ def stop_result_summary(payload: dict[str, Any]) -> str:
                 return compact_text(text, limit=500)
     return ""
 
-
 def payload_text(value: Any) -> str:
     if isinstance(value, str):
         return value.strip()
@@ -332,12 +331,4 @@ def payload_command(payload: dict[str, Any]) -> str:
             value = tool_input.get(key)
             if isinstance(value, str):
                 return value
-    return ""
-
-
-def prompt_summary(payload: dict[str, Any]) -> str:
-    for key in ("prompt", "user_prompt", "message"):
-        value = payload.get(key)
-        if isinstance(value, str):
-            return value.strip()[:240]
     return ""

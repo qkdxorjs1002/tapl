@@ -229,8 +229,6 @@ Run `taplctl searchd start` and `taplctl searchd status` when you want one.
 
 The optional VS Code extension uses a persistent workspace-scoped `tapl-mcp`
 client. Set `taplWorkflow.taplMcpPath` if it cannot locate the executable.
-`taplWorkflow.taplctlPath` remains only as a legacy locator for a sibling
-`tapl-mcp`, not as a workflow command path.
 
 ### Resume and search
 
@@ -263,9 +261,9 @@ flowchart LR
 state at Codex lifecycle points and guards durable-edit boundaries. The SQLite
 database is the shared source of truth for Codex, hooks, and viewers.
 
-`taplctl` is management-only: `init`, `doctor`, `update`, `install`, `viewer`,
-`reindex`, `searchd`, and `import-md`. Agents should never use it to create,
-dispatch, settle, search, or inspect workflow records.
+`taplctl` is management-only. Its seven public commands are `init`, `doctor`,
+`update`, `install`, `viewer`, `reindex`, and `searchd`. Agents should never use
+it to create, dispatch, settle, search, or inspect workflow records.
 
 ## Manage your installation
 
@@ -278,7 +276,6 @@ dispatch, settle, search, or inspect workflow records.
 | `taplctl update --check` / `update` | Check or update standalone installations |
 | `taplctl reindex` | Rebuild search indexes |
 | `taplctl searchd start` / `status` | Manage the optional semantic search process |
-| `taplctl import-md PATH` | Import a legacy Markdown workflow |
 
 ### Updates
 
@@ -344,10 +341,6 @@ durable edits.
 | The viewer cannot find a workspace | Initialize it or choose a folder that already contains `.tapl/tapl.db` |
 | Port 8000 is busy | Stop the Homebrew service or run `taplctl viewer --port PORT` |
 | A Homebrew formula conflicts | Uninstall the installed TAPL formula before selecting another |
-
-`TAPL_ENABLE_LEGACY_WORKFLOW_CLI=1` temporarily exposes the retired workflow CLI
-only for unsupported migration or diagnostics. It is not a normal interface and
-must not be used by agents, scripts, or viewers.
 
 ## Development
 

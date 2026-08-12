@@ -10,7 +10,6 @@ from . import db, prompt as tapl_prompt
 
 
 EXECUTABLE_STATUSES = ("Pending", "In Progress", "Blocked")
-PLAN_KEY_LABELS = tapl_prompt.PLAN_KEY_LABELS
 PLAN_ID_PATTERN = re.compile(r"^(?:PLAN|SPEC)-\d{3,}$")
 TASK_ID_PATTERN = re.compile(r"^TASK-\d{3,}$")
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from string import Template
-from typing import Iterable, Any
+from typing import Any
 
 from . import config as tapl_config
 
@@ -240,7 +240,7 @@ ${context_execution_approval_guidance}
 
 ## Records And History
 
-Use only the records needed for the current task. Do not create or edit legacy workflow markdown files unless the user explicitly asks for them.
+Use only the records needed for the current task.
 
 ${history_search_guidance}
 
@@ -265,27 +265,6 @@ SessionStart is bootstrap only; wait for a concrete user request before creating
 STOP_GUIDANCE_TEMPLATE = """# TAPL MCP
 
 Use `tapl_get_next` to settle remaining tasks or batches. When work is verified, record the result with `tapl_finish_run`, archive eligible work with `tapl_finish_archive`, and report changed behavior, verification, remaining risk, and archive status."""
-
-ROOT_HELP_TEMPLATE = """Manual CLI fallback:
-  Agent workflow guidance and structured field contracts are provided by the `tapl-mcp` server.
-  Use this CLI for human operation, diagnostics, or repair when MCP is unavailable.
-  Subcommand `--help` output documents flags only; it is not the agent workflow prompt."""
-
-SEARCH_HELP_TEMPLATE = """Manual CLI fallback for TAPL history search.
-Use the `tapl_search_history` and `tapl_get_item` MCP tools for agent workflows."""
-
-PLAN_SET_HELP_TEMPLATE = """Manual CLI fallback for plan record repair.
-Use the typed `tapl_apply_plan` MCP tool for agent workflows; command options below document CLI fields."""
-
-TASK_SET_HELP_TEMPLATE = """Manual CLI fallback for task record repair.
-Use the typed TAPL task MCP tools for agent workflows; command options below document CLI fields."""
-
-FINDING_ADD_HELP_TEMPLATE = """Manual CLI fallback for finding record repair.
-Use the typed `tapl_add_finding` MCP tool for agent workflows; command options below document CLI fields."""
-
-APPROVAL_SET_HELP_TEMPLATE = """Manual CLI fallback for approval record repair.
-Use `tapl_approve_execution` or `tapl_reject_execution` for agent workflows; command options below document CLI fields."""
-
 
 def render_template(template: str, **variables: Any) -> str:
     values = {key: str(value) for key, value in variables.items()}
@@ -1053,34 +1032,3 @@ def execution_approval_guidance() -> str:
         "use source `request_user_input` when approval came from that tool."
     )
     return base + " Missing execution approval is always a validation error."
-
-
-def command_help_epilog() -> str:
-    return render(ROOT_HELP_TEMPLATE)
-
-
-def search_epilog() -> str:
-    return render(SEARCH_HELP_TEMPLATE)
-
-
-def plan_set_epilog() -> str:
-    return render(PLAN_SET_HELP_TEMPLATE)
-
-
-def task_set_epilog(
-    *,
-    statuses: Iterable[str] = TASK_STATUSES,
-) -> str:
-    status_values = ", ".join(statuses)
-    return render(
-        TASK_SET_HELP_TEMPLATE,
-        status_values=status_values,
-    )
-
-
-def finding_add_epilog() -> str:
-    return render(FINDING_ADD_HELP_TEMPLATE)
-
-
-def approval_set_epilog() -> str:
-    return render(APPROVAL_SET_HELP_TEMPLATE)

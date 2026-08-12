@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
-import io
-import json
-import os
 import tempfile
 import tomllib
 import unittest
@@ -22,7 +18,6 @@ MANAGEMENT_COMMANDS = {
     "viewer",
     "reindex",
     "searchd",
-    "import-md",
 }
 
 
@@ -35,55 +30,50 @@ def root_commands(parser: argparse.ArgumentParser) -> set[str]:
 
 class PublicCliBoundaryTests(unittest.TestCase):
     def test_public_parser_contains_only_management_commands(self) -> None:
-        with mock.patch.dict(os.environ, {cli.LEGACY_WORKFLOW_CLI_ENV: ""}):
-            parser = cli.build_parser()
+        parser = cli.build_parser()
 
         self.assertEqual(root_commands(parser), MANAGEMENT_COMMANDS)
         help_text = parser.format_help()
-        self.assertIn("Agent workflow operations are MCP-only", help_text)
+        self.assertIn("Agent workflow operations are available through the dedicated `tapl-mcp`", help_text)
         self.assertNotIn("hook-event", help_text)
         self.assertNotIn("{mcp,", help_text)
 
-    def test_removed_workflow_command_has_actionable_mcp_error(self) -> None:
-        with mock.patch.dict(os.environ, {cli.LEGACY_WORKFLOW_CLI_ENV: ""}):
-            parser = cli.build_parser()
-        stderr = io.StringIO()
-
-        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
-            parser.parse_args(["status"])
-
-        self.assertEqual(raised.exception.code, 2)
-        self.assertIn("Agent workflows are MCP-only", stderr.getvalue())
-        self.assertIn("tapl-mcp", stderr.getvalue())
-
-    def test_mcp_and_hook_event_point_to_dedicated_executables(self) -> None:
-        cases = {
-            "mcp": "tapl-mcp",
-            "hook-event": "tapl-hook",
-        }
-        for command, executable in cases.items():
-            with self.subTest(command=command):
-                with mock.patch.dict(os.environ, {cli.LEGACY_WORKFLOW_CLI_ENV: ""}):
-                    parser = cli.build_parser()
-                stderr = io.StringIO()
-                with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
-                    parser.parse_args([command])
-                self.assertIn(executable, stderr.getvalue())
+    def test_workflow_commands_are_not_registered_by_management_cli(self) -> None:
+        commands = root_commands(cli.build_parser())
+        self.assertTrue({"status", "mcp", "hook-event"}.isdisjoint(commands))
 
 
 class HookEntrypointTests(unittest.TestCase):
-    def test_hook_cli_delegates_parsed_event_to_existing_handler(self) -> None:
-        with mock.patch.object(cli, "cmd_hook_event", return_value=2) as handler:
+    def test_hook_cli_handles_event_without_management_cli_bridge(self) -> None:
+        connection = mock.Mock()
+        outcome = {"event": "PreToolUse", "block": True, "message": "blocked"}
+        with (
+            mock.patch.object(hook_cli, "_read_stdin_payload", return_value={"cwd": "/workspace"}),
+            mock.patch.object(hook_cli.tapl_config, "load", return_value=mock.sentinel.settings),
+            mock.patch.object(hook_cli.db, "connect", return_value=connection),
+            mock.patch.object(hook_cli.hooks, "handle_event", return_value=outcome) as handler,
+        ):
             result = hook_cli.main(
-                ["--event", "PreToolUse", "--mode", "enforce", "--tool", "Bash", "--json"]
+                [
+                    "--event",
+                    "PreToolUse",
+                    "--mode",
+                    "enforce",
+                    "--tool",
+                    "Bash",
+                    "--db",
+                    "/tmp/tapl.db",
+                    "--json",
+                ]
             )
 
         self.assertEqual(result, 2)
-        args = handler.call_args.args[0]
-        self.assertEqual(args.event, "PreToolUse")
-        self.assertEqual(args.mode, "enforce")
-        self.assertEqual(args.tool, "Bash")
-        self.assertTrue(args.json)
+        self.assertEqual(handler.call_args.kwargs["event"], "PreToolUse")
+        self.assertEqual(handler.call_args.kwargs["mode"], "enforce")
+        self.assertEqual(handler.call_args.kwargs["tool"], "Bash")
+        self.assertEqual(handler.call_args.kwargs["payload"], {"cwd": "/workspace"})
+        self.assertIs(handler.call_args.kwargs["tapl_settings"], mock.sentinel.settings)
+        connection.close.assert_called_once_with()
 
 
 class InstallerBoundaryTests(unittest.TestCase):

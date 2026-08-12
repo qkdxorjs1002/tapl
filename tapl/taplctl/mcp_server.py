@@ -89,7 +89,7 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
     for recommendation in payload.get("recommendations") or []:
         if not isinstance(recommendation, dict):
             continue
-        item = {key: value for key, value in recommendation.items() if key != "command"}
+        item = dict(recommendation)
         item["tool"] = tool_map.get(str(item.get("name") or ""), "tapl_get_status")
         recommendations.append(item)
     return {**payload, "recommendations": recommendations}

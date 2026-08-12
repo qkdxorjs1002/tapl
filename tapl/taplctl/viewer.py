@@ -158,7 +158,7 @@ class NativeJsonRunner:
     def _status_output(
         state: dict[str, Any], *, full: bool, include_events: bool, events_limit: int = 12
     ) -> dict[str, Any]:
-        """Match the JSON object emitted by ``taplctl status``."""
+        """Match the workflow status payload returned by the application."""
 
         plans = list(state.get("plans") or [])
         tasks = list(state.get("tasks") or [])

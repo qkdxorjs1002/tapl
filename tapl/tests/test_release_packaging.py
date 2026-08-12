@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 import tomllib
 import unittest
+import zipfile
 from pathlib import Path
 
 import yaml
@@ -34,9 +36,9 @@ class PythonPackagingContractTests(unittest.TestCase):
             ["numpy>=1.26", "sentence-transformers>=5.0.0", "sqlite-vec>=0.1.6"],
         )
 
-    def test_base_cli_import_does_not_require_mcp(self) -> None:
-        result = self._run_with_mcp_import_blocked(
-            "import taplctl.cli as cli; cli.main(['--version'])",
+    def test_management_cli_entrypoint_reports_its_version(self) -> None:
+        result = self._run_python(
+            "import taplctl.cli as cli; raise SystemExit(cli.main(['--version']))",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -45,15 +47,42 @@ class PythonPackagingContractTests(unittest.TestCase):
             r"^taplctl \d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?$",
         )
 
-    def test_retired_mcp_cli_command_points_to_dedicated_entrypoint(self) -> None:
-        result = self._run_with_mcp_import_blocked(
-            "import taplctl.cli as cli; raise SystemExit(cli.main(['mcp']))",
+    def test_dedicated_mcp_entrypoint_creates_a_server(self) -> None:
+        result = self._run_python(
+            "from taplctl.mcp_server import create_server; assert create_server() is not None",
         )
 
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("`taplctl mcp` is no longer a public command", result.stderr)
-        self.assertIn("`tapl-mcp`", result.stderr)
-        self.assertNotIn("MCP runtime dependency", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_built_wheel_excludes_retired_importer_and_registers_dedicated_entrypoints(self) -> None:
+        uv = shutil.which("uv")
+        if uv is None:
+            self.skipTest("uv is required to build the release wheel")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "wheel"
+            environment = os.environ.copy()
+            environment.setdefault("UV_CACHE_DIR", str(Path(tmp) / "uv-cache"))
+            build = subprocess.run(
+                [uv, "build", "--wheel", "--out-dir", str(output), str(TAPL_ROOT)],
+                cwd=REPOSITORY_ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(build.returncode, 0, build.stderr)
+            wheels = list(output.glob("taplctl-*.whl"))
+            self.assertEqual(len(wheels), 1)
+
+            with zipfile.ZipFile(wheels[0]) as wheel:
+                names = set(wheel.namelist())
+                entry_points = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
+                scripts = wheel.read(entry_points).decode("utf-8")
+
+        self.assertNotIn("taplctl/importer.py", names)
+        self.assertIn("tapl-mcp = taplctl.mcp_server:main", scripts)
+        self.assertIn("tapl-hook = taplctl.hook_cli:main", scripts)
 
     def test_vscode_package_bundles_the_mcp_client_runtime(self) -> None:
         package = json.loads(VSCODE_PACKAGE.read_text(encoding="utf-8"))
@@ -74,30 +103,11 @@ class PythonPackagingContractTests(unittest.TestCase):
         }
         self.assertIn("node_modules/**", ignored_paths)
 
-    def _run_with_mcp_import_blocked(self, statement: str) -> subprocess.CompletedProcess[str]:
-        script = textwrap.dedent(
-            f"""
-            import importlib.abc
-            import sys
-
-            class BlockMcp(importlib.abc.MetaPathFinder):
-                def find_spec(self, fullname, path=None, target=None):
-                    if fullname == "mcp" or fullname.startswith("mcp."):
-                        raise ModuleNotFoundError(
-                            f"No module named {{fullname!r}}",
-                            name="mcp",
-                        )
-                    return None
-
-            sys.meta_path.insert(0, BlockMcp())
-            {statement}
-            """
-        )
+    def _run_python(self, statement: str) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
-        env.pop("TAPL_ENABLE_LEGACY_WORKFLOW_CLI", None)
         env["PYTHONPATH"] = str(TAPL_ROOT)
         return subprocess.run(
-            [sys.executable, "-c", script],
+            [sys.executable, "-c", statement],
             cwd=TAPL_ROOT,
             env=env,
             text=True,

@@ -1,288 +1,59 @@
-"""Command line interface for tapl."""
+"""Management-only command line interface for TAPL.
+
+Workflow operations are exposed by the dedicated ``tapl-mcp`` server and hook
+events by ``tapl-hook``.  This module intentionally contains only installation,
+health, viewer, update, and semantic-index management commands.
+"""
 
 from __future__ import annotations
 
 import argparse
 import html
 import json
-import os
 import re
 import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
 
-from . import (
-    __version__,
-    config as tapl_config,
-    context as tapl_context,
-    db,
-    embeddings,
-    hooks,
-    importer,
-    install as tapl_install,
-    prompt as tapl_prompt,
-    searchd,
-    updater,
-    validation,
-    viewer,
-)
+from . import __version__, config as tapl_config, db, embeddings, searchd, updater, viewer
+from . import install as tapl_install
 
 
-HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 JSON_HELP = "Print JSON output."
 AGENT_HELP = "Print agent-optimized XML-like output."
 DRY_RUN_HELP = "Preview changes without writing files."
-JSON_FILE_HELP = "Read command fields from a JSON object file. CLI flags override JSON fields."
-STDIN_JSON_HELP = "Read command fields from a JSON object on stdin. CLI flags override JSON fields."
-LEGACY_WORKFLOW_CLI_ENV = "TAPL_ENABLE_LEGACY_WORKFLOW_CLI"
-MANAGEMENT_COMMANDS = frozenset(
-    {"init", "doctor", "update", "install", "viewer", "reindex", "searchd", "import-md"}
-)
-REMOVED_WORKFLOW_COMMANDS = frozenset(
+
+_AGENT_SKIP_KEYS = frozenset(
     {
-        "mcp",
-        "status",
-        "validate",
-        "context",
-        "run",
-        "plan",
-        "task",
-        "batch",
-        "finding",
-        "approval",
-        "item",
-        "archive",
-        "search",
-        "next",
-        "recipe",
-        "hook-event",
+        "archived",
+        "archived_at",
+        "archive_created_at",
+        "body",
+        "config",
+        "created_at",
+        "errors",
+        "payload_json",
+        "raw_text",
+        "run_id",
+        "schema",
+        "search_config",
+        "source_scores",
+        "updated_at",
+        "warnings",
     }
 )
-
-
-class TaplArgumentParser(argparse.ArgumentParser):
-    def parse_args(
-        self,
-        args: list[str] | None = None,
-        namespace: argparse.Namespace | None = None,
-    ) -> argparse.Namespace:
-        self.tapl_argv = list(sys.argv[1:] if args is None else args)
-        return super().parse_args(args, namespace)
-
-    def error(self, message: str) -> None:
-        argv = getattr(self, "tapl_argv", sys.argv[1:])
-        removed_command = requested_top_level_command(argv)
-        if (
-            not getattr(
-                self,
-                "legacy_workflow_cli_enabled",
-                os.environ.get(LEGACY_WORKFLOW_CLI_ENV) == "1",
-            )
-            and removed_command in REMOVED_WORKFLOW_COMMANDS
-        ):
-            if removed_command == "mcp":
-                guidance = "run the dedicated `tapl-mcp` server executable"
-            elif removed_command == "hook-event":
-                guidance = "use the dedicated `tapl-hook` executable for Codex hooks"
-            else:
-                guidance = "use the TAPL tools exposed by the `tapl-mcp` MCP server"
-            message = (
-                f"`taplctl {removed_command}` is no longer a public command; "
-                f"Agent workflows are MCP-only. Please {guidance}."
-            )
-            super().error(message)
-
-        suggestion = command_error_suggestion(message, argv)
-        if suggestion:
-            message = f"{message}\n\nDid you mean: {suggestion}"
-        super().error(message)
-
-
-def requested_top_level_command(argv: list[str]) -> str | None:
-    """Return the root command while skipping taplctl's global option values."""
-
-    skip_value = False
-    for token in argv:
-        if skip_value:
-            skip_value = False
-            continue
-        if token in {"--db", "--config"}:
-            skip_value = True
-            continue
-        if token.startswith("--db=") or token.startswith("--config="):
-            continue
-        if token == "--":
-            continue
-        if not token.startswith("-"):
-            return token
-    return None
-
-
-def command_help_epilog() -> str:
-    return tapl_prompt.command_help_epilog()
-
-
-def search_epilog() -> str:
-    return tapl_prompt.search_epilog()
-
-
-def plan_set_epilog() -> str:
-    return tapl_prompt.plan_set_epilog()
-
-
-def task_set_epilog() -> str:
-    return tapl_prompt.task_set_epilog(statuses=db.TASK_STATUSES)
-
-
-def finding_add_epilog() -> str:
-    return tapl_prompt.finding_add_epilog()
-
-
-def approval_set_epilog() -> str:
-    return tapl_prompt.approval_set_epilog()
-
-
-def add_agent_output_args(parser: argparse.ArgumentParser) -> None:
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--json", action="store_true", help=JSON_HELP)
-    group.add_argument("--agent", action="store_true", help=AGENT_HELP)
-
-
-def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--dry-run", action="store_true", help=DRY_RUN_HELP)
-
-
-def add_json_input_args(parser: argparse.ArgumentParser) -> None:
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--stdin-json", action="store_true", help=STDIN_JSON_HELP)
-    group.add_argument("--json-file", type=Path, default=None, help=JSON_FILE_HELP)
-
-
-def add_run_set_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--summary", default=None, help=tapl_prompt.field_help("run", "summary"))
-    parser.add_argument("--result", default=None, help=tapl_prompt.field_help("run", "result"))
-    parser.add_argument(
-        "--workflow-mode",
-        choices=db.WORKFLOW_MODES,
-        default=None,
-        help="Agent-selected run mode: planned or lightweight.",
-    )
-    add_agent_output_args(parser)
-
-
-def add_plan_write_args(parser: argparse.ArgumentParser, *, include_json_input: bool = False) -> None:
-    parser.add_argument("--id", default="PLAN-001", help=tapl_prompt.field_help("plan", "id"))
-    parser.add_argument("--title", default=None, help=tapl_prompt.field_help("plan", "title"))
-    parser.add_argument("--summary", default=None, help=tapl_prompt.field_help("plan", "summary"))
-    parser.add_argument("--objective", default=None, help=tapl_prompt.field_help("plan", "objective"))
-    parser.add_argument("--requirements-trace", default=None, help=tapl_prompt.field_help("plan", "requirements_trace"))
-    parser.add_argument("--selected-approach", default=None, help=tapl_prompt.field_help("plan", "selected_approach"))
-    parser.add_argument(
-        "--affected-files",
-        "--affected-files-interfaces",
-        dest="affected_files",
-        default=None,
-        help=tapl_prompt.field_help("plan", "affected_files"),
-    )
-    parser.add_argument("--execution-order", default=None, help=tapl_prompt.field_help("plan", "execution_order"))
-    parser.add_argument("--risks", default=None, help=tapl_prompt.field_help("plan", "risks"))
-    parser.add_argument("--validation", default=None, help=tapl_prompt.field_help("plan", "validation"))
-    parser.add_argument("--approval-needs", default=None, help=tapl_prompt.field_help("plan", "approval_needs"))
-    parser.add_argument("--notes", default=None, help=tapl_prompt.field_help("plan", "notes"))
-    parser.add_argument(
-        "--custom-fields",
-        type=custom_fields_arg,
-        default=None,
-        help=tapl_prompt.field_help("plan", "custom_fields"),
-    )
-    parser.add_argument("--status", default=None, help=tapl_prompt.field_help("plan", "status"))
-    if include_json_input:
-        add_json_input_args(parser)
-    add_agent_output_args(parser)
-
-
-def add_task_write_args(
-    parser: argparse.ArgumentParser,
-    *,
-    required_id: bool = True,
-    include_json_input: bool = False,
-) -> None:
-    parser.add_argument("--id", required=required_id, default=None, help=tapl_prompt.field_help("task", "id"))
-    parser.add_argument("--title", default=None, help=tapl_prompt.field_help("task", "title"))
-    parser.add_argument(
-        "--status",
-        default=None,
-        choices=db.TASK_STATUSES,
-        help=tapl_prompt.field_help("task", "status"),
-    )
-    parser.add_argument("--spec-id", default=None, help=tapl_prompt.field_help("task", "spec_id"))
-    parser.add_argument("--goal", default=None, help=tapl_prompt.field_help("task", "goal"))
-    parser.add_argument("--action", default=None, help=tapl_prompt.field_help("task", "action"))
-    parser.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
-    parser.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
-    parser.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
-    parser.add_argument("--next-action", default=None, help=tapl_prompt.field_help("task", "next_action"))
-    parser.add_argument(
-        "--execution-mode",
-        choices=db.EXECUTION_MODES,
-        default=None,
-        help="Task execution mode: sequential or parallel.",
-    )
-    parser.add_argument(
-        "--executor-kind",
-        choices=db.EXECUTOR_KINDS,
-        default=None,
-        help="Task executor: main agent or subagent.",
-    )
-    parser.add_argument(
-        "--parallel-group",
-        default=None,
-        help="Shared non-empty group id for tasks dispatched together.",
-    )
-    parser.add_argument(
-        "--owned-path",
-        dest="owned_paths",
-        action="append",
-        default=None,
-        help="File or directory owned by this task. Repeat for multiple paths.",
-    )
-    parser.add_argument(
-        "--depends-on",
-        dest="depends_on",
-        action="append",
-        default=None,
-        help="Task id that must be Completed first. Repeat for multiple dependencies.",
-    )
-    parser.add_argument(
-        "--custom-fields",
-        type=custom_fields_arg,
-        default=None,
-        help=tapl_prompt.field_help("task", "custom_fields"),
-    )
-    if include_json_input:
-        add_json_input_args(parser)
-    add_agent_output_args(parser)
-
-
-def add_approval_write_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help=tapl_prompt.field_help("approval", "kind"))
-    parser.add_argument("--decision", required=True, choices=db.APPROVAL_DECISIONS, help=tapl_prompt.field_help("approval", "decision"))
-    parser.add_argument("--prompt", default="", help=tapl_prompt.field_help("approval", "prompt"))
-    parser.add_argument(
-        "--source",
-        default=db.DEFAULT_APPROVAL_SOURCE,
-        choices=db.APPROVAL_SOURCES,
-        help=tapl_prompt.field_help("approval", "source"),
-    )
-    add_agent_output_args(parser)
+_AGENT_LIST_ITEM_TAGS = {
+    "dependencies": "dependency",
+    "files": "file",
+    "issues": "issue",
+    "results": "result",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv_list = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
-    parser.tapl_argv = argv_list
-    args = parser.parse_args(argv_list)
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if not hasattr(args, "handler"):
         parser.print_help()
         return 2
@@ -303,223 +74,36 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def auto_install_before_handler(args: argparse.Namespace) -> None:
-    if should_skip_auto_install(args):
-        return
-    tapl_install.auto_install_if_needed()
+    if not should_skip_auto_install(args):
+        tapl_install.auto_install_if_needed()
 
 
 def should_skip_auto_install(args: argparse.Namespace) -> bool:
     command = getattr(args, "command", None)
     if args.db is not None or args.config is not None:
         return True
-    if command in {None, "init", "install", "update", "hook-event", "viewer", "mcp"}:
+    if command in {None, "init", "install", "update", "viewer"}:
         return True
     return command == "searchd" and getattr(args, "searchd_command", None) == "run"
 
 
-def command_error_suggestion(message: str, argv: list[str]) -> str:
-    joined = " ".join(argv)
-    if "--status" in argv and "Progress" in argv:
-        return "quote multi-word statuses, e.g. --status 'In Progress', or use `taplctl task start TASK-001 --agent`."
-    if "invalid choice" in message and "In" in message and "--status" in argv:
-        return "use `taplctl task start TASK-001 --agent` instead of setting --status manually."
-    if "unrecognized arguments: Progress" in message:
-        return "quote multi-word statuses, e.g. --status 'In Progress', or use `taplctl task start TASK-001 --agent`."
-    if "invalid choice" in message and "upsert" in joined:
-        return "use high-level lifecycle commands such as `taplctl plan apply --stdin-json --agent` or `taplctl task create --stdin-json --agent`; upsert aliases are intentionally not supported."
-    if "unrecognized arguments" in message and "task set" in joined and "--status Completed" in joined:
-        return "use `taplctl task complete TASK-001 --verification '<check>' --result '<result>' --agent`."
-    return ""
-
-
-def read_json_object_input(args: argparse.Namespace) -> dict[str, Any]:
-    raw = ""
-    if getattr(args, "stdin_json", False):
-        raw = sys.stdin.read()
-    elif getattr(args, "json_file", None) is not None:
-        raw = Path(args.json_file).read_text(encoding="utf-8")
-    if not raw.strip():
-        return {}
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"invalid JSON input: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("JSON input must be an object")
-    return {normalize_payload_key(key): value for key, value in payload.items()}
-
-
-def custom_fields_arg(value: str) -> dict[str, Any]:
-    try:
-        payload = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise argparse.ArgumentTypeError(f"invalid custom fields JSON: {exc}") from exc
-    try:
-        return validate_custom_fields_input(payload)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
-
-
-def json_object_arg(value: str) -> dict[str, Any]:
-    try:
-        payload = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise argparse.ArgumentTypeError(f"invalid JSON object: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise argparse.ArgumentTypeError("value must be a JSON object")
-    return payload
-
-
-def validate_custom_fields_input(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError("custom_fields must be a JSON object")
-    return db.parse_custom_fields(value)
-
-
-def normalize_payload_key(value: Any) -> str:
-    return str(value).strip().replace("-", "_")
-
-
-def payload_text(payload: dict[str, Any], *names: str) -> str | None:
-    for name in names:
-        key = normalize_payload_key(name)
-        value = payload.get(key)
-        if value is None:
-            continue
-        if isinstance(value, (dict, list)):
-            return json.dumps(value, ensure_ascii=False, sort_keys=True)
-        return str(value)
-    return None
-
-
-def payload_string_list(payload: dict[str, Any], *names: str) -> list[str] | None:
-    for name in names:
-        key = normalize_payload_key(name)
-        if key not in payload or payload[key] is None:
-            continue
-        value = payload[key]
-        if isinstance(value, str):
-            values = [value]
-        elif isinstance(value, list):
-            values = value
-        else:
-            raise ValueError(f"{key} must be a string or an array of strings")
-        if any(not isinstance(item, str) or not item.strip() for item in values):
-            raise ValueError(f"{key} must contain only non-empty strings")
-        return [item.strip() for item in values]
-    return None
-
-
-def merge_json_string_list(
-    args: argparse.Namespace,
-    field: str,
-    payload: dict[str, Any],
-    *aliases: str,
-) -> bool:
-    if getattr(args, field, None) is not None:
-        return False
-    value = payload_string_list(payload, field, *aliases)
-    if value is None:
-        return False
-    setattr(args, field, value)
-    return True
-
-
-def merge_json_fields(
-    args: argparse.Namespace,
-    fields: tuple[str, ...],
-    *,
-    aliases: dict[str, tuple[str, ...]] | None = None,
-    cli_defaults: dict[str, Any] | None = None,
-    payload: dict[str, Any] | None = None,
-) -> tuple[str, ...]:
-    payload = read_json_object_input(args) if payload is None else payload
-    if not payload:
-        return ()
-    aliases = aliases or {}
-    cli_defaults = cli_defaults or {}
-    updated: list[str] = []
-    for field in fields:
-        current = getattr(args, field, None)
-        default = cli_defaults.get(field)
-        cli_provided = current is not None and (field not in cli_defaults or current != default)
-        if cli_provided:
-            continue
-        value = payload_text(payload, field, *aliases.get(field, ()))
-        if value is None:
-            continue
-        setattr(args, field, value)
-        updated.append(field)
-    return tuple(updated)
-
-
-def merge_custom_fields_payload(
-    args: argparse.Namespace,
-    payload: dict[str, Any],
-    updated: list[str],
-) -> None:
-    if getattr(args, "custom_fields", None) is not None or "custom_fields" not in payload:
-        return
-    args.custom_fields = validate_custom_fields_input(payload["custom_fields"])
-    updated.append("custom_fields")
-
-
-def require_arg(args: argparse.Namespace, field: str, flag: str, *, command: str) -> bool:
-    if str(getattr(args, field, "") or "").strip():
-        return True
-    emit(
-        {
-            "ok": False,
-            "error": f"{command} requires {flag}; pass it as a flag or provide it in --stdin-json/--json-file.",
-            "suggestion": f"taplctl recipe {command.replace(' ', '-')} --agent",
-        },
-        getattr(args, "json", False),
-        getattr(args, "agent", False),
-    )
-    return False
-
-
 def build_parser() -> argparse.ArgumentParser:
-    """Build the public management CLI parser.
-
-    Workflow command implementations remain available temporarily for controlled
-    compatibility testing, but they are not registered on the public parser.
-    """
-
-    parser = _build_legacy_parser()
-    parser.legacy_workflow_cli_enabled = os.environ.get(LEGACY_WORKFLOW_CLI_ENV) == "1"
-    if parser.legacy_workflow_cli_enabled:
-        return parser
-
-    parser.description = "Manage TAPL installation, health, indexing, imports, and local services."
-    parser.epilog = (
-        "Agent workflow operations are MCP-only. Run `tapl-mcp` and use its TAPL MCP tools."
-    )
-    for action in parser._actions:
-        if not isinstance(action, argparse._SubParsersAction):
-            continue
-        for command in tuple(action.choices):
-            if command not in MANAGEMENT_COMMANDS:
-                del action.choices[command]
-        action._choices_actions = [
-            choice for choice in action._choices_actions if choice.dest in MANAGEMENT_COMMANDS
-        ]
-    return parser
-
-
-def _build_legacy_parser() -> argparse.ArgumentParser:
-    parser = TaplArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="taplctl",
-        description="Manage tapl workflow state for agent planning, execution, and validation.",
-        epilog=command_help_epilog(),
-        formatter_class=HELP_FORMATTER,
+        description="Manage TAPL installation, health, indexing, and local services.",
+        epilog="Agent workflow operations are available through the dedicated `tapl-mcp` server.",
     )
-    parser.add_argument("--db", type=Path, default=None, help="Path to tapl SQLite DB.")
-    parser.add_argument("--config", type=Path, default=None, help="Path to tapl TOML config.")
-    parser.add_argument("--version", action="version", version=f"taplctl {__version__}", help="Show version and exit.")
+    parser.add_argument("--db", type=Path, default=None, help="Path to TAPL SQLite DB.")
+    parser.add_argument("--config", type=Path, default=None, help="Path to TAPL TOML config.")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"taplctl {__version__}",
+        help="Show version and exit.",
+    )
     sub = parser.add_subparsers(dest="command")
 
-    init = sub.add_parser("init", help="Initialize the tapl database.")
+    init = sub.add_parser("init", help="Initialize the TAPL database.")
     init.add_argument(
         "--workspace-root",
         type=Path,
@@ -529,7 +113,7 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
     add_agent_output_args(init)
     init.set_defaults(handler=cmd_init)
 
-    doctor = sub.add_parser("doctor", help="Check tapl runtime dependencies.")
+    doctor = sub.add_parser("doctor", help="Check TAPL runtime dependencies.")
     add_agent_output_args(doctor)
     doctor.set_defaults(handler=cmd_doctor)
 
@@ -541,18 +125,22 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
             "PowerShell installations."
         ),
     )
-    update.add_argument("--check", action="store_true", help="Check for an update without installing it.")
+    update.add_argument("--check", action="store_true", help="Check without installing.")
     add_agent_output_args(update)
     update.set_defaults(handler=cmd_update)
 
-    viewer_cmd = sub.add_parser(
-        "viewer",
-        help="Serve the workflow viewer in a local web browser.",
-        description=(
-            "Serve the workflow viewer on 127.0.0.1. The current initialized "
-            "workspace is selected automatically; otherwise choose one in the browser."
-        ),
-    )
+    install = sub.add_parser("install", help="Install TAPL hooks and repo-local state.")
+    install_sub = install.add_subparsers(dest="install_command")
+    install_user = install_sub.add_parser("user", help="Install user-global Codex hooks.")
+    install_user.add_argument("--codex-home", type=Path, default=None)
+    add_install_common_args(install_user)
+    install_user.set_defaults(handler=cmd_install_user)
+    install_repo = install_sub.add_parser("repo", help="Install repo-local Codex hooks and state.")
+    install_repo.add_argument("--repo", type=Path, default=None)
+    add_install_common_args(install_repo)
+    install_repo.set_defaults(handler=cmd_install_repo)
+
+    viewer_cmd = sub.add_parser("viewer", help="Serve the workflow viewer locally.")
     viewer_cmd.add_argument(
         "--port",
         type=viewer_port_arg,
@@ -561,437 +149,65 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
     )
     viewer_cmd.set_defaults(handler=cmd_viewer)
 
-    mcp = sub.add_parser(
-        "mcp",
-        help="Run the TAPL MCP stdio server.",
-        description="Run the workspace-bound TAPL MCP server over standard input and output.",
-    )
-    mcp.set_defaults(handler=cmd_mcp)
-
-    status = sub.add_parser("status", help="Show active workflow state.")
-    add_agent_output_args(status)
-    status.add_argument("--full", action="store_true", help="Include full plan/task/finding item details.")
-    status.add_argument(
-        "--include-events",
-        action="store_true",
-        help="Include recent hook event summaries. Event payloads are not included.",
-    )
-    status.add_argument("--events-limit", type=int, default=12, help="Recent hook events to include.")
-    status.set_defaults(handler=cmd_status)
-
-    validate = sub.add_parser("validate", help="Validate tapl database state.")
-    add_agent_output_args(validate)
-    validate.set_defaults(handler=cmd_validate)
-
-    context_cmd = sub.add_parser("context", help="Show lifecycle context for Codex.")
-    context_cmd.add_argument("--event", default="Manual", help="Lifecycle event name to format context for.")
-    add_agent_output_args(context_cmd)
-    context_cmd.set_defaults(handler=cmd_context)
-
-    run = sub.add_parser("run", help="Manage the active workflow run.")
-    run_sub = run.add_subparsers(dest="run_command")
-    run_set = run_sub.add_parser(
-        "set",
-        help="Set active run fields.",
-        description="Set active run fields.",
-    )
-    add_run_set_args(run_set)
-    run_set.set_defaults(handler=cmd_run_set)
-    run_summarize = run_sub.add_parser(
-        "summarize",
-        help="Set the current request summary.",
-        description="Set the current request summary.",
-    )
-    run_summarize.add_argument("--summary", default=None, help=tapl_prompt.field_help("run", "summary"))
-    run_summarize.add_argument(
-        "--workflow-mode",
-        choices=db.WORKFLOW_MODES,
-        default=None,
-        help="Agent-selected run mode: planned or lightweight.",
-    )
-    add_json_input_args(run_summarize)
-    add_agent_output_args(run_summarize)
-    run_summarize.set_defaults(handler=cmd_run_summarize)
-    run_finish = run_sub.add_parser(
-        "finish",
-        help="Record the completed result summary.",
-        description="Record the completed result summary.",
-    )
-    run_finish.add_argument("--result", default=None, help=tapl_prompt.field_help("run", "result"))
-    add_json_input_args(run_finish)
-    add_agent_output_args(run_finish)
-    run_finish.set_defaults(handler=cmd_run_finish)
-
-    install = sub.add_parser("install", help="Install tapl workflow hooks and repo-local state.")
-    install_sub = install.add_subparsers(dest="install_command")
-    install_user = install_sub.add_parser(
-        "user",
-        help="Install user-global Codex hooks.",
-        description="Install user-global Codex hooks.",
-    )
-    install_user.add_argument("--codex-home", type=Path, default=None, help="Codex home directory to update.")
-    add_install_common_args(install_user)
-    install_user.set_defaults(handler=cmd_install_user)
-    install_repo = install_sub.add_parser(
-        "repo",
-        help="Install repo-local Codex hooks, config, and DB.",
-        description="Install repo-local Codex hooks, config, and DB.",
-    )
-    install_repo.add_argument("--repo", type=Path, default=None, help="Repository root to install into.")
-    add_install_common_args(install_repo)
-    install_repo.set_defaults(handler=cmd_install_repo)
-
-    plan = sub.add_parser("plan", help="Manage plan items.", formatter_class=HELP_FORMATTER)
-    plan_sub = plan.add_subparsers(dest="plan_command")
-    plan_set = plan_sub.add_parser(
-        "set",
-        help="Create or update a plan.",
-        description="Create or update a durable plan record.",
-        epilog=plan_set_epilog(),
-        formatter_class=HELP_FORMATTER,
-    )
-    add_plan_write_args(plan_set)
-    plan_set.set_defaults(handler=cmd_plan_set)
-    plan_apply = plan_sub.add_parser(
-        "apply",
-        help="Apply a plan record from safe fields or JSON.",
-        description="Apply a plan record from safe fields or JSON.",
-        epilog=plan_set_epilog(),
-        formatter_class=HELP_FORMATTER,
-    )
-    add_plan_write_args(plan_apply, include_json_input=True)
-    plan_apply.set_defaults(handler=cmd_plan_apply)
-
-    task = sub.add_parser("task", help="Manage tasks.", formatter_class=HELP_FORMATTER)
-    task_sub = task.add_subparsers(dest="task_command")
-    task_set = task_sub.add_parser(
-        "set",
-        help="Create or update a task.",
-        description="Create or update an executable task record.",
-        epilog=task_set_epilog(),
-        formatter_class=HELP_FORMATTER,
-    )
-    add_task_write_args(task_set, required_id=False, include_json_input=True)
-    task_set.set_defaults(handler=cmd_task_set)
-    task_create = task_sub.add_parser(
-        "create",
-        help="Create a pending executable task.",
-        description="Create a pending executable task.",
-        epilog=task_set_epilog(),
-        formatter_class=HELP_FORMATTER,
-    )
-    add_task_write_args(task_create, required_id=False, include_json_input=True)
-    task_create.set_defaults(handler=cmd_task_create)
-    task_start = task_sub.add_parser("start", help="Mark one task In Progress.", description="Mark one task In Progress.")
-    task_start.add_argument("id", help=tapl_prompt.field_help("task", "id"))
-    task_start.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
-    add_json_input_args(task_start)
-    add_agent_output_args(task_start)
-    task_start.set_defaults(handler=cmd_task_start)
-    task_dispatch = task_sub.add_parser(
-        "dispatch",
-        help="Atomically dispatch multiple parallel subagent tasks.",
-        description=(
-            "Validate and atomically dispatch two or more compatible Pending tasks, "
-            "then print a per-task execution manifest."
-        ),
-    )
-    task_dispatch.add_argument("ids", nargs="*", help="Task ids to dispatch together.")
-    task_dispatch.add_argument("--batch-id", default=None, help="Idempotent execution batch id.")
-    task_dispatch.add_argument(
-        "--failure-policy",
-        default=None,
-        help=f"Batch failure policy. Defaults to {db.DEFAULT_FAILURE_POLICY}.",
-    )
-    task_dispatch.add_argument(
-        "--execution-metadata",
-        type=json_object_arg,
-        default=None,
-        help="JSON object mapping task ids to executor_ref/model/reasoning_effort objects.",
-    )
-    add_json_input_args(task_dispatch)
-    add_agent_output_args(task_dispatch)
-    task_dispatch.set_defaults(handler=cmd_task_dispatch)
-    task_complete = task_sub.add_parser("complete", help="Mark one task Completed.", description="Mark one task Completed.")
-    task_complete.add_argument("id", help=tapl_prompt.field_help("task", "id"))
-    task_complete.add_argument(
-        "--execution-id",
-        default=None,
-        help="Execution id to settle. Required when the task has an active parallel execution.",
-    )
-    task_complete.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
-    task_complete.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
-    task_complete.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
-    add_json_input_args(task_complete)
-    add_agent_output_args(task_complete)
-    task_complete.set_defaults(handler=cmd_task_complete)
-    task_block = task_sub.add_parser("block", help="Mark one task Blocked.", description="Mark one task Blocked.")
-    task_block.add_argument("id", help=tapl_prompt.field_help("task", "id"))
-    task_block.add_argument(
-        "--execution-id",
-        default=None,
-        help="Execution id to settle. Required when the task has an active parallel execution.",
-    )
-    task_block.add_argument("--blocker", default=None, help=tapl_prompt.field_help("task", "blocker"))
-    task_block.add_argument("--next-action", default=None, help=tapl_prompt.field_help("task", "next_action"))
-    task_block.add_argument("--verification", default=None, help=tapl_prompt.field_help("task", "verification"))
-    task_block.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
-    add_json_input_args(task_block)
-    add_agent_output_args(task_block)
-    task_block.set_defaults(handler=cmd_task_block)
-    task_skip = task_sub.add_parser("skip", help="Mark one task Skipped.", description="Mark one task Skipped.")
-    task_skip.add_argument("id", help=tapl_prompt.field_help("task", "id"))
-    task_skip.add_argument(
-        "--execution-id",
-        default=None,
-        help="Execution id to settle. Required when the task has an active parallel execution.",
-    )
-    task_skip.add_argument("--result", default=None, help=tapl_prompt.field_help("task", "result"))
-    task_skip.add_argument("--custom-fields", type=custom_fields_arg, default=None, help=tapl_prompt.field_help("task", "custom_fields"))
-    add_json_input_args(task_skip)
-    add_agent_output_args(task_skip)
-    task_skip.set_defaults(handler=cmd_task_skip)
-
-    batch = sub.add_parser("batch", help="Manage parallel execution batches.", formatter_class=HELP_FORMATTER)
-    batch_sub = batch.add_subparsers(dest="batch_command")
-    batch_cancel = batch_sub.add_parser(
-        "cancel",
-        help="Cancel an active batch and recover or block its tasks.",
-        description="Cancel an active execution batch. Tasks return to Pending unless --block is used.",
-    )
-    batch_cancel.add_argument("id", help="Execution batch id.")
-    batch_cancel.add_argument("--reason", default="", help="Cancellation reason.")
-    batch_cancel.add_argument(
-        "--block",
-        action="store_true",
-        help="Leave cancelled tasks Blocked instead of recovering them to Pending.",
-    )
-    add_agent_output_args(batch_cancel)
-    batch_cancel.set_defaults(handler=cmd_batch_cancel)
-    batch_recover = batch_sub.add_parser(
-        "recover",
-        help="Cancel a stale active batch and recover its tasks to Pending.",
-        description="Recover an interrupted active execution batch so its tasks can be dispatched again.",
-    )
-    batch_recover.add_argument("id", help="Execution batch id.")
-    batch_recover.add_argument("--reason", default="", help="Recovery reason.")
-    add_agent_output_args(batch_recover)
-    batch_recover.set_defaults(handler=cmd_batch_recover)
-
-    finding = sub.add_parser("finding", help="Manage findings.")
-    finding_sub = finding.add_subparsers(dest="finding_command")
-    finding_add = finding_sub.add_parser(
-        "add",
-        help="Add a finding.",
-        description="Add a finding.",
-        epilog=finding_add_epilog(),
-        formatter_class=HELP_FORMATTER,
-    )
-    finding_add.add_argument("--title", required=True, help=tapl_prompt.field_help("finding", "title"))
-    finding_add.add_argument("--source", default="", help=tapl_prompt.field_help("finding", "source"))
-    finding_add.add_argument("--finding", default="", help=tapl_prompt.field_help("finding", "finding"))
-    finding_add.add_argument("--impact", default="", help=tapl_prompt.field_help("finding", "impact"))
-    finding_add.add_argument("--related-ids", default="", help=tapl_prompt.field_help("finding", "related_ids"))
-    add_agent_output_args(finding_add)
-    finding_add.set_defaults(handler=cmd_finding_add)
-
-    approval = sub.add_parser("approval", help="Manage explicit workflow approvals.", formatter_class=HELP_FORMATTER)
-    approval_sub = approval.add_subparsers(dest="approval_command")
-    approval_set = approval_sub.add_parser(
-        "set",
-        help="Set an approval decision.",
-        description="Set a user decision for workflow execution.",
-        epilog=approval_set_epilog(),
-        formatter_class=HELP_FORMATTER,
-    )
-    add_approval_write_args(approval_set)
-    approval_set.set_defaults(handler=cmd_approval_set)
-    approval_approve = approval_sub.add_parser(
-        "approve",
-        help="Approve workflow execution.",
-        description="Approve workflow execution.",
-    )
-    approval_approve.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help=tapl_prompt.field_help("approval", "kind"))
-    approval_approve.add_argument("--prompt", default="", help=tapl_prompt.field_help("approval", "prompt"))
-    approval_approve.add_argument("--source", default=db.DEFAULT_APPROVAL_SOURCE, choices=db.APPROVAL_SOURCES, help=tapl_prompt.field_help("approval", "source"))
-    add_json_input_args(approval_approve)
-    add_agent_output_args(approval_approve)
-    approval_approve.set_defaults(handler=cmd_approval_approve)
-    approval_reject = approval_sub.add_parser(
-        "reject",
-        help="Reject workflow execution.",
-        description="Reject workflow execution.",
-    )
-    approval_reject.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help=tapl_prompt.field_help("approval", "kind"))
-    approval_reject.add_argument("--prompt", default="", help=tapl_prompt.field_help("approval", "prompt"))
-    approval_reject.add_argument("--source", default=db.DEFAULT_APPROVAL_SOURCE, choices=db.APPROVAL_SOURCES, help=tapl_prompt.field_help("approval", "source"))
-    add_json_input_args(approval_reject)
-    add_agent_output_args(approval_reject)
-    approval_reject.set_defaults(handler=cmd_approval_reject)
-    approval_status = approval_sub.add_parser(
-        "status",
-        help="Show current approval state.",
-        description="Show current approval state.",
-    )
-    approval_status.add_argument("--kind", default=db.DEFAULT_APPROVAL_KIND, help="Approval kind to inspect.")
-    add_agent_output_args(approval_status)
-    approval_status.set_defaults(handler=cmd_approval_status)
-    approval_list = approval_sub.add_parser("list", help="List recent approvals.", description="List recent approvals.")
-    approval_list.add_argument("--kind", default="", help="Filter by approval kind.")
-    approval_list.add_argument("--limit", type=int, default=10, help="Maximum approvals to return.")
-    add_agent_output_args(approval_list)
-    approval_list.set_defaults(handler=cmd_approval_list)
-
-    item = sub.add_parser("item", help="Inspect workflow items.")
-    item_sub = item.add_subparsers(dest="item_command")
-    item_show = item_sub.add_parser("show", help="Show one item by numeric id.", description="Show one item by numeric id.")
-    item_show.add_argument("--id", type=int, required=True, help="Numeric item id.")
-    add_agent_output_args(item_show)
-    item_show.set_defaults(handler=cmd_item_show)
-
-    archive = sub.add_parser("archive", help="Manage archives.")
-    archive_sub = archive.add_subparsers(dest="archive_command")
-    archive_create = archive_sub.add_parser("create", help="Archive the active run.", description="Archive the active run.")
-    archive_create.add_argument("--slug", required=True, help="Stable archive slug.")
-    archive_create.add_argument("--summary", default="", help="Archive summary text.")
-    add_agent_output_args(archive_create)
-    archive_create.set_defaults(handler=cmd_archive_create)
-    archive_finish = archive_sub.add_parser("finish", help="Archive the completed active run.", description="Archive the completed active run.")
-    archive_finish.add_argument("--slug", default=None, help="Stable archive slug.")
-    archive_finish.add_argument("--summary", default="", help="Archive summary text.")
-    add_json_input_args(archive_finish)
-    add_agent_output_args(archive_finish)
-    archive_finish.set_defaults(handler=cmd_archive_finish)
-    archive_list = archive_sub.add_parser("list", help="List archives.", description="List archives.")
-    archive_list.add_argument("--limit", type=int, default=None, help="Maximum archives to return.")
-    add_agent_output_args(archive_list)
-    archive_list.set_defaults(handler=cmd_archive_list)
-    archive_show = archive_sub.add_parser("show", help="Show archive details.", description="Show archive details.")
-    archive_show.add_argument("--id", required=True, help="Archive id or slug.")
-    add_agent_output_args(archive_show)
-    archive_show.set_defaults(handler=cmd_archive_show)
-
-    search = sub.add_parser(
-        "search",
-        help="Search workflow state and archive history.",
-        epilog=search_epilog(),
-        formatter_class=HELP_FORMATTER,
-    )
-    search.add_argument("query", help="Search query string.")
-    search.add_argument(
-        "--limit",
-        type=positive_int_arg,
-        default=None,
-        help="Maximum results to return. Defaults to search.max_results config.",
-    )
-    add_agent_output_args(search)
-    search.set_defaults(handler=cmd_search)
-
-    next_cmd = sub.add_parser("next", help="Show the safest next lifecycle command.", description="Show the safest next lifecycle command.")
-    add_agent_output_args(next_cmd)
-    next_cmd.set_defaults(handler=cmd_next)
-
-    recipe = sub.add_parser("recipe", help="Show agent command recipes.", description="Show agent command recipes.")
-    recipe.add_argument(
-        "name",
-        nargs="?",
-        default="all",
-        help=(
-            "Recipe name, e.g. plan-apply, task-create, task-dispatch, "
-            "task-complete, batch-recover, archive-finish."
-        ),
-    )
-    add_agent_output_args(recipe)
-    recipe.set_defaults(handler=cmd_recipe)
-
-    reindex = sub.add_parser("reindex", help="Build semantic index when optional deps are installed.")
+    reindex = sub.add_parser("reindex", help="Build the optional semantic index.")
     add_dry_run_arg(reindex)
     add_agent_output_args(reindex)
     reindex.set_defaults(handler=cmd_reindex)
 
     searchd_cmd = sub.add_parser("searchd", help="Manage the semantic search daemon.")
     searchd_sub = searchd_cmd.add_subparsers(dest="searchd_command")
-    searchd_start = searchd_sub.add_parser(
-        "start",
-        help="Start the semantic search daemon.",
-        description="Start the semantic search daemon.",
-    )
-    searchd_start.add_argument("--socket", default=None, help="Unix socket path. Defaults to ~/.tapl/searchd.sock.")
+
+    searchd_start = searchd_sub.add_parser("start", help="Start the semantic search daemon.")
+    searchd_start.add_argument("--socket", default=None, help="Unix socket path.")
     searchd_start.add_argument(
         "--idle-timeout",
         type=non_negative_int_arg,
         default=None,
-        help="Seconds before unloading an idle model. Defaults to search.searchd_model_idle_timeout_seconds.",
+        help="Seconds before unloading an idle model.",
     )
     searchd_start.add_argument(
         "--timeout-ms",
         type=positive_int_arg,
         default=None,
-        help="Milliseconds to wait for daemon readiness. Defaults to 15000.",
+        help="Milliseconds to wait for daemon readiness.",
     )
-    searchd_start.add_argument("--no-wait", action="store_true", help="Return immediately after spawning searchd.")
+    searchd_start.add_argument("--no-wait", action="store_true")
     add_agent_output_args(searchd_start)
     searchd_start.set_defaults(handler=cmd_searchd_start)
 
-    searchd_status = searchd_sub.add_parser(
-        "status",
-        help="Show semantic search daemon status.",
-        description="Show semantic search daemon status.",
-    )
-    searchd_status.add_argument("--socket", default=None, help="Unix socket path. Defaults to ~/.tapl/searchd.sock.")
-    searchd_status.add_argument(
-        "--timeout-ms",
-        type=positive_int_arg,
-        default=None,
-        help="Milliseconds to wait for daemon response. Defaults to 250.",
-    )
+    searchd_status = searchd_sub.add_parser("status", help="Show daemon status.")
+    searchd_status.add_argument("--socket", default=None)
+    searchd_status.add_argument("--timeout-ms", type=positive_int_arg, default=None)
     add_agent_output_args(searchd_status)
     searchd_status.set_defaults(handler=cmd_searchd_status)
 
-    searchd_stop = searchd_sub.add_parser(
-        "stop",
-        help="Stop the semantic search daemon.",
-        description="Stop the semantic search daemon.",
-    )
-    searchd_stop.add_argument("--socket", default=None, help="Unix socket path. Defaults to ~/.tapl/searchd.sock.")
-    searchd_stop.add_argument(
-        "--timeout-ms",
-        type=positive_int_arg,
-        default=None,
-        help="Milliseconds to wait for daemon response. Defaults to 250.",
-    )
+    searchd_stop = searchd_sub.add_parser("stop", help="Stop the daemon.")
+    searchd_stop.add_argument("--socket", default=None)
+    searchd_stop.add_argument("--timeout-ms", type=positive_int_arg, default=None)
     add_agent_output_args(searchd_stop)
     searchd_stop.set_defaults(handler=cmd_searchd_stop)
 
-    searchd_run = searchd_sub.add_parser(
-        "run",
-        help=argparse.SUPPRESS,
-        description="Run the semantic search daemon server loop.",
-    )
+    searchd_run = searchd_sub.add_parser("run", help=argparse.SUPPRESS)
     searchd_run.add_argument("--socket", default=None, help=argparse.SUPPRESS)
-    searchd_run.add_argument("--idle-timeout", type=non_negative_int_arg, default=None, help=argparse.SUPPRESS)
+    searchd_run.add_argument(
+        "--idle-timeout",
+        type=non_negative_int_arg,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     add_agent_output_args(searchd_run)
     searchd_run.set_defaults(handler=cmd_searchd_run)
-
-    import_md = sub.add_parser("import-md", help="Import legacy .agent-workflow markdown.")
-    import_md.add_argument("--path", type=Path, default=Path(".agent-workflow"), help="Legacy workflow directory.")
-    add_dry_run_arg(import_md)
-    import_md.add_argument(
-        "--migrate-existing",
-        action="store_true",
-        help="Convert older raw MD-* legacy import runs already stored in the DB.",
-    )
-    add_agent_output_args(import_md)
-    import_md.set_defaults(handler=cmd_import_md)
-
-    hook = sub.add_parser("hook-event", help="Handle a Codex hook event.")
-    hook.add_argument("--event", required=True, help="Codex hook event name.")
-    hook.add_argument("--mode", choices=("observe", "enforce"), default="observe", help="Hook handling mode.")
-    hook.add_argument("--tool", default=None, help="Tool name for tool hook events.")
-    add_agent_output_args(hook)
-    hook.set_defaults(handler=cmd_hook_event)
-
     return parser
+
+
+def add_agent_output_args(parser: argparse.ArgumentParser) -> None:
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true", help=JSON_HELP)
+    output.add_argument("--agent", action="store_true", help=AGENT_HELP)
+
+
+def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--dry-run", action="store_true", help=DRY_RUN_HELP)
 
 
 def add_install_common_args(parser: argparse.ArgumentParser) -> None:
@@ -1000,18 +216,19 @@ def add_install_common_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="taplctl executable used to locate sibling tapl-mcp and tapl-hook commands.",
     )
-    parser.add_argument("--mode", choices=("observe", "enforce"), default=tapl_install.DEFAULT_HOOK_MODE, help="Hook handling mode.")
+    parser.add_argument(
+        "--mode",
+        choices=("observe", "enforce"),
+        default=tapl_install.DEFAULT_HOOK_MODE,
+        help="Hook handling mode.",
+    )
     parser.add_argument(
         "--tapl-config-policy",
         choices=tapl_install.TAPL_CONFIG_POLICIES,
         default=tapl_install.TAPL_CONFIG_POLICY_PROMPT,
-        help="How to handle existing tapl config.toml when the installed tapl version changes.",
+        help="How to handle existing TAPL config when the installed version changes.",
     )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite static templates and tapl config; make managed Codex config keys use tapl defaults.",
-    )
+    parser.add_argument("--force", action="store_true", help="Overwrite managed templates and config.")
     add_dry_run_arg(parser)
     add_agent_output_args(parser)
 
@@ -1026,13 +243,6 @@ def positive_int_arg(value: str) -> int:
     return parsed
 
 
-def viewer_port_arg(value: str) -> int:
-    try:
-        return viewer.parse_port(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
-
-
 def non_negative_int_arg(value: str) -> int:
     try:
         parsed = int(value)
@@ -1041,6 +251,13 @@ def non_negative_int_arg(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError("must be a non-negative integer")
     return parsed
+
+
+def viewer_port_arg(value: str) -> int:
+    try:
+        return viewer.parse_port(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def open_conn(args: argparse.Namespace, *, start: Path | None = None) -> sqlite3.Connection:
@@ -1057,60 +274,44 @@ def cmd_init(args: argparse.Namespace) -> int:
             raise ValueError("--workspace-root cannot be combined with --db")
         initialized = db.initialize_workspace(args.workspace_root)
         conn = db.connect(initialized["db"])
-        payload = {
-            "ok": True,
-            **initialized,
-            "schema": db.get_meta(conn),
-        }
-        emit(payload, args.json, args.agent)
-        return 0
-
-    conn = open_conn(args)
-    payload = {
-        "ok": True,
-        "db": str(args.db or db.default_db_path()),
-        "schema": db.get_meta(conn),
-    }
+        try:
+            payload = {"ok": True, **initialized, "schema": db.get_meta(conn)}
+        finally:
+            conn.close()
+    else:
+        conn = open_conn(args)
+        try:
+            payload = {
+                "ok": True,
+                "db": str(args.db or db.default_db_path()),
+                "schema": db.get_meta(conn),
+            }
+        finally:
+            conn.close()
     emit(payload, args.json, args.agent)
     return 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     conn = open_conn(args)
-    payload = {
-        "ok": True,
-        "version": __version__,
-        "db": str(args.db or db.default_db_path()),
-        "config": load_config(args).as_dict(),
-        "sqlite_version": sqlite3.sqlite_version,
-        "sqlite_extension_loading": hasattr(conn, "enable_load_extension"),
-        "dependencies": embeddings.dependency_status(),
-        "schema": db.get_meta(conn),
-    }
+    try:
+        payload = {
+            "ok": True,
+            "version": __version__,
+            "db": str(args.db or db.default_db_path()),
+            "config": load_config(args).as_dict(),
+            "sqlite_version": sqlite3.sqlite_version,
+            "sqlite_extension_loading": hasattr(conn, "enable_load_extension"),
+            "dependencies": embeddings.dependency_status(),
+            "schema": db.get_meta(conn),
+        }
+    finally:
+        conn.close()
     emit(payload, args.json, args.agent)
     return 0
 
 
-def cmd_mcp(args: argparse.Namespace) -> int:
-    """Run the MCP transport without emitting non-protocol output."""
-
-    del args
-    try:
-        from . import mcp_server
-    except ModuleNotFoundError as exc:
-        missing = exc.name or "an MCP runtime dependency"
-        raise RuntimeError(
-            f"TAPL MCP runtime dependency {missing!r} is missing. "
-            "Reinstall the Homebrew formula with `brew reinstall taplctl` "
-            "(or `taplctl-semantic`), or install `mcp==2.0.0` in this Python environment."
-        ) from exc
-    mcp_server.create_server().run()
-    return 0
-
-
 def cmd_update(args: argparse.Namespace) -> int:
-    """Check or apply a release update without touching workflow state."""
-
     payload = updater.check_for_update() if args.check else updater.update_installation()
     if args.json:
         print_json(payload)
@@ -1122,612 +323,12 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 
 def cmd_viewer(args: argparse.Namespace) -> int:
-    """Serve the shared workflow viewer without creating a workspace database."""
-
     workspace = None if args.db is not None else viewer.existing_workspace()
     selected_db = args.db.expanduser().resolve() if args.db is not None else None
     if workspace is not None:
         selected_db = workspace / db.DEFAULT_DB_RELATIVE
-    viewer.serve(
-        port=args.port,
-        default_db=selected_db,
-        default_workspace=workspace,
-    )
+    viewer.serve(port=args.port, default_db=selected_db, default_workspace=workspace)
     return 0
-
-
-def emit_update_error(args: argparse.Namespace, error: updater.UpdateError) -> None:
-    """Render updater errors without flattening their stable structured fields."""
-
-    payload = error.as_dict()
-    if getattr(args, "json", False):
-        print_json(payload)
-    elif getattr(args, "agent", False):
-        print(agent_output(payload))
-    else:
-        print(humanize_update_error(error), file=sys.stderr)
-
-
-def humanize_update(payload: dict[str, Any]) -> str:
-    status = payload.get("status")
-    current = str(payload.get("current_version") or "unknown")
-    latest = str(payload.get("latest_version") or current)
-    if status == "update-available":
-        return f"Update available: taplctl {current} → {latest}. Run taplctl update to install it."
-    if status == "up-to-date":
-        return f"taplctl is up to date ({current})."
-    if status == "current-newer":
-        return f"Installed taplctl ({current}) is newer than the published release ({latest})."
-    if status == "updated":
-        previous = str(payload.get("previous_version") or current)
-        return f"Updated taplctl: {previous} → {current}."
-    return f"taplctl update: {status or 'completed'} (current version: {current})."
-
-
-def humanize_update_error(error: updater.UpdateError) -> str:
-    if error.code == "unsupported_installation":
-        return (
-            "taplctl update is available only for installations made with the official "
-            "curl | sh or PowerShell installer. "
-            "For Homebrew, run `brew upgrade taplctl` (or `brew upgrade taplctl-semantic` "
-            "for the semantic formula); for a source checkout or another package manager, "
-            "update it using that installation method."
-        )
-    return f"taplctl update failed ({error.code}): {error}"
-
-
-def cmd_status(args: argparse.Namespace) -> int:
-    conn = open_conn(args)
-    settings = load_config(args)
-    payload = db.status_payload(conn)
-    payload["config"] = settings.as_dict()
-    payload["plan_task_execute"] = validation.validate_plan_task_execute(conn)
-    payload = status_output_payload(
-        payload,
-        full=args.full or args.agent,
-        include_events=args.include_events,
-        events_limit=args.events_limit,
-    )
-    if args.agent:
-        print(agent_status(payload))
-        return 0
-    emit(payload, args.json, args.agent)
-    return 0
-
-
-STATUS_COMPACT_ITEM_FIELDS = (
-    "id",
-    "stable_id",
-    "kind",
-    "title",
-    "status",
-    "source",
-    "archived",
-    "created_at",
-    "updated_at",
-    "custom_fields",
-)
-
-STATUS_EVENT_SUMMARY_FIELDS = (
-    "id",
-    "run_id",
-    "event_type",
-    "tool_name",
-    "mode",
-    "message",
-    "created_at",
-)
-
-
-def status_output_payload(
-    payload: dict[str, Any],
-    *,
-    full: bool = False,
-    include_events: bool = False,
-    events_limit: int = 12,
-) -> dict[str, Any]:
-    plans = list(payload.get("plans") or [])
-    tasks = list(payload.get("tasks") or [])
-    findings = list(payload.get("findings") or [])
-    archive_count = int(payload.get("archive_count") or len(payload.get("archives") or []))
-    projected: dict[str, Any] = {
-        "schema": payload.get("schema") or {},
-        "active_run": payload.get("active_run"),
-        "task_counts": payload.get("task_counts") or {},
-        "incomplete_tasks": payload.get("incomplete_tasks", 0),
-        "counts": {
-            "plans": len(plans),
-            "tasks": len(tasks),
-            "findings": len(findings),
-            "archives": archive_count,
-            "active_batches": len(payload.get("active_batches") or []),
-            "active_executions": len(payload.get("active_executions") or []),
-        },
-        "plans": plans if full else [compact_status_item(item) for item in plans],
-        "tasks": tasks if full else [compact_status_item(item) for item in tasks],
-        "findings": findings if full else [compact_status_item(item) for item in findings],
-        "active_batches": list(payload.get("active_batches") or []),
-        "active_executions": list(payload.get("active_executions") or []),
-    }
-    for key in ("config", "plan_task_execute", "approvals"):
-        if key in payload:
-            projected[key] = payload[key]
-    if include_events:
-        limit = max(events_limit, 0)
-        events = list(payload.get("recent_events") or [])[:limit]
-        projected["recent_events"] = [compact_status_event(event) for event in events]
-    return projected
-
-
-def compact_status_item(item: dict[str, Any]) -> dict[str, Any]:
-    return {key: item[key] for key in STATUS_COMPACT_ITEM_FIELDS if key in item}
-
-
-def compact_status_event(event: dict[str, Any]) -> dict[str, Any]:
-    return {key: event[key] for key in STATUS_EVENT_SUMMARY_FIELDS if key in event}
-
-
-AGENT_STATUS_PLAN_FIELDS = tapl_prompt.agent_status_fields("plan")
-AGENT_STATUS_TASK_FIELDS = tapl_prompt.agent_status_fields("task")
-AGENT_STATUS_FINDING_FIELDS = tapl_prompt.agent_status_fields("finding")
-
-AGENT_STATUS_EVENT_FIELDS = (
-    "event_type",
-    "tool_name",
-    "mode",
-    "message",
-    "created_at",
-)
-
-AGENT_SEARCH_RESULT_FIELDS = (
-    "id",
-    "stable_id",
-    "kind",
-    "title",
-    "status",
-    "source",
-    "snippet",
-)
-
-AGENT_ITEM_BASE_FIELDS = (
-    "id",
-    "stable_id",
-    "kind",
-    "title",
-    "status",
-    "source",
-    "run_status",
-    "request_summary",
-    "archive_slug",
-)
-
-AGENT_ITEM_PLAN_FIELDS = tapl_prompt.agent_item_fields("plan")
-AGENT_ITEM_TASK_FIELDS = tapl_prompt.agent_item_fields("task")
-AGENT_ITEM_FINDING_FIELDS = tapl_prompt.agent_item_fields("finding")
-
-AGENT_SKIP_KEYS = {
-    "archived",
-    "archived_at",
-    "archive_created_at",
-    "body",
-    "config",
-    "created_at",
-    "errors",
-    "payload_json",
-    "raw_text",
-    "run_id",
-    "schema",
-    "search_config",
-    "source_scores",
-    "updated_at",
-    "warnings",
-}
-
-AGENT_LIST_ITEM_TAGS = {
-    "active_batches": "batch",
-    "active_executions": "execution",
-    "approvals": "approval",
-    "archives": "archive",
-    "executions": "execution",
-    "files": "file",
-    "findings": "finding",
-    "instructions": "instruction",
-    "issues": "issue",
-    "items": "item",
-    "next_actions": "next_action",
-    "plans": "plan",
-    "recipes": "recipe",
-    "recommendations": "recommendation",
-    "results": "result",
-    "tasks": "task",
-    "updated_fields": "field",
-    "validation_issues": "validation_issue",
-    "workflow_guidance": "guidance",
-}
-
-TASK_STATUS_AGENT_TAGS = {
-    "Pending": "pending",
-    "In Progress": "in_progress",
-    "Completed": "completed",
-    "Blocked": "blocked",
-    "Skipped": "skipped",
-}
-
-
-def agent_status(payload: dict[str, Any]) -> str:
-    lines = ["<tapl_status>"]
-    append_agent_mapping(
-        lines,
-        1,
-        "active_run",
-        payload.get("active_run") or {},
-        ("request_summary", "result_summary", "status"),
-    )
-    append_agent_counts(lines, payload)
-    append_agent_task_counts(lines, payload.get("task_counts"))
-    approvals = payload.get("approvals") if isinstance(payload.get("approvals"), dict) else {}
-    approval = approvals.get(db.DEFAULT_APPROVAL_KIND) if isinstance(approvals, dict) else None
-    append_agent_mapping(lines, 1, "execution_approval", approval or {}, ("state", "decision", "prompt", "source"))
-    append_agent_node(lines, 1, "active_batches", payload.get("active_batches"))
-    append_agent_node(lines, 1, "active_executions", payload.get("active_executions"))
-    append_agent_issues(lines, payload.get("plan_task_execute"))
-    append_agent_items(lines, 1, "plans", "plan", payload.get("plans"), AGENT_STATUS_PLAN_FIELDS)
-    append_agent_items(lines, 1, "tasks", "task", payload.get("tasks"), AGENT_STATUS_TASK_FIELDS)
-    append_agent_items(lines, 1, "findings", "finding", payload.get("findings"), AGENT_STATUS_FINDING_FIELDS)
-    append_agent_items(lines, 1, "recent_events", "event", payload.get("recent_events"), AGENT_STATUS_EVENT_FIELDS)
-    lines.append("</tapl_status>")
-    return "\n".join(lines)
-
-
-def agent_search(payload: dict[str, Any]) -> str:
-    lines = ["<tapl_search>"]
-    append_agent_value(lines, 1, "query", payload.get("query"))
-    append_agent_value(lines, 1, "mode", payload.get("mode"))
-    append_agent_value(lines, 1, "fallback_reason", payload.get("fallback_reason"))
-    results = payload.get("results") if isinstance(payload.get("results"), list) else []
-    append_agent_value(lines, 1, "result_count", len(results))
-    append_agent_items(lines, 1, "results", "result", results, AGENT_SEARCH_RESULT_FIELDS)
-    lines.append("</tapl_search>")
-    return "\n".join(lines)
-
-
-def agent_item(payload: dict[str, Any]) -> str:
-    lines = ["<tapl_item>"]
-    item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
-    append_agent_fields(lines, 1, item, AGENT_ITEM_BASE_FIELDS)
-    kind = str(item.get("kind") or "")
-    if kind == "plan":
-        append_agent_fields(lines, 1, item, AGENT_ITEM_PLAN_FIELDS)
-    elif kind == "task":
-        append_agent_fields(lines, 1, item, AGENT_ITEM_TASK_FIELDS)
-    elif kind == "finding":
-        append_agent_fields(lines, 1, item, AGENT_ITEM_FINDING_FIELDS)
-    else:
-        append_agent_fields(lines, 1, item, ("body", "raw_text"))
-    lines.append("</tapl_item>")
-    return "\n".join(lines)
-
-
-def agent_error(message: str) -> str:
-    lines = ["<tapl_error>"]
-    append_agent_value(lines, 1, "message", message)
-    lines.append("</tapl_error>")
-    return "\n".join(lines)
-
-
-def agent_output(payload: dict[str, Any], root_tag: str = "tapl_output") -> str:
-    lines = [f"<{root_tag}>"]
-    for key, value in payload.items():
-        append_agent_node(lines, 1, key, value)
-    lines.append(f"</{root_tag}>")
-    return "\n".join(lines)
-
-
-def agent_write_receipt(
-    operation: str,
-    *,
-    active_run: Any = None,
-    item: Any = None,
-    approval: Any = None,
-    archive: Any = None,
-    updated_fields: tuple[str, ...] | list[str] = (),
-    plan_task_execute: dict[str, Any] | None = None,
-) -> str:
-    payload: dict[str, Any] = {
-        "ok": True,
-        "operation": operation,
-    }
-    if updated_fields:
-        payload["updated_fields"] = list(updated_fields)
-    active_run_fields = agent_select_fields(active_run, ("id", "slug", "status"))
-    item_fields = agent_select_fields(item, ("id", "stable_id", "kind", "status"))
-    approval_fields = agent_select_fields(approval, ("id", "kind", "decision", "source"))
-    archive_fields = agent_select_fields(archive, ("id", "slug"))
-    if active_run_fields:
-        payload["active_run"] = active_run_fields
-    if item_fields:
-        payload["item"] = item_fields
-    if approval_fields:
-        payload["approval"] = approval_fields
-    if archive_fields:
-        payload["archive"] = archive_fields
-    if plan_task_execute is not None:
-        payload["plan_task_execute"] = plan_task_execute
-    return agent_output(payload)
-
-
-def agent_select_fields(value: Any, fields: tuple[str, ...]) -> dict[str, Any]:
-    if value is None:
-        return {}
-    data = value if isinstance(value, dict) else db.row_to_dict(value)
-    return {field: data.get(field) for field in fields if agent_value_present(data.get(field))}
-
-
-def provided_arg_fields(args: argparse.Namespace, fields: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(field for field in fields if getattr(args, field, None) is not None)
-
-
-def append_agent_node(
-    lines: list[str],
-    depth: int,
-    tag: str,
-    value: Any,
-    *,
-    apply_skip_filter: bool = True,
-) -> None:
-    if (apply_skip_filter and tag in AGENT_SKIP_KEYS) or not agent_value_present(value):
-        return
-    tag_name = agent_tag_name(tag)
-    if isinstance(value, dict):
-        section: list[str] = []
-        for key, child in value.items():
-            append_agent_node(section, depth + 1, str(key), child, apply_skip_filter=apply_skip_filter)
-        if section:
-            indent = "  " * depth
-            lines.append(f"{indent}<{tag_name}>")
-            lines.extend(section)
-            lines.append(f"{indent}</{tag_name}>")
-        return
-    if isinstance(value, list):
-        item_tag = AGENT_LIST_ITEM_TAGS.get(tag, "item")
-        section = []
-        for child in value:
-            append_agent_node(section, depth + 1, item_tag, child, apply_skip_filter=apply_skip_filter)
-        if section:
-            indent = "  " * depth
-            lines.append(f"{indent}<{tag_name}>")
-            lines.extend(section)
-            lines.append(f"{indent}</{tag_name}>")
-        return
-    append_agent_value(lines, depth, tag_name, value)
-
-
-def append_agent_counts(lines: list[str], payload: dict[str, Any]) -> None:
-    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
-    values = {
-        "plans": counts.get("plans", 0),
-        "tasks": counts.get("tasks", 0),
-        "findings": counts.get("findings", 0),
-        "incomplete_tasks": payload.get("incomplete_tasks", 0),
-        "active_batches": counts.get("active_batches", 0),
-        "active_executions": counts.get("active_executions", 0),
-    }
-    append_agent_mapping(lines, 1, "counts", values, tuple(values.keys()))
-
-
-def append_agent_task_counts(lines: list[str], value: Any) -> None:
-    if not isinstance(value, dict):
-        return
-    lines_to_add: list[str] = []
-    for status, tag in TASK_STATUS_AGENT_TAGS.items():
-        count = int(value.get(status) or 0)
-        if count:
-            append_agent_value(lines_to_add, 2, tag, count)
-    if lines_to_add:
-        lines.append("  <task_counts>")
-        lines.extend(lines_to_add)
-        lines.append("  </task_counts>")
-
-
-def append_agent_issues(lines: list[str], value: Any) -> None:
-    if not isinstance(value, dict):
-        return
-    issues = value.get("issues") if isinstance(value.get("issues"), list) else []
-    append_agent_items(lines, 1, "issues", "issue", issues, ("severity", "code", "stable_id", "message", "remediation"))
-
-
-def append_agent_items(
-    lines: list[str],
-    depth: int,
-    container_tag: str,
-    item_tag: str,
-    value: Any,
-    fields: tuple[str, ...],
-) -> None:
-    if not isinstance(value, list):
-        return
-    rendered_items: list[list[str]] = []
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        item_lines: list[str] = []
-        append_agent_fields(item_lines, depth + 2, item, fields)
-        if item_lines:
-            rendered_items.append(item_lines)
-    if not rendered_items:
-        return
-    indent = "  " * depth
-    lines.append(f"{indent}<{container_tag}>")
-    for item_lines in rendered_items:
-        item_indent = "  " * (depth + 1)
-        lines.append(f"{item_indent}<{item_tag}>")
-        lines.extend(item_lines)
-        lines.append(f"{item_indent}</{item_tag}>")
-    lines.append(f"{indent}</{container_tag}>")
-
-
-def append_agent_mapping(
-    lines: list[str],
-    depth: int,
-    tag: str,
-    value: dict[str, Any],
-    fields: tuple[str, ...],
-) -> None:
-    section: list[str] = []
-    append_agent_fields(section, depth + 1, value, fields)
-    if not section:
-        return
-    indent = "  " * depth
-    lines.append(f"{indent}<{tag}>")
-    lines.extend(section)
-    lines.append(f"{indent}</{tag}>")
-
-
-def append_agent_fields(lines: list[str], depth: int, item: dict[str, Any], fields: tuple[str, ...]) -> None:
-    for field in fields:
-        append_agent_node(
-            lines,
-            depth,
-            field,
-            item.get(field),
-            apply_skip_filter=field != "custom_fields",
-        )
-
-
-def append_agent_value(lines: list[str], depth: int, tag: str, value: Any) -> None:
-    if not agent_value_present(value):
-        return
-    indent = "  " * depth
-    lines.append(f"{indent}<{tag}>{agent_escape(value)}</{tag}>")
-
-
-def agent_value_present(value: Any) -> bool:
-    return value is not None and value != "" and value != [] and value != {}
-
-
-def agent_tag_name(value: str) -> str:
-    normalized = re.sub(r"[^\w.]+", "_", value.replace("-", "_"), flags=re.UNICODE).strip("_")
-    if not normalized:
-        return "field"
-    if normalized[0].isdigit() or normalized[0] == ".":
-        return f"field_{normalized}"
-    return normalized
-
-
-def agent_escape(value: Any) -> str:
-    if isinstance(value, bool):
-        text = "true" if value else "false"
-    else:
-        text = str(value)
-    return html.escape(text, quote=False)
-
-
-def cmd_validate(args: argparse.Namespace) -> int:
-    conn = open_conn(args)
-    settings = load_config(args)
-    meta = db.get_meta(conn)
-    plan_task_execute = validation.validate_plan_task_execute(conn)
-    payload = {
-        "ok": meta.get("schema_version") == str(db.SCHEMA_VERSION) and plan_task_execute["ok"],
-        "schema_version": meta.get("schema_version"),
-        "active_run": db.workflow_run_to_dict(db.active_run(conn)),
-        "incomplete_tasks": db.incomplete_task_count(conn),
-        "config": settings.as_dict(),
-        "plan_task_execute": plan_task_execute,
-    }
-    emit(payload, args.json, args.agent)
-    return 0 if payload["ok"] else 1
-
-
-def cmd_context(args: argparse.Namespace) -> int:
-    packet = tapl_context.build_context(
-        open_conn(args),
-        event=args.event,
-        settings=load_config(args),
-    )
-    if args.json:
-        print_json(packet)
-    elif args.agent:
-        print(agent_output(packet, "tapl_context"))
-    else:
-        print(tapl_context.format_context(packet))
-    return 0
-
-
-def cmd_run_set(args: argparse.Namespace) -> int:
-    merge_json_fields(
-        args,
-        ("summary", "result", "workflow_mode"),
-        aliases={
-            "summary": ("request_summary",),
-            "result": ("result_summary",),
-            "workflow_mode": ("workflow-mode", "planning_mode"),
-        },
-    )
-    if args.summary is None and args.result is None and args.workflow_mode is None:
-        emit(
-            {
-                "ok": False,
-                "error": "provide --summary, --result, --workflow-mode, or a combination",
-            },
-            args.json,
-            args.agent,
-        )
-        return 1
-    conn = open_conn(args)
-    if db.active_run(conn) is None:
-        db.ensure_active_run(
-            conn,
-            request_summary=args.summary or db.DEFAULT_REQUEST_SUMMARY,
-            workflow_mode=args.workflow_mode or db.DEFAULT_WORKFLOW_MODE,
-        )
-    run = db.update_active_run_summary(
-        conn,
-        request_summary=args.summary,
-        result_summary=args.result,
-        workflow_mode=args.workflow_mode,
-    )
-    if args.agent:
-        operation = getattr(args, "operation", "run_set")
-        updated_fields = tuple(
-            field
-            for field, value in (
-                ("request_summary", args.summary),
-                ("result_summary", args.result),
-                ("workflow_mode", args.workflow_mode),
-            )
-            if value is not None
-        )
-        print(agent_write_receipt(operation, active_run=run, updated_fields=updated_fields))
-        return 0
-    emit({"ok": True, "active_run": db.workflow_run_to_dict(run)}, args.json, args.agent)
-    return 0
-
-
-def cmd_run_summarize(args: argparse.Namespace) -> int:
-    merge_json_fields(
-        args,
-        ("summary", "workflow_mode"),
-        aliases={
-            "summary": ("request_summary",),
-            "workflow_mode": ("workflow-mode", "planning_mode"),
-        },
-    )
-    if not require_arg(args, "summary", "--summary", command="run summarize"):
-        return 1
-    args.result = None
-    args.operation = "run_summarize"
-    return cmd_run_set(args)
-
-
-def cmd_run_finish(args: argparse.Namespace) -> int:
-    merge_json_fields(args, ("result",), aliases={"result": ("result_summary",)})
-    if not require_arg(args, "result", "--result", command="run finish"):
-        return 1
-    args.summary = None
-    args.workflow_mode = None
-    args.operation = "run_finish"
-    return cmd_run_set(args)
 
 
 def cmd_install_user(args: argparse.Namespace) -> int:
@@ -1756,926 +357,12 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
     return 0
 
 
-PLAN_WRITE_FIELDS = (
-    "id",
-    "title",
-    "status",
-    "summary",
-    "objective",
-    "requirements_trace",
-    "selected_approach",
-    "affected_files",
-    "execution_order",
-    "risks",
-    "validation",
-    "approval_needs",
-    "notes",
-    "custom_fields",
-)
-
-TASK_WRITE_FIELDS = (
-    "id",
-    "title",
-    "status",
-    "spec_id",
-    "goal",
-    "action",
-    "verification",
-    "result",
-    "blocker",
-    "next_action",
-    "execution_mode",
-    "executor_kind",
-    "parallel_group",
-    "owned_paths",
-    "depends_on",
-    "execution_id",
-    "custom_fields",
-)
-
-
-def merge_plan_payload(args: argparse.Namespace) -> tuple[str, ...]:
-    payload = read_json_object_input(args)
-    updated = list(merge_json_fields(
-        args,
-        tuple(field for field in PLAN_WRITE_FIELDS if field != "custom_fields"),
-        aliases={
-            "id": ("plan_id", "stable_id"),
-            "requirements_trace": ("requirements-trace",),
-            "selected_approach": ("selected-approach",),
-            "affected_files": ("affected-files", "affected_files_interfaces", "affected-files-interfaces"),
-            "execution_order": ("execution-order",),
-            "approval_needs": ("approval-needs",),
-        },
-        cli_defaults={"id": "PLAN-001"},
-        payload=payload,
-    ))
-    merge_custom_fields_payload(args, payload, updated)
-    return tuple(updated)
-
-
-def merge_task_payload(args: argparse.Namespace) -> tuple[str, ...]:
-    payload = read_json_object_input(args)
-    updated = list(merge_json_fields(
-        args,
-        tuple(
-            field
-            for field in TASK_WRITE_FIELDS
-            if field not in ("custom_fields", "owned_paths", "depends_on")
-        ),
-        aliases={
-            "id": ("task_id", "stable_id"),
-            "spec_id": ("spec-id", "source_plan", "source_spec"),
-            "next_action": ("next-action",),
-            "execution_mode": ("execution-mode",),
-            "executor_kind": ("executor-kind",),
-            "parallel_group": ("parallel-group",),
-            "execution_id": ("execution-id",),
-        },
-        payload=payload,
-    ))
-    if merge_json_string_list(args, "owned_paths", payload, "owned-paths", "owned_path"):
-        updated.append("owned_paths")
-    if merge_json_string_list(args, "depends_on", payload, "depends-on", "dependencies"):
-        updated.append("depends_on")
-    merge_custom_fields_payload(args, payload, updated)
-    return tuple(updated)
-
-
-def ensure_attrs(args: argparse.Namespace, fields: tuple[str, ...], default: Any = None) -> None:
-    for field in fields:
-        if not hasattr(args, field):
-            setattr(args, field, default)
-
-
-def cmd_plan_set(args: argparse.Namespace) -> int:
-    return write_plan(args, operation="plan_set")
-
-
-def cmd_plan_apply(args: argparse.Namespace) -> int:
-    return write_plan(args, operation="plan_apply")
-
-
-def write_plan(args: argparse.Namespace, *, operation: str) -> int:
-    merge_plan_payload(args)
-    conn = open_conn(args)
-    settings = load_config(args)
-    existing = db.get_active_plan(conn, args.id)
-    input_check = validation.validate_plan_input(plan_id=args.id)
-    if not input_check["ok"]:
-        emit({"ok": False, "plan_task_execute": input_check}, args.json, args.agent)
-        return 1
-
-    def merged_field(name: str, value: str | None = None, *, default: str = "") -> str:
-        candidate = getattr(args, name) if value is None else value
-        if candidate is not None:
-            return candidate
-        if existing is None:
-            return default
-        stored = existing[name]
-        return "" if stored is None else str(stored)
-
-    title = merged_field("title", default="Plan")
-    status = merged_field("status", default="Draft")
-
-    item = db.upsert_plan(
-        conn,
-        plan_id=args.id,
-        title=title,
-        status=status,
-        summary=merged_field("summary"),
-        objective=merged_field("objective"),
-        requirements_trace=merged_field("requirements_trace"),
-        selected_approach=merged_field("selected_approach"),
-        affected_files=merged_field("affected_files"),
-        execution_order=merged_field("execution_order"),
-        risks=merged_field("risks"),
-        validation=merged_field("validation"),
-        approval_needs=merged_field("approval_needs"),
-        notes=merged_field("notes"),
-        custom_fields=args.custom_fields,
-    )
-    plan_task_execute = validation.validate_plan_task_execute(conn)
-    if args.agent:
-        print(
-            agent_write_receipt(
-                operation,
-                item=item,
-                updated_fields=provided_arg_fields(
-                    args,
-                    (
-                        "title",
-                        "status",
-                        "summary",
-                        "objective",
-                        "requirements_trace",
-                        "selected_approach",
-                        "affected_files",
-                        "execution_order",
-                        "risks",
-                        "validation",
-                        "approval_needs",
-                        "notes",
-                        "custom_fields",
-                    ),
-                ),
-                plan_task_execute=plan_task_execute,
-            )
-        )
-        return 0
-    emit(
-        {
-            "ok": True,
-            "item": db.row_to_dict(item),
-            "plan_task_execute": plan_task_execute,
-        },
-        args.json,
-        args.agent,
-    )
-    return 0
-
-
-def cmd_task_set(args: argparse.Namespace) -> int:
-    merge_task_payload(args)
-    if not require_arg(args, "id", "--id", command="task set"):
-        return 1
-    return write_task(args, operation="task_set")
-
-
-def cmd_task_create(args: argparse.Namespace) -> int:
-    merge_task_payload(args)
-    if args.status is None:
-        args.status = "Pending"
-    if not require_arg(args, "id", "--id", command="task create"):
-        return 1
-    if not require_arg(args, "title", "--title", command="task create"):
-        return 1
-    return write_task(args, operation="task_create")
-
-
-def cmd_task_start(args: argparse.Namespace) -> int:
-    args.status = "In Progress"
-    return write_task(args, operation="task_start")
-
-
-def cmd_task_dispatch(args: argparse.Namespace) -> int:
-    payload = read_json_object_input(args)
-    if not args.ids:
-        args.ids = payload_string_list(payload, "task_ids", "task-ids", "ids", "tasks") or []
-    merge_json_fields(
-        args,
-        ("batch_id", "failure_policy"),
-        aliases={
-            "batch_id": ("batch-id",),
-            "failure_policy": ("failure-policy",),
-        },
-        payload=payload,
-    )
-    if args.execution_metadata is None and "execution_metadata" in payload:
-        metadata = payload["execution_metadata"]
-        if not isinstance(metadata, dict):
-            raise ValueError("execution_metadata must be a JSON object")
-        args.execution_metadata = metadata
-    failure_policy = args.failure_policy or db.DEFAULT_FAILURE_POLICY
-    manifest = db.dispatch_tasks(
-        open_conn(args),
-        args.ids,
-        batch_id=args.batch_id,
-        failure_policy=failure_policy,
-        execution_metadata=args.execution_metadata,
-    )
-    output = {
-        "ok": True,
-        "operation": "task_dispatch",
-        **manifest,
-    }
-    if args.agent:
-        print(agent_output(output, "tapl_dispatch_manifest"))
-    else:
-        emit(output, args.json, args.agent)
-    return 0
-
-
-def cmd_task_complete(args: argparse.Namespace) -> int:
-    merge_task_payload(args)
-    args.status = "Completed"
-    if not require_arg(args, "verification", "--verification", command="task complete"):
-        return 1
-    if not require_arg(args, "result", "--result", command="task complete"):
-        return 1
-    return settle_or_write_task(args, operation="task_complete")
-
-
-def cmd_task_block(args: argparse.Namespace) -> int:
-    merge_task_payload(args)
-    args.status = "Blocked"
-    if not require_arg(args, "blocker", "--blocker", command="task block"):
-        return 1
-    if not require_arg(args, "next_action", "--next-action", command="task block"):
-        return 1
-    return settle_or_write_task(args, operation="task_block")
-
-
-def cmd_task_skip(args: argparse.Namespace) -> int:
-    merge_task_payload(args)
-    args.status = "Skipped"
-    return settle_or_write_task(args, operation="task_skip")
-
-
-def active_execution_id_for_task(conn: sqlite3.Connection, task_id: str) -> str | None:
-    run = db.active_run(conn)
-    if run is None:
-        return None
-    row = conn.execute(
-        """
-        SELECT te.id
-        FROM task_executions te
-        JOIN items i ON i.id = te.task_item_id
-        WHERE i.run_id = ?
-          AND i.kind = 'task'
-          AND i.stable_id = ?
-          AND te.state IN ('dispatched', 'running')
-        LIMIT 1
-        """,
-        (run["id"], task_id),
-    ).fetchone()
-    return str(row["id"]) if row is not None else None
-
-
-def settle_or_write_task(args: argparse.Namespace, *, operation: str) -> int:
-    ensure_attrs(args, TASK_WRITE_FIELDS)
-    conn = open_conn(args)
-    active_execution_id = active_execution_id_for_task(conn, args.id)
-    if active_execution_id is not None and args.execution_id is None:
-        emit(
-            {
-                "ok": False,
-                "error": (
-                    f"{args.id} has an active parallel execution; "
-                    "pass the exact --execution-id from its dispatch manifest."
-                ),
-                "task_id": args.id,
-                "suggestion": (
-                    f"taplctl task {operation.removeprefix('task_')} {args.id} "
-                    "--execution-id '<execution-id>' --agent"
-                ),
-            },
-            args.json,
-            args.agent,
-        )
-        return 1
-    if args.execution_id is None:
-        return write_task(args, operation=operation)
-    receipt = db.settle_task_execution(
-        conn,
-        args.execution_id,
-        task_status=args.status,
-        task_id=args.id,
-        verification=args.verification,
-        result=args.result,
-        blocker=args.blocker,
-        next_action=args.next_action,
-        custom_fields=args.custom_fields,
-    )
-    output = {
-        "ok": True,
-        "operation": operation,
-        "settled_execution_id": args.execution_id,
-        **receipt,
-    }
-    if args.agent:
-        print(agent_output(output, "tapl_batch_receipt"))
-    else:
-        emit(output, args.json, args.agent)
-    return 0
-
-
-def cmd_batch_cancel(args: argparse.Namespace) -> int:
-    receipt = db.cancel_execution_batch(
-        open_conn(args),
-        args.id,
-        reason=args.reason,
-        recover_pending=not args.block,
-    )
-    output = {"ok": True, "operation": "batch_cancel", **receipt}
-    if args.agent:
-        print(agent_output(output, "tapl_batch_receipt"))
-    else:
-        emit(output, args.json, args.agent)
-    return 0
-
-
-def cmd_batch_recover(args: argparse.Namespace) -> int:
-    receipt = db.recover_execution_batch(
-        open_conn(args),
-        args.id,
-        reason=args.reason,
-    )
-    output = {"ok": True, "operation": "batch_recover", **receipt}
-    if args.agent:
-        print(agent_output(output, "tapl_batch_receipt"))
-    else:
-        emit(output, args.json, args.agent)
-    return 0
-
-
-def write_task(args: argparse.Namespace, *, operation: str) -> int:
-    ensure_attrs(args, TASK_WRITE_FIELDS)
-    merge_task_payload(args)
-    conn = open_conn(args)
-    settings = load_config(args)
-    existing = db.get_active_task(conn, args.id)
-    if existing is None:
-        missing = [flag for flag, value in (("--title", args.title), ("--status", args.status)) if value is None]
-        if missing:
-            missing_text = ", ".join(missing)
-            issue = validation.issue(
-                "error",
-                "task_create_missing_fields",
-                f"{args.id} does not exist and is missing required field(s): {missing_text}.",
-                "Create a new task with --title and --status, or update an existing task id with changed fields only.",
-                stable_id=args.id,
-            )
-            emit(
-                {
-                    "ok": False,
-                    "error": issue["message"],
-                    "plan_task_execute": {
-                        "ok": False,
-                        "errors": [issue],
-                        "warnings": [],
-                        "issues": [issue],
-                        "guidance": validation.guidance(),
-                    },
-                },
-                args.json,
-                args.agent,
-            )
-            return 1
-
-    def merged_field(name: str) -> str:
-        value = getattr(args, name)
-        if value is not None:
-            return value
-        if existing is None:
-            return ""
-        stored = existing[name]
-        return "" if stored is None else str(stored)
-
-    title = merged_field("title")
-    status = merged_field("status")
-    spec_id = merged_field("spec_id")
-    goal = merged_field("goal")
-    action = merged_field("action")
-    verification = merged_field("verification")
-    result = merged_field("result")
-    blocker = merged_field("blocker")
-    next_action = merged_field("next_action")
-
-    input_check = validation.validate_task_input(
-        task_id=args.id,
-        status=status,
-        spec_id=spec_id,
-    )
-    if not input_check["ok"]:
-        emit({"ok": False, "plan_task_execute": input_check}, args.json, args.agent)
-        return 1
-
-    item = db.upsert_task(
-        conn,
-        task_id=args.id,
-        title=title,
-        status=status,
-        spec_id=spec_id,
-        goal=goal,
-        action=action,
-        verification=verification,
-        result=result,
-        blocker=blocker,
-        next_action=next_action,
-        custom_fields=args.custom_fields,
-        execution_mode=args.execution_mode,
-        executor_kind=args.executor_kind,
-        parallel_group=args.parallel_group,
-        owned_paths=args.owned_paths,
-        depends_on=args.depends_on,
-    )
-    plan_task_execute = validation.validate_plan_task_execute(conn)
-    if args.agent:
-        print(
-            agent_write_receipt(
-                operation,
-                item=item,
-                updated_fields=provided_arg_fields(
-                    args,
-                    (
-                        "title",
-                        "status",
-                        "spec_id",
-                        "goal",
-                        "action",
-                        "verification",
-                        "result",
-                        "blocker",
-                        "next_action",
-                        "execution_mode",
-                        "executor_kind",
-                        "parallel_group",
-                        "owned_paths",
-                        "depends_on",
-                        "custom_fields",
-                    ),
-                ),
-                plan_task_execute=plan_task_execute,
-            )
-        )
-        return 0
-    emit(
-        {
-            "ok": True,
-            "item": db.row_to_dict(item),
-            "plan_task_execute": plan_task_execute,
-        },
-        args.json,
-        args.agent,
-    )
-    return 0
-
-
-def cmd_finding_add(args: argparse.Namespace) -> int:
-    conn = open_conn(args)
-    item = db.add_finding(
-        conn,
-        title=args.title,
-        source=args.source,
-        finding=args.finding,
-        impact=args.impact,
-        related_ids=args.related_ids,
-    )
-    if args.agent:
-        print(
-            agent_write_receipt(
-                "finding_add",
-                item=item,
-                updated_fields=tuple(
-                    field
-                    for field, value in (
-                        ("title", args.title),
-                        ("source", args.source),
-                        ("finding", args.finding),
-                        ("impact", args.impact),
-                        ("related_ids", args.related_ids),
-                    )
-                    if value
-                ),
-            )
-        )
-        return 0
-    emit({"ok": True, "item": db.row_to_dict(item)}, args.json, args.agent)
-    return 0
-
-
-def cmd_approval_set(args: argparse.Namespace) -> int:
-    merge_json_fields(
-        args,
-        ("kind", "decision", "prompt", "source"),
-        aliases={"prompt": ("scope", "approval_prompt")},
-    )
-    approval = db.record_approval(
-        open_conn(args),
-        kind=args.kind,
-        decision=args.decision,
-        prompt=args.prompt,
-        source=args.source,
-    )
-    if args.agent:
-        print(agent_write_receipt(getattr(args, "operation", "approval_set"), approval=approval, updated_fields=("decision", "source")))
-        return 0
-    emit({"ok": True, "approval": db.row_to_dict(approval)}, args.json, args.agent)
-    return 0
-
-
-def cmd_approval_approve(args: argparse.Namespace) -> int:
-    merge_json_fields(
-        args,
-        ("kind", "prompt", "source"),
-        aliases={"prompt": ("scope", "approval_prompt")},
-        cli_defaults={
-            "kind": db.DEFAULT_APPROVAL_KIND,
-            "prompt": "",
-            "source": db.DEFAULT_APPROVAL_SOURCE,
-        },
-    )
-    args.decision = "approved"
-    if not require_arg(args, "prompt", "--prompt", command="approval approve"):
-        return 1
-    args.operation = "approval_approve"
-    return cmd_approval_set(args)
-
-
-def cmd_approval_reject(args: argparse.Namespace) -> int:
-    merge_json_fields(
-        args,
-        ("kind", "prompt", "source"),
-        aliases={"prompt": ("scope", "approval_prompt")},
-        cli_defaults={
-            "kind": db.DEFAULT_APPROVAL_KIND,
-            "prompt": "",
-            "source": db.DEFAULT_APPROVAL_SOURCE,
-        },
-    )
-    args.decision = "rejected"
-    if not require_arg(args, "prompt", "--prompt", command="approval reject"):
-        return 1
-    args.operation = "approval_reject"
-    return cmd_approval_set(args)
-
-
-def cmd_approval_status(args: argparse.Namespace) -> int:
-    status = db.approval_status(open_conn(args), kind=args.kind)
-    emit({"ok": True, "approval": status}, args.json, args.agent)
-    return 0
-
-
-def cmd_approval_list(args: argparse.Namespace) -> int:
-    kind = args.kind.strip() or None
-    approvals = db.list_approvals(open_conn(args), kind=kind, limit=args.limit)
-    emit({"ok": True, "approvals": approvals}, args.json, args.agent)
-    return 0
-
-
-def cmd_item_show(args: argparse.Namespace) -> int:
-    item = db.item_detail(open_conn(args), args.id)
-    if item is None:
-        if args.agent:
-            print(agent_error(f"item not found: {args.id}"))
-            return 1
-        emit({"ok": False, "error": f"item not found: {args.id}"}, args.json, args.agent)
-        return 1
-    payload = {"ok": True, "item": item}
-    if args.agent:
-        print(agent_item(payload))
-        return 0
-    emit(payload, args.json, args.agent)
-    return 0
-
-
-def cmd_archive_create(args: argparse.Namespace) -> int:
-    merge_json_fields(args, ("slug", "summary"), aliases={"summary": ("archive_summary",)})
-    archive = db.archive_active_run(open_conn(args), slug=args.slug, summary=args.summary)
-    if args.agent:
-        updated_fields = ("summary",) if args.summary else ()
-        print(agent_write_receipt(getattr(args, "operation", "archive_create"), archive=archive, updated_fields=updated_fields))
-        return 0
-    emit({"ok": True, "archive": db.row_to_dict(archive)}, args.json, args.agent)
-    return 0
-
-
-def cmd_archive_finish(args: argparse.Namespace) -> int:
-    merge_json_fields(args, ("slug", "summary"), aliases={"summary": ("archive_summary",)})
-    if not require_arg(args, "slug", "--slug", command="archive finish"):
-        return 1
-    if args.summary is None:
-        args.summary = ""
-    args.operation = "archive_finish"
-    return cmd_archive_create(args)
-
-
-def cmd_archive_list(args: argparse.Namespace) -> int:
-    archives = db.list_archives(open_conn(args), limit=args.limit)
-    emit({"ok": True, "archives": archives}, args.json, args.agent)
-    return 0
-
-
-def cmd_archive_show(args: argparse.Namespace) -> int:
-    detail = db.archive_detail(open_conn(args), args.id)
-    if detail is None:
-        emit({"ok": False, "error": f"archive not found: {args.id}"}, args.json, args.agent)
-        return 1
-    detail["ok"] = True
-    emit(detail, args.json, args.agent)
-    return 0
-
-
-def cmd_search(args: argparse.Namespace) -> int:
-    settings = load_config(args)
-    limit = args.limit if args.limit is not None else settings.search.max_results
-    payload = embeddings.search(open_conn(args), args.query, limit=limit, search_config=settings.search)
-    payload["ok"] = True
-    if args.agent:
-        print(agent_search(payload))
-        return 0
-    emit(payload, args.json, args.agent)
-    return 0
-
-
-def cmd_next(args: argparse.Namespace) -> int:
-    conn = open_conn(args)
-    settings = load_config(args)
-    state = db.status_payload(conn)
-    plan_task_execute = validation.validate_plan_task_execute(conn)
-    payload = {
-        "ok": True,
-        "recommendations": next_recommendations(state, plan_task_execute),
-    }
-    emit(payload, args.json, args.agent)
-    return 0
-
-
-def cmd_recipe(args: argparse.Namespace) -> int:
-    name = str(args.name or "all").strip()
-    recipes = lifecycle_recipes()
-    selected = recipes if name == "all" else [item for item in recipes if item["name"] == name]
-    if not selected:
-        emit(
-            {
-                "ok": False,
-                "error": f"unknown recipe: {name}",
-                "available": ", ".join(item["name"] for item in recipes),
-                "suggestion": "taplctl recipe all --agent",
-            },
-            args.json,
-            args.agent,
-        )
-        return 1
-    emit({"ok": True, "recipes": selected}, args.json, args.agent)
-    return 0
-
-
-def next_recommendations(state: dict[str, Any], plan_task_execute: dict[str, Any]) -> list[dict[str, str]]:
-    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else None
-    if not run:
-        return [
-            recommendation(
-                "summarize-request",
-                "taplctl run summarize --summary '<request summary>' --agent",
-                "Create or update the active request summary before durable workflow work.",
-            )
-        ]
-
-    if str(run.get("request_summary") or "") == db.DEFAULT_REQUEST_SUMMARY:
-        return [
-            recommendation(
-                "summarize-request",
-                "taplctl run summarize --summary '<request summary>' --agent",
-                "The active run still has the default request summary.",
-            )
-        ]
-
-    plans = state.get("plans") if isinstance(state.get("plans"), list) else []
-    tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
-    if not plans:
-        if str(run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE) == "lightweight":
-            if str(run.get("result_summary") or "").strip():
-                return [
-                    recommendation(
-                        "archive-run",
-                        "taplctl archive finish --slug '<timestamp-task-slug>' --summary '<archive summary>' --agent",
-                        "The lightweight result is recorded and ready to archive.",
-                    )
-                ]
-            return [
-                recommendation(
-                    "finish-run",
-                    "taplctl run finish --result '<result summary>' --agent",
-                    (
-                        "The agent selected a lightweight run; answer directly and finish it without plan/task "
-                        "records, or apply a plan first if the work becomes complex or requires durable edits."
-                    ),
-                )
-            ]
-        return [
-            recommendation(
-                "apply-plan",
-                "taplctl plan apply --stdin-json --agent",
-                "No plan exists for the active run; feed the plan JSON object on stdin.",
-            )
-        ]
-    if not tasks:
-        return [
-            recommendation(
-                "create-task",
-                "taplctl task create --stdin-json --agent",
-                "No executable tasks exist; create the first task from a JSON object.",
-            )
-        ]
-
-    approval = (state.get("approvals") or {}).get(db.DEFAULT_APPROVAL_KIND) or {}
-    if state.get("incomplete_tasks", 0) and approval.get("state") != "approved":
-        first = first_task_with_status(tasks, ("Pending", "In Progress", "Blocked"))
-        label = task_id_for_recipe(first)
-        return [
-            recommendation(
-                "approve-execution",
-                f"taplctl approval approve --prompt 'Execute {label} from PLAN-001' --source explicit_user --agent",
-                "Executable tasks exist but execution approval is not recorded.",
-            )
-        ]
-
-    in_progress = first_task_with_status(tasks, ("In Progress",))
-    if in_progress:
-        label = task_id_for_recipe(in_progress)
-        parallel_in_progress = [
-            task
-            for task in tasks
-            if task.get("status") == "In Progress"
-            and task.get("execution_mode") == "parallel"
-            and task.get("executor_kind") == "subagent"
-        ]
-        if parallel_in_progress:
-            label = task_id_for_recipe(parallel_in_progress[0])
-            return [
-                recommendation(
-                    "settle-parallel-task",
-                    (
-                        f"taplctl task complete {label} --execution-id '<execution-id>' "
-                        "--verification '<check>' --result '<result>' --agent"
-                    ),
-                    (
-                        "One or more parallel subagent tasks are active; use the exact "
-                        "execution id from the dispatch manifest to prevent stale settlement."
-                    ),
-                ),
-                recommendation(
-                    "recover-parallel-batch",
-                    "taplctl batch recover '<batch-id>' --reason '<reason>' --agent",
-                    "Use the dispatch manifest batch id if an interrupted batch must return to Pending.",
-                ),
-            ]
-        return [
-            recommendation(
-                "complete-or-block-task",
-                f"taplctl task complete {label} --verification '<check>' --result '<result>' --agent",
-                "A task is in progress; complete it or use `taplctl task block` before starting another.",
-            ),
-            recommendation(
-                "block-task",
-                f"taplctl task block {label} --blocker '<blocker>' --next-action '<next action>' --agent",
-                "Use this if the current task cannot proceed.",
-            ),
-        ]
-
-    pending = first_task_with_status(tasks, ("Pending",))
-    if pending:
-        parallel_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for task in tasks:
-            if (
-                task.get("status") == "Pending"
-                and task.get("execution_mode") == "parallel"
-                and task.get("executor_kind") == "subagent"
-                and str(task.get("parallel_group") or "").strip()
-            ):
-                key = (
-                    str(task.get("spec_id") or ""),
-                    str(task.get("parallel_group") or ""),
-                )
-                parallel_groups.setdefault(key, []).append(task)
-        dispatchable = next(
-            (group for group in parallel_groups.values() if len(group) >= 2),
-            None,
-        )
-        if dispatchable:
-            labels = " ".join(task_id_for_recipe(task) for task in dispatchable)
-            return [
-                recommendation(
-                    "dispatch-parallel-tasks",
-                    f"taplctl task dispatch {labels} --agent",
-                    (
-                        "At least two Pending subagent tasks share a parallel group; "
-                        "dispatch validates dependencies and owned paths atomically."
-                    ),
-                )
-            ]
-        label = task_id_for_recipe(pending)
-        return [
-            recommendation(
-                "start-task",
-                f"taplctl task start {label} --agent",
-                "Start the next pending task with the high-level lifecycle command.",
-            )
-        ]
-
-    if int(state.get("incomplete_tasks") or 0) == 0:
-        return [
-            recommendation(
-                "finish-run",
-                "taplctl run finish --result '<result summary>' --agent",
-                "All tasks are complete; record the final result before archiving.",
-            ),
-            recommendation(
-                "archive-run",
-                "taplctl archive finish --slug '<timestamp-task-slug>' --summary '<archive summary>' --agent",
-                "Archive when no actionable tasks remain.",
-            ),
-        ]
-
-    return [
-        recommendation(
-            "inspect-status",
-            "taplctl status --agent",
-            "No single safe lifecycle command was inferred; inspect current state.",
-        )
-    ]
-
-
-def lifecycle_recipes() -> list[dict[str, str]]:
-    return [
-        recipe("run-summarize", "taplctl run summarize --summary '<request summary>' --agent", "Set the current request summary."),
-        recipe("plan-apply", "taplctl plan apply --stdin-json --agent", "Create or update the plan from a JSON object."),
-        recipe("task-create", "taplctl task create --stdin-json --agent", "Create a pending executable task from a JSON object."),
-        recipe("approval-approve", "taplctl approval approve --prompt 'Execute TASK-001 from PLAN-001' --source explicit_user --agent", "Record execution approval."),
-        recipe("task-start", "taplctl task start TASK-001 --agent", "Mark one task In Progress without quoting a status value."),
-        recipe(
-            "task-dispatch",
-            "taplctl task dispatch TASK-001 TASK-002 --execution-metadata '{\"TASK-001\":{\"model\":\"gpt-5.6-sol\",\"reasoning_effort\":\"xhigh\"}}' --agent",
-            "Atomically dispatch compatible Pending tasks and return their execution ids.",
-        ),
-        recipe("task-complete", "taplctl task complete TASK-001 --verification '<check>' --result '<result>' --agent", "Mark one task Completed."),
-        recipe(
-            "task-settle",
-            "taplctl task complete TASK-001 --execution-id '<execution-id>' --verification '<check>' --result '<result>' --agent",
-            "Atomically settle one parallel execution and its task.",
-        ),
-        recipe("task-block", "taplctl task block TASK-001 --blocker '<blocker>' --next-action '<next action>' --agent", "Mark one task Blocked."),
-        recipe("task-skip", "taplctl task skip TASK-001 --result '<skip reason>' --agent", "Mark one task Skipped."),
-        recipe(
-            "batch-cancel",
-            "taplctl batch cancel '<batch-id>' --reason '<reason>' --block --agent",
-            "Cancel active executions and leave their tasks Blocked.",
-        ),
-        recipe(
-            "batch-recover",
-            "taplctl batch recover '<batch-id>' --reason '<reason>' --agent",
-            "Cancel an interrupted batch and return active tasks to Pending.",
-        ),
-        recipe("run-finish", "taplctl run finish --result '<result summary>' --agent", "Record the completed result summary."),
-        recipe("archive-finish", "taplctl archive finish --slug '<timestamp-task-slug>' --summary '<archive summary>' --agent", "Archive the active run."),
-    ]
-
-
-def recipe(name: str, command: str, purpose: str) -> dict[str, str]:
-    return {"name": name, "command": command, "purpose": purpose}
-
-
-def recommendation(name: str, command: str, reason: str) -> dict[str, str]:
-    return {"name": name, "command": command, "reason": reason}
-
-
-def first_task_with_status(tasks: list[dict[str, Any]], statuses: tuple[str, ...]) -> dict[str, Any] | None:
-    for task in tasks:
-        if str(task.get("status") or "") in statuses:
-            return task
-    return None
-
-
-def task_id_for_recipe(task: dict[str, Any] | None) -> str:
-    if not task:
-        return "TASK-001"
-    return str(task.get("stable_id") or task.get("task_id") or "TASK-001")
-
-
 def cmd_reindex(args: argparse.Namespace) -> int:
-    payload = embeddings.reindex(open_conn(args), dry_run=args.dry_run)
+    conn = open_conn(args)
+    try:
+        payload = embeddings.reindex(conn, dry_run=args.dry_run)
+    finally:
+        conn.close()
     emit(payload, args.json, args.agent)
     return 0 if payload.get("ok") else 1
 
@@ -2721,94 +408,49 @@ def cmd_searchd_run(args: argparse.Namespace) -> int:
     return 0 if payload.get("ok") else 1
 
 
-def cmd_import_md(args: argparse.Namespace) -> int:
-    payload = importer.import_markdown(
-        open_conn(args),
-        path=args.path,
-        dry_run=args.dry_run,
-        migrate_existing=args.migrate_existing,
-    )
-    emit(payload, args.json, args.agent)
-    return 0 if payload.get("ok") else 1
+def emit_update_error(args: argparse.Namespace, error: updater.UpdateError) -> None:
+    payload = error.as_dict()
+    if getattr(args, "json", False):
+        print_json(payload)
+    elif getattr(args, "agent", False):
+        print(agent_output(payload))
+    else:
+        print(humanize_update_error(error), file=sys.stderr)
 
 
-def cmd_hook_event(args: argparse.Namespace) -> int:
-    raw = sys.stdin.read() if not sys.stdin.isatty() else ""
-    payload: dict[str, Any] = {}
-    if raw.strip():
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                payload = parsed
-        except json.JSONDecodeError:
-            payload = {"raw": raw}
-
-    start = payload_cwd(payload)
-    workspace: dict[str, Any] | None = None
-    if args.db is None and args.config is None:
-        start, workspace = initialize_hook_workspace(start)
-        tapl_install.auto_install_if_needed(start=start)
-    settings = load_config(args, start=start)
-    outcome = hooks.handle_event(
-        open_conn(args, start=start),
-        event=args.event,
-        mode=args.mode,
-        tool=args.tool,
-        payload=payload,
-        tapl_settings=settings,
-    )
-    if workspace is not None:
-        outcome["workspace"] = workspace
-    emit_hook_outcome(outcome, args.json, args.agent)
-    return 2 if outcome.get("block") else 0
+def humanize_update(payload: dict[str, Any]) -> str:
+    status = payload.get("status")
+    current = str(payload.get("current_version") or "unknown")
+    latest = str(payload.get("latest_version") or current)
+    if status == "update-available":
+        return f"Update available: taplctl {current} → {latest}. Run taplctl update to install it."
+    if status == "up-to-date":
+        return f"taplctl is up to date ({current})."
+    if status == "current-newer":
+        return f"Installed taplctl ({current}) is newer than the published release ({latest})."
+    if status == "updated":
+        previous = str(payload.get("previous_version") or current)
+        return f"Updated taplctl: {previous} → {current}."
+    return f"taplctl update: {status or 'completed'} (current version: {current})."
 
 
-def emit_hook_outcome(outcome: dict[str, Any], as_json: bool, as_agent: bool = False) -> None:
-    if as_json:
-        print_json(outcome)
-        return
-    if as_agent:
-        print(agent_output(outcome, "tapl_hook_event"))
-        return
-
-    if outcome.get("event") == "Stop":
-        if outcome.get("block"):
-            print_json(
-                {
-                    "decision": "block",
-                    "reason": outcome.get("message") or "tapl blocked Stop hook.",
-                }
-            )
-        return
-
-    if outcome.get("message"):
-        stream = sys.stderr if outcome.get("block") else sys.stdout
-        print(outcome["message"], file=stream)
-
-
-def payload_cwd(payload: dict[str, Any]) -> Path | None:
-    value = payload.get("cwd")
-    if isinstance(value, str) and value.strip():
-        return Path(value).expanduser()
-    return None
-
-
-def initialize_hook_workspace(start: Path | None) -> tuple[Path | None, dict[str, Any] | None]:
-    if start is None:
-        return None, None
-    workspace_root = db.find_workspace_root(start) or start
-    initialized = db.initialize_workspace(workspace_root)
-    return Path(initialized["workspace_root"]), initialized
+def humanize_update_error(error: updater.UpdateError) -> str:
+    if error.code == "unsupported_installation":
+        return (
+            "taplctl update is available only for installations made with the official "
+            "curl | sh or PowerShell installer. For Homebrew, run `brew upgrade taplctl` "
+            "(or `brew upgrade taplctl-semantic`); otherwise use the original install method."
+        )
+    return f"taplctl update failed ({error.code}): {error}"
 
 
 def emit(payload: dict[str, Any], as_json: bool, as_agent: bool = False) -> None:
     if as_json:
         print_json(payload)
-        return
-    if as_agent:
+    elif as_agent:
         print(agent_output(payload))
-        return
-    print(humanize(payload))
+    else:
+        print(humanize(payload))
 
 
 def print_json(payload: dict[str, Any]) -> None:
@@ -2818,90 +460,71 @@ def print_json(payload: dict[str, Any]) -> None:
 def humanize(payload: dict[str, Any]) -> str:
     if "error" in payload:
         return f"error: {payload['error']}"
-    if "plan_task_execute" in payload and not payload.get("ok", True):
-        return validation.format_issues(payload["plan_task_execute"])
     if "db" in payload:
         return f"tapl db: {payload['db']}"
     if "install" in payload:
         lines = [f"tapl install {payload['install']}: {payload.get('repo') or payload.get('codex_home')}"]
         lines.extend(f"{item['action']}: {item['path']}" for item in payload.get("files", []))
         return "\n".join(lines)
-    if "archive" in payload and "items" in payload:
-        archive = payload["archive"]
-        lines = [f"{archive['created_at']} {archive['slug']}: {archive['summary']}"]
-        lines.extend(f"{item['kind']} {item['stable_id']} {item['title']}" for item in payload["items"])
-        return "\n".join(lines)
-    if "active_run" in payload and "task_counts" in payload:
-        return humanize_status(payload)
-    if "batch" in payload and "executions" in payload:
-        batch = payload["batch"]
-        batch_id = batch.get("batch_id") or batch.get("id") or ""
-        lines = [f"batch {batch_id}: {batch.get('state', '')}"]
-        lines.extend(
-            (
-                f"{execution.get('task_id', '')} "
-                f"{execution.get('execution_state', '')} "
-                f"{execution.get('execution_id', '')}"
-            ).strip()
-            for execution in payload.get("executions") or []
-        )
-        return "\n".join(lines)
-    if "item" in payload:
-        item = payload["item"]
-        return f"{item['kind']} {item['stable_id']} {item['title']}"
-    if "approval" in payload:
-        approval = payload["approval"]
-        source = approval.get("source")
-        source_text = f" ({source})" if source else ""
-        return f"approval {approval.get('kind', '')}: {approval.get('state') or approval.get('decision')}{source_text}"
-    if "approvals" in payload:
-        approvals = payload["approvals"]
-        return "\n".join(
-            f"{item['decided_at']} {item['kind']} {item['decision']} [{item.get('source', '')}]: {item['prompt']}"
-            for item in approvals
-        ) or "no approvals"
-    if "archives" in payload:
-        return "\n".join(f"{item['created_at']} {item['slug']}: {item['summary']}" for item in payload["archives"]) or "no archives"
-    if "recommendations" in payload:
-        return "\n".join(
-            f"{item['name']}: {item['command']} # {item['reason']}" for item in payload["recommendations"]
-        ) or "no recommendations"
-    if "recipes" in payload:
-        return "\n".join(f"{item['name']}: {item['command']} # {item['purpose']}" for item in payload["recipes"]) or "no recipes"
+    if "running" in payload:
+        state = "running" if payload.get("running") else "stopped"
+        return f"searchd {state}: {payload.get('socket_path', '')}".rstrip()
     if "results" in payload:
-        return "\n".join(f"{item['stable_id']} {item['title']}" for item in payload["results"]) or "no results"
-    if "active_run" in payload:
-        run = payload["active_run"] or {}
-        request = run.get("request_summary") or "active"
-        result = run.get("result_summary") or ""
-        return f"active run: {request}" + (f"\nresult: {result}" if result else "")
+        return f"indexed {len(payload.get('results') or [])} item(s)"
     return "ok" if payload.get("ok") else str(payload)
 
 
-def humanize_status(payload: dict[str, Any]) -> str:
-    run = payload.get("active_run")
-    if isinstance(run, dict):
-        request = run.get("request_summary") or "active"
-        lines = [f"active run: {request}"]
-    else:
-        lines = ["active run: none"]
+def agent_error(message: str) -> str:
+    return f"<tapl_error>\n  <message>{agent_escape(message)}</message>\n</tapl_error>"
 
-    task_counts = payload.get("task_counts") if isinstance(payload.get("task_counts"), dict) else {}
-    plans = payload.get("plans") if isinstance(payload.get("plans"), list) else []
-    tasks = payload.get("tasks") if isinstance(payload.get("tasks"), list) else []
-    findings = payload.get("findings") if isinstance(payload.get("findings"), list) else []
-    incomplete = payload.get("incomplete_tasks", 0)
 
-    lines.append(
-        f"plans: {len(plans)}, tasks: {len(tasks)}, findings: {len(findings)}, incomplete tasks: {incomplete}"
-    )
-    if task_counts:
-        ordered = [f"{status}={task_counts.get(status, 0)}" for status in db.TASK_STATUSES]
-        lines.append("task counts: " + ", ".join(ordered))
-
-    plan_task_execute = payload.get("plan_task_execute")
-    if isinstance(plan_task_execute, dict):
-        issue_text = validation.format_issues(plan_task_execute, max_items=3)
-        if issue_text:
-            lines.append(issue_text)
+def agent_output(payload: dict[str, Any], root_tag: str = "tapl_output") -> str:
+    lines = [f"<{root_tag}>"]
+    for key, value in payload.items():
+        append_agent_node(lines, 1, key, value)
+    lines.append(f"</{root_tag}>")
     return "\n".join(lines)
+
+
+def append_agent_node(lines: list[str], depth: int, tag: str, value: Any) -> None:
+    if tag in _AGENT_SKIP_KEYS or not agent_value_present(value):
+        return
+    tag_name = agent_tag_name(tag)
+    if isinstance(value, dict):
+        section: list[str] = []
+        for key, child in value.items():
+            append_agent_node(section, depth + 1, str(key), child)
+        if section:
+            indent = "  " * depth
+            lines.extend((f"{indent}<{tag_name}>", *section, f"{indent}</{tag_name}>"))
+        return
+    if isinstance(value, list):
+        section = []
+        item_tag = _AGENT_LIST_ITEM_TAGS.get(tag, "item")
+        for child in value:
+            append_agent_node(section, depth + 1, item_tag, child)
+        if section:
+            indent = "  " * depth
+            lines.extend((f"{indent}<{tag_name}>", *section, f"{indent}</{tag_name}>"))
+        return
+    lines.append(f"{'  ' * depth}<{tag_name}>{agent_escape(value)}</{tag_name}>")
+
+
+def agent_value_present(value: Any) -> bool:
+    return value is not None and value != "" and value != [] and value != {}
+
+
+def agent_tag_name(value: str) -> str:
+    normalized = re.sub(r"[^\w.]+", "_", value.replace("-", "_"), flags=re.UNICODE).strip("_")
+    if not normalized:
+        return "field"
+    return f"field_{normalized}" if normalized[0].isdigit() or normalized[0] == "." else normalized
+
+
+def agent_escape(value: Any) -> str:
+    text = "true" if value is True else "false" if value is False else str(value)
+    return html.escape(text, quote=False)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

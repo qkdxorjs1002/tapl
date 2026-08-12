@@ -2,7 +2,7 @@
 # Search mode: semantic, bm25, word, or hybrid.
 mode = "hybrid"
 
-# Default maximum number of search results returned by taplctl search.
+# Default maximum number of workflow search results.
 max_results = 12
 
 # Hybrid search blends semantic rank and BM25 rank.

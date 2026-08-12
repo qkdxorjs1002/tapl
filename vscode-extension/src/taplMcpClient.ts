@@ -1,6 +1,5 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import * as path from 'path';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
@@ -235,13 +234,11 @@ export class TaplMcpClientPool {
 
 export function taplMcpCommandCandidates(
   configuredMcpPath: string,
-  configuredTaplctlPath: string,
   platform = process.platform
 ): string[] {
   const executable = platform === 'win32' ? 'tapl-mcp.exe' : 'tapl-mcp';
   return uniqueStrings([
     configuredMcpPath.trim() || undefined,
-    deriveTaplMcpSibling(configuredTaplctlPath.trim(), executable),
     executable,
     platform === 'win32' ? undefined : '/opt/homebrew/bin/tapl-mcp',
     platform === 'win32' ? undefined : '/usr/local/bin/tapl-mcp'
@@ -257,14 +254,6 @@ export function taplMcpEnvironment(): Record<string, string> {
     ...inherited,
     PATH: [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin'].filter(Boolean).join(delimiter)
   };
-}
-
-function deriveTaplMcpSibling(configuredTaplctlPath: string, executable: string): string | undefined {
-  if (!configuredTaplctlPath) {
-    return undefined;
-  }
-  const directory = path.dirname(configuredTaplctlPath);
-  return directory === '.' ? executable : path.join(directory, executable);
 }
 
 function uniqueStrings(values: Array<string | undefined>): string[] {

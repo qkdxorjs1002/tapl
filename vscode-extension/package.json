@@ -54,12 +54,6 @@
           "default": "",
           "description": "Path or command name for the tapl-mcp stdio server. Leave empty to search PATH plus common Homebrew locations."
         },
-        "taplWorkflow.taplctlPath": {
-          "type": "string",
-          "default": "",
-          "description": "%configuration.taplctlPath.description%",
-          "deprecationMessage": "Use taplWorkflow.taplMcpPath. This legacy value is only used to locate a sibling tapl-mcp executable."
-        },
         "taplWorkflow.layout": {
           "type": "string",
           "default": "auto",

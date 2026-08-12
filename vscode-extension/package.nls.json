@@ -2,7 +2,6 @@
   "extension.displayName": "tapl Workflow Viewer",
   "extension.description": "View tapl SQLite workflow state through the taplctl CLI.",
   "configuration.title": "tapl Workflow",
-  "configuration.taplctlPath.description": "Path or command name for taplctl. Leave empty to search PATH plus common Homebrew locations.",
   "configuration.layout.title": "Dashboard Layout",
   "configuration.layout.description": "Controls the layout size of the tapl dashboard.",
   "configuration.layout.enum.auto.label": "Automatic",

@@ -8,14 +8,6 @@ from typing import Any
 from . import config as tapl_config, db, prompt as tapl_prompt, validation
 
 
-def taplctl_execution_guidance() -> str:
-    return tapl_prompt.taplctl_execution_guidance()
-
-
-def taplctl_command_guidance() -> str:
-    return tapl_prompt.taplctl_command_guidance()
-
-
 def external_findings_guidance() -> str:
     return tapl_prompt.external_findings_guidance()
 

@@ -33,32 +33,32 @@
     <text x="204" y="307" fill="#94a3b8">detailed plans, granular tasks, execution approval required</text>
 
     <text x="120" y="372" fill="#c084fc">codex</text>
-    <text x="204" y="372" fill="#94a3b8">uses the same CLI state before editing</text>
+    <text x="204" y="372" fill="#94a3b8">uses typed MCP workflow state before editing</text>
 
     <text x="152" y="420" fill="#38bdf8">1.</text>
-    <text x="194" y="420" fill="#e6edf3">taplctl status --agent</text>
+    <text x="194" y="420" fill="#e6edf3">tapl_get_status</text>
     <text x="518" y="420" fill="#94a3b8"># active run, counts, approvals, validation</text>
 
     <text x="152" y="455" fill="#38bdf8">2.</text>
-    <text x="194" y="455" fill="#e6edf3">taplctl search 'README self PR codex cli screenshot' --agent</text>
+    <text x="194" y="455" fill="#e6edf3">tapl_search_history query='README self PR'</text>
     <text x="990" y="455" fill="#94a3b8"># prior work</text>
 
     <text x="152" y="490" fill="#38bdf8">3.</text>
-    <text x="194" y="490" fill="#e6edf3">taplctl plan set --id SPEC-README-SELF-PR</text>
+    <text x="194" y="490" fill="#e6edf3">tapl_apply_plan plan_id=PLAN-001</text>
     <text x="790" y="490" fill="#94a3b8"># requirements, order, risks</text>
 
     <text x="152" y="525" fill="#38bdf8">4.</text>
-    <text x="194" y="525" fill="#e6edf3">taplctl task set --id TASK-README-001</text>
+    <text x="194" y="525" fill="#e6edf3">tapl_create_task task_id=TASK-001</text>
     <text x="810" y="525" fill="#94a3b8"># executable work items</text>
 
     <text x="152" y="560" fill="#38bdf8">5.</text>
-    <text x="194" y="560" fill="#e6edf3">taplctl approval set --decision approved</text>
+    <text x="194" y="560" fill="#e6edf3">tapl_approve_execution source=explicit_user</text>
     <text x="818" y="560" fill="#94a3b8"># durable edit boundary</text>
 
     <text x="152" y="595" fill="#38bdf8">6.</text>
-    <text x="194" y="595" fill="#e6edf3">edit README.md README.ko.md assets/tapl-codex-iterm-demo.png</text>
+    <text x="194" y="595" fill="#e6edf3">edit README.md README.ko.md assets/tapl-codex-iterm-demo.svg</text>
 
-    <text x="120" y="660" fill="#fbbf24">taplctl status</text>
+    <text x="120" y="660" fill="#fbbf24">tapl_get_status</text>
     <text x="120" y="704" fill="#a7f3d0">approval</text>
     <text x="236" y="704" fill="#e6edf3">approved</text>
     <text x="388" y="704" fill="#a7f3d0">plans</text>

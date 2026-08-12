@@ -224,8 +224,6 @@ semantic formula는 preloaded search process를 의도적으로 시작하지 않
 
 선택 VS Code extension은 workspace별 persistent `tapl-mcp` client를 사용합니다.
 executable을 못 찾으면 `taplWorkflow.taplMcpPath`를 설정하세요.
-`taplWorkflow.taplctlPath`는 sibling `tapl-mcp`를 찾는 legacy locator일 뿐 workflow
-command path가 아닙니다.
 
 ### 재개와 검색
 
@@ -258,9 +256,9 @@ plane을 감싸지 않습니다. `tapl-hook`은 Codex lifecycle 지점에서 간
 더하고 durable-edit boundary를 지킵니다. SQLite database는 Codex, hook, viewer가 공유하는
 source of truth입니다.
 
-`taplctl`은 management-only입니다. 제공하는 것은 `init`, `doctor`, `update`, `install`,
-`viewer`, `reindex`, `searchd`, `import-md`뿐입니다. agent는 workflow record를 만들거나,
-dispatch·정산·검색·조회하려고 이 CLI를 사용해서는 안 됩니다.
+`taplctl`은 management-only입니다. 공개 명령은 정확히 일곱 가지인 `init`, `doctor`,
+`update`, `install`, `viewer`, `reindex`, `searchd`입니다. agent는 workflow record를
+만들거나 dispatch·정산·검색·조회하려고 이 CLI를 사용해서는 안 됩니다.
 
 ## 설치 관리
 
@@ -273,7 +271,6 @@ dispatch·정산·검색·조회하려고 이 CLI를 사용해서는 안 됩니�
 | `taplctl update --check` / `update` | 독립형 설치 업데이트 확인 또는 실행 |
 | `taplctl reindex` | search index 다시 만들기 |
 | `taplctl searchd start` / `status` | 선택 semantic search process 관리 |
-| `taplctl import-md PATH` | legacy Markdown workflow 가져오기 |
 
 ### 업데이트
 
@@ -337,10 +334,6 @@ plan/task policy는 고정입니다. 실행 작업은 상세 plan, 명시적인 
 | viewer가 workspace를 찾지 못함 | 초기화하거나 `.tapl/tapl.db`가 있는 folder를 선택 |
 | 8000 포트 사용 중 | Homebrew service를 멈추거나 `taplctl viewer --port PORT` 실행 |
 | Homebrew formula 충돌 | 다른 formula를 선택하기 전에 설치된 TAPL formula 제거 |
-
-`TAPL_ENABLE_LEGACY_WORKFLOW_CLI=1`은 지원되지 않는 migration 또는 diagnostic에만
-retired workflow CLI를 임시로 노출합니다. 일반 interface가 아니며 agent, script,
-viewer가 사용해서는 안 됩니다.
 
 ## 개발
 

@@ -191,7 +191,6 @@ type HostWebviewMessage =
 const COMMAND_PREFIX = "taplWorkflow";
 const TAPL_DB_WATCH_DEBOUNCE_MS = 2000;
 const TAPL_MCP_PATH_SETTING = "taplMcpPath";
-const TAPLCTL_PATH_SETTING = "taplctlPath";
 const LANGUAGE_SETTING = "language";
 const LAYOUT_SETTING = "layout";
 let taplMcpClients: TaplMcpClientPool | undefined;
@@ -292,10 +291,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await webviewManager.searchFromCommand();
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (
-        event.affectsConfiguration(`${COMMAND_PREFIX}.${TAPL_MCP_PATH_SETTING}`)
-        || event.affectsConfiguration(`${COMMAND_PREFIX}.${TAPLCTL_PATH_SETTING}`)
-      ) {
+      if (event.affectsConfiguration(`${COMMAND_PREFIX}.${TAPL_MCP_PATH_SETTING}`)) {
         taplMcpClients?.invalidate();
         refreshAll();
         return;
@@ -1760,10 +1756,7 @@ function taplMcpWorkspace(root: vscode.WorkspaceFolder): TaplMcpWorkspace {
   return {
     key: root.uri.fsPath,
     cwd: root.uri.fsPath,
-    commands: taplMcpCommandCandidates(
-      configuration.get<string>(TAPL_MCP_PATH_SETTING, ''),
-      configuration.get<string>(TAPLCTL_PATH_SETTING, '')
-    )
+    commands: taplMcpCommandCandidates(configuration.get<string>(TAPL_MCP_PATH_SETTING, ''))
   };
 }
 

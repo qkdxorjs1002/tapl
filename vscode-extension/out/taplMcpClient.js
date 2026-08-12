@@ -1,44 +1,10 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TaplMcpClientPool = exports.WorkspaceTaplMcpClient = exports.TaplMcpToolError = void 0;
 exports.taplMcpCommandCandidates = taplMcpCommandCandidates;
 exports.taplMcpEnvironment = taplMcpEnvironment;
 const index_js_1 = require("@modelcontextprotocol/sdk/client/index.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/client/stdio.js");
-const path = __importStar(require("path"));
 const REQUEST_TIMEOUT_MS = 10000;
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 class TaplMcpToolError extends Error {
@@ -210,11 +176,10 @@ class TaplMcpClientPool {
     }
 }
 exports.TaplMcpClientPool = TaplMcpClientPool;
-function taplMcpCommandCandidates(configuredMcpPath, configuredTaplctlPath, platform = process.platform) {
+function taplMcpCommandCandidates(configuredMcpPath, platform = process.platform) {
     const executable = platform === 'win32' ? 'tapl-mcp.exe' : 'tapl-mcp';
     return uniqueStrings([
         configuredMcpPath.trim() || undefined,
-        deriveTaplMcpSibling(configuredTaplctlPath.trim(), executable),
         executable,
         platform === 'win32' ? undefined : '/opt/homebrew/bin/tapl-mcp',
         platform === 'win32' ? undefined : '/usr/local/bin/tapl-mcp'
@@ -227,13 +192,6 @@ function taplMcpEnvironment() {
         ...inherited,
         PATH: [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin'].filter(Boolean).join(delimiter)
     };
-}
-function deriveTaplMcpSibling(configuredTaplctlPath, executable) {
-    if (!configuredTaplctlPath) {
-        return undefined;
-    }
-    const directory = path.dirname(configuredTaplctlPath);
-    return directory === '.' ? executable : path.join(directory, executable);
 }
 function uniqueStrings(values) {
     return [...new Set(values.filter((value) => Boolean(value)))];

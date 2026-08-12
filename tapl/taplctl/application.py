@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from . import config, context as tapl_context, db, embeddings, validation
+from . import config, context as tapl_context, db, embeddings, recommendations, validation
 
 
 UNSET = object()
@@ -115,14 +115,10 @@ class WorkflowApplication:
         return payload
 
     def get_next(self) -> dict[str, Any]:
-        # Kept in cli.py for backwards-compatible human recipes; the application
-        # consumes only its pure state-to-recommendation function.
-        from .cli import next_recommendations
-
         with self._connection() as conn:
             state = db.status_payload(conn)
             check = validation.validate_plan_task_execute(conn)
-        return {"ok": True, "recommendations": next_recommendations(state, check)}
+        return {"ok": True, "recommendations": recommendations.next_recommendations(state, check)}
 
     def validate_state(self) -> dict[str, Any]:
         with self._connection() as conn:

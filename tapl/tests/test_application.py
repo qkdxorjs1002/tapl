@@ -99,3 +99,54 @@ def test_application_missing_item_has_actionable_error() -> None:
             assert str(exc) == "item not found: 999"
         else:
             raise AssertionError("missing item must fail")
+
+
+def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run("parallel application workflow")
+        app.apply_plan(
+            "PLAN-001",
+            title="Parallel plan",
+            status="Finalized",
+            summary="REQ-001: dispatch independent tasks.",
+            objective="Exercise the native parallel execution boundary.",
+            requirements_trace="REQ-001",
+            selected_approach="Dispatch two owned-path tasks.",
+            affected_files="src/a.py, src/b.py",
+            execution_order="approve, dispatch, settle",
+            risks="Execution ids must remain paired with their task.",
+            validation="Focused application test.",
+        )
+        for task_id, owned_path in (("TASK-001", "src/a.py"), ("TASK-002", "src/b.py")):
+            app.create_task(
+                task_id,
+                f"Parallel {task_id}",
+                "PLAN-001",
+                f"Complete {task_id}",
+                f"Implement {task_id}",
+                f"Verify {task_id}",
+                execution_mode="parallel",
+                executor_kind="subagent",
+                parallel_group="workers",
+                owned_paths=[owned_path],
+            )
+        app.record_approval(
+            decision="approved", prompt="Execute parallel tasks", source="explicit_user"
+        )
+
+        manifest = app.dispatch_tasks(["TASK-001", "TASK-002"], batch_id="BATCH-001")
+        executions = {row["task_id"]: row["execution_id"] for row in manifest["executions"]}
+        assert set(executions) == {"TASK-001", "TASK-002"}
+
+        for task_id, execution_id in executions.items():
+            receipt = app.settle_task(
+                task_id,
+                status="Completed",
+                execution_id=execution_id,
+                verification=f"Verified {task_id}",
+                result=f"Completed {task_id}",
+            )
+            assert receipt["settled_execution_id"] == execution_id
+
+        assert app.get_status(full=True)["active_batches"] == []
