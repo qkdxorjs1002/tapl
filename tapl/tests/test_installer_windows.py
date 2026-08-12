@@ -33,6 +33,8 @@ class PowerShellInstallerStaticTests(unittest.TestCase):
         )
         self.assertGreaterEqual(source.count(version_pattern), 2)
         self.assertIn("function Compare-SemVer {", source)
+        self.assertEqual(source.count("-cnotmatch $versionPattern"), 2)
+        self.assertGreaterEqual(source.count("-cnotmatch '^[0-9]+"), 2)
         self.assertIn("$stageRanks = @{ a = 0; b = 1; rc = 2; stable = 3 }", source)
         self.assertNotIn("[System.Management.Automation.SemanticVersion]", source)
 

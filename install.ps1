@@ -256,7 +256,7 @@ function Get-ManagedInstallation {
         $shaValue = Get-PropertyValue $metadata "wheel_sha256"
         if (-not (Test-SafeUrlText $manifestUrlValue)) { throw "manifest_url" }
         if (-not (Test-SafeUrlText $wheelUrlValue)) { throw "wheel_url" }
-        if (-not ($versionValue -is [string]) -or $versionValue -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$') { throw "version" }
+        if (-not ($versionValue -is [string]) -or $versionValue -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$') { throw "version" }
         if (-not ($shaValue -is [string]) -or $shaValue -notmatch '^[0-9a-fA-F]{64}$') { throw "sha" }
 
         $pythonCommand = Join-Path (Join-Path $normalizedVenv "Scripts") "python.exe"
@@ -292,11 +292,11 @@ function Compare-SemVer {
         [Parameter(Mandatory = $true)][string]$Right
     )
     $versionPattern = '^(?<major>[0-9]+)\.(?<minor>[0-9]+)\.(?<patch>[0-9]+)(?:(?<stage>a|b|rc)(?<serial>[0-9]+))?$'
-    if ($Left -notmatch $versionPattern) { throw "invalid left version" }
+    if ($Left -cnotmatch $versionPattern) { throw "invalid left version" }
     $leftParts = @($Matches['major'], $Matches['minor'], $Matches['patch'])
     $leftStage = $Matches['stage']
     $leftSerial = $Matches['serial']
-    if ($Right -notmatch $versionPattern) { throw "invalid right version" }
+    if ($Right -cnotmatch $versionPattern) { throw "invalid right version" }
     $rightParts = @($Matches['major'], $Matches['minor'], $Matches['patch'])
     $rightStage = $Matches['stage']
     $rightSerial = $Matches['serial']
@@ -545,7 +545,7 @@ try {
         $manifestSchema = Get-PropertyValue $manifest "schema_version"
         if (($manifestSchema -is [bool]) -or $manifestSchema -ne 1) { throw "schema" }
         $manifestVersion = Get-PropertyValue $manifest "version"
-        if (-not ($manifestVersion -is [string]) -or $manifestVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$') { throw "version" }
+        if (-not ($manifestVersion -is [string]) -or $manifestVersion -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?$') { throw "version" }
         $wheel = Get-PropertyValue $manifest "wheel"
         if (-not ($wheel -is [System.Management.Automation.PSCustomObject])) { throw "wheel" }
         $wheelUrl = Get-PropertyValue $wheel "url"
