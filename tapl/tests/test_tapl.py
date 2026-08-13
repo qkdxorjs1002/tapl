@@ -38,6 +38,7 @@ from taplctl import (
     mcp_server as tapl_mcp,
     prompt as tapl_prompt,
     updater as tapl_updater,
+    validation as tapl_validation,
 )
 
 
@@ -530,12 +531,12 @@ class TaplRuntimeTests(unittest.TestCase):
             finally:
                 migrated.close()
 
-    def test_mcp_server_instructions_are_compact_and_keep_policy_invariants(self) -> None:
+    def test_mcp_server_instructions_are_compact_and_keep_adaptive_policy(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions(
             subagents=tapl_config.SubagentsConfig()
         )
 
-        self.assertLess(len(instructions), 10_000)
+        self.assertLess(len(instructions), 8_500)
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",
             "before execution approval",
@@ -543,22 +544,31 @@ class TaplRuntimeTests(unittest.TestCase):
             "Do not commit, push, rebase, reset, discard changes",
             "Never overwrite user changes",
             "current-state snapshots, not logs",
-            "agent must select `lightweight` only for a direct, non-durable answer",
-            "`tapl_apply_plan` promotes it to planned mode",
+            "Classify once from the request and readily available context: Answer, Investigation, Analysis, Planning, Implementation, or Mixed.",
+            "First choose Strict",
+            "Otherwise choose Fast",
+            "All other work is Standard.",
+            "Mixed uses its highest child mode.",
+            "Use `lightweight` only for Fast non-durable Answer, Investigation, Analysis, or Planning work",
+            "`tapl_apply_plan` promotes it when scope or risk grows.",
             "Planning must happen before implementation",
-            "Mark it finalized only after explicit user confirmation",
-            "Before finalizing the plan",
-            'Fixed plan detail (`plan_detail = "very_detailed"`)',
-            'Fixed planning approval (`planning_approval_level = "more"`)',
-            'Fixed task granularity (`task_granularity = "very_granular"`)',
+            "Finalize only after explicit user confirmation.",
+            "Before finalizing a plan",
+            "Do not search, query history, or create plan/tasks solely to classify",
+            "Record at most two short reasons",
+            "uncertainty defaults to Standard",
+            "Bundle sequential implementation and its targeted verification in one task.",
+            "Split only independent",
             "Execute planned tasks one at a time in task order",
             "exclusive owned_paths",
             "exact manifest execution_id",
             "recover or cancel the batch before retrying",
             "actual runtime model/reasoning effort",
-            'Fixed execution approval (`require_execution_approval = true`)',
+            "Delegate only when at least two genuinely independent, non-overlapping parallel tracks",
+            "startup and coordination cost.",
+            "execution approval",
             "only active work is In Progress",
-            "If scope or implementation changes materially",
+            "Reclassify upward only when scope, risk, or uncertainty grows",
             "search relevant prior TAPL history",
             "ignore unrelated matches",
             "During execution, search again",
@@ -569,6 +579,82 @@ class TaplRuntimeTests(unittest.TestCase):
         )
         for policy in required_policy:
             self.assertIn(policy, instructions)
+        self.assertNotIn("very_detailed", instructions)
+        self.assertNotIn("very_granular", instructions)
+
+    def test_adaptive_validation_allows_compact_plans_and_coherent_task_bundles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            (workspace / ".git").mkdir(parents=True)
+            tapl_db.initialize_workspace(workspace)
+            conn = tapl_db.connect(workspace / tapl_db.DEFAULT_DB_RELATIVE)
+            try:
+                tapl_db.ensure_active_run(
+                    conn,
+                    request_summary="Apply one small local fix.",
+                    workflow_mode="planned",
+                )
+                missing_plan_issues = tapl_validation.validate_plan_task_execute(conn)["issues"]
+                self.assertIn("missing_plan", {issue["code"] for issue in missing_plan_issues})
+
+                tapl_db.upsert_plan(
+                    conn,
+                    plan_id="PLAN-001",
+                    title="Compact local fix",
+                    status="Finalized",
+                    summary="Fix one local issue.",
+                    validation="Run the targeted test.",
+                )
+                tapl_db.upsert_task(
+                    conn,
+                    task_id="TASK-001",
+                    title="Fix and verify local issue",
+                    status="Pending",
+                    spec_id="PLAN-001",
+                    goal="Fix the local issue.",
+                    action="Implement the change and run its targeted test.",
+                    verification="The targeted test passes.",
+                )
+                issues = tapl_validation.validate_plan_task_execute(conn)["issues"]
+            finally:
+                conn.close()
+
+        codes = {issue["code"] for issue in issues}
+        self.assertNotIn("plan_detail_too_sparse", codes)
+        self.assertNotIn("task_granularity_too_coarse", codes)
+
+        self.assertEqual(tapl_validation.validate_plan_detail([], required=False), [])
+
+    def test_adaptive_validation_guidance_uses_adaptive_policy_keys(self) -> None:
+        payload = tapl_validation.guidance()
+
+        self.assertIn("adaptive_plan_policy", payload)
+        self.assertIn("adaptive_task_policy", payload)
+        self.assertIn("execution_approval_policy", payload)
+        self.assertNotIn("fixed_plan_policy", payload)
+        self.assertNotIn("fixed_task_policy", payload)
+        self.assertNotIn("fixed_execution_approval_policy", payload)
+
+    def test_subagent_opt_in_is_compact_and_conditional(self) -> None:
+        guidance = tapl_prompt.subagent_delegation_request_guidance(
+            tapl_config.SubagentsConfig()
+        )
+
+        self.assertLess(len(guidance), 350)
+        self.assertIn("only for approved tasks meeting the MCP delegation criteria", guidance)
+        self.assertIn("without renewed approval", guidance)
+        self.assertIn("dispatch, ownership, model-selection, and settlement rules", guidance)
+        self.assertIn("scope, safety, permission, and sandbox constraints", guidance)
+        self.assertNotIn("For this TAPL run", guidance)
+
+    def test_lightweight_help_covers_all_fast_non_durable_work(self) -> None:
+        mode_help = tapl_prompt.field_help("run", "workflow_mode")
+        next_action = tapl_prompt.lightweight_run_next_action()
+
+        self.assertIn("lightweight for Fast non-durable work", mode_help)
+        self.assertIn("complete the Fast non-durable work", next_action)
+        self.assertNotIn("direct non-durable answers", mode_help)
+        self.assertNotIn("answer directly", next_action)
 
     def test_config_defaults_when_file_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

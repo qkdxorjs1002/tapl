@@ -38,7 +38,7 @@ RUN_FIELDS = (
     FieldSpec(
         "workflow_mode",
         "--workflow-mode",
-        "Agent-selected run mode: planned for persisted planning/execution, lightweight for direct non-durable answers.",
+        "Agent-selected run mode: planned for durable, Standard, or Strict work; lightweight for Fast non-durable work.",
         "defaults to planned",
         "Workflow mode",
     ),
@@ -193,7 +193,7 @@ AGENT_ITEM_FIELDS = {
     "finding": ("body", "impact", "related_ids"),
 }
 
-MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is the workflow system for this workspace. Its `tapl_*` MCP tools call the repo-local workflow application directly. Call `tapl_get_status` and `tapl_get_next` before non-trivial work or whenever state is uncertain, and use `tapl_get_context` when lifecycle guidance is needed. These server instructions, tool descriptions, and JSON schemas are the authoritative workflow and field contract.
+MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is the workflow system for this workspace. Its `tapl_*` MCP tools call the repo-local workflow application directly. Call `tapl_get_status` and `tapl_get_next` before non-trivial work or whenever state is uncertain. These server instructions, tool descriptions, and JSON schemas are the authoritative workflow and field contract.
 
 # Workflow
 
@@ -201,46 +201,35 @@ Write workflow records and reports in the user's language unless asked otherwise
 
 ## Role Boundaries
 
-- Workflow state lives in the repo-local TAPL database behind the in-process workflow application used by these tools.
-- Use high-level lifecycle tools and `tapl_get_next` to manage workflow state.
 - Do not modify source, tests, docs, configs, migrations, generated files, or other durable project artifacts before execution approval.
 - TAPL run, plan, task, finding, approval, and archive records may be created or updated before execution approval.
 - Do not commit, push, rebase, reset, discard changes, or include workflow records in commits unless explicitly requested.
-- Check the worktree before and after work when practical. Never overwrite user changes.
-- Keep TAPL records as current-state snapshots, not logs.
+- Never overwrite user changes. Keep TAPL records as current-state snapshots, not logs.
 - ${custom_fields_guidance}
 
-## Planning
+## Adaptive workflow
 
 ${workflow_mode_guidance}
 
 Planning must happen before implementation. Requirements are captured inside the plan, not in a separate requirements file or request artifact.
 
-Keep the plan current as decisions are made. Mark it finalized only after explicit user confirmation.
-
-Fixed plan detail (`plan_detail = "very_detailed"`): ${plan_detail_guidance}
-
-The plan must be concise but executable. Include only what is needed for the implementation to proceed safely.
-
-Fixed planning approval (`planning_approval_level = "more"`): ${planning_approval_guidance}
+${plan_detail_guidance}
+${planning_approval_guidance}
 
 ## Tasks And Execution
 
 Tasks are executable implementation or verification work derived from the stored plan, not planning or task-design work.
 
-- Keep tasks focused on the current execution window and next useful step.
-Fixed task granularity (`task_granularity = "very_granular"`): ${task_granularity_guidance}
+- ${task_granularity_guidance}
 ${task_execution_order_guidance}
 ${subagent_delegation_guidance}
 ${context_execution_approval_guidance}
 
 - Task state must reflect current reality: only active work is In Progress, completed work has implementation and verification done, and blocked work records the blocker and next action.
 - Keep blocked, skipped, pending, or unverified work in TAPL records.
-- If scope or implementation changes materially, update the plan or tasks and ask the user before continuing.
+- Reclassify upward only when scope, risk, or uncertainty grows; then update the plan/tasks and ask the user before continuing when required.
 
 ## Records And History
-
-Use only the records needed for the current task.
 
 ${history_search_guidance}
 
@@ -558,7 +547,7 @@ def create_plan_next_action() -> str:
 
 def lightweight_run_next_action() -> str:
     return (
-        "This run is lightweight: answer directly without plan/task records, then use `tapl_finish_run` and "
+        "This run is lightweight: complete the Fast non-durable work without plan/task records, then use `tapl_finish_run` and "
         "`tapl_finish_archive`. If the work becomes complex or needs durable edits, call `tapl_apply_plan`; "
         "creating the plan promotes the run to planned mode."
     )
@@ -769,7 +758,7 @@ def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = N
 
 def context_execution_approval_guidance() -> str:
     return (
-        "Fixed execution approval (`require_execution_approval = true`): execution approval is required before "
+        "Execution approval is required before "
         "task execution or durable edits; explicit edit, test, implementation, and verification requests count as "
         "explicit user approval. Tool-confirmed continuation uses the request_user_input source."
     )
@@ -792,22 +781,18 @@ def external_findings_guidance() -> str:
 
 
 def plan_detail_guidance() -> str:
-    return "Expand edge cases, alternatives considered, and per-spec validation."
+    return (
+        "Plan depth follows the mode: Fast durable work gets one compact plan and task; Standard gets a concise "
+        "executable plan and 1–3 coherent tasks; Strict documents risk, interfaces, rollback, and validation boundaries. "
+        "Finalize only after explicit user confirmation."
+    )
 
 
 def planning_approval_guidance() -> str:
-    guidance = (
-        "Before finalizing the plan with `tapl_apply_plan`, use request_user_input Tool early for unclear planning "
-        "methods, material scope/risk/API/UX/data/compat, or tradeoffs. Ask short, focused "
-        "questions with 2-3 mutually exclusive options, and continue with follow-ups until "
-        "the plan is materially clear."
-    )
     return (
-        f"{guidance} Invoke it only when the Tool is available in the current mode; "
-        "when multiple independent decisions are already known, batch up to three short questions in one "
-        "request_user_input call. Set autoResolutionMs=240000 whenever the tool contract allows auto-resolution; "
-        "omit it only when explicit user input is required before continuing; if unavailable, state assumptions "
-        "or ask one concise plain-text question only when blocked."
+        "Before finalizing a plan, ask only about a material unresolved scope, risk, compatibility, or tradeoff. "
+        "Batch known independent choices when the tool is available; otherwise state a safe assumption or ask one "
+        "concise question only when blocked."
     )
 
 
@@ -842,25 +827,10 @@ def structured_record_guidance(subject: str = "plan and task content") -> str:
 
 def custom_fields_guidance() -> str:
     return (
-        "When writing plans/tasks, proactively populate `custom_fields` when context has metadata useful for future search, "
-        "review, handoff, or decision reconstruction, even when AGENTS.md and the user do not explicitly request it. "
-        "Put metadata shared by the run or multiple tasks—work type, user choices, global constraints, strategy, and "
-        "decision rationale—on the plan instead of copying it to every task. Populate a task's `custom_fields` only "
-        "with metadata unique to that task, such as owned files or interfaces, task-specific constraints, or validation. "
-        "When a task was actually delegated to a subagent, the root records the actual model and reasoning effort used, "
-        "not merely requested, during settlement: e.g. `서브 에이전트 모델`: `gpt-5.6-sol (xhigh)` or "
-        "`SubAgent Model`: `gpt-5.6-sol (xhigh)`; omit this field when no subagent was used. Do not copy a fact already "
-        "represented on the source plan or the same key and value across sibling tasks; reuse a label only with "
-        "task-specific values or context. Before a patch, inspect the record's existing `custom_fields` with "
-        "`tapl_get_status` or `tapl_get_item`. Keep one field per fact, decision, constraint, or path; update its exact "
-        "stored key instead of adding a synonymous label or duplicate value. For redundant aliases, choose the clearest, "
-        "most specific label as the canonical key and send its current value plus top-level nulls for the obsolete alias "
-        "keys in one patch. Do not consolidate genuinely different facts; when the distinction is unclear, preserve them "
-        "or ask. New fields use concise natural-language labels and human-readable string values in the user's language; "
-        "avoid snake_case/code-style labels. Preserve exact source text for paths, commands, APIs, stable IDs, and code "
-        "identifiers, plus JSON types for non-strings. Do not rename or migrate unrelated keys, copy standard fields, "
-        "record transient progress, or invent facts. Omitted fields are preserved; provided keys merge at top level; "
-        "top-level null deletes a key."
+        "Use `custom_fields` only for durable, search-useful metadata not represented by standard fields. Put shared "
+        "facts on the plan and task-specific facts on its task; do not duplicate, invent, or record transient progress. "
+        "Inspect existing fields before patching, preserve exact keys/types, and use top-level null only to remove a true "
+        "duplicate. For delegated work, record the actual runtime model/reasoning effort at settlement."
     )
 
 
@@ -874,7 +844,7 @@ def workflow_order_guidance() -> str:
     return (
         "Lifecycle order: `tapl_get_status`/`tapl_get_next` -> resolve residual run direction with user approval -> "
         "`tapl_search_history` and clarify until unblocked -> `tapl_summarize_run` with agent-selected "
-        "`planned` or `lightweight` mode. Lightweight non-durable answers may finish/archive without records and "
+        "`planned` or `lightweight` mode. Lightweight Fast non-durable work may finish/archive without records and "
         "are promoted by `tapl_apply_plan` if complexity grows. Planned work continues through `tapl_apply_plan` -> "
         "`tapl_create_task` -> `tapl_approve_execution` -> sequential start and settlement tools or "
         "`tapl_dispatch_tasks` plus execution-id settlement -> `tapl_finish_run` -> `tapl_finish_archive`."
@@ -883,10 +853,17 @@ def workflow_order_guidance() -> str:
 
 def workflow_mode_guidance() -> str:
     return (
-        "When calling `tapl_summarize_run`, the agent must select `lightweight` only for a direct, non-durable "
-        "answer whose complexity does not need a persisted plan; select `planned` for complex analysis, planning, "
-        "execution, edits, tests, or verification. A lightweight run may finish/archive without plan or task "
-        "records, and `tapl_apply_plan` promotes it to planned mode when complexity grows."
+        "Classify once from the request and readily available context: Answer, Investigation, Analysis, Planning, "
+        "Implementation, or Mixed. Mixed uses its highest child mode. First choose Strict for security/permission/privacy, "
+        "data schema or destructive work, public compatibility, deployment/external writes, incident/data-correctness, "
+        "irreversible high-cost decisions, or materially conflicting evidence. Otherwise choose Fast only when every "
+        "relevant condition is small and clear: one objective and evidence/domain/change surface, routine reversible "
+        "work, and a single targeted validation; Fast implementation also has at most two direct files. All other work "
+        "is Standard. Do not search, query history, or create plan/tasks solely to classify: uncertainty defaults to "
+        "Standard and Strict requires a known hard gate. Record at most two short reasons only when a plan/task record "
+        "is needed. Use `lightweight` only for Fast non-durable Answer, Investigation, Analysis, "
+        "or Planning work; use `planned` for durable work and every Standard or Strict run. A lightweight run may finish/archive "
+        "without plan/tasks; `tapl_apply_plan` promotes it when scope or risk grows."
     )
 
 
@@ -954,11 +931,9 @@ def subagent_delegation_request_guidance(
         return ""
 
     return (
-        "For this TAPL run, this applicable workflow instruction explicitly requests SubAgent delegation. "
-        "When the authoritative TAPL MCP server instructions select delegation for an approved executable task, "
-        "spawn the required SubAgent(s) without asking the user again, while following all TAPL dispatch, "
-        "ownership, model-selection, and settlement rules. This does not override higher-priority instructions, "
-        "user scope, safety policy, sandboxing, or approval requirements."
+        "This TAPL workflow requests SubAgents only for approved tasks meeting the MCP delegation criteria. "
+        "Spawn them without renewed approval; follow dispatch, ownership, model-selection, and settlement rules. "
+        "Higher-priority scope, safety, permission, and sandbox constraints remain."
     )
 
 
@@ -992,22 +967,21 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
 
     return (
         "### SubAgent Delegation\n\n"
-        "- For every executable task, assess complexity/difficulty and delegate with an efficient suitable model and "
-        "reasoning effort; the root retains coordination, TAPL writes, and cross-task decisions.\n"
-        "- Choose only from the intersection of these configured pairs and pairs actually supported by the current "
-        "SubAgent runtime; use the most efficient suitable pair:\n"
+        "- Delegate only when at least two genuinely independent, non-overlapping parallel tracks have enough benefit to "
+        "outweigh startup and coordination cost. Otherwise the root executes. The root retains TAPL writes and cross-task decisions.\n"
+        "- For delegation, choose the most efficient pair supported by both this configuration and the current runtime:\n"
         f"{available_models}\n"
-        "- If that intersection is empty, report delegation unavailable and let the root execute without a SubAgent.\n"
-        "- Parallel delegation follows the preceding dispatch/ownership contract: atomically dispatch, concurrently "
-        "spawn one SubAgent per manifest execution, constrain owned_paths, settle by exact execution_id, and recover or "
-        "cancel on spawn failure/interruption.\n"
-        "- At settlement, record the actual runtime model/reasoning effort—not merely requested—in task "
-        "`custom_fields`; omit it when no SubAgent was used."
+        "- Atomically dispatch, concurrently spawn one SubAgent per manifest execution, constrain owned_paths, settle by "
+        "exact execution_id, and recover or cancel on spawn failure/interruption. Record actual runtime model/reasoning "
+        "effort in task `custom_fields`."
     )
 
 
 def task_granularity_guidance() -> str:
-    return "Split every independent edit, migration, and verification step."
+    return (
+        "Bundle sequential implementation and its targeted verification in one task. Split only independent work, "
+        "separate risk/ownership boundaries, migrations, or work that can block separately."
+    )
 
 
 def task_required_fields() -> str:

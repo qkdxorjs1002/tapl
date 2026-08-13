@@ -74,6 +74,7 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
         "summarize-request": "tapl_summarize_run",
         "apply-plan": "tapl_apply_plan",
         "create-task": "tapl_create_task",
+        "decide-after-plan": ["tapl_create_task", "tapl_finish_run"],
         "approve-execution": "tapl_approve_execution",
         "settle-parallel-task": ["tapl_complete_task", "tapl_block_task", "tapl_skip_task"],
         "recover-parallel-batch": "tapl_recover_batch",
@@ -342,7 +343,7 @@ def create_server(
         summary: Annotated[str, Field(description=tapl_prompt.field_help("run", "summary"), min_length=1, max_length=2000)],
         workflow_mode: Annotated[
             WorkflowMode,
-            Field(description="Agent-selected workflow complexity: planned or lightweight."),
+            Field(description="Agent-selected lifecycle mode: planned or lightweight."),
         ] = db.DEFAULT_WORKFLOW_MODE,
     ) -> dict[str, Any]:
         """Summarize the request and explicitly select planned or lightweight workflow handling."""
@@ -372,7 +373,7 @@ def create_server(
         custom_fields: CustomFields = None,
         status: Annotated[str | None, Field(description=tapl_prompt.field_help("plan", "status"))] = None,
     ) -> dict[str, Any]:
-        """Create or partially update the detailed plan. New plans need all detailed fields; omitted update fields are preserved."""
+        """Create or update an adaptive-depth plan; Fast plans may be compact and omitted update fields are preserved."""
 
         return await call_application_write(
             application,

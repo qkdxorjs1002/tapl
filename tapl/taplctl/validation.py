@@ -1,4 +1,4 @@
-"""Plan/task validation driven by TAPL's fixed workflow policy."""
+"""Plan/task validation driven by TAPL's adaptive workflow policy."""
 
 from __future__ import annotations
 
@@ -154,7 +154,6 @@ def validate_plan_detail(
     *,
     required: bool = True,
 ) -> list[dict[str, Any]]:
-    body = "\n".join(str(plan.get("body") or plan.get("title") or "") for plan in plans).strip()
     if not plans and not required:
         return []
     if not plans:
@@ -162,18 +161,8 @@ def validate_plan_detail(
             issue(
                 "error",
                 "missing_plan",
-                "The fixed `very_detailed` policy requires a plan record for the active run.",
+                "Planned runs require a plan record before task execution.",
                 tapl_prompt.missing_plan_remediation(),
-            )
-        ]
-
-    if len(body) < 180:
-        return [
-            issue(
-                "warning",
-                "plan_detail_too_sparse",
-                "The fixed `very_detailed` policy requires a less sparse plan.",
-                tapl_prompt.sparse_plan_remediation(),
             )
         ]
     return []
@@ -183,25 +172,15 @@ def validate_task_granularity(
     plans: list[dict[str, Any]],
     tasks: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    task_count = len([task for task in tasks if task_status(task) != "Skipped"])
-    if task_count == 0:
-        return []
+    """Accept coherent task bundles; depth is selected by the workflow policy.
 
-    plan_count = len(plans)
-    target = max(2, plan_count * 2)
-    severity = "error" if task_count <= 1 else "warning"
+    A task may cover a tightly coupled implementation and its verification.  The
+    remaining validators still enforce task identifiers, content, dependencies,
+    execution contracts, and approval before execution.
+    """
 
-    if task_count >= target:
-        return []
-
-    return [
-        issue(
-            severity,
-            "task_granularity_too_coarse",
-            f"The fixed `very_granular` policy has {task_count} task(s) for {plan_count} plan item(s).",
-            task_granularity_remediation(),
-        )
-    ]
+    del plans, tasks
+    return []
 
 
 def validate_plan_content(plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -759,10 +738,10 @@ def guidance() -> dict[str, Any]:
     payload: dict[str, Any] = {
         "field_contract_source": "Use TAPL MCP tool descriptions and input schemas for exact field contracts.",
         "stable_ids": stable_id_guidance(),
-        "fixed_plan_policy": plan_detail_guidance(),
-        "fixed_task_policy": task_granularity_guidance(),
+        "adaptive_plan_policy": plan_detail_guidance(),
+        "adaptive_task_policy": task_granularity_guidance(),
         "task_required_fields": tapl_prompt.task_required_field_summary(),
-        "fixed_execution_approval_policy": execution_approval_validation_guidance(),
+        "execution_approval_policy": execution_approval_validation_guidance(),
     }
     return payload
 

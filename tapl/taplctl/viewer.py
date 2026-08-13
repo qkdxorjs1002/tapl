@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import sqlite3
@@ -42,6 +43,43 @@ class WorkspaceRequired(ViewerError):
 
 
 JsonRunner = Callable[[Path, list[str]], dict[str, Any]]
+
+
+def database_revision(db_path: Path) -> str:
+    """Return an opaque revision for the SQLite database and its WAL sidecars.
+
+    The viewer only needs to know whether the on-disk state changed, so hash
+    deterministic file metadata rather than exposing paths or timestamps to
+    the browser.  SQLite may create or remove WAL sidecars between requests;
+    that race is represented as a normal missing file.
+    """
+
+    files: list[dict[str, object]] = []
+    paths = (
+        db_path,
+        db_path.with_name(f"{db_path.name}-wal"),
+        db_path.with_name(f"{db_path.name}-shm"),
+    )
+    for path in paths:
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            files.append(
+                {"name": path.name, "exists": False, "mtime_ns": None, "size": None}
+            )
+        except OSError as exc:
+            raise ViewerError(f"Could not read TAPL database revision: {exc}") from exc
+        else:
+            files.append(
+                {
+                    "name": path.name,
+                    "exists": True,
+                    "mtime_ns": stat.st_mtime_ns,
+                    "size": stat.st_size,
+                }
+            )
+    serialized = json.dumps(files, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
 
 
 def parse_port(value: str) -> int:
@@ -312,10 +350,26 @@ class ViewerApplication:
         workspace: Path | None = None
         try:
             workspace, db_path = self.resolve_database(raw_workspace)
+            if payload["command"] == "revision":
+                return {
+                    "type": "revision",
+                    "revision": database_revision(db_path),
+                    "workspace": str(workspace) if workspace else "",
+                    "workspaceValid": True,
+                    "message": "",
+                }
             view = self._build_view(payload, db_path)
             if workspace is not None and view.get("type") == "overview":
                 view["workspace"] = str(workspace)
         except WorkspaceRequired as exc:
+            if payload["command"] == "revision":
+                return {
+                    "type": "revision",
+                    "revision": "",
+                    "workspace": raw_workspace if isinstance(raw_workspace, str) else "",
+                    "workspaceValid": False,
+                    "message": str(exc),
+                }
             view = {
                 "type": "workspace",
                 "workspace": raw_workspace if isinstance(raw_workspace, str) else "",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from taplctl import db
+from taplctl import db, mcp_server
 from taplctl.application import WorkflowApplication
 
 
@@ -88,6 +88,42 @@ def test_application_partial_updates_preserve_omitted_fields_and_nested_null_del
         assert plan["objective"] == "Keep this objective"
         assert plan["summary"] == "Only this field changes"
         assert plan["custom_fields"] == {"keep": "value"}
+
+
+def test_plan_without_tasks_offers_execution_or_non_execution_completion() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run("analyze and report without implementation")
+        app.apply_plan(
+            "PLAN-001",
+            title="Analysis plan",
+            status="Completed",
+            summary="REQ-001: explain the current behavior",
+            objective="Report findings without durable edits.",
+            requirements_trace="REQ-001",
+            selected_approach="Inspect the relevant code path.",
+            affected_files="None",
+            execution_order="Inspect, summarize.",
+            risks="None",
+            validation="Cite the decisive code path.",
+        )
+
+        next_payload = app.get_next()
+        assert next_payload["recommendations"] == [
+            {
+                "name": "decide-after-plan",
+                "reason": (
+                    "The plan has no executable tasks. Finish the run for analysis, planning, or reporting scope; "
+                    "create a task only when execution was explicitly requested."
+                ),
+            }
+        ]
+
+        mcp_payload = mcp_server.mcp_next_recommendations(next_payload)
+        assert mcp_payload["recommendations"][0]["tool"] == [
+            "tapl_create_task",
+            "tapl_finish_run",
+        ]
 
 
 def test_application_missing_item_has_actionable_error() -> None:

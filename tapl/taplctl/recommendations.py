@@ -50,7 +50,7 @@ def next_recommendations(
                 recommendation(
                     "finish-run",
                     (
-                        "The agent selected a lightweight run; answer directly and finish it without plan/task "
+                        "The agent selected a lightweight run; complete the Fast non-durable work without plan/task "
                         "records, or apply a plan first if the work becomes complex or requires durable edits."
                     ),
                 )
@@ -64,8 +64,11 @@ def next_recommendations(
     if not tasks:
         return [
             recommendation(
-                "create-task",
-                "No executable tasks exist; create the first task from a JSON object.",
+                "decide-after-plan",
+                (
+                    "The plan has no executable tasks. Finish the run for analysis, planning, or reporting scope; "
+                    "create a task only when execution was explicitly requested."
+                ),
             )
         ]
 

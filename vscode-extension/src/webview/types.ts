@@ -145,6 +145,15 @@ export type HostMessage =
   | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string }
   | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout };
 
+/** Lightweight standalone-viewer response used to detect workspace changes. */
+export interface RevisionMessage {
+  type: 'revision';
+  revision: string;
+  workspace: string;
+  workspaceValid: boolean;
+  message: string;
+}
+
 export type WebviewCommand =
   | { command: 'ready' }
   | { command: 'chooseWorkspace' }
@@ -156,3 +165,6 @@ export type WebviewCommand =
   | { command: 'openArchive'; archiveId: string }
   | { command: 'search'; query: string }
   | { command: 'openSearchResult'; itemId: number };
+
+/** Browser-only request; the VS Code host deliberately never receives this command. */
+export type BrowserApiCommand = WebviewCommand | { command: 'revision'; workspace?: string };

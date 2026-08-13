@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -98,6 +99,94 @@ class ViewerTests(unittest.TestCase):
             self.assertEqual(selected["view"]["type"], "overview")
             self.assertEqual(selected["workspace"], str(workspace.resolve()))
 
+    def test_database_revision_tracks_database_and_sqlite_sidecars(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            sidecars = (
+                db_path,
+                db_path.with_name("tapl.db-wal"),
+                db_path.with_name("tapl.db-shm"),
+            )
+
+            revision = viewer.database_revision(db_path)
+            self.assertEqual(revision, viewer.database_revision(db_path))
+
+            for path in sidecars:
+                with self.subTest(path=path.name):
+                    path.write_bytes(b"state")
+                    created = viewer.database_revision(db_path)
+                    self.assertNotEqual(revision, created)
+                    self.assertEqual(created, viewer.database_revision(db_path))
+
+                    path.write_bytes(b"state with a different size")
+                    contents_changed = viewer.database_revision(db_path)
+                    self.assertNotEqual(created, contents_changed)
+
+                    stat = path.stat()
+                    os.utime(
+                        path,
+                        ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000),
+                    )
+                    metadata_changed = viewer.database_revision(db_path)
+                    self.assertNotEqual(contents_changed, metadata_changed)
+
+                    path.unlink()
+                    revision = viewer.database_revision(db_path)
+                    self.assertNotEqual(metadata_changed, revision)
+
+    def test_revision_message_skips_view_build_and_handles_workspace_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = mock.Mock(side_effect=AssertionError("revision must not query viewer data"))
+            unconfigured = viewer.ViewerApplication(json_runner=runner)
+
+            missing = unconfigured.handle_message({"command": "revision", "locale": "ko"})
+            self.assertEqual(
+                missing,
+                {
+                    "type": "revision",
+                    "revision": "",
+                    "workspace": "",
+                    "workspaceValid": False,
+                    "message": "Choose a workspace that contains .tapl/tapl.db.",
+                },
+            )
+
+            workspace = self.initialized_workspace(root)
+            response = unconfigured.handle_message(
+                {"command": "revision", "workspace": str(workspace), "layout": "large"}
+            )
+            self.assertEqual(
+                set(response),
+                {"type", "revision", "workspace", "workspaceValid", "message"},
+            )
+            self.assertEqual(response["type"], "revision")
+            self.assertEqual(len(response["revision"]), 64)
+            self.assertEqual(response["workspace"], str(workspace.resolve()))
+            self.assertTrue(response["workspaceValid"])
+            self.assertEqual(response["message"], "")
+
+            db_path = workspace / tapl_db.DEFAULT_DB_RELATIVE
+            resolved_db_path = workspace.resolve() / tapl_db.DEFAULT_DB_RELATIVE
+            db_path.unlink()
+            invalid = unconfigured.handle_message(
+                {"command": "revision", "workspace": str(workspace)}
+            )
+            self.assertEqual(
+                invalid,
+                {
+                    "type": "revision",
+                    "revision": "",
+                    "workspace": str(workspace),
+                    "workspaceValid": False,
+                    "message": (
+                        f"No tapl database found at {resolved_db_path}. "
+                        f"Run `taplctl init --workspace-root {workspace.resolve()}` first."
+                    ),
+                },
+            )
+            runner.assert_not_called()
+
     def test_explicit_database_does_not_claim_the_current_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "custom.db"
@@ -174,6 +263,24 @@ class ViewerTests(unittest.TestCase):
                 with opener.open(request, timeout=5) as response:
                     body = json.loads(response.read())
                     self.assertEqual(body["view"]["type"], "overview")
+
+                revision_request = urllib.request.Request(
+                    f"{origin}/api/message",
+                    data=json.dumps({"command": "revision"}).encode("utf-8"),
+                    headers={"Content-Type": "application/json", "Origin": origin},
+                    method="POST",
+                )
+                with opener.open(revision_request, timeout=5) as response:
+                    body = json.loads(response.read())
+                    self.assertEqual(
+                        set(body),
+                        {"type", "revision", "workspace", "workspaceValid", "message"},
+                    )
+                    self.assertEqual(body["type"], "revision")
+                    self.assertEqual(len(body["revision"]), 64)
+                    self.assertEqual(body["workspace"], str(workspace.resolve()))
+                    self.assertTrue(body["workspaceValid"])
+                    self.assertEqual(body["message"], "")
 
                 forbidden = urllib.request.Request(
                     f"{origin}/api/message",

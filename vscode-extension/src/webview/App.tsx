@@ -91,8 +91,14 @@ export function App(): JSX.Element {
       }
     };
     window.addEventListener('message', listener);
+    // BrowserApi implements this optional hook. The real VS Code bridge has no
+    // polling capability, so extension-host webviews remain push-driven.
+    api.setPollingActive?.(true);
     api.postMessage({ command: 'ready' });
-    return () => window.removeEventListener('message', listener);
+    return () => {
+      window.removeEventListener('message', listener);
+      api.setPollingActive?.(false);
+    };
   }, [api]);
 
   useEffect(() => {
@@ -887,7 +893,7 @@ function ArchiveSummary({ archive }: { archive: TaplArchive }): JSX.Element {
   );
 }
 
-function ActiveBatches({ batches }: { batches: TaplExecutionBatch[] }): JSX.Element {
+function ActiveBatches({ batches }: { batches: TaplExecutionBatch[] }): JSX.Element | null {
   const { t } = useI18n();
   if (!batches.length) {
     return null;
