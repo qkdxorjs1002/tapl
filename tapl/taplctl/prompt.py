@@ -848,13 +848,17 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "Immediately after each `tapl_*` MCP tool call that creates or updates workflow state, report only that "
-        "call's result in one compact Markdown table, with no lead-in or follow-up prose. Use user-friendly labels "
-        "and values in the user's language; translate work_type, workflow_mode, record_mode, status, and operation "
-        "codes instead of showing raw codes alone. For run, plan, task, finding, approval, batch, or archive writes, "
-        "include the created or updated item and the submitted fields or content that changed, without extra "
-        "interpretation. This rule applies only to the immediate MCP tool-result report, not to reasoning, injected "
-        "lifecycle context, ordinary answers, or the final completion report."
+        "After one or more consecutive `tapl_*` MCP tool calls that create or update workflow state, report their "
+        "results together in one compact Markdown table, with one row per write and no lead-in or follow-up prose. "
+        "Use the fixed columns `Step | Result | Status | Scope`, translated into the user's language. A single write "
+        "uses the same table with one row. Flush the table immediately before the next non-`tapl_*` tool call, any "
+        "ordinary response, or the final completion report. Do not batch errors, blockers, approval requests, or calls "
+        "requiring user input; report them immediately. Use user-friendly labels and values in the user's language; "
+        "translate work_type, workflow_mode, record_mode, status, and operation codes instead of showing raw codes "
+        "alone. For run, plan, task, finding, approval, batch, or archive writes, include the created or updated item "
+        "and compact only the submitted fields or content that changed into the four cells, without extra "
+        "interpretation. This rule applies only to MCP write-result reports, not to read-only calls, reasoning, "
+        "injected lifecycle context, ordinary answers, or the final completion report itself."
     )
 
 

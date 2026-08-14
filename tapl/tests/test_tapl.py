@@ -710,19 +710,24 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "each `tapl_*` MCP tool call that creates or updates workflow state",
-            "only that call's result in one compact Markdown table",
-            "with no lead-in or follow-up prose",
+            "one or more consecutive `tapl_*` MCP tool calls that create or update workflow state",
+            "results together in one compact Markdown table",
+            "one row per write and no lead-in or follow-up prose",
+            "`Step | Result | Status | Scope`",
+            "A single write uses the same table with one row",
+            "before the next non-`tapl_*` tool call, any ordinary response, or the final completion report",
+            "Do not batch errors, blockers, approval requests, or calls requiring user input",
             "work_type, workflow_mode, record_mode, status, and operation",
             "run, plan, task, finding, approval, batch, or archive writes",
-            "submitted fields or content that changed",
-            "only to the immediate MCP tool-result report",
-            "not to reasoning, injected lifecycle context, ordinary answers, or the final completion report",
+            "compact only the submitted fields or content that changed into the four cells",
+            "only to MCP write-result reports",
+            "not to read-only calls, reasoning, injected lifecycle context, ordinary answers",
         )
         for guidance in required_result_guidance:
             self.assertIn(guidance, instructions)
             self.assertNotIn(guidance, injected_context)
             self.assertNotIn(guidance, tool_result)
+        self.assertNotIn("Immediately after each `tapl_*` MCP tool call", instructions)
 
     def test_adaptive_validation_allows_compact_plans_and_coherent_task_bundles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
