@@ -83,9 +83,9 @@ Choose one installation path:
 
 | Platform / need | Recommended option |
 | --- | --- |
-| macOS, full-text search | Homebrew `taplctl` |
-| macOS, semantic search included | Homebrew `taplctl-semantic` |
-| macOS, newest stable or prerelease | Homebrew `taplctl@pre` |
+| full-text search | Homebrew `taplctl` |
+| semantic search included | Homebrew `taplctl-semantic` |
+| newest stable or prerelease | Homebrew `taplctl@pre` |
 | Linux | Standalone `curl \| sh` installer |
 | Windows 10 or 11 | Standalone PowerShell installer |
 
@@ -101,7 +101,7 @@ After any installation, [connect TAPL to Codex](#connect-tapl-to-codex).
 
 The release wheel is platform-independent, but its Python dependencies still need compatible wheels. Uncommon architectures, very new Python releases, and musl-based Linux distributions such as Alpine may require local build tools.
 
-### macOS with Homebrew
+### Homebrew
 
 Add and trust the tap once:
 

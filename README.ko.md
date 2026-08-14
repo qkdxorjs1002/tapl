@@ -83,9 +83,9 @@ Codex는 평소처럼 계획하고 작업합니다. 그 뒤에서 TAPL은 승인
 
 | 환경 / 필요 | 권장 방법 |
 | --- | --- |
-| macOS, 전문 검색 | Homebrew `taplctl` |
-| macOS, semantic search 포함 | Homebrew `taplctl-semantic` |
-| macOS, 최신 안정판 또는 prerelease | Homebrew `taplctl@pre` |
+| 전문 검색 | Homebrew `taplctl` |
+| semantic search 포함 | Homebrew `taplctl-semantic` |
+| 최신 안정판 또는 prerelease | Homebrew `taplctl@pre` |
 | Linux | 독립형 `curl \| sh` installer |
 | Windows 10 또는 11 | 독립형 PowerShell installer |
 
@@ -101,7 +101,7 @@ Codex는 평소처럼 계획하고 작업합니다. 그 뒤에서 TAPL은 승인
 
 release wheel은 platform-independent이지만 Python dependency에는 호환되는 wheel이 필요합니다. 드문 architecture, 아주 새로운 Python release, Alpine 같은 musl Linux는 local build tool이 필요할 수 있습니다.
 
-### macOS + Homebrew
+### Homebrew
 
 tap을 한 번 추가하고 trust합니다.
 
