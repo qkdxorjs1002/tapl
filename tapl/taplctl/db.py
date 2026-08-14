@@ -2329,22 +2329,34 @@ def active_task_count(conn: sqlite3.Connection) -> int:
 
 
 def search_bm25(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[dict[str, Any]]:
-    fts_query = build_fts_query(query)
-    if not fts_query:
+    fts_queries = build_fts_queries(query)
+    if not fts_queries:
         return search_word(conn, query, limit=limit)
 
-    rows = conn.execute(
-        """
-        SELECT i.*, bm25(items_fts) AS score
-        FROM items_fts
-        JOIN items i ON i.id = items_fts.rowid
-        WHERE items_fts MATCH ?
-        ORDER BY score
-        LIMIT ?
-        """,
-        (fts_query, limit),
-    ).fetchall()
-    return [search_row(row, "bm25") for row in rows]
+    results: list[dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    # Tiers are ordered from strictest to broadest; BM25 ranks within each tier.
+    for fts_query in fts_queries:
+        rows = conn.execute(
+            """
+            -- items_fts columns: stable_id, kind, title, body
+            SELECT i.*, bm25(items_fts, 6.0, 1.0, 4.0, 1.0) AS score
+            FROM items_fts
+            JOIN items i ON i.id = items_fts.rowid
+            WHERE items_fts MATCH ?
+            ORDER BY score
+            LIMIT ?
+            """,
+            (fts_query, limit),
+        ).fetchall()
+        for row in rows:
+            if row["id"] in seen_ids:
+                continue
+            seen_ids.add(row["id"])
+            results.append(search_row(row, "bm25"))
+            if len(results) == limit:
+                return results
+    return results
 
 
 def search_word(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -2364,7 +2376,27 @@ def search_word(conn: sqlite3.Connection, query: str, limit: int = 10) -> list[d
 
 def build_fts_query(query: str) -> str:
     terms = re.findall(r"[\w가-힣]+", query, flags=re.UNICODE)
-    return " OR ".join(f'"{term}"' for term in terms[:8])
+    return " OR ".join(f'"{term}"*' for term in terms[:8])
+
+
+def build_fts_queries(query: str) -> list[str]:
+    terms = re.findall(r"[\w가-힣]+", query, flags=re.UNICODE)[:8]
+    if not terms:
+        return []
+
+    exact_terms = [f'"{term}"' for term in terms]
+    prefix_terms = [f'"{term}"*' for term in terms]
+    candidates = []
+    if len(terms) > 1:
+        candidates.append(f'"{" ".join(terms)}"')
+    candidates.extend(
+        [
+            " AND ".join(exact_terms),
+            " AND ".join(prefix_terms),
+            build_fts_query(query),
+        ]
+    )
+    return list(dict.fromkeys(candidates))
 
 
 def search_row(row: sqlite3.Row, source: str) -> dict[str, Any]:
