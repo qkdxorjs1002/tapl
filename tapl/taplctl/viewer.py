@@ -9,7 +9,7 @@ import sqlite3
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from urllib.parse import unquote, urlsplit
 
 from . import config, db, embeddings, validation
@@ -90,6 +90,10 @@ def parse_port(value: str) -> int:
     if not 1 <= port <= 65535:
         raise ValueError("port must be between 1 and 65535")
     return port
+
+
+def parse_allowed_origin(value: str) -> str:
+    return config.http_origin(value)
 
 
 def existing_workspace(start: Path | None = None) -> Path | None:
@@ -491,9 +495,21 @@ class ViewerApplication:
 class ViewerHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, server_address: tuple[str, int], app: ViewerApplication) -> None:
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        app: ViewerApplication,
+        *,
+        allowed_origins: Iterable[str] = (),
+    ) -> None:
+        configured_origins = {parse_allowed_origin(origin) for origin in allowed_origins}
         self.app = app
         super().__init__(server_address, ViewerRequestHandler)
+        host, port = self.server_address[:2]
+        local_origins = {f"http://{host}:{port}"}
+        if host == DEFAULT_HOST:
+            local_origins.add(f"http://localhost:{port}")
+        self.allowed_origins = frozenset(local_origins | configured_origins)
 
     @property
     def browser_origin(self) -> str:
@@ -543,11 +559,11 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if not origin:
             return True
-        host, port = self.server.server_address[:2]
-        allowed = {f"http://{host}:{port}"}
-        if host == DEFAULT_HOST:
-            allowed.add(f"http://localhost:{port}")
-        return origin in allowed
+        try:
+            normalized = parse_allowed_origin(origin)
+        except ValueError:
+            return False
+        return normalized in self.server.allowed_origins
 
     def _serve_asset(self, relative: Path) -> None:
         root = self.server.app.asset_root
@@ -584,9 +600,15 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
         return
 
 
-def create_server(app: ViewerApplication, *, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> ViewerHTTPServer:
+def create_server(
+    app: ViewerApplication,
+    *,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+    allowed_origins: Iterable[str] = (),
+) -> ViewerHTTPServer:
     try:
-        return ViewerHTTPServer((host, port), app)
+        return ViewerHTTPServer((host, port), app, allowed_origins=allowed_origins)
     except OSError as exc:
         if getattr(exc, "errno", None) in {48, 98, 10048}:
             raise ViewerError(
@@ -598,6 +620,7 @@ def create_server(app: ViewerApplication, *, host: str = DEFAULT_HOST, port: int
 def serve(
     *,
     port: int = DEFAULT_PORT,
+    allowed_origins: Iterable[str] = (),
     default_db: Path | None = None,
     default_workspace: Path | None = None,
     asset_root: Path | None = None,
@@ -610,7 +633,7 @@ def serve(
     index_path = app.asset_root / INDEX_PATH
     if not index_path.is_file():
         raise ViewerError(f"Viewer assets are missing: {index_path}")
-    server = create_server(app, port=port)
+    server = create_server(app, port=port, allowed_origins=allowed_origins)
     print(f"tapl viewer: {server.browser_origin}", flush=True)
     if default_workspace:
         print(f"workspace: {default_workspace}", flush=True)

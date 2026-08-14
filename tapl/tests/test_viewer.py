@@ -10,6 +10,7 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
+from taplctl import config as tapl_config
 from taplctl import db as tapl_db
 from taplctl import cli as tapl_cli
 from taplctl import viewer
@@ -57,6 +58,79 @@ class ViewerTests(unittest.TestCase):
         for value in ("0", "65536", "abc"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 viewer.parse_port(value)
+
+    def test_allowed_origin_validation(self) -> None:
+        self.assertEqual(
+            viewer.parse_allowed_origin("HTTPS://Example.COM:443/"),
+            "https://example.com",
+        )
+        self.assertEqual(
+            viewer.parse_allowed_origin("http://[::1]:9000"),
+            "http://[::1]:9000",
+        )
+        for value in (
+            "example.com",
+            "ftp://example.com",
+            "https://example.com/path",
+            "https://example.com?query=1",
+            "https://user@example.com",
+            "https://example.com:invalid",
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                viewer.parse_allowed_origin(value)
+
+        args = tapl_cli.build_parser().parse_args(
+            ["viewer", "--allowed-origin", "HTTPS://Example.COM:443/"]
+        )
+        self.assertEqual(args.allowed_origins, ["https://example.com"])
+
+    def test_config_loads_and_validates_viewer_allowed_origins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.toml"
+            config_path.write_text(
+                """
+[viewer]
+allowed_origins = [
+  "HTTPS://Example.COM:443/",
+  "http://viewer.example.com:9000",
+]
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            settings = tapl_config.load(config_path)
+
+            self.assertEqual(
+                settings.viewer.allowed_origins,
+                ("https://example.com", "http://viewer.example.com:9000"),
+            )
+            self.assertEqual(
+                settings.as_dict()["viewer"],
+                {
+                    "allowed_origins": [
+                        "https://example.com",
+                        "http://viewer.example.com:9000",
+                    ]
+                },
+            )
+
+            invalid_cases = (
+                ('allowed_origins = "https://example.com"', "must be an array"),
+                ("allowed_origins = [3]", r"viewer\.allowed_origins\[0\]"),
+                ('allowed_origins = ["https://example.com/path"]', "without a path"),
+                (
+                    'allowed_origins = ["https://example.com", "https://example.com:443"]',
+                    "contains duplicate origin",
+                ),
+            )
+            for setting, expected_error in invalid_cases:
+                with self.subTest(setting=setting):
+                    config_path.write_text(
+                        f"[viewer]\n{setting}\n",
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(ValueError, expected_error):
+                        tapl_config.load(config_path)
 
     def test_packaged_viewer_assets_are_present(self) -> None:
         self.assertTrue((viewer.ASSET_ROOT / viewer.INDEX_PATH).is_file())
@@ -189,14 +263,40 @@ class ViewerTests(unittest.TestCase):
 
     def test_explicit_database_does_not_claim_the_current_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "custom.db"
+            root = Path(tmp)
+            db_path = root / "custom.db"
+            config_path = root / "config.toml"
             tapl_db.connect(db_path).close()
-            args = type("Args", (), {"db": db_path, "port": 9123})()
+            config_path.write_text(
+                '[viewer]\nallowed_origins = ["https://config.example.com"]\n',
+                encoding="utf-8",
+            )
+            args = type(
+                "Args",
+                (),
+                {
+                    "db": db_path,
+                    "config": config_path,
+                    "port": 9123,
+                    "allowed_origins": (
+                        "https://config.example.com",
+                        "https://tapl.example.com",
+                    ),
+                },
+            )()
             with mock.patch.object(tapl_cli.viewer, "existing_workspace") as existing:
                 with mock.patch.object(tapl_cli.viewer, "serve") as serve:
                     self.assertEqual(tapl_cli.cmd_viewer(args), 0)
             existing.assert_not_called()
-            serve.assert_called_once_with(port=9123, default_db=db_path.resolve(), default_workspace=None)
+            serve.assert_called_once_with(
+                port=9123,
+                allowed_origins=(
+                    "https://config.example.com",
+                    "https://tapl.example.com",
+                ),
+                default_db=db_path.resolve(),
+                default_workspace=None,
+            )
 
     def test_view_messages_use_read_only_cli_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -238,7 +338,11 @@ class ViewerTests(unittest.TestCase):
                 json_runner=self.fake_runner,
             )
             try:
-                server = viewer.create_server(app, port=0)
+                server = viewer.create_server(
+                    app,
+                    port=0,
+                    allowed_origins=("https://tapl.example.com",),
+                )
             except viewer.ViewerError as exc:
                 if "Operation not permitted" in str(exc):
                     self.skipTest("sandbox does not permit loopback sockets")
@@ -261,6 +365,19 @@ class ViewerTests(unittest.TestCase):
                     method="POST",
                 )
                 with opener.open(request, timeout=5) as response:
+                    body = json.loads(response.read())
+                    self.assertEqual(body["view"]["type"], "overview")
+
+                public_request = urllib.request.Request(
+                    f"{origin}/api/message",
+                    data=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Origin": "https://tapl.example.com",
+                    },
+                    method="POST",
+                )
+                with opener.open(public_request, timeout=5) as response:
                     body = json.loads(response.read())
                     self.assertEqual(body["view"]["type"], "overview")
 

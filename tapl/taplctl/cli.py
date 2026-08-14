@@ -147,6 +147,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=viewer.DEFAULT_PORT,
         help=f"Local TCP port. Defaults to {viewer.DEFAULT_PORT}.",
     )
+    viewer_cmd.add_argument(
+        "--allowed-origin",
+        dest="allowed_origins",
+        action="append",
+        type=viewer_origin_arg,
+        default=None,
+        help=(
+            "Additional HTTP(S) browser origin allowed to call the viewer API. "
+            "Repeat for multiple origins."
+        ),
+    )
     viewer_cmd.set_defaults(handler=cmd_viewer)
 
     reindex = sub.add_parser("reindex", help="Build the optional semantic index.")
@@ -260,6 +271,13 @@ def viewer_port_arg(value: str) -> int:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def viewer_origin_arg(value: str) -> str:
+    try:
+        return viewer.parse_allowed_origin(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def open_conn(args: argparse.Namespace, *, start: Path | None = None) -> sqlite3.Connection:
     return db.connect(args.db or db.default_db_path(start))
 
@@ -327,7 +345,18 @@ def cmd_viewer(args: argparse.Namespace) -> int:
     selected_db = args.db.expanduser().resolve() if args.db is not None else None
     if workspace is not None:
         selected_db = workspace / db.DEFAULT_DB_RELATIVE
-    viewer.serve(port=args.port, default_db=selected_db, default_workspace=workspace)
+    settings = load_config(args, start=workspace)
+    allowed_origins = tuple(
+        dict.fromkeys(
+            (*settings.viewer.allowed_origins, *(args.allowed_origins or ()))
+        )
+    )
+    viewer.serve(
+        port=args.port,
+        allowed_origins=allowed_origins,
+        default_db=selected_db,
+        default_workspace=workspace,
+    )
     return 0
 
 

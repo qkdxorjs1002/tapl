@@ -241,15 +241,9 @@ runtime이 SubAgent를 만들고 관리합니다. 병렬 task는 dependency가 �
 
 ## 동작 방식
 
-```mermaid
-flowchart LR
-    U[사용자] --> C[Codex]
-    C --> M[tapl-mcp<br/>typed workflow tools]
-    C --> H[tapl-hook<br/>context와 lifecycle guard]
-    M --> D[(.tapl/tapl.db)]
-    H --> D
-    D --> V[Browser / VS Code viewer]
-```
+<p align="center">
+  <img src="assets/tapl-flow-scenario.gif" alt="사용자 요청이 Codex, tapl-mcp, WorkflowApplication, SQLite 상태 저장소와 viewer로 이어지는 TAPL 흐름 시나리오 애니메이션" />
+</p>
 
 `tapl-mcp`는 workflow application을 직접 호출하며 `taplctl` command나 CLI JSON data
 plane을 감싸지 않습니다. `tapl-hook`은 Codex lifecycle 지점에서 간결한 current state를
@@ -350,3 +344,5 @@ semantic search를 개발할 때는 `uv --directory tapl sync --extra semantic`�
 ## 라이선스
 
 MIT. [LICENSE.md](LICENSE.md)를 참고하세요.
+
+_이 흐름 시각화는 [Archify](https://github.com/tt-a1i/archify)로 제작했습니다. 좋은 도구에 기여해 주신 모든 분께 감사드립니다._

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 import tomllib
+from urllib.parse import urlsplit
 
 from . import db
 
@@ -90,17 +91,27 @@ class SubagentsConfig:
 
 
 @dataclass(frozen=True)
+class ViewerConfig:
+    allowed_origins: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"allowed_origins": list(self.allowed_origins)}
+
+
+@dataclass(frozen=True)
 class TaplConfig:
     path: str
     exists: bool
     search: SearchConfig = field(default_factory=SearchConfig)
     subagents: SubagentsConfig = field(default_factory=SubagentsConfig)
+    viewer: ViewerConfig = field(default_factory=ViewerConfig)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "path": self.path,
             "exists": self.exists,
             "search": self.search.as_dict(),
+            "viewer": self.viewer.as_dict(),
             "subagents": self.subagents.as_dict(),
         }
 
@@ -222,11 +233,24 @@ def load(
         )
     else:
         subagent_models = default_subagent_models()
+    viewer_data = table(data, "viewer")
+    viewer = ViewerConfig(
+        allowed_origins=origin_array(
+            setting(
+                viewer_data,
+                "allowed_origins",
+                "allowed-origins",
+                default=[],
+            ),
+            "viewer.allowed_origins",
+        )
+    )
 
     return TaplConfig(
         path=str(config_path),
         exists=exists,
         search=search,
+        viewer=viewer,
         subagents=SubagentsConfig(
             enabled=subagents_enabled,
             models=subagent_models,
@@ -266,6 +290,53 @@ def boolean(value: Any, key: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{key} must be a boolean")
     return value
+
+
+def http_origin(value: Any, key: str = "origin") -> str:
+    message = f"{key} must be an HTTP(S) origin without a path, query, or fragment"
+    if not isinstance(value, str):
+        raise ValueError(message)
+    candidate = value.strip()
+    if not candidate or any(character.isspace() for character in candidate):
+        raise ValueError(message)
+    try:
+        parsed = urlsplit(candidate)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    scheme = parsed.scheme.lower()
+    if (
+        scheme not in {"http", "https"}
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(message)
+
+    hostname = parsed.hostname.lower()
+    authority = f"[{hostname}]" if ":" in hostname else hostname
+    default_port = 80 if scheme == "http" else 443
+    if port is not None and port != default_port:
+        authority = f"{authority}:{port}"
+    return f"{scheme}://{authority}"
+
+
+def origin_array(value: Any, key: str) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be an array of HTTP(S) origin strings")
+
+    origins: list[str] = []
+    seen: set[str] = set()
+    for index, raw_origin in enumerate(value):
+        origin = http_origin(raw_origin, f"{key}[{index}]")
+        if origin in seen:
+            raise ValueError(f"{key} contains duplicate origin: {origin}")
+        seen.add(origin)
+        origins.append(origin)
+    return tuple(origins)
 
 
 def parse_subagent_models(

@@ -1,0 +1,322 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "TAPL 저장소 구조",
+    "output": "tapl-architecture.html",
+    "quality_profile": "showcase",
+    "animation": "trace",
+    "views": [
+      {
+        "id": "request-arrives",
+        "label": "1. 요청과 수명 주기 시작",
+        "focus": ["operator", "codexRuntime", "lifecycleHook"],
+        "note": "사용자 요청을 받은 Codex와 tapl-hook이 현재 작업 맥락과 실행 경계를 준비합니다."
+      },
+      {
+        "id": "workflow-runs",
+        "label": "2. typed workflow 실행",
+        "focus": ["codexRuntime", "mcpAdapter", "workflowCore", "policyEngine"],
+        "note": "Codex의 stdio MCP 호출을 WorkflowApplication이 처리하고 검증·추천 엔진이 계약을 확인합니다."
+      },
+      {
+        "id": "state-persists",
+        "label": "3. 상태와 이력 저장",
+        "focus": ["workflowCore", "stateStore", "historySearch", "lifecycleHook"],
+        "note": "실행 상태와 hook 이벤트를 SQLite에 보존하고 BM25·선택적 semantic 검색으로 다시 찾습니다."
+      },
+      {
+        "id": "results-observed",
+        "label": "4. 결과 관찰",
+        "focus": ["stateStore", "browserViewer", "vscodeViewer"],
+        "note": "Browser viewer는 SQLite를 직접 읽고 VS Code extension은 persistent tapl-mcp로 상태를 조회합니다."
+      }
+    ],
+    "repository": {
+      "url": "https://github.com/qkdxorjs1002/tapl",
+      "revision": "ae49efbf21c25f9add1936c4fb92a393220ce781"
+    },
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": { "label": "사용자 인터페이스" },
+        "backend": { "label": "애플리케이션 구성요소" },
+        "database": { "label": "지속 상태·검색" },
+        "security": { "label": "수명 주기 가드" },
+        "external": { "label": "외부 실행 주체" }
+      }
+    }
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [42, 104],
+    "cols": 6,
+    "gapX": 64,
+    "gapY": 64,
+    "cellW": 154,
+    "cellH": 72
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "사용자",
+      "sublabel": "평소처럼 Codex에 요청",
+      "row": 2,
+      "col": 0,
+      "sources": [{ "path": "README.ko.md", "label": "사용 경험" }]
+    },
+    {
+      "id": "codexRuntime",
+      "type": "external",
+      "label": "Codex 런타임",
+      "sublabel": "계획·도구 호출·SubAgent 관리",
+      "row": 2,
+      "col": 1,
+      "sources": [{ "path": "README.ko.md", "label": "Codex 연동" }]
+    },
+    {
+      "id": "mcpAdapter",
+      "type": "backend",
+      "label": "tapl-mcp",
+      "sublabel": "typed stdio MCP 도구",
+      "tag": "agent data plane",
+      "row": 2,
+      "col": 2,
+      "sources": [
+        { "path": "tapl/taplctl/mcp_server.py", "label": "MCP 서버" },
+        { "path": "tapl/pyproject.toml", "label": "실행 진입점" }
+      ]
+    },
+    {
+      "id": "workflowCore",
+      "type": "backend",
+      "label": "WorkflowApplication",
+      "sublabel": "workspace별 use case 경계",
+      "tag": "연결당 SQLite 세션",
+      "row": 2,
+      "col": 3,
+      "sources": [{ "path": "tapl/taplctl/application.py", "label": "애플리케이션 경계" }]
+    },
+    {
+      "id": "stateStore",
+      "type": "database",
+      "label": ".tapl/tapl.db",
+      "sublabel": "workflow 기록·보관 이력",
+      "tag": "SQLite + FTS5",
+      "row": 2,
+      "col": 4,
+      "sources": [{ "path": "tapl/taplctl/db.py", "label": "상태 저장소" }]
+    },
+    {
+      "id": "browserViewer",
+      "type": "frontend",
+      "label": "Browser viewer",
+      "sublabel": "127.0.0.1 read-only UI",
+      "row": 2,
+      "col": 5,
+      "sources": [{ "path": "tapl/taplctl/viewer.py", "label": "로컬 viewer" }]
+    },
+    {
+      "id": "vscodeViewer",
+      "type": "frontend",
+      "label": "VS Code extension",
+      "sublabel": "persistent workspace MCP client",
+      "row": 0,
+      "col": 2,
+      "sources": [
+        { "path": "vscode-extension/src/taplMcpClient.ts", "label": "stdio MCP client" },
+        { "path": "vscode-extension/src/extension.ts", "label": "viewer host" }
+      ]
+    },
+    {
+      "id": "policyEngine",
+      "type": "security",
+      "label": "검증·추천 엔진",
+      "sublabel": "승인·의존성·소유 범위 점검",
+      "row": 0,
+      "col": 3,
+      "sources": [
+        { "path": "tapl/taplctl/validation.py", "label": "검증" },
+        { "path": "tapl/taplctl/recommendations.py", "label": "다음 행동" }
+      ]
+    },
+    {
+      "id": "historySearch",
+      "type": "database",
+      "label": "이력 검색 계층",
+      "sublabel": "BM25 + 선택적 semantic/searchd",
+      "row": 0,
+      "col": 4,
+      "sources": [
+        { "path": "tapl/taplctl/embeddings.py", "label": "검색 결합" },
+        { "path": "tapl/taplctl/searchd.py", "label": "선택 daemon" }
+      ]
+    },
+    {
+      "id": "lifecycleHook",
+      "type": "security",
+      "label": "tapl-hook",
+      "sublabel": "context 주입·durable edit 가드",
+      "tag": "Codex lifecycle",
+      "row": 4,
+      "col": 1,
+      "sources": [
+        { "path": "tapl/taplctl/hook_cli.py", "label": "hook 진입점" },
+        { "path": "tapl/taplctl/hooks.py", "label": "event 처리" }
+      ]
+    },
+    {
+      "id": "managementCli",
+      "type": "backend",
+      "label": "taplctl",
+      "sublabel": "설치·진단·viewer·검색",
+      "tag": "management only",
+      "row": 4,
+      "col": 4,
+      "sources": [
+        { "path": "tapl/taplctl/cli.py", "label": "관리 CLI" },
+        { "path": "tapl/taplctl/install.py", "label": "설치" },
+        { "path": "tapl/taplctl/updater.py", "label": "업데이트" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "TAPL 저장소별 시스템",
+      "wraps": [
+        "mcpAdapter",
+        "workflowCore",
+        "stateStore",
+        "browserViewer",
+        "vscodeViewer",
+        "policyEngine",
+        "historySearch",
+        "lifecycleHook",
+        "managementCli"
+      ],
+      "pad": 24
+    }
+  ],
+  "connections": [
+    {
+      "id": "requestIntent",
+      "from": "operator",
+      "to": "codexRuntime",
+      "label": "작업 요청",
+      "variant": "emphasis"
+    },
+    {
+      "id": "agentToolCalls",
+      "from": "codexRuntime",
+      "to": "mcpAdapter",
+      "label": "stdio MCP 도구 호출",
+      "variant": "emphasis"
+    },
+    {
+      "id": "typedUseCases",
+      "from": "mcpAdapter",
+      "to": "workflowCore",
+      "label": "직접 use case 호출",
+      "variant": "emphasis"
+    },
+    {
+      "id": "transactionalState",
+      "from": "workflowCore",
+      "to": "stateStore",
+      "label": "트랜잭션 읽기·쓰기",
+      "variant": "emphasis",
+      "labelAt": [825, 450]
+    },
+    {
+      "id": "localReadModel",
+      "from": "stateStore",
+      "to": "browserViewer",
+      "label": "직접 read-only 조회",
+      "variant": "emphasis"
+    },
+    {
+      "id": "extensionReadTools",
+      "from": "vscodeViewer",
+      "to": "mcpAdapter",
+      "label": "persistent stdio 조회",
+      "variant": "default",
+      "labelAt": [538, 178]
+    },
+    {
+      "id": "contractChecks",
+      "from": "workflowCore",
+      "to": "policyEngine",
+      "label": "계약 검증·다음 행동",
+      "variant": "security"
+    },
+    {
+      "id": "historyQuery",
+      "from": "workflowCore",
+      "to": "historySearch",
+      "label": "이력 검색",
+      "variant": "dashed"
+    },
+    {
+      "id": "searchIndex",
+      "from": "historySearch",
+      "to": "stateStore",
+      "label": "FTS5·vector index",
+      "variant": "dashed",
+      "labelAt": [974, 178]
+    },
+    {
+      "id": "hookEvents",
+      "from": "codexRuntime",
+      "to": "lifecycleHook",
+      "label": "lifecycle event",
+      "variant": "security",
+      "labelAt": [320, 450]
+    },
+    {
+      "id": "guardedState",
+      "from": "lifecycleHook",
+      "to": "stateStore",
+      "label": "context·guard·event 기록",
+      "variant": "security"
+    },
+    {
+      "id": "manageWorkspace",
+      "from": "managementCli",
+      "to": "stateStore",
+      "label": "init·reindex",
+      "variant": "dashed"
+    },
+    {
+      "id": "serveViewer",
+      "from": "managementCli",
+      "to": "browserViewer",
+      "label": "loopback HTTP 서비스 시작",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "주 실행 경로",
+      "items": [
+        "Codex의 typed MCP 호출을 WorkflowApplication이 직접 실행합니다."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "상태와 안전 경계",
+      "items": [
+        ".tapl/tapl.db가 상태의 단일 기준이며 tapl-hook이 durable edit 승인 경계를 지킵니다."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "관찰과 검색",
+      "items": [
+        "Browser viewer는 SQLite를 직접 읽고 VS Code extension은 persistent tapl-mcp로 조회합니다."
+      ]
+    }
+  ]
+}

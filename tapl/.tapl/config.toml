@@ -1,3 +1,8 @@
+[viewer]
+# Exact browser origins allowed to call the viewer API through a trusted proxy.
+# Keep this empty when the viewer is only used from localhost.
+allowed_origins = []
+
 [search]
 # Search mode: semantic, bm25, word, or hybrid.
 mode = "hybrid"

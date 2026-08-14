@@ -220,6 +220,34 @@ is available—for example, when started as a Homebrew login service—the page 
 for an initialized workspace folder and remembers the last successful choice in
 that browser.
 
+When a trusted reverse proxy or tunnel publishes the viewer at another origin,
+allow that exact browser origin explicitly:
+
+```sh
+taplctl viewer --allowed-origin https://tapl.example.com
+```
+
+For a persistent service, add the origins to `~/.tapl/config.toml` and restart
+the matching Homebrew service:
+
+```toml
+[viewer]
+allowed_origins = [
+  "https://tapl.example.com",
+  "https://tapl.internal.example",
+]
+```
+
+```sh
+brew services restart taplctl
+```
+
+The value must contain only the HTTP(S) scheme, host, and optional port. Repeat
+`--allowed-origin` or use the configuration array to allow more than one origin.
+CLI and configuration origins are combined. TAPL continues to listen only on
+loopback; the proxy should handle authentication and TLS. Avoid wildcard origin
+rules when the viewer is reachable from an untrusted network.
+
 Start the installed Homebrew formula automatically at login with
 `brew services start taplctl`, `brew services start taplctl-semantic`, or
 `brew services start taplctl@pre`. Each service serves the viewer on port 8000.
