@@ -214,6 +214,10 @@ Write workflow records and reports in the user's language unless asked otherwise
 - Never overwrite user changes. Keep TAPL records as current-state snapshots, not logs.
 - ${custom_fields_guidance}
 
+## Tool Result Display
+
+${mcp_tool_result_display_guidance}
+
 ## Adaptive workflow
 
 ${workflow_mode_guidance}
@@ -290,6 +294,7 @@ def template_variables(**overrides: Any) -> dict[str, str]:
         "structured_record_guidance_plan_task": structured_record_guidance("plan/task content"),
         "structured_record_guidance_task": structured_record_guidance("task content"),
         "custom_fields_guidance": custom_fields_guidance(),
+        "mcp_tool_result_display_guidance": mcp_tool_result_display_guidance(),
         "stable_id_guidance": stable_id_guidance(),
         "workflow_order_guidance": workflow_order_guidance(),
         "workflow_mode_guidance": workflow_mode_guidance(),
@@ -838,6 +843,18 @@ def custom_fields_guidance() -> str:
         "facts on the plan and task-specific facts on its task; do not duplicate, invent, or record transient progress. "
         "Inspect existing fields before patching, preserve exact keys/types, and use top-level null only to remove a true "
         "duplicate. For delegated work, record the actual runtime model/reasoning effort at settlement."
+    )
+
+
+def mcp_tool_result_display_guidance() -> str:
+    return (
+        "Immediately after each `tapl_*` MCP tool call that creates or updates workflow state, report only that "
+        "call's result in one compact Markdown table, with no lead-in or follow-up prose. Use user-friendly labels "
+        "and values in the user's language; translate work_type, workflow_mode, record_mode, status, and operation "
+        "codes instead of showing raw codes alone. For run, plan, task, finding, approval, batch, or archive writes, "
+        "include the created or updated item and the submitted fields or content that changed, without extra "
+        "interpretation. This rule applies only to the immediate MCP tool-result report, not to reasoning, injected "
+        "lifecycle context, ordinary answers, or the final completion report."
     )
 
 

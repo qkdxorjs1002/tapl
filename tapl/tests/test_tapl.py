@@ -685,6 +685,45 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("very_detailed", instructions)
         self.assertNotIn("very_granular", instructions)
 
+    def test_mcp_result_table_guidance_stays_in_server_instructions(self) -> None:
+        instructions = tapl_prompt.mcp_server_instructions()
+        injected_context = "\n".join(
+            (
+                tapl_prompt.session_start_guidance(),
+                tapl_prompt.user_prompt_submit_guidance(),
+                tapl_prompt.stop_guidance(),
+            )
+        )
+        tool_result = json.dumps(
+            tapl_mcp.mcp_write_receipt(
+                {
+                    "ok": True,
+                    "item": {
+                        "id": 1,
+                        "stable_id": "TASK-001",
+                        "kind": "task",
+                        "status": "Pending",
+                    },
+                },
+                operation="task_create",
+            )
+        )
+
+        required_result_guidance = (
+            "each `tapl_*` MCP tool call that creates or updates workflow state",
+            "only that call's result in one compact Markdown table",
+            "with no lead-in or follow-up prose",
+            "work_type, workflow_mode, record_mode, status, and operation",
+            "run, plan, task, finding, approval, batch, or archive writes",
+            "submitted fields or content that changed",
+            "only to the immediate MCP tool-result report",
+            "not to reasoning, injected lifecycle context, ordinary answers, or the final completion report",
+        )
+        for guidance in required_result_guidance:
+            self.assertIn(guidance, instructions)
+            self.assertNotIn(guidance, injected_context)
+            self.assertNotIn(guidance, tool_result)
+
     def test_adaptive_validation_allows_compact_plans_and_coherent_task_bundles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
