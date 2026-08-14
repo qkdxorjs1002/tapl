@@ -38,7 +38,7 @@ def next_recommendations(
     plans = state.get("plans") if isinstance(state.get("plans"), list) else []
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
     if not plans:
-        if str(run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE) == "lightweight":
+        if str(run.get("record_mode") or db.DEFAULT_RECORD_MODE) == "lightweight":
             if str(run.get("result_summary") or "").strip():
                 return [
                     recommendation(
@@ -50,7 +50,7 @@ def next_recommendations(
                 recommendation(
                     "finish-run",
                     (
-                        "The agent selected a lightweight run; complete the Fast non-durable work without plan/task "
+                        "This run has a derived lightweight record_mode; complete the Fast non-durable work without plan/task "
                         "records, or apply a plan first if the work becomes complex or requires durable edits."
                     ),
                 )

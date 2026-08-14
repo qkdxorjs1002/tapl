@@ -57,7 +57,11 @@ def test_mcp_native_sequential_lifecycle_never_spawns_cli() -> None:
                 return [
                     await client.call_tool(
                         "tapl_summarize_run",
-                        {"summary": "Native MCP lifecycle", "workflow_mode": "planned"},
+                        {
+                            "summary": "Native MCP lifecycle",
+                            "work_type": "implementation",
+                            "workflow_mode": "standard",
+                        },
                     ),
                     await client.call_tool(
                         "tapl_apply_plan",

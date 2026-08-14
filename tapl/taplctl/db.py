@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -31,19 +31,36 @@ APPROVAL_DECISIONS = ("approved", "rejected")
 APPROVAL_SOURCES = ("explicit_user", "request_user_input", "unspecified")
 DEFAULT_APPROVAL_SOURCE = "explicit_user"
 DEFAULT_REQUEST_SUMMARY = "New request"
-WORKFLOW_MODES = ("planned", "lightweight")
-DEFAULT_WORKFLOW_MODE = "planned"
+WORK_TYPES = ("answer", "investigation", "analysis", "planning", "implementation", "mixed")
+DEFAULT_WORK_TYPE = "mixed"
+WORKFLOW_MODES = ("fast", "standard", "strict")
+DEFAULT_WORKFLOW_MODE = "standard"
+RECORD_MODES = ("lightweight", "planned")
+DEFAULT_RECORD_MODE = "planned"
+LIGHTWEIGHT_WORK_TYPES = ("answer", "investigation", "analysis", "planning")
 WORKFLOW_RUN_OUTPUT_FIELDS = (
     "id",
     "slug",
     "status",
     "request_summary",
     "result_summary",
+    "work_type",
     "workflow_mode",
+    "record_mode",
     "created_at",
     "updated_at",
     "archived_at",
 )
+
+
+def derive_record_mode(work_type: str, workflow_mode: str) -> str:
+    if work_type not in WORK_TYPES:
+        raise ValueError(f"invalid work_type: {work_type}")
+    if workflow_mode not in WORKFLOW_MODES:
+        raise ValueError(f"invalid workflow_mode: {workflow_mode}")
+    if workflow_mode == "fast" and work_type in LIGHTWEIGHT_WORK_TYPES:
+        return "lightweight"
+    return "planned"
 
 
 def utc_now() -> str:
@@ -135,6 +152,8 @@ def migrate(conn: sqlite3.Connection) -> None:
                 f"{stored_schema_version} is newer than supported version {SCHEMA_VERSION}"
             )
 
+    migrated_legacy_record_mode = migrate_legacy_workflow_mode(conn)
+
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS workflow_runs (
@@ -143,8 +162,12 @@ def migrate(conn: sqlite3.Connection) -> None:
           status TEXT NOT NULL,
           request_summary TEXT NOT NULL DEFAULT '',
           result_summary TEXT NOT NULL DEFAULT '',
-          workflow_mode TEXT NOT NULL DEFAULT 'planned'
-            CHECK (workflow_mode IN ('planned', 'lightweight')),
+          work_type TEXT NOT NULL DEFAULT 'mixed'
+            CHECK (work_type IN ('answer', 'investigation', 'analysis', 'planning', 'implementation', 'mixed')),
+          workflow_mode TEXT NOT NULL DEFAULT 'standard'
+            CHECK (workflow_mode IN ('fast', 'standard', 'strict')),
+          record_mode TEXT NOT NULL DEFAULT 'planned'
+            CHECK (record_mode IN ('lightweight', 'planned')),
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           archived_at TEXT
@@ -298,9 +321,29 @@ def migrate(conn: sqlite3.Connection) -> None:
     ensure_column(
         conn,
         "workflow_runs",
-        "workflow_mode",
-        "TEXT NOT NULL DEFAULT 'planned' CHECK (workflow_mode IN ('planned', 'lightweight'))",
+        "work_type",
+        "TEXT NOT NULL DEFAULT 'mixed' CHECK (work_type IN ('answer', 'investigation', 'analysis', 'planning', 'implementation', 'mixed'))",
     )
+    ensure_column(
+        conn,
+        "workflow_runs",
+        "workflow_mode",
+        "TEXT NOT NULL DEFAULT 'standard' CHECK (workflow_mode IN ('fast', 'standard', 'strict'))",
+    )
+    ensure_column(
+        conn,
+        "workflow_runs",
+        "record_mode",
+        "TEXT NOT NULL DEFAULT 'planned' CHECK (record_mode IN ('lightweight', 'planned'))",
+    )
+    if migrated_legacy_record_mode:
+        conn.execute(
+            """
+            UPDATE workflow_runs
+            SET work_type = CASE record_mode WHEN 'lightweight' THEN 'answer' ELSE 'mixed' END,
+                workflow_mode = CASE record_mode WHEN 'lightweight' THEN 'fast' ELSE 'standard' END
+            """
+        )
     ensure_column(conn, "approvals", "source", "TEXT NOT NULL DEFAULT 'unspecified'")
     ensure_column(conn, "items", "custom_fields_json", "TEXT NOT NULL DEFAULT '{}'")
     ensure_column(
@@ -337,6 +380,25 @@ def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition:
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+
+
+def migrate_legacy_workflow_mode(conn: sqlite3.Connection) -> bool:
+    table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workflow_runs'"
+    ).fetchone()
+    if table is None:
+        return False
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(workflow_runs)")}
+    if "record_mode" in columns or "workflow_mode" not in columns:
+        return False
+    values = {
+        str(row["workflow_mode"])
+        for row in conn.execute("SELECT DISTINCT workflow_mode FROM workflow_runs")
+    }
+    if not values.issubset(set(RECORD_MODES)):
+        return False
+    conn.execute("ALTER TABLE workflow_runs RENAME COLUMN workflow_mode TO record_mode")
+    return True
 
 
 def drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
@@ -420,10 +482,14 @@ def ensure_active_run(
     *,
     slug: str = "active",
     request_summary: str = DEFAULT_REQUEST_SUMMARY,
+    work_type: str = DEFAULT_WORK_TYPE,
     workflow_mode: str = DEFAULT_WORKFLOW_MODE,
 ) -> sqlite3.Row:
+    if work_type not in WORK_TYPES:
+        raise ValueError(f"invalid work_type: {work_type}")
     if workflow_mode not in WORKFLOW_MODES:
         raise ValueError(f"invalid workflow_mode: {workflow_mode}")
+    record_mode = derive_record_mode(work_type, workflow_mode)
     existing = active_run(conn)
     if existing:
         if request_summary and not existing["request_summary"]:
@@ -441,11 +507,12 @@ def ensure_active_run(
         conn.execute(
             """
             INSERT INTO workflow_runs(
-              id, slug, status, request_summary, workflow_mode, created_at, updated_at
+              id, slug, status, request_summary, work_type, workflow_mode, record_mode,
+              created_at, updated_at
             )
-            VALUES(?, ?, 'active', ?, ?, ?, ?)
+            VALUES(?, ?, 'active', ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, slug, request_summary, workflow_mode, now, now),
+            (run_id, slug, request_summary, work_type, workflow_mode, record_mode, now, now),
         )
     except sqlite3.IntegrityError:
         existing = active_run(conn)
@@ -461,6 +528,7 @@ def update_active_run_summary(
     *,
     request_summary: str | None = None,
     result_summary: str | None = None,
+    work_type: str | None = None,
     workflow_mode: str | None = None,
 ) -> sqlite3.Row:
     run = active_run(conn)
@@ -473,6 +541,8 @@ def update_active_run_summary(
                 "cannot finish workflow run while an execution batch is active; "
                 "settle every execution or recover/cancel the batch first"
             )
+    if work_type is not None and work_type not in WORK_TYPES:
+        raise ValueError(f"invalid work_type: {work_type}")
     if workflow_mode is not None and workflow_mode not in WORKFLOW_MODES:
         raise ValueError(f"invalid workflow_mode: {workflow_mode}")
 
@@ -484,9 +554,17 @@ def update_active_run_summary(
     if result_summary is not None:
         updates.append("result_summary = ?")
         params.append(result_summary.strip())
+    if work_type is not None:
+        updates.append("work_type = ?")
+        params.append(work_type)
     if workflow_mode is not None:
         updates.append("workflow_mode = ?")
         params.append(workflow_mode)
+    if work_type is not None or workflow_mode is not None:
+        next_work_type = work_type or str(run["work_type"])
+        next_workflow_mode = workflow_mode or str(run["workflow_mode"])
+        updates.append("record_mode = ?")
+        params.append(derive_record_mode(next_work_type, next_workflow_mode))
     if not updates:
         return run
 
@@ -847,7 +925,7 @@ def upsert_plan(
         ),
     )
     conn.execute(
-        "UPDATE workflow_runs SET workflow_mode = 'planned', updated_at = ? WHERE id = ?",
+        "UPDATE workflow_runs SET record_mode = 'planned', updated_at = ? WHERE id = ?",
         (utc_now(), item["run_id"]),
     )
     conn.commit()

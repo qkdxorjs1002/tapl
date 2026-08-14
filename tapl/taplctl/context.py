@@ -104,11 +104,22 @@ def guidance_lines(items: list[str]) -> list[str]:
 def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
     run = state.get("active_run")
     if not run:
-        return {"present": False, "request_summary": "", "result_summary": "", "created_at": ""}
+        return {
+            "present": False,
+            "request_summary": "",
+            "result_summary": "",
+            "work_type": "",
+            "workflow_mode": "",
+            "record_mode": "",
+            "created_at": "",
+        }
     return {
         "present": True,
         "request_summary": run.get("request_summary") or "",
         "result_summary": run.get("result_summary") or "",
+        "work_type": run.get("work_type") or db.DEFAULT_WORK_TYPE,
+        "workflow_mode": run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE,
+        "record_mode": run.get("record_mode") or db.DEFAULT_RECORD_MODE,
         "created_at": run.get("created_at") or "",
     }
 
@@ -161,7 +172,7 @@ def next_actions(
     has_plans = bool(state.get("plans"))
     has_tasks = bool(state.get("tasks"))
     if not has_plans:
-        if str(run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE) == "lightweight":
+        if str(run.get("record_mode") or db.DEFAULT_RECORD_MODE) == "lightweight":
             if str(run.get("result_summary") or "").strip():
                 actions.append(tapl_prompt.archive_lightweight_run_next_action())
             else:
@@ -188,7 +199,7 @@ def covered_validation_issue_codes(state: dict[str, Any], plan_task: dict[str, A
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
     if (
         not state.get("plans")
-        and str(run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE) != "lightweight"
+        and str(run.get("record_mode") or db.DEFAULT_RECORD_MODE) != "lightweight"
     ):
         codes.add("missing_plan")
     if state.get("incomplete_tasks", 0):

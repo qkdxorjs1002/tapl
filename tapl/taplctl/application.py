@@ -167,14 +167,28 @@ class WorkflowApplication:
             raise WorkflowApplicationError(f"archive not found: {archive_id}")
         return {"ok": True, **detail}
 
-    def summarize_run(self, summary: str, *, workflow_mode: str = db.DEFAULT_WORKFLOW_MODE) -> dict[str, Any]:
+    def summarize_run(
+        self,
+        summary: str,
+        *,
+        work_type: str = db.DEFAULT_WORK_TYPE,
+        workflow_mode: str = db.DEFAULT_WORKFLOW_MODE,
+    ) -> dict[str, Any]:
         if not summary.strip():
             raise WorkflowApplicationError("summary must not be empty")
         with self._connection() as conn:
             if db.active_run(conn) is None:
-                db.ensure_active_run(conn, request_summary=summary, workflow_mode=workflow_mode)
+                db.ensure_active_run(
+                    conn,
+                    request_summary=summary,
+                    work_type=work_type,
+                    workflow_mode=workflow_mode,
+                )
             run = db.update_active_run_summary(
-                conn, request_summary=summary, workflow_mode=workflow_mode
+                conn,
+                request_summary=summary,
+                work_type=work_type,
+                workflow_mode=workflow_mode,
             )
         return {"ok": True, "active_run": db.workflow_run_to_dict(run)}
 

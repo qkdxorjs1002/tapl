@@ -65,6 +65,43 @@ def test_application_uses_fresh_connection_for_each_call() -> None:
         assert first["active_run"]["id"] == second["active_run"]["id"]
 
 
+def test_application_derives_record_mode_from_work_type_and_workflow_mode() -> None:
+    cases = (
+        ("answer", "fast", "lightweight"),
+        ("implementation", "fast", "planned"),
+        ("analysis", "standard", "planned"),
+        ("planning", "strict", "planned"),
+    )
+    for work_type, workflow_mode, expected_record_mode in cases:
+        with tempfile.TemporaryDirectory() as tmp:
+            _, app = workspace(tmp)
+            summarized = app.summarize_run(
+                "classify workflow state",
+                work_type=work_type,
+                workflow_mode=workflow_mode,
+            )
+            run = summarized["active_run"]
+            assert run["work_type"] == work_type
+            assert run["workflow_mode"] == workflow_mode
+            assert run["record_mode"] == expected_record_mode
+
+
+def test_applying_plan_promotes_only_record_mode() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run(
+            "investigate a small issue",
+            work_type="investigation",
+            workflow_mode="fast",
+        )
+        app.apply_plan("PLAN-001", title="Escalated investigation", status="Finalized")
+
+        run = app.get_status()["active_run"]
+        assert run["work_type"] == "investigation"
+        assert run["workflow_mode"] == "fast"
+        assert run["record_mode"] == "planned"
+
+
 def test_application_partial_updates_preserve_omitted_fields_and_nested_null_deletes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         _, app = workspace(tmp)

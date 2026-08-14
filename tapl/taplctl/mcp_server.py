@@ -45,7 +45,8 @@ CustomFields = Annotated[
     Field(description=tapl_prompt.field_help("task", "custom_fields")),
 ]
 ApprovalSource = Literal["explicit_user", "request_user_input"]
-WorkflowMode = Literal["planned", "lightweight"]
+WorkType = Literal["answer", "investigation", "analysis", "planning", "implementation", "mixed"]
+WorkflowMode = Literal["fast", "standard", "strict"]
 
 
 def resolve_workspace_root(start: Path | None = None) -> Path:
@@ -192,7 +193,7 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
         "operation": str(payload.get("operation") or operation),
     }
     object_fields = (
-        ("active_run", ("id", "slug", "status", "workflow_mode")),
+        ("active_run", ("id", "slug", "status", "work_type", "workflow_mode", "record_mode")),
         ("item", ("id", "stable_id", "kind", "status")),
         ("approval", ("id", "kind", "decision", "source")),
         ("archive", ("id", "slug")),
@@ -341,17 +342,22 @@ def create_server(
     @server.tool(name="tapl_summarize_run", title="Summarize active TAPL run", annotations=WRITE)
     async def summarize_run(
         summary: Annotated[str, Field(description=tapl_prompt.field_help("run", "summary"), min_length=1, max_length=2000)],
+        work_type: Annotated[
+            WorkType,
+            Field(description=tapl_prompt.field_help("run", "work_type")),
+        ],
         workflow_mode: Annotated[
             WorkflowMode,
-            Field(description="Agent-selected lifecycle mode: planned or lightweight."),
-        ] = db.DEFAULT_WORKFLOW_MODE,
+            Field(description=tapl_prompt.field_help("run", "workflow_mode")),
+        ],
     ) -> dict[str, Any]:
-        """Summarize the request and explicitly select planned or lightweight workflow handling."""
+        """Summarize the request and explicitly classify its work type and workflow mode."""
 
         return await call_application_write(
             application,
             application.summarize_run,
             summary,
+            work_type=work_type,
             workflow_mode=workflow_mode,
             operation="run_summarize",
         )

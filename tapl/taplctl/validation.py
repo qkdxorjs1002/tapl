@@ -32,12 +32,12 @@ def validate_plan_task_execute(
         return result
 
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
-    workflow_mode = str(run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE)
+    record_mode = str(run.get("record_mode") or db.DEFAULT_RECORD_MODE)
     plans = state.get("plans", [])
     tasks = state.get("tasks", [])
     issues: list[dict[str, Any]] = []
     issues.extend(validate_stable_ids(plans, tasks))
-    issues.extend(validate_plan_detail(plans, required=workflow_mode != "lightweight"))
+    issues.extend(validate_plan_detail(plans, required=record_mode != "lightweight"))
     issues.extend(validate_plan_content(plans))
     issues.extend(validate_task_granularity(plans, tasks))
     issues.extend(validate_task_content(tasks))

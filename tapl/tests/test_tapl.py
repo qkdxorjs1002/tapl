@@ -121,18 +121,25 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("workspace", task_schema["properties"])
         summarize_schema = by_name["tapl_summarize_run"].input_schema
         self.assertEqual(
-            summarize_schema["properties"]["workflow_mode"]["enum"],
-            ["planned", "lightweight"],
+            set(summarize_schema["required"]),
+            {"summary", "work_type", "workflow_mode"},
         )
         self.assertEqual(
-            summarize_schema["properties"]["workflow_mode"]["default"],
-            "planned",
+            summarize_schema["properties"]["work_type"]["enum"],
+            ["answer", "investigation", "analysis", "planning", "implementation", "mixed"],
+        )
+        self.assertEqual(
+            summarize_schema["properties"]["workflow_mode"]["enum"],
+            ["fast", "standard", "strict"],
         )
 
     def test_every_mcp_write_tool_routes_through_compact_receipt_with_next(self) -> None:
         server = tapl_mcp.create_server(workspace_root=ROOT)
         calls = (
-            ("tapl_summarize_run", {"summary": "Receipt routing"}),
+            (
+                "tapl_summarize_run",
+                {"summary": "Receipt routing", "work_type": "analysis", "workflow_mode": "standard"},
+            ),
             ("tapl_apply_plan", {}),
             (
                 "tapl_create_task",
@@ -204,7 +211,9 @@ class TaplRuntimeTests(unittest.TestCase):
                 "id": "run-id",
                 "slug": "active",
                 "status": "active",
-                "workflow_mode": "planned",
+                "work_type": "implementation",
+                "workflow_mode": "strict",
+                "record_mode": "planned",
                 "request_summary": "Do not echo this body",
             },
         }
@@ -238,7 +247,11 @@ class TaplRuntimeTests(unittest.TestCase):
                     tools = await client.list_tools()
                     result = await client.call_tool(
                         "tapl_summarize_run",
-                        {"summary": "stdio MCP smoke test"},
+                        {
+                            "summary": "stdio MCP smoke test",
+                            "work_type": "analysis",
+                            "workflow_mode": "standard",
+                        },
                     )
                     return tools, result
 
@@ -247,7 +260,9 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertFalse(result.is_error)
             receipt = result.structured_content
             self.assertEqual(receipt["operation"], "run_summarize")
-            self.assertEqual(receipt["active_run"]["workflow_mode"], "planned")
+            self.assertEqual(receipt["active_run"]["work_type"], "analysis")
+            self.assertEqual(receipt["active_run"]["workflow_mode"], "standard")
+            self.assertEqual(receipt["active_run"]["record_mode"], "planned")
             self.assertNotIn("request_summary", receipt["active_run"])
             self.assertEqual(receipt["recommendations"][0]["tool"], "tapl_apply_plan")
 
@@ -261,7 +276,14 @@ class TaplRuntimeTests(unittest.TestCase):
             async def exercise() -> list[object]:
                 async with Client(server) as client:
                     calls = [
-                        await client.call_tool("tapl_summarize_run", {"summary": "MCP lifecycle"}),
+                        await client.call_tool(
+                            "tapl_summarize_run",
+                            {
+                                "summary": "MCP lifecycle",
+                                "work_type": "implementation",
+                                "workflow_mode": "standard",
+                            },
+                        ),
                         await client.call_tool(
                             "tapl_apply_plan",
                             {
@@ -372,7 +394,11 @@ class TaplRuntimeTests(unittest.TestCase):
                 async with Client(server) as client:
                     summarized = await client.call_tool(
                         "tapl_summarize_run",
-                        {"summary": "Answer a simple question", "workflow_mode": "lightweight"},
+                        {
+                            "summary": "Answer a simple question",
+                            "work_type": "answer",
+                            "workflow_mode": "fast",
+                        },
                     )
                     finished = await client.call_tool(
                         "tapl_finish_run",
@@ -386,7 +412,15 @@ class TaplRuntimeTests(unittest.TestCase):
 
             summarized, finished, archived = asyncio.run(exercise())
             self.assertEqual(
+                summarized.structured_content["active_run"]["work_type"],
+                "answer",
+            )
+            self.assertEqual(
                 summarized.structured_content["active_run"]["workflow_mode"],
+                "fast",
+            )
+            self.assertEqual(
+                summarized.structured_content["active_run"]["record_mode"],
                 "lightweight",
             )
             self.assertEqual(
@@ -531,6 +565,74 @@ class TaplRuntimeTests(unittest.TestCase):
             finally:
                 migrated.close()
 
+    def test_v8_workflow_modes_migrate_to_explicit_classification_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tapl.db"
+            with sqlite3.connect(db_path) as legacy:
+                legacy.executescript(
+                    """
+                    CREATE TABLE meta (
+                      key TEXT PRIMARY KEY,
+                      value TEXT NOT NULL
+                    );
+                    INSERT INTO meta(key, value) VALUES('schema_version', '8');
+                    CREATE TABLE workflow_runs (
+                      id TEXT PRIMARY KEY,
+                      slug TEXT NOT NULL,
+                      status TEXT NOT NULL,
+                      request_summary TEXT NOT NULL DEFAULT '',
+                      result_summary TEXT NOT NULL DEFAULT '',
+                      workflow_mode TEXT NOT NULL DEFAULT 'planned'
+                        CHECK (workflow_mode IN ('planned', 'lightweight')),
+                      created_at TEXT NOT NULL,
+                      updated_at TEXT NOT NULL,
+                      archived_at TEXT
+                    );
+                    INSERT INTO workflow_runs(
+                      id, slug, status, request_summary, workflow_mode, created_at, updated_at
+                    ) VALUES
+                      ('legacy-fast', 'legacy-fast', 'archived', 'Small answer', 'lightweight', '2026-01-01', '2026-01-01'),
+                      ('legacy-planned', 'active', 'active', 'Durable work', 'planned', '2026-01-02', '2026-01-02');
+                    """
+                )
+
+            migrated = tapl_db.connect(db_path)
+            try:
+                columns = {
+                    row["name"] for row in migrated.execute("PRAGMA table_info(workflow_runs)")
+                }
+                rows = {
+                    row["id"]: dict(row)
+                    for row in migrated.execute(
+                        "SELECT id, work_type, workflow_mode, record_mode FROM workflow_runs"
+                    )
+                }
+                self.assertEqual(
+                    {"work_type", "workflow_mode", "record_mode"} - columns,
+                    set(),
+                )
+                self.assertEqual(
+                    rows["legacy-fast"],
+                    {
+                        "id": "legacy-fast",
+                        "work_type": "answer",
+                        "workflow_mode": "fast",
+                        "record_mode": "lightweight",
+                    },
+                )
+                self.assertEqual(
+                    rows["legacy-planned"],
+                    {
+                        "id": "legacy-planned",
+                        "work_type": "mixed",
+                        "workflow_mode": "standard",
+                        "record_mode": "planned",
+                    },
+                )
+                self.assertEqual(tapl_db.get_meta(migrated)["schema_version"], "9")
+            finally:
+                migrated.close()
+
     def test_mcp_server_instructions_are_compact_and_keep_adaptive_policy(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions(
             subagents=tapl_config.SubagentsConfig()
@@ -549,8 +651,9 @@ class TaplRuntimeTests(unittest.TestCase):
             "Otherwise choose Fast",
             "All other work is Standard.",
             "Mixed uses its highest child mode.",
-            "Use `lightweight` only for Fast non-durable Answer, Investigation, Analysis, or Planning work",
-            "`tapl_apply_plan` promotes it when scope or risk grows.",
+            "Pass the selected work_type and workflow_mode explicitly",
+            "record_mode=`lightweight` only for Fast non-durable Answer, Investigation, Analysis, or Planning work",
+            "`tapl_apply_plan` promotes only record_mode when scope or risk grows.",
             "Planning must happen before implementation",
             "Finalize only after explicit user confirmation.",
             "Before finalizing a plan",
@@ -592,7 +695,8 @@ class TaplRuntimeTests(unittest.TestCase):
                 tapl_db.ensure_active_run(
                     conn,
                     request_summary="Apply one small local fix.",
-                    workflow_mode="planned",
+                    work_type="implementation",
+                    workflow_mode="fast",
                 )
                 missing_plan_issues = tapl_validation.validate_plan_task_execute(conn)["issues"]
                 self.assertIn("missing_plan", {issue["code"] for issue in missing_plan_issues})
@@ -648,12 +752,14 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("For this TAPL run", guidance)
 
     def test_lightweight_help_covers_all_fast_non_durable_work(self) -> None:
+        work_type_help = tapl_prompt.field_help("run", "work_type")
         mode_help = tapl_prompt.field_help("run", "workflow_mode")
         next_action = tapl_prompt.lightweight_run_next_action()
 
-        self.assertIn("lightweight for Fast non-durable work", mode_help)
+        self.assertIn("answer, investigation, analysis, planning, implementation, or mixed", work_type_help)
+        self.assertIn("fast, standard, or strict", mode_help)
         self.assertIn("complete the Fast non-durable work", next_action)
-        self.assertNotIn("direct non-durable answers", mode_help)
+        self.assertIn("record_mode to planned", next_action)
         self.assertNotIn("answer directly", next_action)
 
     def test_config_defaults_when_file_is_missing(self) -> None:

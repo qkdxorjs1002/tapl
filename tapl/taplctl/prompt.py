@@ -36,10 +36,17 @@ RUN_FIELDS = (
     FieldSpec("summary", "--summary", "Short description of the current request.", label="Summary"),
     FieldSpec("result", "--result", "Short description of the completed result.", label="Result"),
     FieldSpec(
+        "work_type",
+        "--work-type",
+        "Request kind: answer, investigation, analysis, planning, implementation, or mixed.",
+        "required when summarizing",
+        "Work type",
+    ),
+    FieldSpec(
         "workflow_mode",
         "--workflow-mode",
-        "Agent-selected run mode: planned for durable, Standard, or Strict work; lightweight for Fast non-durable work.",
-        "defaults to planned",
+        "Execution rigor selected from fast, standard, or strict.",
+        "required when summarizing",
         "Workflow mode",
     ),
 )
@@ -549,7 +556,7 @@ def lightweight_run_next_action() -> str:
     return (
         "This run is lightweight: complete the Fast non-durable work without plan/task records, then use `tapl_finish_run` and "
         "`tapl_finish_archive`. If the work becomes complex or needs durable edits, call `tapl_apply_plan`; "
-        "creating the plan promotes the run to planned mode."
+        "creating the plan promotes its record_mode to planned."
     )
 
 
@@ -844,8 +851,8 @@ def workflow_order_guidance() -> str:
     return (
         "Lifecycle order: `tapl_get_status`/`tapl_get_next` -> resolve residual run direction with user approval -> "
         "`tapl_search_history` and clarify until unblocked -> `tapl_summarize_run` with agent-selected "
-        "`planned` or `lightweight` mode. Lightweight Fast non-durable work may finish/archive without records and "
-        "are promoted by `tapl_apply_plan` if complexity grows. Planned work continues through `tapl_apply_plan` -> "
+        "work_type and `fast`, `standard`, or `strict` workflow_mode. A derived lightweight record may finish/archive "
+        "without plan/tasks and `tapl_apply_plan` promotes record_mode to planned. Planned records continue through `tapl_apply_plan` -> "
         "`tapl_create_task` -> `tapl_approve_execution` -> sequential start and settlement tools or "
         "`tapl_dispatch_tasks` plus execution-id settlement -> `tapl_finish_run` -> `tapl_finish_archive`."
     )
@@ -861,9 +868,10 @@ def workflow_mode_guidance() -> str:
         "work, and a single targeted validation; Fast implementation also has at most two direct files. All other work "
         "is Standard. Do not search, query history, or create plan/tasks solely to classify: uncertainty defaults to "
         "Standard and Strict requires a known hard gate. Record at most two short reasons only when a plan/task record "
-        "is needed. Use `lightweight` only for Fast non-durable Answer, Investigation, Analysis, "
-        "or Planning work; use `planned` for durable work and every Standard or Strict run. A lightweight run may finish/archive "
-        "without plan/tasks; `tapl_apply_plan` promotes it when scope or risk grows."
+        "is needed. Pass the selected work_type and workflow_mode explicitly to `tapl_summarize_run`. TAPL derives "
+        "record_mode=`lightweight` only for Fast non-durable Answer, Investigation, Analysis, or Planning work; durable "
+        "work and every Standard or Strict run derive record_mode=`planned`. A lightweight record may finish/archive "
+        "without plan/tasks; `tapl_apply_plan` promotes only record_mode when scope or risk grows."
     )
 
 
