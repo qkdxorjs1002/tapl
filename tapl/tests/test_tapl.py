@@ -711,25 +711,35 @@ class TaplRuntimeTests(unittest.TestCase):
 
         required_result_guidance = (
             "For consecutive `tapl_*` write calls",
-            "one compact two-column Markdown table headed TAPL",
-            "Give every record its own section",
-            "bold appropriate icon + stable id",
-            "localized status wrapped as ***`status`***",
-            "localized 내용 and 범위 rows",
-            "never merge IDs",
-            "Batch consecutive writes in that table",
-            "Translate status, work_type, workflow_mode, record_mode, and operation codes",
-            "If `tapl_search_history` is followed by `tapl_get_item`, include relevant returned detail in the same card despite read-only status",
-            "Flush before the next",
+            "one compact TAPL-headed two-column Markdown table",
+            "Right-align status with `---:`",
+            "Before each record, including first, add a blank separator row (`| |`)",
+            "Each record has exactly two adjacent rows",
+            "bold icon + stable ID left",
+            "status **status-appropriate emoji `localized status`**",
+            "for example, completed: **✅ `완료`**",
+            "next row starts with `• ` and is a one-line summary left with empty right",
+            "no 내용/범위 labels or separate status rows",
+            "Keep IDs separate",
+            "Batch consecutive records",
+            "summarize writes and relevant `tapl_search_history`→`tapl_get_item` detail",
+            "Translate codes/labels",
+            "Flush immediately before next",
             "Handle errors, blockers, approvals, and user-input calls immediately",
-            "Exclude ordinary reads, reasoning, injected context, ordinary answers, and final completion reports",
+            "Exclude ordinary reads, reasoning, injected context, ordinary answers, and final reports",
         )
         for guidance in required_result_guidance:
             self.assertIn(guidance, instructions)
             self.assertNotIn(guidance, injected_context)
             self.assertNotIn(guidance, tool_result)
+        self.assertNotIn("| **내용** |", instructions)
+        self.assertNotIn("| **범위** |", instructions)
+        self.assertNotIn("| | |", instructions)
+        self.assertNotIn("|---|---|", instructions)
         self.assertNotIn("| **📝 PLAN-001** | ***`FINALIZED`*** |", instructions)
         self.assertNotIn("| **📋 TASK-001** | ***`Pending`*** |", instructions)
+        self.assertNotIn("| **📝 PLAN-001**", instructions)
+        self.assertNotIn("| **📋 TASK-001**", instructions)
         self.assertNotIn("TASK-003·004", instructions)
         self.assertNotIn("Immediately after each `tapl_*` MCP tool call", instructions)
 

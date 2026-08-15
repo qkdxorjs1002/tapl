@@ -848,14 +848,15 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "For consecutive `tapl_*` write calls, report results in one compact two-column Markdown table headed TAPL, with "
-        "no lead-in/follow-up prose. Give every record its own section; never merge IDs: left cell is a bold appropriate "
-        "icon + stable id, right cell is localized status wrapped as ***`status`***, followed by localized 내용 and 범위 "
-        "rows. Batch consecutive writes in that table. Translate status, work_type, workflow_mode, record_mode, and "
-        "operation codes; compact only submitted or changed fields. If `tapl_search_history` is followed by "
-        "`tapl_get_item`, include relevant returned detail in the same card despite read-only status. Flush before the next "
-        "non-`tapl_*` call, ordinary response, or final report. Handle errors, blockers, approvals, and user-input calls "
-        "immediately. Exclude ordinary reads, reasoning, injected context, ordinary answers, and final completion reports."
+        "For consecutive `tapl_*` write calls, report results in one compact TAPL-headed two-column Markdown table, with no "
+        "lead-in/follow-up prose. Right-align status with `---:`. Before each record, including first, add a blank separator "
+        "row (`| |`). Each record has exactly two adjacent rows: heading row with bold icon + stable ID left and right "
+        "status **status-appropriate emoji `localized status`** (for example, completed: **✅ `완료`**); next row starts with `• ` and is a one-line summary left with empty right. Keep IDs separate; no "
+        "내용/범위 labels or separate status rows. Batch consecutive records; summarize writes and relevant "
+        "`tapl_search_history`→`tapl_get_item` detail. Translate codes/labels; compact submitted/changed fields. Flush "
+        "immediately before next non-`tapl_*` call, ordinary response, or final report. Handle errors, blockers, approvals, "
+        "and user-input calls immediately. Exclude ordinary reads, reasoning, injected context, ordinary answers, and final "
+        "reports."
     )
 
 
