@@ -710,32 +710,27 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "one or more consecutive `tapl_*` MCP tool calls that create or update workflow state",
-            "one two-column Markdown table",
-            "`| TAPL | |`",
-            "results together with no lead-in or follow-up prose",
-            "Record heading row",
-            "bold icon/stable ID",
-            "PLAN ***`FINALIZED`***",
-            "| **📋 TASK-001** | ***`Pending`*** |",
-            "내용 and 범위 rows",
-            "Never add a separate 상태/status row",
-            "Keep consecutive writes in one table",
-            "`tapl_search_history` is followed by `tapl_get_item` for a returned record",
-            "same card format",
-            "Flush immediately before the next non-`tapl_*` tool call",
-            "Exclude ordinary read-only calls",
-            "errors, blockers, approval calls/requests, and calls requiring user input",
-            "Preserve immediate handling of",
-            "work_type, workflow_mode, record_mode, status, and operation",
-            "For run, plan, task, finding, approval, batch, or archive writes",
-            "compact only the submitted fields or content that changed into the card",
-            "not to read-only calls, reasoning, injected lifecycle context, ordinary answers, or the final completion report",
+            "For consecutive `tapl_*` write calls",
+            "one compact two-column Markdown table headed TAPL",
+            "Give every record its own section",
+            "bold appropriate icon + stable id",
+            "localized status wrapped as ***`status`***",
+            "localized 내용 and 범위 rows",
+            "never merge IDs",
+            "Batch consecutive writes in that table",
+            "Translate status, work_type, workflow_mode, record_mode, and operation codes",
+            "If `tapl_search_history` is followed by `tapl_get_item`, include relevant returned detail in the same card despite read-only status",
+            "Flush before the next",
+            "Handle errors, blockers, approvals, and user-input calls immediately",
+            "Exclude ordinary reads, reasoning, injected context, ordinary answers, and final completion reports",
         )
         for guidance in required_result_guidance:
             self.assertIn(guidance, instructions)
             self.assertNotIn(guidance, injected_context)
             self.assertNotIn(guidance, tool_result)
+        self.assertNotIn("| **📝 PLAN-001** | ***`FINALIZED`*** |", instructions)
+        self.assertNotIn("| **📋 TASK-001** | ***`Pending`*** |", instructions)
+        self.assertNotIn("TASK-003·004", instructions)
         self.assertNotIn("Immediately after each `tapl_*` MCP tool call", instructions)
 
     def test_adaptive_validation_allows_compact_plans_and_coherent_task_bundles(self) -> None:

@@ -848,23 +848,14 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "After one or more consecutive `tapl_*` MCP tool calls that create or update workflow state, results together with "
-        "no lead-in or follow-up prose in one two-column Markdown table. Skeleton: `| TAPL | |`: "
-        "| TAPL | |\n|---|---|\n| | |\n| **📝 PLAN-001** | ***`FINALIZED`*** |\n| **내용** | ... |\n"
-        "| **범위** | ... |. Record heading row: bold icon/stable ID; plan `PLAN ***`FINALIZED`***`; task row is "
-        "`| **📋 TASK-001** | ***`Pending`*** |`. "
-        "Never add a separate 상태/status row; no separate 상태 row. Use 내용 and 범위 rows. Keep consecutive writes in one "
-        "table; consecutive writes batched as sections. Translate work_type, workflow_mode, record_mode, status, and operation "
-        "codes. For run, "
-        "plan, task, finding, approval, batch, or archive writes. For writes, compact only the submitted fields or content "
-        "that changed into 내용 and 범위; compact only the submitted fields or content that changed into the card. If "
-        "`tapl_search_history` is followed by `tapl_get_item` for a returned record, include it in the same card format; "
-        "`tapl_search_history` followed by `tapl_get_item` detail is the read-only exception. Flush immediately before the next "
-        "non-`tapl_*` tool call, any ordinary response, or the final completion report. Preserve immediate handling of "
-        "errors, blockers, approval calls/requests, and calls requiring user input; errors, blockers, approval requests, or "
-        "calls requiring user input must be reported immediately. This rule applies only to MCP write-result reports, not to "
-        "read-only calls, reasoning, injected lifecycle context, ordinary answers, or the final completion report; ordinary "
-        "read-only calls remain excluded. Exclude ordinary read-only calls."
+        "For consecutive `tapl_*` write calls, report results in one compact two-column Markdown table headed TAPL, with "
+        "no lead-in/follow-up prose. Give every record its own section; never merge IDs: left cell is a bold appropriate "
+        "icon + stable id, right cell is localized status wrapped as ***`status`***, followed by localized 내용 and 범위 "
+        "rows. Batch consecutive writes in that table. Translate status, work_type, workflow_mode, record_mode, and "
+        "operation codes; compact only submitted or changed fields. If `tapl_search_history` is followed by "
+        "`tapl_get_item`, include relevant returned detail in the same card despite read-only status. Flush before the next "
+        "non-`tapl_*` call, ordinary response, or final report. Handle errors, blockers, approvals, and user-input calls "
+        "immediately. Exclude ordinary reads, reasoning, injected context, ordinary answers, and final completion reports."
     )
 
 
