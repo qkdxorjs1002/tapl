@@ -848,17 +848,23 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "After one or more consecutive `tapl_*` MCP tool calls that create or update workflow state, report their "
-        "results together in one compact Markdown table, with one row per write and no lead-in or follow-up prose. "
-        "Use the fixed columns `Step | Result | Status | Scope`, translated into the user's language. A single write "
-        "uses the same table with one row. Flush the table immediately before the next non-`tapl_*` tool call, any "
-        "ordinary response, or the final completion report. Do not batch errors, blockers, approval requests, or calls "
-        "requiring user input; report them immediately. Use user-friendly labels and values in the user's language; "
-        "translate work_type, workflow_mode, record_mode, status, and operation codes instead of showing raw codes "
-        "alone. For run, plan, task, finding, approval, batch, or archive writes, include the created or updated item "
-        "and compact only the submitted fields or content that changed into the four cells, without extra "
-        "interpretation. This rule applies only to MCP write-result reports, not to read-only calls, reasoning, "
-        "injected lifecycle context, ordinary answers, or the final completion report itself."
+        "After one or more consecutive `tapl_*` MCP tool calls that create or update workflow state, results together with "
+        "no lead-in or follow-up prose in one two-column Markdown table. Skeleton: `| TAPL | |`: "
+        "| TAPL | |\n|---|---|\n| | |\n| **📝 PLAN-001** | ***`FINALIZED`*** |\n| **내용** | ... |\n"
+        "| **범위** | ... |. Record heading row: bold icon/stable ID; plan `PLAN ***`FINALIZED`***`; task row is "
+        "`| **📋 TASK-001** | ***`Pending`*** |`. "
+        "Never add a separate 상태/status row; no separate 상태 row. Use 내용 and 범위 rows. Keep consecutive writes in one "
+        "table; consecutive writes batched as sections. Translate work_type, workflow_mode, record_mode, status, and operation "
+        "codes. For run, "
+        "plan, task, finding, approval, batch, or archive writes. For writes, compact only the submitted fields or content "
+        "that changed into 내용 and 범위; compact only the submitted fields or content that changed into the card. If "
+        "`tapl_search_history` is followed by `tapl_get_item` for a returned record, include it in the same card format; "
+        "`tapl_search_history` followed by `tapl_get_item` detail is the read-only exception. Flush immediately before the next "
+        "non-`tapl_*` tool call, any ordinary response, or the final completion report. Preserve immediate handling of "
+        "errors, blockers, approval calls/requests, and calls requiring user input; errors, blockers, approval requests, or "
+        "calls requiring user input must be reported immediately. This rule applies only to MCP write-result reports, not to "
+        "read-only calls, reasoning, injected lifecycle context, ordinary answers, or the final completion report; ordinary "
+        "read-only calls remain excluded. Exclude ordinary read-only calls."
     )
 
 
