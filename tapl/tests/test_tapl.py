@@ -710,36 +710,30 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "For consecutive `tapl_*` write calls",
-            "one compact TAPL-headed two-column Markdown table",
-            "Right-align status with `---:`",
-            "Before each record, including first, add a blank separator row (`| |`)",
-            "Each record has exactly two adjacent rows",
-            "bold icon + stable ID left",
-            "status **status-appropriate emoji `localized status`**",
-            "for example, completed: **✅ `완료`**",
-            "next row starts with `• ` and is a one-line summary left with empty right",
-            "no 내용/범위 labels or separate status rows",
-            "Keep IDs separate",
-            "Batch consecutive records",
-            "summarize writes and relevant `tapl_search_history`→`tapl_get_item` detail",
-            "Translate codes/labels",
-            "Flush immediately before next",
-            "Handle errors, blockers, approvals, and user-input calls immediately",
-            "Exclude ordinary reads, reasoning, injected context, ordinary answers, and final reports",
+            "For consecutive `tapl_*` writes, begin directly",
+            "literal Markdown pipe rows `| TAPL | |` and `|---|---:|`",
+            "Continue the same table with one three-row block per record",
+            "a `| |` separator",
+            "bold record icon and stable ID",
+            "status-appropriate emoji plus inline-code localized status in bold",
+            "for example **✅ `완료`**",
+            "summary row beginning with `• ` in the left cell and an empty right cell",
+            "Use 📝 for plans and 📋 for tasks",
+            "keep one stable ID per block",
+            "render relevant `tapl_search_history`→`tapl_get_item` detail with the same block",
+            "Translate codes and labels",
+            "Finish the table before the next non-`tapl_*` call or ordinary response",
+            "Report errors, blockers, approvals, and user-input calls immediately",
+            "Use normal prose for other reads, reasoning, injected context, ordinary answers, and final reports",
         )
         for guidance in required_result_guidance:
             self.assertIn(guidance, instructions)
             self.assertNotIn(guidance, injected_context)
             self.assertNotIn(guidance, tool_result)
-        self.assertNotIn("| **내용** |", instructions)
-        self.assertNotIn("| **범위** |", instructions)
-        self.assertNotIn("| | |", instructions)
-        self.assertNotIn("|---|---|", instructions)
-        self.assertNotIn("| **📝 PLAN-001** | ***`FINALIZED`*** |", instructions)
-        self.assertNotIn("| **📋 TASK-001** | ***`Pending`*** |", instructions)
-        self.assertNotIn("| **📝 PLAN-001**", instructions)
-        self.assertNotIn("| **📋 TASK-001**", instructions)
+        self.assertNotIn("TAPL-headed", instructions)
+        self.assertNotIn("### TAPL", instructions)
+        self.assertNotIn("• TAPL", instructions)
+        self.assertNotIn("record/status headings", instructions)
         self.assertNotIn("TASK-003·004", instructions)
         self.assertNotIn("Immediately after each `tapl_*` MCP tool call", instructions)
 

@@ -848,15 +848,15 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "For consecutive `tapl_*` write calls, report results in one compact TAPL-headed two-column Markdown table, with no "
-        "lead-in/follow-up prose. Right-align status with `---:`. Before each record, including first, add a blank separator "
-        "row (`| |`). Each record has exactly two adjacent rows: heading row with bold icon + stable ID left and right "
-        "status **status-appropriate emoji `localized status`** (for example, completed: **✅ `완료`**); next row starts with `• ` and is a one-line summary left with empty right. Keep IDs separate; no "
-        "내용/범위 labels or separate status rows. Batch consecutive records; summarize writes and relevant "
-        "`tapl_search_history`→`tapl_get_item` detail. Translate codes/labels; compact submitted/changed fields. Flush "
-        "immediately before next non-`tapl_*` call, ordinary response, or final report. Handle errors, blockers, approvals, "
-        "and user-input calls immediately. Exclude ordinary reads, reasoning, injected context, ordinary answers, and final "
-        "reports."
+        "For consecutive `tapl_*` writes, begin directly with the literal Markdown pipe rows `| TAPL | |` and "
+        "`|---|---:|`. Continue the same table with one three-row block per record: a `| |` separator; a heading whose "
+        "left cell is the bold record icon and stable ID and whose right cell is a status-appropriate emoji plus "
+        "inline-code localized status in bold (for example **✅ `완료`**); then a summary row beginning with `• ` in the "
+        "left cell and an empty right cell. Use 📝 for plans and 📋 for tasks, and keep one stable ID per block. Summarize "
+        "submitted or changed write fields; render relevant `tapl_search_history`→`tapl_get_item` detail with the same "
+        "block. Translate codes and labels. Finish the table before the next non-`tapl_*` call or ordinary response. "
+        "Report errors, blockers, approvals, and user-input calls immediately. Use normal prose for other reads, reasoning, "
+        "injected context, ordinary answers, and final reports."
     )
 
 
