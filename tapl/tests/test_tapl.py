@@ -710,21 +710,21 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "For consecutive `tapl_*` writes, begin directly",
-            "literal Markdown pipe rows `| TAPL | |` and `|---|---:|`",
-            "Continue the same table with one three-row block per record",
+            "For consecutive `tapl_*` writes, output one Markdown table starting exactly",
+            "`| TAPL | |` and `|---|---:|`",
+            "Add one three-row block per record",
             "a `| |` separator",
-            "bold record icon and stable ID",
-            "status-appropriate emoji plus inline-code localized status in bold",
+            "bold record icon and stable ID on the left",
+            "status-appropriate emoji plus inline-code localized status in bold on the right",
             "for example **✅ `완료`**",
-            "summary row beginning with `• ` in the left cell and an empty right cell",
+            "summary row starting with `• ` on the left and an empty right cell",
             "Use 📝 for plans and 📋 for tasks",
             "keep one stable ID per block",
-            "render relevant `tapl_search_history`→`tapl_get_item` detail with the same block",
-            "Translate codes and labels",
+            "Include submitted or changed write fields and relevant",
+            "`tapl_search_history`→`tapl_get_item` detail in that block, translating codes and labels",
             "Finish the table before the next non-`tapl_*` call or ordinary response",
             "Report errors, blockers, approvals, and user-input calls immediately",
-            "Use normal prose for other reads, reasoning, injected context, ordinary answers, and final reports",
+            "Use normal prose for all other reads, reasoning, injected context, ordinary answers, and final reports",
         )
         for guidance in required_result_guidance:
             self.assertIn(guidance, instructions)
