@@ -710,26 +710,19 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "For one or more `tapl_*` write results reported in the same turn, begin exactly with `### TAPL`",
-            "Render each record as its own Markdown block",
+            "For `tapl_*` writes reported together, output `### TAPL`, then one block per record",
             "``| **✏️ PLAN-001** | **✅ `확정`** |``",
-            "the separator `|---|---|`",
-            "one or more summary list items beginning with `- ` immediately below the table",
-            "Separate record blocks with a blank line",
-            "never combine multiple records into one table",
-            "Use ⚙️ for RUN, ✏️ for PLAN, 📋 for TASK, 🔎 for FINDING, and 🗂️ for ARCHIVE",
-            "Use ✅ for Completed, finalized, or confirmed",
-            "⏩ for Skipped; ⛔️ for Blocked; ♻️ for InProgress; and 📝 for Created",
-            "Translate status labels and other codes to the user's language",
-            "Use each record's stable ID when available",
-            "a concise, unique, human-readable name otherwise, such as an archive slug",
-            "never use a UUID or another opaque random identifier",
-            "Summarize submitted or changed write fields and relevant",
-            "`tapl_search_history`→`tapl_get_item` detail in that record's list",
-            "Finish all blocks before the next non-`tapl_*` call or ordinary response",
-            "Report errors, blockers, approvals, and user-input calls immediately",
-            "Use normal prose for all other reads, reasoning, injected context, ordinary answers, and final reports",
+            "`|---|---:|`, and `- {concise summary}`",
+            "Record icons: ⚙️ RUN, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE",
+            "Status icons: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
+            "Localize labels and codes",
+            "Prefer stable IDs; otherwise use unique readable names, never UUIDs",
+            "Summarize changed fields and relevant `tapl_search_history`→`tapl_get_item` detail",
+            "Finish before non-`tapl_*` calls or replies",
+            "surface errors, blockers, approvals, and input requests immediately",
+            "Use prose otherwise",
         )
+        self.assertLess(len(tapl_prompt.mcp_tool_result_display_guidance()), 1_000)
         for guidance in required_result_guidance:
             self.assertIn(guidance, instructions)
             self.assertNotIn(guidance, injected_context)
@@ -739,6 +732,7 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("one Markdown table", instructions)
         self.assertNotIn("three-row block", instructions)
         self.assertNotIn("a `| |` separator", instructions)
+        self.assertNotIn("`|---|---|`", instructions)
         self.assertNotIn("• TAPL", instructions)
         self.assertNotIn("record/status headings", instructions)
         self.assertNotIn("TASK-003·004", instructions)
