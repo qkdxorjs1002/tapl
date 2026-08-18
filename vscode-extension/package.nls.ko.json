@@ -1,6 +1,6 @@
 {
   "extension.displayName": "tapl workflow 뷰어",
-  "extension.description": "tapl workflow 상태를 시각적으로 확인합니다.",
+  "extension.description": "로컬 tapl-mcp 서버를 통해 TAPL 계획, 작업, 발견 사항, 승인 및 아카이브를 확인합니다.",
   "configuration.title": "tapl workflow",
   "configuration.layout.title": "대시보드 레이아웃",
   "configuration.layout.description": "tapl 대시보드의 화면 레이아웃 크기를 설정합니다.",

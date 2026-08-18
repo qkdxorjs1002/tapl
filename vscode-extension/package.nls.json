@@ -1,6 +1,6 @@
 {
   "extension.displayName": "tapl Workflow Viewer",
-  "extension.description": "View tapl SQLite workflow state through the taplctl CLI.",
+  "extension.description": "View TAPL plans, tasks, findings, approvals, and archives through the local tapl-mcp server.",
   "configuration.title": "tapl Workflow",
   "configuration.layout.title": "Dashboard Layout",
   "configuration.layout.description": "Controls the layout size of the tapl dashboard.",

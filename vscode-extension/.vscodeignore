@@ -1,9 +1,11 @@
 .git/**
 .codex/**
+.DS_Store
 out/**/*.map
 webview-dist/**/*.map
 webview-dist/**/*.html
 src/**
+scripts/**
 pnpm-lock.yaml
 tsconfig.json
 tsconfig.webview.json
@@ -15,3 +17,4 @@ node_modules/**
 !out/node_modules/**
 README.ko.md
 AGENTS.md
+resources/marketplace-icon.svg

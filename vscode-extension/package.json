@@ -2,9 +2,31 @@
   "name": "tapl-workflow-viewer",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "2.0.0-beta1",
+  "version": "2.1.0",
   "publisher": "paragonnov",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qkdxorjs1002/tapl.git",
+    "directory": "vscode-extension"
+  },
+  "homepage": "https://github.com/qkdxorjs1002/tapl#readme",
+  "bugs": {
+    "url": "https://github.com/qkdxorjs1002/tapl/issues"
+  },
+  "icon": "resources/icon.png",
+  "galleryBanner": {
+    "color": "#0f172a",
+    "theme": "dark"
+  },
+  "keywords": [
+    "tapl",
+    "workflow",
+    "mcp",
+    "planning",
+    "tasks"
+  ],
+  "pricing": "Free",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -21,12 +43,14 @@
   ],
   "main": "./out/extension.js",
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "npm run compile:extension && npm run compile:webview",
     "compile:extension": "tsc -p ./ && node scripts/bundle-extension.mjs",
     "compile:webview": "vite build && node scripts/sync-viewer-assets.mjs",
     "watch": "tsc -watch -p ./",
     "watch:webview": "vite build --watch",
-    "package": "vsce package --no-dependencies --allow-missing-repository --out tapl-workflow-viewer-$npm_package_version.vsix"
+    "package": "vsce package --no-dependencies --out tapl-workflow-viewer-$npm_package_version.vsix",
+    "package:pre-release": "vsce package --pre-release --no-dependencies --out tapl-workflow-viewer-$npm_package_version-pre-release.vsix"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
