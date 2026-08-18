@@ -850,9 +850,10 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "For `tapl_*` writes reported together, output `### TAPL`, then one block per record: "
-        "``| **✏️ PLAN-001** | **✅ `확정`** |``, `|---|---:|`, and `- {concise summary}`. Separate blocks with "
-        "a blank line. Record icons: ⚙️ RUN, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE. Status icons: ✅ Completed, "
+        "For `tapl_*` writes reported together, output `### TAPL`, then one block per record with exactly two table "
+        "lines: ``| **✏️ PLAN-001** | **✅ `확정`** |`` and `|---|---:|`. After a blank line, add unwrapped "
+        "`- {concise summary}` items; never put summaries in `| ... |` table rows. Separate blocks with a blank line. "
+        "Record icons: ⚙️ RUN, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE. Status icons: ✅ Completed, "
         "⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created. Localize labels and codes. Prefer stable IDs; otherwise use "
         "unique readable names, never UUIDs. Summarize changed fields and relevant `tapl_search_history`→`tapl_get_item` "
         "detail. Finish before non-`tapl_*` calls or replies; surface errors, blockers, approvals, and input requests "

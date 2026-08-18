@@ -715,9 +715,12 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "For `tapl_*` writes reported together, output `### TAPL`, then one block per record",
+            "For `tapl_*` writes reported together, output `### TAPL`, then one block per record with exactly two table lines",
             "``| **✏️ PLAN-001** | **✅ `확정`** |``",
-            "`|---|---:|`, and `- {concise summary}`",
+            "`|---|---:|`. After a blank line",
+            "add unwrapped `- {concise summary}` items",
+            "never put summaries in `| ... |` table rows",
+            "Separate blocks with a blank line",
             "Record icons: ⚙️ RUN, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE",
             "Status icons: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
             "Localize labels and codes",
