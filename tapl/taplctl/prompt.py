@@ -851,10 +851,11 @@ def custom_fields_guidance() -> str:
 def mcp_tool_result_display_guidance() -> str:
     return (
         "Batch consecutive `tapl_*` calls. After each batch, before any non-`tapl_*` call or response, emit one "
-        "intermediate notice for its writes and `tapl_search_history` results. Use one ordered table: `|TAPL| 상태 |`, "
-        "`|---|---:|`, then one row such as ``| **✏️ PLAN-001** | **✅ `확정`** |`` per result. After a blank line, add "
-        "one `- {concise summary}` per row in the same order. Icons: ⚙️ RUN/APPROVE, ✏️ PLAN, 📋 TASK, 🧠 HISTORY, "
-        "🔍 FINDING, 🗂️ ARCHIVE. Statuses: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created. Localize "
+        "intermediate notice for its writes and `tapl_search_history` results in call order. For each result, output a "
+        "separate table: `|TAPL| 상태 |`, `|---|---:|`, and ``| **✏️ PLAN-001** | **✅ `확정`** |``. After a blank "
+        "line, add its `- {concise summary}`, then continue with the next block. Icons: ⚙️ RUN/APPROVE, ✏️ PLAN, "
+        "📋 TASK, 🧠 HISTORY, 🔍 FINDING, 🗂️ ARCHIVE. Statuses: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, "
+        "📝 Created. Localize "
         "labels/codes; use stable IDs or readable names, never UUIDs. HISTORY summarizes relevant matches and "
         "`tapl_get_item` detail. Surface errors, blockers, approvals, and input requests immediately. Final reports use prose."
     )

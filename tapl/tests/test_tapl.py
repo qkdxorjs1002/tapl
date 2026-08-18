@@ -717,12 +717,12 @@ class TaplRuntimeTests(unittest.TestCase):
         required_result_guidance = (
             "Batch consecutive `tapl_*` calls",
             "After each batch, before any non-`tapl_*` call or response",
-            "emit one intermediate notice for its writes and `tapl_search_history` results",
-            "Use one ordered table",
+            "emit one intermediate notice for its writes and `tapl_search_history` results in call order",
+            "For each result, output a separate table",
             "`|TAPL| 상태 |`",
             "`|---|---:|`",
             "``| **✏️ PLAN-001** | **✅ `확정`** |``",
-            "one `- {concise summary}` per row in the same order",
+            "add its `- {concise summary}`, then continue with the next block",
             "Icons: ⚙️ RUN/APPROVE, ✏️ PLAN, 📋 TASK, 🧠 HISTORY, 🔍 FINDING, 🗂️ ARCHIVE",
             "Statuses: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
             "Localize labels/codes; use stable IDs or readable names, never UUIDs",
@@ -742,6 +742,7 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("three-row block", instructions)
         self.assertNotIn("a `| |` separator", instructions)
         self.assertNotIn("`|---|---|`", instructions)
+        self.assertNotIn("Use one ordered table", instructions)
         self.assertNotIn("🔎 FINDING", instructions)
         self.assertNotIn("never put summaries", instructions)
         self.assertNotIn("• TAPL", instructions)
