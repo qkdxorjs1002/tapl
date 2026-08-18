@@ -720,7 +720,7 @@ class TaplRuntimeTests(unittest.TestCase):
             "`|---|---:|`",
             "``| **✏️ PLAN-001** | **✅ `확정`** |``",
             "After a blank line, add `- {concise summary}` items outside the table",
-            "Record icons: ⚙️ RUN, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE",
+            "Record icons: ⚙️ RUN and APPROVE, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE",
             "Status icons: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
             "Localize labels and codes",
             "Prefer stable IDs; otherwise use unique readable names, never UUIDs",
