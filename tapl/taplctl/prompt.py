@@ -252,6 +252,8 @@ Archive the active run when no actionable tasks remain, the workflow is supersed
 
 When work finishes, report changed files/behavior, verification commands/results, remaining risks or blocked work, and whether the TAPL run was archived.
 
+When the user asks to run, test, inspect, or show output, lead with the observed result and include the relevant raw output or a faithful excerpt; never substitute generic success/completion wording. Keep excerpts scoped and redact secrets.
+
 Record the final result with `tapl_finish_run` before archiving with `tapl_finish_archive`."""
 
 CONTEXT_INJECTION_PROMPT_TEMPLATE = """# TAPL MCP

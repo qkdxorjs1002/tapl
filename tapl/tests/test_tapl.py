@@ -678,6 +678,11 @@ class TaplRuntimeTests(unittest.TestCase):
             "decision-relevant findings with source and impact",
             "never store raw dumps, long candidate lists, or stale findings",
             "Archive the active run when no actionable tasks remain",
+            "When the user asks to run, test, inspect, or show output",
+            "lead with the observed result",
+            "include the relevant raw output or a faithful excerpt",
+            "never substitute generic success/completion wording",
+            "Keep excerpts scoped and redact secrets",
             "Record the final result with `tapl_finish_run` before archiving",
         )
         for policy in required_policy:
