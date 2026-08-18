@@ -848,16 +848,18 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "For consecutive `tapl_*` writes, output one Markdown table starting exactly with `| TAPL | |` and "
-        "`|---|---:|`. Add one three-row block per record: a `| |` separator; a heading with the bold record icon and "
-        "stable ID on the left and a status-appropriate emoji plus inline-code localized status in bold on the right "
-        "(for example **✅ `완료`**); and a summary row starting with `• ` on the left and an empty right cell. Use 📝 for "
-        "plans and 📋 for tasks; keep one unique, user-friendly stable ID per block. Use concise, human-readable names "
-        "whose purpose is apparent; never UUIDs or other opaque random identifiers. Include submitted or changed write "
-        "fields and relevant "
-        "`tapl_search_history`→`tapl_get_item` detail in that block, translating codes and labels. Finish the table before "
-        "the next non-`tapl_*` call or ordinary response. Report errors, blockers, approvals, and user-input calls "
-        "immediately. Use normal prose for all other reads, reasoning, injected context, ordinary answers, and final reports."
+        "For one or more `tapl_*` write results reported in the same turn, begin exactly with `### TAPL`. Render each "
+        "record as its own Markdown block: a two-column heading row such as ``| **✏️ PLAN-001** | **✅ `확정`** |``, "
+        "the separator `|---|---|`, then one or more summary list items beginning with `- ` immediately below the table. "
+        "Separate record blocks with a blank line; never combine multiple records into one table. Use ⚙️ for RUN, ✏️ "
+        "for PLAN, 📋 for TASK, 🔎 for FINDING, and 🗂️ for ARCHIVE. Use ✅ for Completed, finalized, or confirmed; ⏩ "
+        "for Skipped; ⛔️ for Blocked; ♻️ for InProgress; and 📝 for Created. Translate status labels and other codes to "
+        "the user's language. Use each record's stable ID when available and a concise, unique, human-readable name "
+        "otherwise, such as an archive slug; never use a UUID or another opaque random identifier. Summarize submitted "
+        "or changed write fields and relevant `tapl_search_history`→`tapl_get_item` detail in that record's list. Finish "
+        "all blocks before the next non-`tapl_*` call or ordinary response. Report errors, blockers, approvals, and "
+        "user-input calls immediately. Use normal prose for all other reads, reasoning, injected context, ordinary answers, "
+        "and final reports."
     )
 
 
