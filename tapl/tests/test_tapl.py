@@ -715,11 +715,11 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "For `tapl_*` writes reported together, output `### TAPL`, then one block per record with exactly two table lines",
+            "For every `tapl_*` write result, output one three-row table",
+            "`|TAPL| 상태 |`",
+            "`|---|---:|`",
             "``| **✏️ PLAN-001** | **✅ `확정`** |``",
-            "`|---|---:|`. After a blank line",
-            "add `- {concise summary}` items outside the table",
-            "Separate blocks with a blank line",
+            "After a blank line, add `- {concise summary}` items outside the table",
             "Record icons: ⚙️ RUN, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE",
             "Status icons: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
             "Localize labels and codes",
@@ -735,6 +735,7 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertNotIn(guidance, injected_context)
             self.assertNotIn(guidance, tool_result)
         self.assertNotIn("TAPL-headed", instructions)
+        self.assertNotIn("`### TAPL`", instructions)
         self.assertNotIn("`| TAPL | |`", instructions)
         self.assertNotIn("one Markdown table", instructions)
         self.assertNotIn("three-row block", instructions)
