@@ -718,8 +718,7 @@ class TaplRuntimeTests(unittest.TestCase):
             "For `tapl_*` writes reported together, output `### TAPL`, then one block per record with exactly two table lines",
             "``| **✏️ PLAN-001** | **✅ `확정`** |``",
             "`|---|---:|`. After a blank line",
-            "add unwrapped `- {concise summary}` items",
-            "never put summaries in `| ... |` table rows",
+            "add `- {concise summary}` items outside the table",
             "Separate blocks with a blank line",
             "Record icons: ⚙️ RUN, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE",
             "Status icons: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
@@ -730,7 +729,7 @@ class TaplRuntimeTests(unittest.TestCase):
             "surface errors, blockers, approvals, and input requests immediately",
             "Use prose otherwise",
         )
-        self.assertLess(len(tapl_prompt.mcp_tool_result_display_guidance()), 1_000)
+        self.assertLess(len(tapl_prompt.mcp_tool_result_display_guidance()), 800)
         for guidance in required_result_guidance:
             self.assertIn(guidance, instructions)
             self.assertNotIn(guidance, injected_context)
@@ -741,6 +740,7 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("three-row block", instructions)
         self.assertNotIn("a `| |` separator", instructions)
         self.assertNotIn("`|---|---|`", instructions)
+        self.assertNotIn("never put summaries", instructions)
         self.assertNotIn("• TAPL", instructions)
         self.assertNotIn("record/status headings", instructions)
         self.assertNotIn("TASK-003·004", instructions)
