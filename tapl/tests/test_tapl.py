@@ -715,16 +715,16 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "For every `tapl_*` write result, output one three-row table",
+            "For every `tapl_*` write or `tapl_search_history` result, output one three-row table",
             "`|TAPL| 상태 |`",
             "`|---|---:|`",
             "``| **✏️ PLAN-001** | **✅ `확정`** |``",
             "After a blank line, add `- {concise summary}` items outside the table",
-            "Record icons: ⚙️ RUN and APPROVE, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE",
+            "Record icons: ⚙️ RUN and APPROVE, ✏️ PLAN, 📋 TASK, 🧠 HISTORY, 🔍 FINDING, 🗂️ ARCHIVE",
             "Status icons: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
             "Localize labels and codes",
             "Prefer stable IDs; otherwise use unique readable names, never UUIDs",
-            "Summarize changed fields and relevant `tapl_search_history`→`tapl_get_item` detail",
+            "Summarize changed fields; for HISTORY, summarize relevant matches and `tapl_get_item` detail",
             "Finish before non-`tapl_*` calls or replies",
             "surface errors, blockers, approvals, and input requests immediately",
             "Use prose otherwise",
@@ -741,6 +741,7 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("three-row block", instructions)
         self.assertNotIn("a `| |` separator", instructions)
         self.assertNotIn("`|---|---|`", instructions)
+        self.assertNotIn("🔎 FINDING", instructions)
         self.assertNotIn("never put summaries", instructions)
         self.assertNotIn("• TAPL", instructions)
         self.assertNotIn("record/status headings", instructions)

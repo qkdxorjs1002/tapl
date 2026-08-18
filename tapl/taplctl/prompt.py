@@ -850,13 +850,14 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "For every `tapl_*` write result, output one three-row table: `|TAPL| 상태 |`, `|---|---:|`, and "
+        "For every `tapl_*` write or `tapl_search_history` result, output one three-row table: `|TAPL| 상태 |`, "
+        "`|---|---:|`, and "
         "``| **✏️ PLAN-001** | **✅ `확정`** |``. After a blank line, add `- {concise summary}` items outside the table. "
-        "Record icons: ⚙️ RUN and APPROVE, ✏️ PLAN, 📋 TASK, 🔎 FINDING, 🗂️ ARCHIVE. Status icons: ✅ Completed, "
+        "Record icons: ⚙️ RUN and APPROVE, ✏️ PLAN, 📋 TASK, 🧠 HISTORY, 🔍 FINDING, 🗂️ ARCHIVE. Status icons: ✅ Completed, "
         "⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created. Localize labels and codes. Prefer stable IDs; otherwise use "
-        "unique readable names, never UUIDs. Summarize changed fields and relevant `tapl_search_history`→`tapl_get_item` "
-        "detail. Finish before non-`tapl_*` calls or replies; surface errors, blockers, approvals, and input requests "
-        "immediately. Use prose otherwise."
+        "unique readable names, never UUIDs. Summarize changed fields; for HISTORY, summarize relevant matches and "
+        "`tapl_get_item` detail. Finish before non-`tapl_*` calls or replies; surface errors, blockers, approvals, and "
+        "input requests immediately. Use prose otherwise."
     )
 
 
