@@ -715,19 +715,20 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "For every `tapl_*` write or `tapl_search_history` result, output one three-row table",
+            "Batch consecutive `tapl_*` calls",
+            "After each batch, before any non-`tapl_*` call or response",
+            "emit one intermediate notice for its writes and `tapl_search_history` results",
+            "Use one ordered table",
             "`|TAPL| 상태 |`",
             "`|---|---:|`",
             "``| **✏️ PLAN-001** | **✅ `확정`** |``",
-            "After a blank line, add `- {concise summary}` items outside the table",
-            "Record icons: ⚙️ RUN and APPROVE, ✏️ PLAN, 📋 TASK, 🧠 HISTORY, 🔍 FINDING, 🗂️ ARCHIVE",
-            "Status icons: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
-            "Localize labels and codes",
-            "Prefer stable IDs; otherwise use unique readable names, never UUIDs",
-            "Summarize changed fields; for HISTORY, summarize relevant matches and `tapl_get_item` detail",
-            "Finish before non-`tapl_*` calls or replies",
-            "surface errors, blockers, approvals, and input requests immediately",
-            "Use prose otherwise",
+            "one `- {concise summary}` per row in the same order",
+            "Icons: ⚙️ RUN/APPROVE, ✏️ PLAN, 📋 TASK, 🧠 HISTORY, 🔍 FINDING, 🗂️ ARCHIVE",
+            "Statuses: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
+            "Localize labels/codes; use stable IDs or readable names, never UUIDs",
+            "HISTORY summarizes relevant matches and `tapl_get_item` detail",
+            "Surface errors, blockers, approvals, and input requests immediately",
+            "Final reports use prose",
         )
         self.assertLess(len(tapl_prompt.mcp_tool_result_display_guidance()), 800)
         for guidance in required_result_guidance:
