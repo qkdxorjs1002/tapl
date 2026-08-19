@@ -656,12 +656,13 @@ class TaplRuntimeTests(unittest.TestCase):
             "`tapl_apply_plan` promotes only record_mode when scope or risk grows.",
             "Planning must happen before implementation",
             "Finalize only after explicit user confirmation.",
-            "Before finalizing a plan",
+            "use request_user_input Tool early",
+            "continue with follow-ups until the plan is materially clear",
+            "batch up to three short questions",
             "Do not search, query history, or create plan/tasks solely to classify",
             "Record at most two short reasons",
             "uncertainty defaults to Standard",
-            "Bundle sequential implementation and its targeted verification in one task.",
-            "Split only independent",
+            "Split every independent edit, migration, and verification step.",
             "Execute planned tasks one at a time in task order",
             "exclusive owned_paths",
             "exact manifest execution_id",
@@ -689,6 +690,8 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertIn(policy, instructions)
         self.assertNotIn("very_detailed", instructions)
         self.assertNotIn("very_granular", instructions)
+        self.assertNotIn("one compact plan and task", instructions)
+        self.assertNotIn("1–3 coherent tasks", instructions)
 
     def test_mcp_result_table_guidance_stays_in_server_instructions(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions()
@@ -750,7 +753,7 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("TASK-003·004", instructions)
         self.assertNotIn("Immediately after each `tapl_*` MCP tool call", instructions)
 
-    def test_adaptive_validation_allows_compact_plans_and_coherent_task_bundles(self) -> None:
+    def test_adaptive_validation_rejects_coarse_single_task_and_accepts_split_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
             (workspace / ".git").mkdir(parents=True)
@@ -777,20 +780,34 @@ class TaplRuntimeTests(unittest.TestCase):
                 tapl_db.upsert_task(
                     conn,
                     task_id="TASK-001",
-                    title="Fix and verify local issue",
+                    title="Fix local issue",
                     status="Pending",
                     spec_id="PLAN-001",
                     goal="Fix the local issue.",
-                    action="Implement the change and run its targeted test.",
+                    action="Implement the change.",
+                    verification="The implementation is present.",
+                )
+                coarse_issues = tapl_validation.validate_plan_task_execute(conn)["issues"]
+
+                tapl_db.upsert_task(
+                    conn,
+                    task_id="TASK-002",
+                    title="Verify local issue",
+                    status="Pending",
+                    spec_id="PLAN-001",
+                    goal="Verify the local issue is fixed.",
+                    action="Run the targeted test.",
                     verification="The targeted test passes.",
                 )
-                issues = tapl_validation.validate_plan_task_execute(conn)["issues"]
+                split_issues = tapl_validation.validate_plan_task_execute(conn)["issues"]
             finally:
                 conn.close()
 
-        codes = {issue["code"] for issue in issues}
-        self.assertNotIn("plan_detail_too_sparse", codes)
-        self.assertNotIn("task_granularity_too_coarse", codes)
+        coarse_codes = {issue["code"] for issue in coarse_issues}
+        split_codes = {issue["code"] for issue in split_issues}
+        self.assertIn("task_granularity_too_coarse", coarse_codes)
+        self.assertNotIn("plan_detail_too_sparse", split_codes)
+        self.assertNotIn("task_granularity_too_coarse", split_codes)
 
         self.assertEqual(tapl_validation.validate_plan_detail([], required=False), [])
 

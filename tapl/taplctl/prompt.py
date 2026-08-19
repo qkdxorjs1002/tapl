@@ -796,17 +796,25 @@ def external_findings_guidance() -> str:
 
 def plan_detail_guidance() -> str:
     return (
-        "Plan depth follows the mode: Fast durable work gets one compact plan and task; Standard gets a concise "
-        "executable plan and 1–3 coherent tasks; Strict documents risk, interfaces, rollback, and validation boundaries. "
+        "Plan depth follows the mode: Fast durable work gets a compact executable plan; Standard gets a concise "
+        "executable plan; Strict documents risk, interfaces, rollback, and validation boundaries. "
         "Finalize only after explicit user confirmation."
     )
 
 
 def planning_approval_guidance() -> str:
+    guidance = (
+        "Before finalizing with `tapl_apply_plan`, use request_user_input Tool early for unclear planning methods "
+        "or material scope/risk/API/UX/data/compat/tradeoffs. Ask focused questions with 2-3 mutually exclusive "
+        "options and continue with follow-ups until "
+        "the plan is materially clear."
+    )
     return (
-        "Before finalizing a plan, ask only about a material unresolved scope, risk, compatibility, or tradeoff. "
-        "Batch known independent choices when the tool is available; otherwise state a safe assumption or ask one "
-        "concise question only when blocked."
+        f"{guidance} Use it only when available in the mode; "
+        "when multiple independent decisions are already known, batch up to three short questions in one "
+        "request_user_input call. Set autoResolutionMs=240000 whenever the tool contract allows auto-resolution; "
+        "omit it only when explicit user input is required before continuing; if unavailable, state assumptions "
+        "or ask one concise plain-text question only when blocked."
     )
 
 
@@ -1006,10 +1014,7 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
 
 
 def task_granularity_guidance() -> str:
-    return (
-        "Bundle sequential implementation and its targeted verification in one task. Split only independent work, "
-        "separate risk/ownership boundaries, migrations, or work that can block separately."
-    )
+    return "Split every independent edit, migration, and verification step."
 
 
 def task_required_fields() -> str:

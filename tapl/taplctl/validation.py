@@ -172,15 +172,25 @@ def validate_task_granularity(
     plans: list[dict[str, Any]],
     tasks: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Accept coherent task bundles; depth is selected by the workflow policy.
+    task_count = len([task for task in tasks if task_status(task) != "Skipped"])
+    if task_count == 0:
+        return []
 
-    A task may cover a tightly coupled implementation and its verification.  The
-    remaining validators still enforce task identifiers, content, dependencies,
-    execution contracts, and approval before execution.
-    """
+    plan_count = len(plans)
+    target = max(2, plan_count * 2)
+    severity = "error" if task_count <= 1 else "warning"
 
-    del plans, tasks
-    return []
+    if task_count >= target:
+        return []
+
+    return [
+        issue(
+            severity,
+            "task_granularity_too_coarse",
+            f"The granular task policy has {task_count} task(s) for {plan_count} plan item(s).",
+            task_granularity_remediation(),
+        )
+    ]
 
 
 def validate_plan_content(plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
