@@ -860,13 +860,14 @@ def custom_fields_guidance() -> str:
 def mcp_tool_result_display_guidance() -> str:
     return (
         "Batch consecutive `tapl_*` calls. After each batch, before any non-`tapl_*` call or response, emit one "
-        "intermediate notice for its writes and `tapl_search_history` results in call order. For each result, output a "
-        "separate table: `|TAPL| 상태 |`, `|---|---:|`, and ``| **✏️ PLAN-001** | **✅ `확정`** |``. After a blank "
-        "line, add its `- {concise summary}`, then continue with the next block. Icons: ⚙️ RUN/APPROVE, ✏️ PLAN, "
-        "📋 TASK, 🧠 HISTORY, 🔍 FINDING, 🗂️ ARCHIVE. Statuses: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, "
-        "📝 Created. Localize "
-        "labels/codes; use stable IDs or readable names, never UUIDs. HISTORY summarizes relevant matches and "
-        "`tapl_get_item` detail. Surface errors, blockers, approvals, and input requests immediately. Final reports use prose."
+        "short notice covering writes and history results. Use one line: "
+        "`<emoji> TAPL · <current activity or user-relevant outcome>`. Activity icons: 🔎 inspect/search, "
+        "📝 draft/record, 🛠️ change/execute, 🧪 verify/test. State icons: ✅ completed, ⚠️ warning, "
+        "🙋 input needed, 🔐 approval needed, ⛔ blocked, ❌ failed. Fold routine successes into the next activity; omit "
+        "tables, IDs, raw payloads, and per-call receipts. Report errors, blockers, approvals, and input requests immediately "
+        "with the reason and next action. Show scoped, secret-redacted raw output only when the user asks to run, test, "
+        "inspect, or show output, or to explain a failure. "
+        "Localize text. Final reports use prose."
     )
 
 

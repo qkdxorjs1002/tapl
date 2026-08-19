@@ -696,7 +696,7 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("one compact plan and task", instructions)
         self.assertNotIn("1–3 coherent tasks", instructions)
 
-    def test_mcp_result_table_guidance_stays_in_server_instructions(self) -> None:
+    def test_mcp_result_notice_guidance_stays_in_server_instructions(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions()
         injected_context = "\n".join(
             (
@@ -723,17 +723,16 @@ class TaplRuntimeTests(unittest.TestCase):
         required_result_guidance = (
             "Batch consecutive `tapl_*` calls",
             "After each batch, before any non-`tapl_*` call or response",
-            "emit one intermediate notice for its writes and `tapl_search_history` results in call order",
-            "For each result, output a separate table",
-            "`|TAPL| 상태 |`",
-            "`|---|---:|`",
-            "``| **✏️ PLAN-001** | **✅ `확정`** |``",
-            "add its `- {concise summary}`, then continue with the next block",
-            "Icons: ⚙️ RUN/APPROVE, ✏️ PLAN, 📋 TASK, 🧠 HISTORY, 🔍 FINDING, 🗂️ ARCHIVE",
-            "Statuses: ✅ Completed, ⏩ Skipped, ⛔️ Blocked, ♻️ InProgress, 📝 Created",
-            "Localize labels/codes; use stable IDs or readable names, never UUIDs",
-            "HISTORY summarizes relevant matches and `tapl_get_item` detail",
-            "Surface errors, blockers, approvals, and input requests immediately",
+            "emit one short notice covering writes and history results",
+            "`<emoji> TAPL · <current activity or user-relevant outcome>`",
+            "Activity icons: 🔎 inspect/search, 📝 draft/record, 🛠️ change/execute, 🧪 verify/test",
+            "State icons: ✅ completed, ⚠️ warning, 🙋 input needed, 🔐 approval needed, ⛔ blocked, ❌ failed",
+            "Fold routine successes into the next activity",
+            "omit tables, IDs, raw payloads, and per-call receipts",
+            "with the reason and next action",
+            "Show scoped, secret-redacted raw output only when the user asks to run, test, inspect, or show output",
+            "or to explain a failure",
+            "Localize text",
             "Final reports use prose",
         )
         self.assertLess(len(tapl_prompt.mcp_tool_result_display_guidance()), 800)
@@ -753,6 +752,9 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("never put summaries", instructions)
         self.assertNotIn("• TAPL", instructions)
         self.assertNotIn("record/status headings", instructions)
+        self.assertNotIn("For each result, output a separate table", instructions)
+        self.assertNotIn("`|TAPL| 상태 |`", instructions)
+        self.assertNotIn("per-call receipt rows", instructions)
         self.assertNotIn("TASK-003·004", instructions)
         self.assertNotIn("Immediately after each `tapl_*` MCP tool call", instructions)
 
