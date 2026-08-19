@@ -208,18 +208,46 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
             decision="approved", prompt="Execute parallel tasks", source="explicit_user"
         )
 
-        manifest = app.dispatch_tasks(["TASK-001", "TASK-002"], batch_id="BATCH-001")
-        executions = {row["task_id"]: row["execution_id"] for row in manifest["executions"]}
+        execution_metadata = {
+            "TASK-001": {
+                "executor_ref": "agent-a",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "xhigh",
+            },
+            "TASK-002": {
+                "executor_ref": "agent-b",
+                "model": "gpt-5.6-terra",
+                "reasoning_effort": "high",
+            },
+        }
+        manifest = app.dispatch_tasks(
+            ["TASK-001", "TASK-002"],
+            batch_id="BATCH-001",
+            execution_metadata=execution_metadata,
+        )
+        executions = {row["task_id"]: row for row in manifest["executions"]}
         assert set(executions) == {"TASK-001", "TASK-002"}
 
-        for task_id, execution_id in executions.items():
+        for task_id, execution in executions.items():
+            metadata = execution_metadata[task_id]
+            assert execution["model"] == metadata["model"]
+            assert execution["reasoning_effort"] == metadata["reasoning_effort"]
             receipt = app.settle_task(
                 task_id,
                 status="Completed",
-                execution_id=execution_id,
+                execution_id=execution["execution_id"],
                 verification=f"Verified {task_id}",
                 result=f"Completed {task_id}",
+                custom_fields={
+                    "SubAgent Model": (
+                        f"{metadata['model']} ({metadata['reasoning_effort']})"
+                    )
+                },
             )
-            assert receipt["settled_execution_id"] == execution_id
+            assert receipt["settled_execution_id"] == execution["execution_id"]
 
-        assert app.get_status(full=True)["active_batches"] == []
+        status = app.get_status(full=True)
+        assert status["active_batches"] == []
+        tasks = {task["stable_id"]: task for task in status["tasks"]}
+        assert tasks["TASK-001"]["custom_fields"]["SubAgent Model"] == "gpt-5.6-sol (xhigh)"
+        assert tasks["TASK-002"]["custom_fields"]["SubAgent Model"] == "gpt-5.6-terra (high)"
