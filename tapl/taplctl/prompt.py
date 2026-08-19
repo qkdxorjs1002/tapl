@@ -859,14 +859,14 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "Batch consecutive `tapl_*` calls. After each batch, before any non-`tapl_*` call or response, emit one "
-        "short notice covering writes and history results. Use one line: "
-        "`<emoji> TAPL · <current activity or user-relevant outcome>`. Activity icons: 🔎 inspect/search, "
-        "📝 draft/record, 🛠️ change/execute, 🧪 verify/test. State icons: ✅ completed, ⚠️ warning, "
-        "🙋 input needed, 🔐 approval needed, ⛔ blocked, ❌ failed. Fold routine successes into the next activity; omit "
-        "tables, IDs, raw payloads, and per-call receipts. Report errors, blockers, approvals, and input requests immediately "
-        "with the reason and next action. Show scoped, secret-redacted raw output only when the user asks to run, test, "
-        "inspect, or show output, or to explain a failure. "
+        "Do not report every `tapl_*` call or result. On TAPL stage changes, emit at most one notice: "
+        "`<emoji> **<tapl-kind>** · <current activity>`, e.g. `🧪 **TASK** · 전체 테스트 실행 중`. Use the TAPL workflow "
+        "kind: **RUN**, **PLAN**, **TASK**, **HISTORY**, **FINDING**, **APPROVAL**, or **ARCHIVE**. Normal notices: one "
+        "clause, 60 characters, progressive, current activity only. "
+        "Omit completed results, counts, rationale, lists, "
+        "sequences, next steps, receipts, tables, IDs, statuses, payloads, and summaries; never echo returned data. Icons: "
+        "🔎 inspect, 📝 plan, 🛠️ execute, 🧪 verify. Combine consecutive calls. Errors, blockers, approvals, or input requests "
+        "may include reason and next action. "
         "Localize text. Final reports use prose."
     )
 
