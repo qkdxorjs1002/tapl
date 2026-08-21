@@ -48,6 +48,9 @@ jobs:
   release:
     name: Build and publish release
     needs: windows-installer-preflight
+    outputs:
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      version: ${{ steps.version.outputs.version }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -443,6 +446,15 @@ jobs:
           asyncio.run(main())
           PY
 
+      - name: Upload stable VSIX for Marketplace publication
+        if: steps.version.outputs.prerelease == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-marketplace-${{ steps.version.outputs.version }}
+          path: release-dist/tapl-workflow-viewer-${{ steps.version.outputs.version }}.vsix
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -543,3 +555,68 @@ jobs:
           fi
           git -C homebrew-tap commit -m "taplctl ${RELEASE_TAG} (${release_channel})"
           git -C homebrew-tap push
+
+  marketplace:
+    name: Publish stable VS Code extension
+    needs: release
+    if: needs.release.outputs.prerelease == 'false'
+    environment: vscode-marketplace
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Require Marketplace Entra configuration
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for variable in AZURE_CLIENT_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID; do
+            if [[ -z "${!variable}" ]]; then
+              echo "Set ${variable} in the vscode-marketplace GitHub environment." >&2
+              exit 1
+            fi
+          done
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install VS Code extension publisher
+        working-directory: vscode-extension
+        run: npm install --package-lock=false --ignore-scripts
+
+      - name: Download validated VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: vscode-marketplace-${{ needs.release.outputs.version }}
+          path: release-dist
+
+      - name: Log in to Azure with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Publish VS Code extension to Marketplace
+        working-directory: vscode-extension
+        env:
+          TAG_VERSION: ${{ needs.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm exec -- vsce publish \
+            --azure-credential \
+            --packagePath "../release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix" \
+            --skip-duplicate
