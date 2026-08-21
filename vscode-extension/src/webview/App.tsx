@@ -22,6 +22,7 @@ import type {
   TaplSearchPayload,
   TaplSearchResult,
   TaplStatus,
+  TaplWorkflowRun,
   WebviewCommand,
   WebviewView
 } from './types';
@@ -205,6 +206,7 @@ function OverviewView({
             </div>
             <h1 className="m-0 text-3xl font-semibold">{t('appTitle')}</h1>
             <p className="tapl-hero-summary">{conciseText(activeSummary, 220)}</p>
+            <RunClassification run={status.active_run} />
             <div className="tapl-hero-pills">
               <Pill label="Pending" value={pendingCount} />
               <Pill label="In Progress" value={activeCount} />
@@ -947,6 +949,31 @@ function RunFocus({ status, counts }: { status: TaplStatus; counts: Record<strin
   );
 }
 
+function RunClassification({ run }: { run: TaplWorkflowRun | null }): JSX.Element | null {
+  const { t } = useI18n();
+  if (!run) {
+    return null;
+  }
+  const fields = [
+    [t('workType'), run.work_type],
+    [t('workflowMode'), run.workflow_mode],
+    [t('recordMode'), run.record_mode]
+  ].filter((field): field is [string, string] => Boolean(field[1]));
+  if (!fields.length) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap gap-2" aria-label={t('classification')}>
+      {fields.map(([label, value]) => (
+        <span key={label} className="badge badge-outline badge-sm gap-1">
+          <span className="tapl-muted">{label}</span>
+          <strong>{formatClassificationValue(value)}</strong>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function FocusRow({ label, value, detail }: { label: string; value: string; detail?: string }): JSX.Element {
   return (
     <div className="tapl-detail-row tapl-focus-row">
@@ -1212,6 +1239,14 @@ function conciseText(value: unknown, maxLength: number): string {
     return text;
   }
   return `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function formatClassificationValue(value: string): string {
+  return value
+    .split(/[_-]/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
 }
 
 function formatTimestamp(value: unknown): string {

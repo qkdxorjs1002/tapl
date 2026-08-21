@@ -638,7 +638,7 @@ class TaplRuntimeTests(unittest.TestCase):
             subagents=tapl_config.SubagentsConfig()
         )
 
-        self.assertLess(len(instructions), 8_500)
+        self.assertLess(len(instructions), 8_800)
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",
             "before execution approval",
@@ -728,6 +728,10 @@ class TaplRuntimeTests(unittest.TestCase):
             "Use the TAPL workflow kind",
             "**RUN**, **PLAN**, **TASK**, **HISTORY**, **FINDING**, **APPROVAL**, or **ARCHIVE**",
             "Normal notices: one clause, 60 characters, progressive, current activity only",
+            "After `tapl_summarize_run`, emit one localized classification notice",
+            "`🔎 **RUN** · 분류: Implementation · Standard · Planned`",
+            "work_type, workflow_mode, and derived record_mode",
+            "do not repeat it unless the classification changes",
             "Omit completed results, counts, rationale, lists, sequences, next steps, receipts, tables, IDs, statuses, payloads, and summaries",
             "never echo returned data",
             "Icons: 🔎 inspect, 📝 plan, 🛠️ execute, 🧪 verify",
@@ -736,7 +740,7 @@ class TaplRuntimeTests(unittest.TestCase):
             "Localize text",
             "Final reports use prose",
         )
-        self.assertLess(len(tapl_prompt.mcp_tool_result_display_guidance()), 800)
+        self.assertLess(len(tapl_prompt.mcp_tool_result_display_guidance()), 1_100)
         for guidance in required_result_guidance:
             self.assertIn(guidance, instructions)
             self.assertNotIn(guidance, injected_context)

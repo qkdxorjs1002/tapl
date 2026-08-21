@@ -6,8 +6,19 @@ export type TaplJsonValue = string | number | boolean | null | TaplJsonValue[] |
   [key: string]: TaplJsonValue;
 };
 
+export interface TaplWorkflowRun {
+  id?: string;
+  slug?: string;
+  status?: string;
+  request_summary?: string;
+  result_summary?: string;
+  work_type?: string;
+  workflow_mode?: string;
+  record_mode?: string;
+}
+
 export interface TaplStatus {
-  active_run: Record<string, unknown> | null;
+  active_run: TaplWorkflowRun | null;
   task_counts: Record<string, number>;
   incomplete_tasks: number;
   plans: TaplItem[];
