@@ -608,6 +608,18 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
 
+      - name: Show authenticated Marketplace identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          az rest \
+            --method get \
+            --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --query '{id:id,displayName:displayName}' \
+            --output json
+
       - name: Publish VS Code extension to Marketplace
         working-directory: vscode-extension
         env:
