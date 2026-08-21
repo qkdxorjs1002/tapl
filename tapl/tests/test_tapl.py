@@ -671,8 +671,10 @@ class TaplRuntimeTests(unittest.TestCase):
             "not the requested pair",
             "`서브 에이전트 모델`/`SubAgent Model`: `gpt-5.6-sol (xhigh)`",
             "omit it when no SubAgent ran",
-            "Delegate only when at least two genuinely independent, non-overlapping parallel tracks",
-            "startup and coordination cost.",
+            "parallel SubAgents are expected to improve net efficiency",
+            "aggregate root/SubAgent token use",
+            "wall-clock completion time",
+            "without materially worsening the other",
             "execution approval",
             "only active work is In Progress",
             "Reclassify upward only when scope, risk, or uncertainty grows",
@@ -851,6 +853,18 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertIn("dispatch, ownership, model-selection, and settlement rules", guidance)
         self.assertIn("scope, safety, permission, and sandbox constraints", guidance)
         self.assertNotIn("For this TAPL run", guidance)
+
+    def test_subagent_delegation_uses_net_efficiency_gain(self) -> None:
+        guidance = tapl_prompt.subagent_delegation_guidance(
+            tapl_config.SubagentsConfig()
+        )
+
+        self.assertIn("improve net efficiency", guidance)
+        self.assertIn("aggregate root/SubAgent token use", guidance)
+        self.assertIn("wall-clock completion time", guidance)
+        self.assertIn("without materially worsening the other", guidance)
+        self.assertNotIn("at least two genuinely independent", guidance)
+        self.assertIn("Atomically dispatch", guidance)
 
     def test_lightweight_help_covers_all_fast_non_durable_work(self) -> None:
         work_type_help = tapl_prompt.field_help("run", "work_type")

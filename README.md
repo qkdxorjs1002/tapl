@@ -354,6 +354,13 @@ allowlist in MCP instructions. The runtime may use only supported pairs in that
 allowlist. Set `enabled = false` to omit TAPL's delegation guidance; this does not
 remove delegation instructions from another source such as `AGENTS.md`.
 
+Delegation is based on expected net efficiency, not task count alone. TAPL asks the
+root to compare total token consumption across the root and all SubAgents and
+wall-clock completion time after spawn, context-transfer, coordination, and result
+integration overhead. It parallelizes when one or both improve without materially
+worsening the other. Independence, exclusive owned paths, atomic dispatch, and exact
+execution-id settlement remain required safety conditions.
+
 Plan and task policy is fixed: executable work uses detailed planning, explicit
 plan confirmation, independently split tasks, and recorded approval before
 durable edits.

@@ -314,6 +314,12 @@ enabled = true
 `enabled = false`로 TAPL의 delegation guidance를 빼도 `AGENTS.md` 같은 다른 source의
 delegation instruction은 제거되지 않습니다.
 
+위임은 task 개수 자체가 아니라 예상 순효율을 기준으로 판단합니다. root와 모든
+SubAgent의 총 토큰 소모와 wall-clock 완료 시간을 spawn, context 전달, 조율, 결과 통합
+overhead까지 포함해 비교하고, 한 축 이상이 개선되면서 다른 축이 유의미하게 악화되지
+않을 때 병렬화합니다. 독립성, 배타적 owned paths, 원자적 dispatch, 정확한 execution-id
+정산은 그대로 필요한 안전 조건입니다.
+
 plan/task policy는 고정입니다. 실행 작업은 상세 plan, 명시적인 plan confirmation,
 독립적으로 나뉜 task, durable edit 전의 기록된 approval을 사용합니다.
 

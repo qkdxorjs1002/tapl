@@ -1008,8 +1008,10 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
 
     return (
         "### SubAgent Delegation\n\n"
-        "- Delegate only when at least two genuinely independent, non-overlapping parallel tracks have enough benefit to "
-        "outweigh startup and coordination cost. Otherwise the root executes. The root retains TAPL writes and cross-task decisions.\n"
+        "- Delegate only when parallel SubAgents are expected to improve net efficiency after spawn/coordination "
+        "overhead. Compare aggregate root/SubAgent token use and wall-clock completion time; use "
+        "them when one or both improve without materially worsening the other. Otherwise root executes and retains "
+        "TAPL writes and cross-task decisions.\n"
         "- For delegation, choose the most efficient pair supported by both this configuration and the current runtime:\n"
         f"{available_models}\n"
         "- Atomically dispatch, concurrently spawn one SubAgent per manifest execution, constrain owned_paths, settle by "
