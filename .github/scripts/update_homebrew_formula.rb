@@ -53,6 +53,8 @@ RUNTIME_BEGIN = "# taplctl-mcp-runtime-begin"
 RUNTIME_END = "# taplctl-mcp-runtime-end"
 SMOKE_BEGIN = "# taplctl-mcp-smoke-begin"
 SMOKE_END = "# taplctl-mcp-smoke-end"
+SERVICE_RESTART_BEGIN = "# taplctl-service-restart-begin"
+SERVICE_RESTART_END = "# taplctl-service-restart-end"
 PRE_FORMULA_TEMPLATE = ENV["PRE_FORMULA_TEMPLATE"]
 PEP_440_VERSION_PATTERN = '\\d+\\.\\d+\\.\\d+(?:(?:a|b|rc)\\d+)?'
 FORMULA_CONFLICTS = {
@@ -101,6 +103,51 @@ def upsert_viewer_service_block(lines, indent)
 
   insert_index = install_end + 1
   block = ["\n", *viewer_service_block(indent)]
+  block << "\n" unless lines[insert_index]&.match?(/^\s*$/)
+  lines.insert(insert_index, *block)
+end
+
+def running_service_restart_block(indent)
+  [
+    "#{indent}#{SERVICE_RESTART_BEGIN}\n",
+    "#{indent}def post_install\n",
+    "#{indent}  if OS.mac?\n",
+    "#{indent}    quiet_system \"/bin/launchctl\", \"kill\", \"SIGTERM\", \"gui/\#{Process.uid}/\#{plist_name}\"\n",
+    "#{indent}  elsif OS.linux?\n",
+    "#{indent}    systemctl = which(\"systemctl\")\n",
+    "#{indent}    if systemctl\n",
+    "#{indent}      quiet_system systemctl, \"--user\", \"daemon-reload\"\n",
+    "#{indent}      quiet_system systemctl, \"--user\", \"try-restart\", service_name\n",
+    "#{indent}    end\n",
+    "#{indent}  end\n",
+    "#{indent}end\n",
+    "#{indent}#{SERVICE_RESTART_END}\n",
+  ]
+end
+
+def upsert_running_service_restart_block(lines, indent)
+  restart_lines = running_service_restart_block(indent)
+  start_index = lines.index { |line| line.strip == SERVICE_RESTART_BEGIN }
+  end_index = lines.index { |line| line.strip == SERVICE_RESTART_END }
+  if start_index || end_index
+    complete_markers = start_index && end_index && end_index >= start_index
+    raise "Incomplete marked block #{SERVICE_RESTART_BEGIN}" unless complete_markers
+
+    lines[start_index..end_index] = restart_lines
+    return
+  end
+
+  existing_post_install = lines.index { |line| line.match?(/^#{Regexp.escape(indent)}def post_install\s*$/) }
+  raise "Refusing to overwrite unmanaged post_install block" if existing_post_install
+
+  install_start = lines.index { |line| line.match?(/^#{Regexp.escape(indent)}def install\s*$/) }
+  raise "Could not find install block for service restart insertion" unless install_start
+
+  install_end = find_block_end(lines, install_start, indent)
+  raise "Could not find end of install block for service restart insertion" unless install_end
+
+  insert_index = install_end + 1
+  block = ["\n", *restart_lines]
   block << "\n" unless lines[insert_index]&.match?(/^\s*$/)
   lines.insert(insert_index, *block)
 end
@@ -282,6 +329,7 @@ def update_formula(file, version, wheel_url, wheel_sha256, runtime_assets, formu
   raise "Could not find end of install block in #{file}" unless install_end
 
   lines[install_start..install_end] = install_block(indent)
+  upsert_running_service_restart_block(lines, indent)
   upsert_viewer_service_block(lines, indent)
 
   test_start = lines.index { |line| line.match?(/^#{Regexp.escape(indent)}test\s+do\s*$/) }

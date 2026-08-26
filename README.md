@@ -128,6 +128,12 @@ brew install taplctl@pre
 
 Homebrew installs pinned dependencies from release-hosted wheel bundles and does not resolve packages from PyPI during installation.
 
+When `taplctl`, `taplctl-semantic`, or `taplctl@pre` (the `taplctl-pre` formula)
+is upgraded or reinstalled, the formula attempts to restart that formula's TAPL
+viewer service only when it was already running. A stopped or unregistered
+service, and a fresh install, are left stopped. This does not affect a manually
+started standalone `searchd` or an MCP stdio process.
+
 <details>
 <summary>Linux standalone installer</summary>
 

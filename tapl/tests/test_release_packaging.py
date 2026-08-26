@@ -190,6 +190,7 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
             self.assertIn('assert_path_exists bin/"tapl-hook"', formula)
             self.assertIn('from taplctl.mcp_server import create_server', formula)
             self.assertIn('run [opt_bin/"taplctl", "viewer"]', formula)
+            self._assert_running_service_restart_contract(formula)
 
         self.assertEqual(
             self._conflict_lines(base_after_first),
@@ -218,6 +219,50 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
     @staticmethod
     def _conflict_lines(formula: str) -> list[str]:
         return [line.strip() for line in formula.splitlines() if line.lstrip().startswith("conflicts_with ")]
+
+    def _assert_running_service_restart_contract(self, formula: str) -> None:
+        self.assertEqual(formula.count("# taplctl-service-restart-begin"), 1)
+        self.assertEqual(formula.count("# taplctl-service-restart-end"), 1)
+        self.assertEqual(formula.count("def post_install"), 1)
+        self.assertIn(
+            'quiet_system "/bin/launchctl", "kill", "SIGTERM", "gui/#{Process.uid}/#{plist_name}"',
+            formula,
+        )
+        self.assertIn('quiet_system systemctl, "--user", "daemon-reload"', formula)
+        self.assertIn(
+            'quiet_system systemctl, "--user", "try-restart", service_name',
+            formula,
+        )
+
+    def test_updater_rejects_incomplete_service_restart_marker(self) -> None:
+        self.base_formula.write_text(
+            self.BASE_FORMULA.replace(
+                "  def install\n",
+                "  # taplctl-service-restart-begin\n\n  def install\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = self._run_updater()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Incomplete marked block # taplctl-service-restart-begin", result.stderr)
+
+    def test_updater_rejects_unmanaged_post_install(self) -> None:
+        self.base_formula.write_text(
+            self.BASE_FORMULA.replace(
+                "  service do\n",
+                "  def post_install\n  end\n\n  service do\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = self._run_updater()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Refusing to overwrite unmanaged post_install block", result.stderr)
 
     def _run_updater(self) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()

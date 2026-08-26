@@ -75,6 +75,7 @@ class HomebrewPrereleaseFormulaUpdaterTests(unittest.TestCase):
         self.assertIn('bin.install_symlink libexec/"bin/tapl-mcp"', formula_after_first)
         self.assertIn('bin.install_symlink libexec/"bin/tapl-hook"', formula_after_first)
         self.assertIn('assert_path_exists bin/"tapl-hook"', formula_after_first)
+        self._assert_running_service_restart_contract(formula_after_first)
         self.assertTrue(self.pre_alias.is_symlink())
         self.assertEqual(self.pre_alias.readlink(), Path("../Formula/taplctl-pre.rb"))
 
@@ -83,6 +84,20 @@ class HomebrewPrereleaseFormulaUpdaterTests(unittest.TestCase):
         self.assertEqual(self.pre_formula.read_text(encoding="utf-8"), formula_after_first)
         self.assertTrue(self.pre_alias.is_symlink())
         self.assertEqual(self.pre_alias.readlink(), Path("../Formula/taplctl-pre.rb"))
+
+    def _assert_running_service_restart_contract(self, formula: str) -> None:
+        self.assertEqual(formula.count("# taplctl-service-restart-begin"), 1)
+        self.assertEqual(formula.count("# taplctl-service-restart-end"), 1)
+        self.assertEqual(formula.count("def post_install"), 1)
+        self.assertIn(
+            'quiet_system "/bin/launchctl", "kill", "SIGTERM", "gui/#{Process.uid}/#{plist_name}"',
+            formula,
+        )
+        self.assertIn('quiet_system systemctl, "--user", "daemon-reload"', formula)
+        self.assertIn(
+            'quiet_system systemctl, "--user", "try-restart", service_name',
+            formula,
+        )
 
     def test_older_release_does_not_replace_prerelease_formula_metadata(self) -> None:
         created = self._run_updater("2.0.0b1")

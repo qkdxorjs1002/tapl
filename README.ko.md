@@ -128,6 +128,12 @@ brew install taplctl@pre
 
 Homebrew는 release-hosted wheel bundle의 고정 dependency를 설치하며, 설치 중 PyPI에서 package를 해석하지 않습니다.
 
+`taplctl`, `taplctl-semantic`, `taplctl@pre`(`taplctl-pre` formula)를 upgrade하거나
+reinstall하면 해당 formula의 TAPL viewer service가 이미 실행 중일 때만 formula가
+자동 재시작을 시도합니다. 중지됐거나 등록되지 않은 service와 fresh install은
+계속 중지된 상태로 둡니다. 수동으로 시작한 standalone `searchd`나 MCP stdio
+process에는 적용되지 않습니다.
+
 <details>
 <summary>Linux 독립형 installer</summary>
 
