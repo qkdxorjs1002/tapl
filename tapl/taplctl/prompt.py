@@ -849,11 +849,15 @@ def structured_record_guidance(subject: str = "plan and task content") -> str:
 
 def custom_fields_guidance() -> str:
     return (
-        "Use `custom_fields` only for durable, searchable non-standard metadata. Put shared facts on the plan and "
-        "task-specific facts on its task; preserve keys/types, avoid duplicates or transient progress, and use top-level "
-        "null only to delete a duplicate. For delegated tasks, the root records the actual runtime model/reasoning "
-        "effort—not the requested pair—at settlement, e.g. `서브 에이전트 모델`/`SubAgent Model`: "
-        "`gpt-5.6-sol (xhigh)`; omit it when no SubAgent ran."
+        "Use `custom_fields` for durable, searchable non-standard metadata. Record user-relevant facts not carried by "
+        "standard fields when they remain true after work and affect result interpretation, later decisions, or operation: "
+        "user impact, constraints, compatibility, remaining risks, unverified scope, or follow-up actions. Group related facts "
+        "under `사용자 참고사항`/`User Notes` as concise entries with `종류`/`category`, `내용`/`content`, and "
+        "`영향`/`impact`. Put shared facts on the plan and "
+        "task-specific facts on its task; preserve keys/types, avoid duplicates/transient progress, and use top-level null only "
+        "to delete a duplicate. For delegated tasks, the root records the actual runtime model/reasoning effort—not the "
+        "requested pair—at settlement, e.g. `서브 에이전트 모델`/`SubAgent Model`: `gpt-5.6-sol (xhigh)`; omit it when no "
+        "SubAgent ran."
     )
 
 

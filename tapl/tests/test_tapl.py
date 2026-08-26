@@ -638,7 +638,7 @@ class TaplRuntimeTests(unittest.TestCase):
             subagents=tapl_config.SubagentsConfig()
         )
 
-        self.assertLess(len(instructions), 8_800)
+        self.assertLess(len(instructions), 9_200)
         for strategy in tapl_config.SUBAGENT_STRATEGIES:
             with self.subTest(strategy=strategy):
                 self.assertLess(
@@ -647,7 +647,7 @@ class TaplRuntimeTests(unittest.TestCase):
                             subagents=tapl_config.SubagentsConfig(strategy=strategy)
                         )
                     ),
-                    8_800,
+                    9_200,
                 )
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",
@@ -656,6 +656,13 @@ class TaplRuntimeTests(unittest.TestCase):
             "Do not commit, push, rebase, reset, discard changes",
             "Never overwrite user changes",
             "current-state snapshots, not logs",
+            "Record user-relevant facts not carried by standard fields",
+            "remain true after work and affect result interpretation, later decisions, or operation",
+            "user impact, constraints, compatibility, remaining risks, unverified scope, or follow-up actions",
+            "`사용자 참고사항`/`User Notes` as concise entries",
+            "`종류`/`category`, `내용`/`content`, and `영향`/`impact`",
+            "Put shared facts on the plan and task-specific facts on its task",
+            "preserve keys/types, avoid duplicates/transient progress",
             "Classify once from the request and readily available context: Answer, Investigation, Analysis, Planning, Implementation, or Mixed.",
             "First choose Strict",
             "Otherwise choose Fast",
