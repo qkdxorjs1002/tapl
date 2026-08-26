@@ -303,22 +303,38 @@ install에 생성됩니다. upgrade 때 default overwrite 또는 누락 key merg
 ```toml
 [subagents]
 enabled = true
+# conservative는 순효율을 입증하고, balanced(기본값)는 적격한 비사소 작업 그룹을,
+# aggressive는 작은 작업을 포함한 모든 적격 그룹을 위임합니다.
+strategy = "balanced"
 
 [subagents.models]
 "gpt-5.6-sol" = ["xhigh", "max"]
 "gpt-5.6-terra" = ["high", "xhigh", "max"]
+"gpt-5.6-luna" = ["high", "xhigh"]
 ```
 
 활성화하면 TAPL은 delegation policy와 model/reasoning allowlist를 MCP instruction에
 포함합니다. runtime은 이 allowlist 중 실제 지원하는 pair만 사용할 수 있습니다.
-`enabled = false`로 TAPL의 delegation guidance를 빼도 `AGENTS.md` 같은 다른 source의
-delegation instruction은 제거되지 않습니다.
 
-위임은 task 개수 자체가 아니라 예상 순효율을 기준으로 판단합니다. root와 모든
-SubAgent의 총 토큰 소모와 wall-clock 완료 시간을 spawn, context 전달, 조율, 결과 통합
-overhead까지 포함해 비교하고, 한 축 이상이 개선되면서 다른 축이 유의미하게 악화되지
-않을 때 병렬화합니다. 독립성, 배타적 owned paths, 원자적 dispatch, 정확한 execution-id
-정산은 그대로 필요한 안전 조건입니다.
+`strategy`는 runtime이 얼마나 적극적으로 위임할지 결정합니다.
+
+- `balanced`(기본값)는 최소 두 개의 비사소하고 dependency-ready인 task로 이루어진
+  적격 그룹을 병렬 SubAgent에 기본 위임합니다. 각 task는 배타적이고 서로 겹치지 않는
+  `owned_paths`를 가져야 합니다. trivial 작업, 공유 file/state 또는 결정, 의존 task,
+  또는 overhead가 명백히 큰 경우에는 root가 실행합니다.
+- `conservative`는 순효율 입증 기준을 유지합니다. spawn, context 전달, 조율, 결과 통합
+  overhead를 포함했을 때 root/SubAgent 전체 토큰 사용량 또는 wall-clock 시간이 개선되고
+  다른 축이 유의미하게 악화되지 않을 때만 위임합니다.
+- `aggressive`는 작은 task를 포함해, 배타적이고 서로 겹치지 않는 `owned_paths`를 가진
+  최소 두 개의 dependency-ready task로 이루어진 모든 적격 그룹을 우선 위임합니다.
+  delegation safety contract를 충족할 수 없을 때만 root가 실행합니다.
+
+어떤 strategy에서도 execution approval, dependency readiness, 배타적이고 겹치지 않는
+소유 범위, 원자적 dispatch, 정확한 `execution_id`를 사용한 정산이 필요합니다. TAPL
+write와 task 간 결정은 root만 담당합니다. 보수적인 동작으로 되돌리려면
+`strategy = "conservative"`로 설정하세요. TAPL의 delegation guidance를 완전히 빼려면
+`enabled = false`로 설정할 수 있지만, `AGENTS.md` 같은 다른 source의 delegation
+instruction까지 제거하지는 않습니다.
 
 plan/task policy는 고정입니다. 실행 작업은 상세 plan, 명시적인 plan confirmation,
 독립적으로 나뉜 task, durable edit 전의 기록된 approval을 사용합니다.

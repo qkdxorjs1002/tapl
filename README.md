@@ -343,23 +343,41 @@ runtime config policy explicitly.
 ```toml
 [subagents]
 enabled = true
+# conservative proves net efficiency; balanced (the default) delegates eligible
+# non-trivial groups; aggressive delegates every eligible group, including small tasks.
+strategy = "balanced"
 
 [subagents.models]
 "gpt-5.6-sol" = ["xhigh", "max"]
 "gpt-5.6-terra" = ["high", "xhigh", "max"]
+"gpt-5.6-luna" = ["high", "xhigh"]
 ```
 
 When enabled, TAPL includes its delegation policy and configured model/reasoning
 allowlist in MCP instructions. The runtime may use only supported pairs in that
-allowlist. Set `enabled = false` to omit TAPL's delegation guidance; this does not
-remove delegation instructions from another source such as `AGENTS.md`.
+allowlist.
 
-Delegation is based on expected net efficiency, not task count alone. TAPL asks the
-root to compare total token consumption across the root and all SubAgents and
-wall-clock completion time after spawn, context-transfer, coordination, and result
-integration overhead. It parallelizes when one or both improve without materially
-worsening the other. Independence, exclusive owned paths, atomic dispatch, and exact
-execution-id settlement remain required safety conditions.
+The `strategy` setting controls how actively the runtime delegates:
+
+- `balanced` (the default) delegates eligible groups of at least two non-trivial,
+  dependency-ready tasks to parallel SubAgents when each task has exclusive,
+  non-overlapping `owned_paths`. Root execution remains appropriate for trivial
+  work, shared files/state or decisions, dependent tasks, or clearly excessive
+  overhead.
+- `conservative` preserves the net-efficiency proof: delegate only when expected
+  aggregate root/SubAgent token use or wall-clock time improves without materially
+  worsening the other after spawn, context-transfer, coordination, and result
+  integration overhead.
+- `aggressive` prefers every eligible group of at least two dependency-ready tasks
+  with exclusive, non-overlapping `owned_paths`, including small tasks. Root keeps
+  execution only when the delegation safety contract cannot be met.
+
+Every strategy still requires execution approval, dependency readiness, exclusive
+non-overlapping ownership, atomic dispatch, and settlement by the exact
+`execution_id`; the root retains TAPL writes and cross-task decisions. To roll back
+to the conservative behavior, set `strategy = "conservative"`. Set `enabled = false`
+to omit TAPL's delegation guidance entirely; this does not remove delegation
+instructions from another source such as `AGENTS.md`.
 
 Plan and task policy is fixed: executable work uses detailed planning, explicit
 plan confirmation, independently split tasks, and recorded approval before

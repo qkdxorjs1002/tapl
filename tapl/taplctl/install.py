@@ -581,6 +581,7 @@ searchd_model_idle_timeout_seconds = {config.DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_
 
 [subagents]
 enabled = true
+strategy = "{config.DEFAULT_SUBAGENT_STRATEGY}"
 
 [subagents.models]
 "gpt-5.6-sol" = ["xhigh", "max"]

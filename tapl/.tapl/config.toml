@@ -25,6 +25,10 @@ searchd_model_idle_timeout_seconds = 1800
 # Enable subagent delegation for eligible tasks.
 enabled = true
 
+# conservative proves net efficiency; balanced prefers eligible non-trivial groups;
+# aggressive prefers every eligible group, including small tasks.
+strategy = "balanced"
+
 # Each model maps to the reasoning-effort levels available for delegation.
 [subagents.models]
 "gpt-5.6-sol" = ["xhigh", "max"]

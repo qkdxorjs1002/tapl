@@ -19,6 +19,7 @@ DEFAULT_SEARCH_MAX_RESULTS = 12
 DEFAULT_SEMANTIC_PROVIDER = "auto"
 DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
 DEFAULT_SUBAGENTS_ENABLED = True
+DEFAULT_SUBAGENT_STRATEGY = "balanced"
 DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("gpt-5.6-sol", ("xhigh", "max")),
     ("gpt-5.6-terra", ("high", "xhigh", "max")),
@@ -27,6 +28,7 @@ DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
+SUBAGENT_STRATEGIES = ("conservative", "balanced", "aggressive")
 
 
 @dataclass(frozen=True)
@@ -78,11 +80,13 @@ def default_subagent_models() -> tuple[SubagentModelConfig, ...]:
 @dataclass(frozen=True)
 class SubagentsConfig:
     enabled: bool = DEFAULT_SUBAGENTS_ENABLED
+    strategy: str = DEFAULT_SUBAGENT_STRATEGY
     models: tuple[SubagentModelConfig, ...] = field(default_factory=default_subagent_models)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
+            "strategy": self.strategy,
             "models": {
                 model.name: list(model.reasoning_efforts)
                 for model in self.models
@@ -226,6 +230,15 @@ def load(
         ),
         "subagents.enabled",
     )
+    subagent_strategy = choice(
+        setting(
+            subagents_data,
+            "strategy",
+            default=DEFAULT_SUBAGENT_STRATEGY,
+        ),
+        SUBAGENT_STRATEGIES,
+        "subagents.strategy",
+    )
     if "models" in subagents_data:
         subagent_models = parse_subagent_models(
             subagents_data["models"],
@@ -253,6 +266,7 @@ def load(
         viewer=viewer,
         subagents=SubagentsConfig(
             enabled=subagents_enabled,
+            strategy=subagent_strategy,
             models=subagent_models,
         ),
     )

@@ -965,6 +965,28 @@ def subagents_enabled(subagents: tapl_config.SubagentsConfig | None = None) -> b
     return (subagents or tapl_config.SubagentsConfig()).enabled
 
 
+def subagent_strategy_guidance(
+    subagents: tapl_config.SubagentsConfig | None = None,
+) -> str:
+    strategy = (subagents or tapl_config.SubagentsConfig()).strategy
+    if strategy == "conservative":
+        return (
+            "Conservative: delegate only when parallel SubAgents are expected to improve aggregate "
+            "root/SubAgent token use or wall-clock time without materially worsening the other after overhead."
+        )
+    if strategy == "aggressive":
+        return (
+            "Aggressive: during task design, maximize delegation by defaulting every eligible group of at least "
+            "two dependency-ready tasks with exclusive non-overlapping owned_paths to parallel SubAgents, even "
+            "when tasks are small. Keep root execution only when the delegation safety contract cannot be met."
+        )
+    return (
+        "Balanced: at task design, default eligible groups of at least two non-trivial dependency-ready "
+        "tasks with exclusive non-overlapping owned_paths to parallel SubAgents. Keep root execution only for "
+        "trivial work, shared files/state or decisions, task dependencies, or clearly excessive overhead."
+    )
+
+
 def subagent_delegation_request_guidance(
     subagents: tapl_config.SubagentsConfig | None = None,
 ) -> str:
@@ -1005,13 +1027,11 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
     )
     if not available_models:
         available_models = "- No configured model/reasoning-effort pairs are available; do not delegate work."
+    strategy_guidance = subagent_strategy_guidance(subagents)
 
     return (
         "### SubAgent Delegation\n\n"
-        "- Delegate only when parallel SubAgents are expected to improve net efficiency after spawn/coordination "
-        "overhead. Compare aggregate root/SubAgent token use and wall-clock completion time; use "
-        "them when one or both improve without materially worsening the other. Otherwise root executes and retains "
-        "TAPL writes and cross-task decisions.\n"
+        f"- Strategy: {strategy_guidance} Root retains TAPL writes and cross-task decisions.\n"
         "- For delegation, choose the most efficient pair supported by both this configuration and the current runtime:\n"
         f"{available_models}\n"
         "- Atomically dispatch, concurrently spawn one SubAgent per manifest execution, constrain owned_paths, settle by "
