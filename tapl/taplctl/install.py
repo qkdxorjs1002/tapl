@@ -584,9 +584,9 @@ enabled = true
 strategy = "{config.DEFAULT_SUBAGENT_STRATEGY}"
 
 [subagents.models]
-"gpt-5.6-sol" = ["xhigh", "max"]
-"gpt-5.6-terra" = ["high", "xhigh", "max"]
-"gpt-5.6-luna" = ["high", "xhigh"]
+"gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
+"gpt-5.6-terra" = ["high", "xhigh"]
+"gpt-5.6-luna" = ["xhigh", "max"]
 """
 
 
