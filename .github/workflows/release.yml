@@ -437,8 +437,8 @@ jobs:
               server = create_server(workspace_root=Path(sys.argv[1]))
               async with Client(server) as client:
                   tools = await client.list_tools()
-                  if len(tools.tools) != 23:
-                      raise SystemExit(f"expected 23 TAPL MCP tools, got {len(tools.tools)}")
+                  if len(tools.tools) != 24:
+                      raise SystemExit(f"expected 24 TAPL MCP tools, got {len(tools.tools)}")
                   result = await client.call_tool("tapl_get_status", {})
                   if result.is_error:
                       raise SystemExit("tapl_get_status failed in isolated runtime")
