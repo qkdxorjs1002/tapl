@@ -21,9 +21,9 @@ DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
 DEFAULT_SUBAGENTS_ENABLED = True
 DEFAULT_SUBAGENT_STRATEGY = "balanced"
 DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("gpt-5.6-sol", ("xhigh", "max")),
-    ("gpt-5.6-terra", ("high", "xhigh", "max")),
-    ("gpt-5.6-luna", ("high", "xhigh")),
+    ("gpt-5.6-sol", ("medium", "high", "xhigh", "max")),
+    ("gpt-5.6-terra", ("high", "xhigh")),
+    ("gpt-5.6-luna", ("xhigh", "max")),
 )
 
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")

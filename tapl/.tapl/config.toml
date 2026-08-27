@@ -1,36 +1,54 @@
 [viewer]
-# Exact browser origins allowed to call the viewer API through a trusted proxy.
-# Keep this empty when the viewer is only used from localhost.
+# Additional browser origins allowed to call the viewer API through a trusted proxy.
+# Type: array of unique strings. Each value must be an exact http:// or https://
+# origin (scheme + host + optional port) without credentials, a path, query, or fragment.
+# Keep [] for direct localhost use only. Example: ["https://tapl.example.com"]
 allowed_origins = []
 
 [search]
-# Search mode: semantic, bm25, word, or hybrid.
+# Search backend. Allowed values:
+# - "semantic": embedding similarity for conceptually related results.
+# - "bm25": ranked lexical matching.
+# - "word": simple word matching.
+# - "hybrid": blend semantic and BM25 rankings.
 mode = "hybrid"
 
 # Default maximum number of workflow search results.
+# Type: integer greater than or equal to 1.
 max_results = 12
 
-# Hybrid search blends semantic rank and BM25 rank.
-# 0.65 keeps concept search dominant while preserving exact keyword matches.
+# Semantic weight used only by hybrid search.
+# Type: number from 0.0 to 1.0. The BM25 weight is derived as 1.0 minus this
+# value and is not configured separately. 0.65 favors concept search while
+# preserving exact keyword matches.
 hybrid_semantic_ratio = 0.65
 
-# Semantic provider: auto, daemon, or local.
-# auto uses searchd when it is already running, then falls back to local loading.
+# Semantic model provider. Allowed values:
+# - "auto": use searchd when it is running, otherwise load the model locally.
+# - "daemon": require the separately running searchd process.
+# - "local": load the model in the current taplctl process.
 semantic_provider = "auto"
 
-# 0 disables model unload. The default keeps the model warm for 30 minutes after the last search.
+# Seconds searchd keeps an idle semantic model loaded.
+# Type: integer greater than or equal to 0. 0 disables automatic model unload;
+# 1800 keeps the model warm for 30 minutes after the last search.
 searchd_model_idle_timeout_seconds = 1800
 
 [subagents]
-# Enable subagent delegation for eligible tasks.
+# Whether eligible tasks may be delegated to SubAgents. Type: true or false.
 enabled = true
 
-# conservative proves net efficiency; balanced prefers eligible non-trivial groups;
-# aggressive prefers every eligible group, including small tasks.
+# Delegation strategy. Allowed values:
+# - "conservative": delegate only when net efficiency is clearly established.
+# - "balanced": prefer eligible non-trivial task groups.
+# - "aggressive": prefer every eligible group, including small tasks.
 strategy = "balanced"
 
-# Each model maps to the reasoning-effort levels available for delegation.
 [subagents.models]
+# Delegation allowlist. Each key is a runtime-supported model ID and each value
+# is a non-empty array of unique reasoning-effort strings supported by that model.
+# At least one model is required when subagents.enabled is true. Current bundled
+# model/effort pairs are listed below; unsupported pairs fail at delegation time.
 "gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
 "gpt-5.6-terra" = ["high", "xhigh"]
 "gpt-5.6-luna" = ["xhigh", "max"]
