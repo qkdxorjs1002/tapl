@@ -572,22 +572,62 @@ def default_config_text() -> str:
     template = template_text(".tapl", "config.toml")
     if template is not None:
         return template
-    return f"""[search]
+    model_lines = "".join(
+        format_toml_assignment((name,), list(reasoning_efforts))
+        for name, reasoning_efforts in config.DEFAULT_SUBAGENT_MODELS
+    )
+    return f"""[viewer]
+# Additional browser origins allowed to call the viewer API through a trusted proxy.
+# Type: array of unique strings. Each value must be an exact http:// or https://
+# origin (scheme + host + optional port) without credentials, a path, query, or fragment.
+# Keep [] for direct localhost use only. Example: ["https://tapl.example.com"]
+allowed_origins = []
+
+[search]
+# Search backend. Allowed values:
+# - "semantic": embedding similarity for conceptually related results.
+# - "bm25": ranked lexical matching.
+# - "word": simple word matching.
+# - "hybrid": blend semantic and BM25 rankings.
 mode = "{config.DEFAULT_SEARCH_MODE}"
+
+# Default maximum number of workflow search results.
+# Type: integer greater than or equal to 1.
 max_results = {config.DEFAULT_SEARCH_MAX_RESULTS}
+
+# Semantic weight used only by hybrid search.
+# Type: number from 0.0 to 1.0. The BM25 weight is derived as 1.0 minus this
+# value and is not configured separately. 0.65 favors concept search while
+# preserving exact keyword matches.
 hybrid_semantic_ratio = {config.DEFAULT_HYBRID_SEMANTIC_RATIO}
+
+# Semantic model provider. Allowed values:
+# - "auto": use searchd when it is running, otherwise load the model locally.
+# - "daemon": require the separately running searchd process.
+# - "local": load the model in the current taplctl process.
 semantic_provider = "{config.DEFAULT_SEMANTIC_PROVIDER}"
+
+# Seconds searchd keeps an idle semantic model loaded.
+# Type: integer greater than or equal to 0. 0 disables automatic model unload;
+# 1800 keeps the model warm for 30 minutes after the last search.
 searchd_model_idle_timeout_seconds = {config.DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS}
 
 [subagents]
-enabled = true
+# Whether eligible tasks may be delegated to SubAgents. Type: true or false.
+enabled = {str(config.DEFAULT_SUBAGENTS_ENABLED).lower()}
+
+# Delegation strategy. Allowed values:
+# - "conservative": delegate only when net efficiency is clearly established.
+# - "balanced": prefer eligible non-trivial task groups.
+# - "aggressive": prefer every eligible group, including small tasks.
 strategy = "{config.DEFAULT_SUBAGENT_STRATEGY}"
 
 [subagents.models]
-"gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
-"gpt-5.6-terra" = ["high", "xhigh"]
-"gpt-5.6-luna" = ["xhigh", "max"]
-"""
+# Delegation allowlist. Each key is a runtime-supported model ID and each value
+# is a non-empty array of unique reasoning-effort strings supported by that model.
+# At least one model is required when subagents.enabled is true. Current bundled
+# model/effort pairs are listed below; unsupported pairs fail at delegation time.
+{model_lines}"""
 
 
 def install_static_codex_templates(

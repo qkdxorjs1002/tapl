@@ -982,9 +982,9 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertEqual(
                 cfg.subagents.as_dict()["models"],
                 {
-                    "gpt-5.6-sol": ["xhigh", "max"],
-                    "gpt-5.6-terra": ["high", "xhigh", "max"],
-                    "gpt-5.6-luna": ["high", "xhigh"],
+                    "gpt-5.6-sol": ["medium", "high", "xhigh", "max"],
+                    "gpt-5.6-terra": ["high", "xhigh"],
+                    "gpt-5.6-luna": ["xhigh", "max"],
                 },
             )
             self.assertEqual(
@@ -994,6 +994,27 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertEqual(cfg.as_dict()["subagents"], cfg.subagents.as_dict())
             self.assertNotIn("plan_task_execute", cfg.as_dict())
             self.assertFalse(hasattr(cfg, "plan_task_execute"))
+
+    def test_default_config_documents_options_and_fallback_matches_template(self) -> None:
+        template = (ROOT / ".tapl" / "config.toml").read_text(encoding="utf-8")
+        with mock.patch.object(tapl_install, "template_text", return_value=None):
+            fallback = tapl_install.default_config_text()
+
+        self.assertEqual(tomllib.loads(fallback), tomllib.loads(template))
+        for text in (
+            "Each value must be an exact http:// or https://",
+            '"semantic": embedding similarity',
+            "integer greater than or equal to 1",
+            "The BM25 weight is derived",
+            '"auto": use searchd',
+            "0 disables automatic model unload",
+            "Type: true or false",
+            '"conservative": delegate only',
+            "non-empty array of unique reasoning-effort strings",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, template)
+                self.assertIn(text, fallback)
 
     def test_config_loads_custom_and_disabled_subagent_settings_without_runtime_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1058,9 +1079,9 @@ enabled = false
             self.assertEqual(
                 disabled_with_defaults.subagents.as_dict()["models"],
                 {
-                    "gpt-5.6-sol": ["xhigh", "max"],
-                    "gpt-5.6-terra": ["high", "xhigh", "max"],
-                    "gpt-5.6-luna": ["high", "xhigh"],
+                    "gpt-5.6-sol": ["medium", "high", "xhigh", "max"],
+                    "gpt-5.6-terra": ["high", "xhigh"],
+                    "gpt-5.6-luna": ["xhigh", "max"],
                 },
             )
 
@@ -1462,9 +1483,9 @@ searchd_start_timeout_ms = 1
                     "enabled": True,
                     "strategy": "balanced",
                     "models": {
-                        "gpt-5.6-sol": ["xhigh", "max"],
-                        "gpt-5.6-terra": ["high", "xhigh", "max"],
-                        "gpt-5.6-luna": ["high", "xhigh"],
+                        "gpt-5.6-sol": ["medium", "high", "xhigh", "max"],
+                        "gpt-5.6-terra": ["high", "xhigh"],
+                        "gpt-5.6-luna": ["xhigh", "max"],
                     },
                 },
             )
@@ -1737,9 +1758,9 @@ keep = true
             self.assertEqual(
                 parsed["subagents"]["models"],
                 {
-                    "gpt-5.6-sol": ["xhigh", "max"],
-                    "gpt-5.6-terra": ["high", "xhigh", "max"],
-                    "gpt-5.6-luna": ["high", "xhigh"],
+                    "gpt-5.6-sol": ["medium", "high", "xhigh", "max"],
+                    "gpt-5.6-terra": ["high", "xhigh"],
+                    "gpt-5.6-luna": ["xhigh", "max"],
                 },
             )
             self.assertNotIn("user", parsed)
@@ -1812,7 +1833,7 @@ keep = true
             )
             self.assertEqual(
                 parsed["subagents"]["models"]["gpt-5.6-luna"],
-                ["high", "xhigh"],
+                ["xhigh", "max"],
             )
             config_text = config_path.read_text(encoding="utf-8")
             for key in (

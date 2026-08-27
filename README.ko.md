@@ -314,13 +314,14 @@ enabled = true
 strategy = "balanced"
 
 [subagents.models]
-"gpt-5.6-sol" = ["xhigh", "max"]
-"gpt-5.6-terra" = ["high", "xhigh", "max"]
-"gpt-5.6-luna" = ["high", "xhigh"]
+"gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
+"gpt-5.6-terra" = ["high", "xhigh"]
+"gpt-5.6-luna" = ["xhigh", "max"]
 ```
 
 활성화하면 TAPL은 delegation policy와 model/reasoning allowlist를 MCP instruction에
-포함합니다. runtime은 이 allowlist 중 실제 지원하는 pair만 사용할 수 있습니다.
+포함합니다. runtime은 이 allowlist 중 실제 지원하는 pair만 사용할 수 있습니다. 설치된
+`.tapl/config.toml`에는 모든 runtime option의 type과 허용값이 주석으로 설명되어 있습니다.
 
 `strategy`는 runtime이 얼마나 적극적으로 위임할지 결정합니다.
 
