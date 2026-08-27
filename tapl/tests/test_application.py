@@ -86,6 +86,166 @@ def test_application_derives_record_mode_from_work_type_and_workflow_mode() -> N
             assert run["record_mode"] == expected_record_mode
 
 
+def test_application_splits_independent_requests_into_separate_runs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+
+        split = app.split_run(
+            [
+                {
+                    "key": "docs",
+                    "summary": "Update the documentation",
+                    "work_type": "implementation",
+                    "workflow_mode": "standard",
+                    "depends_on": [],
+                },
+                {
+                    "key": "billing",
+                    "summary": "Investigate the billing report",
+                    "work_type": "investigation",
+                    "workflow_mode": "fast",
+                    "depends_on": [],
+                },
+            ]
+        )
+
+        assert split["active_run"]["split_key"] == "docs"
+        assert split["active_run"]["request_summary"] == "Update the documentation"
+        assert len(split["queued_runs"]) == 1
+        queued = split["queued_runs"][0]
+        assert queued["split_key"] == "billing"
+        assert queued["status"] == "queued"
+        assert queued["depends_on"] == []
+        assert queued["ready"] is True
+        assert queued["record_mode"] == "lightweight"
+        assert queued["id"] != split["active_run"]["id"]
+
+
+def test_application_activates_dependent_run_only_after_finished_archive() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.split_run(
+            [
+                {
+                    "key": "conversation-title",
+                    "summary": "Generate conversation titles asynchronously",
+                    "work_type": "implementation",
+                    "workflow_mode": "standard",
+                    "depends_on": [],
+                },
+                {
+                    "key": "suggestion-chips",
+                    "summary": "Build suggestion chips from conversation titles",
+                    "work_type": "implementation",
+                    "workflow_mode": "standard",
+                    "depends_on": ["conversation-title"],
+                },
+            ]
+        )
+
+        app.finish_run("Conversation title generation is complete.")
+        archived = app.finish_archive("conversation-title")
+
+        assert archived["next_active_run"]["split_key"] == "suggestion-chips"
+        status = app.get_status()
+        assert status["active_run"]["request_summary"] == (
+            "Build suggestion chips from conversation titles"
+        )
+        assert status["plans"] == []
+        assert status["tasks"] == []
+        assert status["queued_runs"] == []
+
+
+def test_application_keeps_dependency_queued_when_predecessor_is_archived_unfinished() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.split_run(
+            [
+                {
+                    "key": "first",
+                    "summary": "Complete the prerequisite",
+                    "work_type": "implementation",
+                    "workflow_mode": "standard",
+                    "depends_on": [],
+                },
+                {
+                    "key": "second",
+                    "summary": "Consume the prerequisite",
+                    "work_type": "implementation",
+                    "workflow_mode": "standard",
+                    "depends_on": ["first"],
+                },
+            ]
+        )
+
+        archived = app.finish_archive("unfinished-first")
+
+        assert archived["next_active_run"] is None
+        assert archived["queued_runs"][0]["waiting_on"] == ["first"]
+        next_action = app.get_next()["recommendations"][0]
+        assert next_action["name"] == "inspect-status"
+
+
+def test_application_rejects_split_dependencies_that_do_not_reference_earlier_requests() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+
+        try:
+            app.split_run(
+                [
+                    {
+                        "key": "first",
+                        "summary": "First request",
+                        "work_type": "answer",
+                        "workflow_mode": "fast",
+                        "depends_on": ["second"],
+                    },
+                    {
+                        "key": "second",
+                        "summary": "Second request",
+                        "work_type": "answer",
+                        "workflow_mode": "fast",
+                        "depends_on": [],
+                    },
+                ]
+            )
+        except ValueError as exc:
+            assert "dependencies must reference earlier requests" in str(exc)
+        else:
+            raise AssertionError("forward split dependency must fail")
+
+
+def test_application_rejects_split_after_plan_records_exist() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run("One cohesive request")
+        app.apply_plan("PLAN-001", title="Existing plan")
+
+        try:
+            app.split_run(
+                [
+                    {
+                        "key": "first",
+                        "summary": "First request",
+                        "work_type": "analysis",
+                        "workflow_mode": "standard",
+                        "depends_on": [],
+                    },
+                    {
+                        "key": "second",
+                        "summary": "Second request",
+                        "work_type": "analysis",
+                        "workflow_mode": "standard",
+                        "depends_on": [],
+                    },
+                ]
+            )
+        except ValueError as exc:
+            assert "must be split before plans" in str(exc)
+        else:
+            raise AssertionError("run with an existing plan must not be split")
+
+
 def test_applying_plan_promotes_only_record_mode() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         _, app = workspace(tmp)

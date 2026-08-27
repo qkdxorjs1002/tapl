@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 
 from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import __version__, config as tapl_config, db, prompt as tapl_prompt
 from .application import WorkflowApplication
@@ -49,6 +49,26 @@ WorkType = Literal["answer", "investigation", "analysis", "planning", "implement
 WorkflowMode = Literal["fast", "standard", "strict"]
 
 
+class SplitRunRequest(BaseModel):
+    """One independently deliverable request extracted from a user prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(
+        description="Unique stable key referenced by later depends_on entries.",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    summary: str = Field(description="Standalone request summary.", min_length=1, max_length=2000)
+    work_type: WorkType = Field(description="Work type for this request only.")
+    workflow_mode: WorkflowMode = Field(description="Workflow rigor for this request only.")
+    depends_on: list[str] = Field(
+        default_factory=list,
+        description="Keys of earlier requests that must finish before this run activates.",
+    )
+
+
 def resolve_workspace_root(start: Path | None = None) -> Path:
     """Anchor one MCP process to the workspace selected when it starts."""
 
@@ -72,6 +92,7 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
     """Replace command recipes with MCP tool names in MCP-facing output."""
 
     tool_map: dict[str, str | list[str]] = {
+        "classify-request": ["tapl_split_run", "tapl_summarize_run"],
         "summarize-request": "tapl_summarize_run",
         "apply-plan": "tapl_apply_plan",
         "create-task": "tapl_create_task",
@@ -193,7 +214,20 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
         "operation": str(payload.get("operation") or operation),
     }
     object_fields = (
-        ("active_run", ("id", "slug", "status", "work_type", "workflow_mode", "record_mode")),
+        (
+            "active_run",
+            (
+                "id", "slug", "status", "work_type", "workflow_mode", "record_mode",
+                "split_group_id", "split_key", "split_position",
+            ),
+        ),
+        (
+            "next_active_run",
+            (
+                "id", "slug", "status", "work_type", "workflow_mode", "record_mode",
+                "split_group_id", "split_key", "split_position",
+            ),
+        ),
         ("item", ("id", "stable_id", "kind", "status")),
         ("approval", ("id", "kind", "decision", "source")),
         ("archive", ("id", "slug")),
@@ -202,6 +236,23 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
         selected = select_receipt_fields(payload.get(key), fields)
         if selected:
             receipt[key] = selected
+
+    if payload.get("split_group_id"):
+        receipt["split_group_id"] = payload["split_group_id"]
+    queued_runs = []
+    for queued in payload.get("queued_runs") or []:
+        selected = select_receipt_fields(
+            queued,
+            (
+                "id", "status", "work_type", "workflow_mode", "record_mode",
+                "split_group_id", "split_key", "split_position", "depends_on",
+                "waiting_on", "ready",
+            ),
+        )
+        if selected:
+            queued_runs.append(selected)
+    if queued_runs:
+        receipt["queued_runs"] = queued_runs
 
     if payload.get("settled_execution_id"):
         receipt["settled_execution_id"] = payload["settled_execution_id"]
@@ -360,6 +411,26 @@ def create_server(
             work_type=work_type,
             workflow_mode=workflow_mode,
             operation="run_summarize",
+        )
+
+    @server.tool(name="tapl_split_run", title="Split independent TAPL runs", annotations=WRITE)
+    async def split_run(
+        requests: Annotated[
+            list[SplitRunRequest],
+            Field(
+                description="Independent requests in input order; dependencies may reference earlier keys.",
+                min_length=2,
+                max_length=20,
+            ),
+        ],
+    ) -> dict[str, Any]:
+        """Split a fresh composite prompt before planning; add dependencies only when resolution order matters."""
+
+        return await call_application_write(
+            application,
+            application.split_run,
+            [request.model_dump() for request in requests],
+            operation="run_split",
         )
 
     @server.tool(name="tapl_apply_plan", title="Create or update TAPL plan", annotations=WRITE)

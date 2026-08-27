@@ -33,10 +33,11 @@ def test_mcp_exposes_native_application_tools() -> None:
         tools = asyncio.run(mcp_server.create_server(workspace_root=_workspace(tmp)).list_tools())
 
     by_name = {tool.name: tool for tool in tools}
-    assert len(tools) == 23
+    assert len(tools) == 24
     assert "tapl_get_context" in by_name
     assert "tapl_list_archives" in by_name
     assert "tapl_get_archive" in by_name
+    assert "tapl_split_run" in by_name
     assert by_name["tapl_get_context"].annotations.read_only_hint
     assert set(by_name["tapl_create_task"].input_schema["required"]) == {
         "task_id",
@@ -46,6 +47,64 @@ def test_mcp_exposes_native_application_tools() -> None:
         "action",
         "verification",
     }
+    split_schema = by_name["tapl_split_run"].input_schema
+    assert split_schema["required"] == ["requests"]
+    assert split_schema["properties"]["requests"]["minItems"] == 2
+    assert set(split_schema["$defs"]["SplitRunRequest"]["required"]) == {
+        "key",
+        "summary",
+        "work_type",
+        "workflow_mode",
+    }
+
+
+def test_mcp_split_run_queues_and_activates_dependent_request() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        server = mcp_server.create_server(workspace_root=_workspace(tmp))
+
+        async def exercise() -> list[object]:
+            async with Client(server) as client:
+                split = await client.call_tool(
+                    "tapl_split_run",
+                    {
+                        "requests": [
+                            {
+                                "key": "conversation-title",
+                                "summary": "Generate conversation titles asynchronously",
+                                "work_type": "implementation",
+                                "workflow_mode": "standard",
+                            },
+                            {
+                                "key": "suggestion-chips",
+                                "summary": "Build suggestion chips from conversation titles",
+                                "work_type": "implementation",
+                                "workflow_mode": "standard",
+                                "depends_on": ["conversation-title"],
+                            },
+                        ]
+                    },
+                )
+                finished = await client.call_tool(
+                    "tapl_finish_run",
+                    {"result": "Conversation title generation is complete."},
+                )
+                archived = await client.call_tool(
+                    "tapl_finish_archive",
+                    {"slug": "conversation-title"},
+                )
+                return [split, finished, archived]
+
+        split, finished, archived = asyncio.run(exercise())
+
+    assert not split.is_error
+    assert split.structured_content["operation"] == "run_split"
+    assert split.structured_content["active_run"]["split_key"] == "conversation-title"
+    assert split.structured_content["queued_runs"][0]["waiting_on"] == [
+        "conversation-title"
+    ]
+    assert finished.structured_content["operation"] == "run_finish"
+    assert archived.structured_content["next_active_run"]["split_key"] == "suggestion-chips"
+    assert "request_summary" not in archived.structured_content["next_active_run"]
 
 
 def test_mcp_native_sequential_lifecycle_never_spawns_cli() -> None:

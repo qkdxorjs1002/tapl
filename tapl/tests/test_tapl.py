@@ -96,12 +96,13 @@ class TaplRuntimeTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         by_name = {tool.name: tool for tool in tools}
 
-        self.assertEqual(len(tools), 23)
+        self.assertEqual(len(tools), 24)
         self.assertIn("tapl_get_status", by_name)
         self.assertIn("tapl_get_context", by_name)
         self.assertIn("tapl_list_archives", by_name)
         self.assertIn("tapl_get_archive", by_name)
         self.assertIn("tapl_apply_plan", by_name)
+        self.assertIn("tapl_split_run", by_name)
         self.assertIn("tapl_create_task", by_name)
         self.assertIn("tapl_finish_archive", by_name)
         self.assertTrue(by_name["tapl_get_status"].annotations.read_only_hint)
@@ -136,6 +137,25 @@ class TaplRuntimeTests(unittest.TestCase):
     def test_every_mcp_write_tool_routes_through_compact_receipt_with_next(self) -> None:
         server = tapl_mcp.create_server(workspace_root=ROOT)
         calls = (
+            (
+                "tapl_split_run",
+                {
+                    "requests": [
+                        {
+                            "key": "first",
+                            "summary": "First request",
+                            "work_type": "analysis",
+                            "workflow_mode": "standard",
+                        },
+                        {
+                            "key": "second",
+                            "summary": "Second request",
+                            "work_type": "analysis",
+                            "workflow_mode": "standard",
+                        },
+                    ]
+                },
+            ),
             (
                 "tapl_summarize_run",
                 {"summary": "Receipt routing", "work_type": "analysis", "workflow_mode": "standard"},
@@ -198,7 +218,7 @@ class TaplRuntimeTests(unittest.TestCase):
             results = asyncio.run(exercise())
 
         self.assertEqual(write.await_count, len(calls))
-        self.assertEqual(len(calls), 15)
+        self.assertEqual(len(calls), 16)
         for result in results:
             self.assertFalse(result.is_error)
             self.assertIn("operation", result.structured_content)
@@ -256,7 +276,7 @@ class TaplRuntimeTests(unittest.TestCase):
                     return tools, result
 
             tools, result = asyncio.run(exercise())
-            self.assertEqual(len(tools.tools), 23)
+            self.assertEqual(len(tools.tools), 24)
             self.assertFalse(result.is_error)
             receipt = result.structured_content
             self.assertEqual(receipt["operation"], "run_summarize")
@@ -608,8 +628,22 @@ class TaplRuntimeTests(unittest.TestCase):
                     )
                 }
                 self.assertEqual(
-                    {"work_type", "workflow_mode", "record_mode"} - columns,
+                    {
+                        "work_type",
+                        "workflow_mode",
+                        "record_mode",
+                        "split_group_id",
+                        "split_key",
+                        "split_position",
+                    }
+                    - columns,
                     set(),
+                )
+                self.assertIsNotNone(
+                    migrated.execute(
+                        "SELECT 1 FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'workflow_run_dependencies'"
+                    ).fetchone()
                 )
                 self.assertEqual(
                     rows["legacy-fast"],
@@ -629,7 +663,7 @@ class TaplRuntimeTests(unittest.TestCase):
                         "record_mode": "planned",
                     },
                 )
-                self.assertEqual(tapl_db.get_meta(migrated)["schema_version"], "9")
+                self.assertEqual(tapl_db.get_meta(migrated)["schema_version"], "10")
             finally:
                 migrated.close()
 
@@ -638,7 +672,14 @@ class TaplRuntimeTests(unittest.TestCase):
             subagents=tapl_config.SubagentsConfig()
         )
 
-        self.assertLess(len(instructions), 9_200)
+        self.assertLess(len(instructions), 9_900)
+        for guidance in (
+            "identify independently deliverable outcomes",
+            "call `tapl_split_run`",
+            "add `depends_on` only for stated order",
+            "Never share one plan across split runs",
+        ):
+            self.assertIn(guidance, instructions)
         for strategy in tapl_config.SUBAGENT_STRATEGIES:
             with self.subTest(strategy=strategy):
                 self.assertLess(
@@ -647,7 +688,7 @@ class TaplRuntimeTests(unittest.TestCase):
                             subagents=tapl_config.SubagentsConfig(strategy=strategy)
                         )
                     ),
-                    9_200,
+                    9_900,
                 )
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",

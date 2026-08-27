@@ -96,7 +96,9 @@ class WorkflowApplication:
                 "archives": int(state.get("archive_count") or 0),
                 "active_batches": len(state.get("active_batches") or []),
                 "active_executions": len(state.get("active_executions") or []),
+                "queued_runs": len(state.get("queued_runs") or []),
             },
+            "queued_runs": state.get("queued_runs") or [],
             "plans": project(state.get("plans") or []),
             "tasks": project(state.get("tasks") or []),
             "findings": project(state.get("findings") or []),
@@ -128,6 +130,7 @@ class WorkflowApplication:
                 "ok": meta.get("schema_version") == str(db.SCHEMA_VERSION) and check["ok"],
                 "schema_version": meta.get("schema_version"),
                 "active_run": db.workflow_run_to_dict(db.active_run(conn)),
+                "queued_runs": db.queued_runs(conn),
                 "incomplete_tasks": db.incomplete_task_count(conn),
                 "config": self._settings().as_dict(),
                 "plan_task_execute": check,
@@ -191,6 +194,15 @@ class WorkflowApplication:
                 workflow_mode=workflow_mode,
             )
         return {"ok": True, "active_run": db.workflow_run_to_dict(run)}
+
+    def split_run(self, requests: list[dict[str, Any]]) -> dict[str, Any]:
+        """Split a fresh active request into independent queued workflow runs."""
+
+        with self._connection() as conn:
+            if db.active_run(conn) is None:
+                db.ensure_active_run(conn)
+            payload = db.split_active_run(conn, requests)
+        return {"ok": True, **payload}
 
     def finish_run(self, result: str) -> dict[str, Any]:
         if not result.strip():
@@ -332,7 +344,14 @@ class WorkflowApplication:
     def finish_archive(self, slug: str, *, summary: str = "") -> dict[str, Any]:
         with self._connection() as conn:
             row = db.archive_active_run(conn, slug=slug, summary=summary)
-        return {"ok": True, "archive": db.row_to_dict(row)}
+            next_run = db.workflow_run_to_dict(db.active_run(conn))
+            queued = db.queued_runs(conn)
+        return {
+            "ok": True,
+            "archive": db.row_to_dict(row),
+            "next_active_run": next_run,
+            "queued_runs": queued,
+        }
 
 
 def _validation_message(payload: dict[str, Any]) -> str:

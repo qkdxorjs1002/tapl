@@ -27,12 +27,14 @@ def build_context(
         "ok": True,
         "event": event,
         "active_run": active_run_summary(state),
+        "queued_runs": state.get("queued_runs", []),
         "counts": {
             "plans": len(state.get("plans", [])),
             "tasks": len(state.get("tasks", [])),
             "incomplete_tasks": state.get("incomplete_tasks", 0),
             "active_batches": len(state.get("active_batches", [])),
             "active_executions": len(state.get("active_executions", [])),
+            "queued_runs": len(state.get("queued_runs", [])),
         },
         "active_batches": state.get("active_batches", []),
         "active_executions": state.get("active_executions", []),
@@ -65,6 +67,16 @@ def format_context(packet: dict[str, Any]) -> str:
         )
     else:
         lines.append("- State: no active run.")
+    if counts.get("queued_runs"):
+        queued_labels = ", ".join(
+            str(item.get("split_key") or item.get("id") or "queued")
+            for item in packet.get("queued_runs", [])
+            if isinstance(item, dict)
+        )
+        lines.append(
+            f"- Queue: {counts['queued_runs']} split run(s) waiting"
+            f"{f' ({queued_labels})' if queued_labels else ''}."
+        )
 
     for item in packet.get("instructions", []):
         lines.append(f"- {item}")
@@ -111,6 +123,9 @@ def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
             "work_type": "",
             "workflow_mode": "",
             "record_mode": "",
+            "split_group_id": "",
+            "split_key": "",
+            "split_position": 0,
             "created_at": "",
         }
     return {
@@ -120,6 +135,9 @@ def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
         "work_type": run.get("work_type") or db.DEFAULT_WORK_TYPE,
         "workflow_mode": run.get("workflow_mode") or db.DEFAULT_WORKFLOW_MODE,
         "record_mode": run.get("record_mode") or db.DEFAULT_RECORD_MODE,
+        "split_group_id": run.get("split_group_id") or "",
+        "split_key": run.get("split_key") or "",
+        "split_position": run.get("split_position") or 0,
         "created_at": run.get("created_at") or "",
     }
 
@@ -159,7 +177,13 @@ def next_actions(
         return actions
 
     if not state.get("active_run"):
-        actions.append("Create an active workflow run before durable work.")
+        queued = state.get("queued_runs") if isinstance(state.get("queued_runs"), list) else []
+        if queued:
+            actions.append(
+                "Queued split runs are waiting on unfinished dependencies; inspect their waiting_on fields before new durable work."
+            )
+        else:
+            actions.append("Create an active workflow run before durable work.")
         return actions
 
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}

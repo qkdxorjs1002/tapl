@@ -20,18 +20,26 @@ def next_recommendations(
     del plan_task_execute
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else None
     if not run:
+        queued = state.get("queued_runs") if isinstance(state.get("queued_runs"), list) else []
+        if queued:
+            return [
+                recommendation(
+                    "inspect-status",
+                    "Queued split runs exist but none has satisfied dependencies; inspect waiting_on before continuing.",
+                )
+            ]
         return [
             recommendation(
-                "summarize-request",
-                "Create or update the active request summary before durable workflow work.",
+                "classify-request",
+                "Classify the prompt as one request or multiple independent requests before durable workflow work.",
             )
         ]
 
     if str(run.get("request_summary") or "") == db.DEFAULT_REQUEST_SUMMARY:
         return [
             recommendation(
-                "summarize-request",
-                "The active run still has the default request summary.",
+                "classify-request",
+                "The active run is fresh; split independent outcomes or summarize one cohesive request.",
             )
         ]
 

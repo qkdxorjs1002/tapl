@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -47,6 +47,9 @@ WORKFLOW_RUN_OUTPUT_FIELDS = (
     "work_type",
     "workflow_mode",
     "record_mode",
+    "split_group_id",
+    "split_key",
+    "split_position",
     "created_at",
     "updated_at",
     "archived_at",
@@ -168,6 +171,9 @@ def migrate(conn: sqlite3.Connection) -> None:
             CHECK (workflow_mode IN ('fast', 'standard', 'strict')),
           record_mode TEXT NOT NULL DEFAULT 'planned'
             CHECK (record_mode IN ('lightweight', 'planned')),
+          split_group_id TEXT NOT NULL DEFAULT '',
+          split_key TEXT NOT NULL DEFAULT '',
+          split_position INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           archived_at TEXT
@@ -272,6 +278,13 @@ def migrate(conn: sqlite3.Connection) -> None:
           CHECK(task_item_id <> dependency_item_id)
         );
 
+        CREATE TABLE IF NOT EXISTS workflow_run_dependencies (
+          run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+          dependency_run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+          PRIMARY KEY(run_id, dependency_run_id),
+          CHECK(run_id <> dependency_run_id)
+        );
+
         CREATE TABLE IF NOT EXISTS execution_batches (
           id TEXT PRIMARY KEY,
           run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
@@ -307,6 +320,8 @@ def migrate(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
         CREATE INDEX IF NOT EXISTS idx_task_dependencies_dependency
           ON task_dependencies(dependency_item_id);
+        CREATE INDEX IF NOT EXISTS idx_run_dependencies_dependency
+          ON workflow_run_dependencies(dependency_run_id);
         CREATE INDEX IF NOT EXISTS idx_execution_batches_run_state
           ON execution_batches(run_id, state);
         CREATE INDEX IF NOT EXISTS idx_task_executions_batch_state
@@ -335,6 +350,13 @@ def migrate(conn: sqlite3.Connection) -> None:
         "workflow_runs",
         "record_mode",
         "TEXT NOT NULL DEFAULT 'planned' CHECK (record_mode IN ('lightweight', 'planned'))",
+    )
+    ensure_column(conn, "workflow_runs", "split_group_id", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "workflow_runs", "split_key", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "workflow_runs", "split_position", "INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_runs_split_queue "
+        "ON workflow_runs(status, split_group_id, split_position)"
     )
     if migrated_legacy_record_mode:
         conn.execute(
@@ -456,6 +478,246 @@ def active_run(conn: sqlite3.Connection) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def queued_runs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return queued split runs with their dependency readiness."""
+
+    queued: list[dict[str, Any]] = []
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM workflow_runs
+        WHERE status = 'queued'
+        ORDER BY created_at, split_group_id, split_position, id
+        """
+    ).fetchall()
+    for row in rows:
+        dependencies = conn.execute(
+            """
+            SELECT dependency.id, dependency.split_key, dependency.request_summary,
+                   dependency.status, dependency.result_summary
+            FROM workflow_run_dependencies rd
+            JOIN workflow_runs dependency ON dependency.id = rd.dependency_run_id
+            WHERE rd.run_id = ?
+            ORDER BY dependency.split_position, dependency.created_at, dependency.id
+            """,
+            (row["id"],),
+        ).fetchall()
+        data = workflow_run_to_dict(row) or {}
+        data["depends_on"] = [
+            dependency["split_key"] or dependency["id"] for dependency in dependencies
+        ]
+        data["waiting_on"] = [
+            dependency["split_key"] or dependency["id"]
+            for dependency in dependencies
+            if dependency["status"] != "archived"
+            or not str(dependency["result_summary"] or "").strip()
+        ]
+        data["ready"] = not data["waiting_on"]
+        queued.append(data)
+    return queued
+
+
+def activate_next_queued_run(
+    conn: sqlite3.Connection,
+    *,
+    preferred_group_id: str = "",
+) -> sqlite3.Row | None:
+    """Activate the earliest dependency-ready queued run when no run is active."""
+
+    current = active_run(conn)
+    if current is not None:
+        return current
+    candidate = conn.execute(
+        """
+        SELECT queued.*
+        FROM workflow_runs queued
+        WHERE queued.status = 'queued'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM workflow_run_dependencies rd
+            JOIN workflow_runs dependency ON dependency.id = rd.dependency_run_id
+            WHERE rd.run_id = queued.id
+              AND (
+                dependency.status <> 'archived'
+                OR TRIM(dependency.result_summary) = ''
+              )
+          )
+        ORDER BY
+          CASE WHEN ? <> '' AND queued.split_group_id = ? THEN 0 ELSE 1 END,
+          queued.created_at,
+          queued.split_group_id,
+          queued.split_position,
+          queued.id
+        LIMIT 1
+        """,
+        (preferred_group_id, preferred_group_id),
+    ).fetchone()
+    if candidate is None:
+        return None
+    now = utc_now()
+    conn.execute(
+        """
+        UPDATE workflow_runs
+        SET status = 'active', updated_at = ?
+        WHERE id = ? AND status = 'queued'
+        """,
+        (now, candidate["id"]),
+    )
+    return active_run(conn)
+
+
+def split_active_run(
+    conn: sqlite3.Connection,
+    requests: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """Atomically partition an empty active run into queued sibling runs."""
+
+    request_rows = [dict(request) for request in requests]
+    if len(request_rows) < 2:
+        raise ValueError("split run requires at least two independent requests")
+    if len(request_rows) > 20:
+        raise ValueError("split run supports at most 20 independent requests")
+
+    keys: list[str] = []
+    for index, request in enumerate(request_rows):
+        key = str(request.get("key") or "").strip()
+        summary = str(request.get("summary") or "").strip()
+        work_type = str(request.get("work_type") or "").strip()
+        workflow_mode = str(request.get("workflow_mode") or "").strip()
+        if not key:
+            raise ValueError(f"split request {index + 1} key must not be empty")
+        if len(key) > 100 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", key) is None:
+            raise ValueError(
+                f"split request {index + 1} key must be an ASCII identifier up to 100 characters"
+            )
+        if key in keys:
+            raise ValueError(f"duplicate split request key: {key}")
+        if not summary:
+            raise ValueError(f"split request {key} summary must not be empty")
+        if work_type not in WORK_TYPES:
+            raise ValueError(f"invalid work_type for {key}: {work_type}")
+        if workflow_mode not in WORKFLOW_MODES:
+            raise ValueError(f"invalid workflow_mode for {key}: {workflow_mode}")
+        dependencies = request.get("depends_on") or []
+        if not isinstance(dependencies, list) or any(
+            not isinstance(dependency, str) or not dependency.strip()
+            for dependency in dependencies
+        ):
+            raise ValueError(f"split request {key} depends_on must contain non-empty keys")
+        normalized_dependencies = list(dict.fromkeys(dependency.strip() for dependency in dependencies))
+        unknown_or_later = [dependency for dependency in normalized_dependencies if dependency not in keys]
+        if unknown_or_later:
+            raise ValueError(
+                f"split request {key} dependencies must reference earlier requests: "
+                f"{', '.join(unknown_or_later)}"
+            )
+        request["key"] = key
+        request["summary"] = summary
+        request["work_type"] = work_type
+        request["workflow_mode"] = workflow_mode
+        request["depends_on"] = normalized_dependencies
+        keys.append(key)
+
+    _begin_immediate(conn)
+    try:
+        run = active_run(conn)
+        if run is None:
+            raise ValueError("no active workflow run to split")
+        if str(run["split_group_id"] or "").strip():
+            raise ValueError("active workflow run was already split")
+        item_count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM items WHERE run_id = ?",
+                (run["id"],),
+            ).fetchone()[0]
+        )
+        approval_count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM approvals WHERE run_id = ?",
+                (run["id"],),
+            ).fetchone()[0]
+        )
+        if item_count or approval_count or str(run["result_summary"] or "").strip():
+            raise ValueError(
+                "active workflow run must be split before plans, tasks, approvals, or results exist"
+            )
+
+        group_id = str(uuid.uuid4())
+        now = utc_now()
+        first = request_rows[0]
+        conn.execute(
+            """
+            UPDATE workflow_runs
+            SET slug = ?, request_summary = ?, work_type = ?, workflow_mode = ?,
+                record_mode = ?, split_group_id = ?, split_key = ?, split_position = 0,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                first["key"],
+                first["summary"],
+                first["work_type"],
+                first["workflow_mode"],
+                derive_record_mode(first["work_type"], first["workflow_mode"]),
+                group_id,
+                first["key"],
+                now,
+                run["id"],
+            ),
+        )
+        run_ids = {first["key"]: str(run["id"])}
+        for position, request in enumerate(request_rows[1:], start=1):
+            run_id = str(uuid.uuid4())
+            run_ids[request["key"]] = run_id
+            conn.execute(
+                """
+                INSERT INTO workflow_runs(
+                  id, slug, status, request_summary, work_type, workflow_mode, record_mode,
+                  split_group_id, split_key, split_position, created_at, updated_at
+                )
+                VALUES(?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    request["key"],
+                    request["summary"],
+                    request["work_type"],
+                    request["workflow_mode"],
+                    derive_record_mode(request["work_type"], request["workflow_mode"]),
+                    group_id,
+                    request["key"],
+                    position,
+                    now,
+                    now,
+                ),
+            )
+        for request in request_rows:
+            conn.executemany(
+                """
+                INSERT INTO workflow_run_dependencies(run_id, dependency_run_id)
+                VALUES(?, ?)
+                """,
+                [
+                    (run_ids[request["key"]], run_ids[dependency])
+                    for dependency in request["depends_on"]
+                ],
+            )
+        conn.commit()
+        return {
+            "split_group_id": group_id,
+            "active_run": workflow_run_to_dict(active_run(conn)),
+            "queued_runs": [
+                queued
+                for queued in queued_runs(conn)
+                if queued.get("split_group_id") == group_id
+            ],
+        }
+    except Exception:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+
+
 def dedupe_active_runs(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         """
@@ -500,6 +762,11 @@ def ensure_active_run(
             conn.commit()
             return active_run(conn)  # type: ignore[return-value]
         return existing
+
+    queued = activate_next_queued_run(conn)
+    if queued is not None:
+        conn.commit()
+        return queued
 
     now = utc_now()
     run_id = str(uuid.uuid4())
@@ -2053,6 +2320,10 @@ def archive_active_run(conn: sqlite3.Connection, *, slug: str, summary: str = ""
         "INSERT INTO archives(id, run_id, slug, summary, created_at) VALUES(?, ?, ?, ?, ?)",
         (archive_id, run["id"], slug, summary, now),
     )
+    activate_next_queued_run(
+        conn,
+        preferred_group_id=str(run["split_group_id"] or ""),
+    )
     conn.commit()
     return conn.execute("SELECT * FROM archives WHERE id = ?", (archive_id,)).fetchone()
 
@@ -2190,6 +2461,7 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
         ]
 
     archives = list_archives(conn, limit=8)
+    queued = queued_runs(conn)
     archive_count = int(conn.execute("SELECT COUNT(*) FROM archives").fetchone()[0])
     recent_events = [
         row_to_dict(row)
@@ -2209,6 +2481,7 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
     return {
         "schema": get_meta(conn),
         "active_run": workflow_run_to_dict(run),
+        "queued_runs": queued,
         "approvals": {
             DEFAULT_APPROVAL_KIND: approval_status(conn, kind=DEFAULT_APPROVAL_KIND, run_id=run_id),
         },

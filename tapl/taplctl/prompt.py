@@ -220,6 +220,8 @@ ${mcp_tool_result_display_guidance}
 
 ## Adaptive workflow
 
+${request_partition_guidance}
+
 ${workflow_mode_guidance}
 
 Planning must happen before implementation. Requirements are captured inside the plan, not in a separate requirements file or request artifact.
@@ -300,6 +302,7 @@ def template_variables(**overrides: Any) -> dict[str, str]:
         "stable_id_guidance": stable_id_guidance(),
         "workflow_order_guidance": workflow_order_guidance(),
         "workflow_mode_guidance": workflow_mode_guidance(),
+        "request_partition_guidance": request_partition_guidance(),
         "workflow_stage_progression_guidance": workflow_stage_progression_guidance(),
         "task_execution_order_guidance": task_execution_order_guidance(),
         "subagent_delegation_guidance": subagent_delegation_guidance(),
@@ -552,7 +555,10 @@ def task_granularity_remediation() -> str:
 
 
 def summarize_request_next_action() -> str:
-    return "Summarize the request with `tapl_summarize_run`."
+    return (
+        "Classify request boundaries before planning: use `tapl_split_run` for two or more independent outcomes, "
+        "otherwise summarize the cohesive request with `tapl_summarize_run`."
+    )
 
 
 def create_plan_next_action() -> str:
@@ -887,9 +893,11 @@ def stable_id_guidance() -> str:
 def workflow_order_guidance() -> str:
     return (
         "Lifecycle order: `tapl_get_status`/`tapl_get_next` -> resolve residual run direction with user approval -> "
+        "inspect the latest prompt for independent outcomes -> call `tapl_split_run` when needed, otherwise "
         "`tapl_search_history` and clarify until unblocked -> `tapl_summarize_run` with agent-selected "
         "work_type and `fast`, `standard`, or `strict` workflow_mode. A derived lightweight record may finish/archive "
-        "without plan/tasks and `tapl_apply_plan` promotes record_mode to planned. Planned records continue through `tapl_apply_plan` -> "
+        "without plan/tasks and `tapl_apply_plan` promotes record_mode to planned. Each split child searches relevant history "
+        "before its own plan. Planned records continue through `tapl_apply_plan` -> "
         "`tapl_create_task` -> `tapl_approve_execution` -> sequential start and settlement tools or "
         "`tapl_dispatch_tasks` plus execution-id settlement -> `tapl_finish_run` -> `tapl_finish_archive`."
     )
@@ -909,6 +917,17 @@ def workflow_mode_guidance() -> str:
         "record_mode=`lightweight` only for Fast non-durable Answer, Investigation, Analysis, or Planning work; durable "
         "work and every Standard or Strict run derive record_mode=`planned`. A lightweight record may finish/archive "
         "without plan/tasks; `tapl_apply_plan` promotes only record_mode when scope or risk grows."
+    )
+
+
+def request_partition_guidance() -> str:
+    return (
+        "Before summarizing or planning, identify independently deliverable outcomes in the whole input. If at least two can "
+        "each be completed and reported alone, call `tapl_split_run` and give each child its own summary and classification. "
+        "Do not split steps, constraints, examples, or acceptance criteria serving one outcome. Preserve input order; add "
+        "`depends_on` only for stated order or when a later outcome consumes an earlier one, and reference earlier keys only. "
+        "Leave independent siblings dependency-free. Plan only the active child; finishing and archiving it activates the next "
+        "ready child. Never share one plan across split runs."
     )
 
 
@@ -935,7 +954,7 @@ def history_search_guidance() -> str:
 
 def lifecycle_recipe_guidance() -> str:
     return (
-        "Primary lifecycle tools: `tapl_summarize_run`, `tapl_apply_plan`, `tapl_create_task`, "
+        "Primary lifecycle tools: `tapl_split_run`, `tapl_summarize_run`, `tapl_apply_plan`, `tapl_create_task`, "
         "`tapl_approve_execution`, `tapl_start_task`, `tapl_dispatch_tasks`, `tapl_complete_task`, "
         "`tapl_block_task`, `tapl_skip_task`, `tapl_cancel_batch`, `tapl_recover_batch`, "
         "`tapl_finish_run`, and `tapl_finish_archive`."
