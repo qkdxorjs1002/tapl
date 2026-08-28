@@ -412,6 +412,7 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
                 executor_kind="subagent",
                 parallel_group="workers",
                 owned_paths=[owned_path],
+                custom_fields={"Existing": "preserved"} if task_id == "TASK-001" else None,
             )
         app.record_approval(
             decision="approved", prompt="Execute parallel tasks", source="explicit_user"
@@ -437,6 +438,18 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
         executions = {row["task_id"]: row for row in manifest["executions"]}
         assert set(executions) == {"TASK-001", "TASK-002"}
 
+        dispatched_status = app.get_status(full=True)
+        dispatched_tasks = {
+            task["stable_id"]: task for task in dispatched_status["tasks"]
+        }
+        assert dispatched_tasks["TASK-001"]["custom_fields"] == {
+            "Existing": "preserved",
+            "SubAgent Model": "gpt-5.6-sol (xhigh)",
+        }
+        assert dispatched_tasks["TASK-002"]["custom_fields"] == {
+            "SubAgent Model": "gpt-5.6-terra (high)",
+        }
+
         for task_id, execution in executions.items():
             metadata = execution_metadata[task_id]
             assert execution["model"] == metadata["model"]
@@ -447,11 +460,6 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
                 execution_id=execution["execution_id"],
                 verification=f"Verified {task_id}",
                 result=f"Completed {task_id}",
-                custom_fields={
-                    "SubAgent Model": (
-                        f"{metadata['model']} ({metadata['reasoning_effort']})"
-                    )
-                },
             )
             assert receipt["settled_execution_id"] == execution["execution_id"]
 
@@ -459,4 +467,55 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
         assert status["active_batches"] == []
         tasks = {task["stable_id"]: task for task in status["tasks"]}
         assert tasks["TASK-001"]["custom_fields"]["SubAgent Model"] == "gpt-5.6-sol (xhigh)"
+        assert tasks["TASK-001"]["custom_fields"]["Existing"] == "preserved"
         assert tasks["TASK-002"]["custom_fields"]["SubAgent Model"] == "gpt-5.6-terra (high)"
+
+
+def test_application_dispatch_ignores_incomplete_model_metadata() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run("parallel metadata compatibility")
+        app.apply_plan(
+            "PLAN-001",
+            title="Compatibility plan",
+            status="Finalized",
+            summary="REQ-001: preserve incomplete metadata behavior.",
+            objective="Keep incomplete dispatch metadata backward compatible.",
+            requirements_trace="REQ-001",
+            selected_approach="Dispatch tasks without a complete model pair.",
+            affected_files="src/a.py, src/b.py",
+            execution_order="approve, dispatch, inspect",
+            risks="Incomplete metadata must not create a misleading model field.",
+            validation="Inspect task custom fields after dispatch.",
+        )
+        for task_id, owned_path in (("TASK-001", "src/a.py"), ("TASK-002", "src/b.py")):
+            app.create_task(
+                task_id,
+                f"Parallel {task_id}",
+                "PLAN-001",
+                f"Complete {task_id}",
+                f"Implement {task_id}",
+                f"Verify {task_id}",
+                execution_mode="parallel",
+                executor_kind="subagent",
+                parallel_group="workers",
+                owned_paths=[owned_path],
+                custom_fields={"Existing": task_id},
+            )
+        app.record_approval(
+            decision="approved", prompt="Execute parallel tasks", source="explicit_user"
+        )
+
+        app.dispatch_tasks(
+            ["TASK-001", "TASK-002"],
+            batch_id="BATCH-001",
+            execution_metadata={
+                "TASK-001": {"model": "gpt-5.6-sol"},
+                "TASK-002": {"model": "", "reasoning_effort": "xhigh"},
+            },
+        )
+
+        status = app.get_status(full=True)
+        tasks = {task["stable_id"]: task for task in status["tasks"]}
+        assert tasks["TASK-001"]["custom_fields"] == {"Existing": "TASK-001"}
+        assert tasks["TASK-002"]["custom_fields"] == {"Existing": "TASK-002"}

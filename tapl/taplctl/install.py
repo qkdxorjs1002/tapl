@@ -619,7 +619,7 @@ enabled = {str(config.DEFAULT_SUBAGENTS_ENABLED).lower()}
 # Delegation strategy. Allowed values:
 # - "conservative": delegate only when net efficiency is clearly established.
 # - "balanced": prefer eligible non-trivial task groups.
-# - "aggressive": prefer every eligible group, including small tasks.
+# - "aggressive": delegate every eligible group, including small tasks, unless there is a clear, material downside.
 strategy = "{config.DEFAULT_SUBAGENT_STRATEGY}"
 
 [subagents.models]

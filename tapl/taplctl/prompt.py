@@ -869,9 +869,9 @@ def custom_fields_guidance() -> str:
         "under `사용자 참고사항`/`User Notes` as concise entries with `종류`/`category`, `내용`/`content`, and "
         "`영향`/`impact`. Put shared facts on the plan and "
         "task-specific facts on its task; preserve keys/types, avoid duplicates/transient progress, and use top-level null only "
-        "to delete a duplicate. For delegated tasks, the root records the actual runtime model/reasoning effort—not the "
-        "requested pair—at settlement, e.g. `서브 에이전트 모델`/`SubAgent Model`: `gpt-5.6-sol (xhigh)`; omit it when no "
-        "SubAgent ran."
+        "to delete a duplicate. Atomic dispatch records the manifest model/reasoning effort as `SubAgent Model` in task "
+        "`custom_fields` before returning. Root verifies it before spawn; settlement is not the first recording point. "
+        "Example: `gpt-5.6-sol (xhigh)`; omit it when no SubAgent ran."
     )
 
 
@@ -980,16 +980,13 @@ def task_plan_dependency_guidance() -> str:
 
 def task_execution_order_guidance() -> str:
     return (
-        "Execute planned tasks one at a time in task order when they are sequential: use `tapl_start_task` "
-        "immediately before work, then complete, block, or skip it before another sequential task. "
-        "Tasks explicitly declared as execution_mode=parallel, executor_kind=subagent, in the same "
-        "parallel_group, with completed dependencies and exclusive owned_paths may run concurrently only "
-        "after atomic `tapl_dispatch_tasks`. The root agent is the sole TAPL state writer: it must spawn "
-        "one SubAgent per dispatched task concurrently, keep each worker inside its owned_paths, and settle "
-        "each task with the exact manifest execution_id via the complete, block, or skip MCP tool. "
-        "Record the actual delegated model and reasoning effort in task custom_fields. If any SubAgent spawn "
-        "fails or the root is interrupted, recover or cancel the batch before retrying; never leave a partial "
-        "batch or start another batch around it."
+        "Execute planned tasks one at a time in task order when sequential: `tapl_start_task` immediately before work, then "
+        "complete, block, or skip it before another. Parallel tasks with `execution_mode=parallel`, `executor_kind=subagent`, "
+        "same `parallel_group`, completed dependencies, and exclusive owned_paths run concurrently only after atomic "
+        "`tapl_dispatch_tasks`. Root agent is sole TAPL state writer: verify each `SubAgent Model` record, then spawn one "
+        "SubAgent per manifest execution concurrently within its exclusive `owned_paths`; settle each with exact manifest "
+        "execution_id via `tapl_complete_task`, `tapl_block_task`, or `tapl_skip_task`. If spawn fails or root is interrupted, "
+        "recover or cancel the batch before retrying; never leave a partial batch or start another batch around it."
     )
 
 
@@ -1008,9 +1005,9 @@ def subagent_strategy_guidance(
         )
     if strategy == "aggressive":
         return (
-            "Aggressive: during task design, maximize delegation by defaulting every eligible group of at least "
-            "two dependency-ready tasks with exclusive non-overlapping owned_paths to parallel SubAgents, even "
-            "when tasks are small. Keep root execution only when the delegation safety contract cannot be met."
+            "Aggressive: maximize delegation during task design: delegate every eligible group of at least two "
+            "dependency-ready tasks with exclusive non-overlapping owned_paths, even when tasks are small. Keep root "
+            "only for a clear, material downside or when the delegation safety contract cannot be met."
         )
     return (
         "Balanced: at task design, default eligible groups of at least two non-trivial dependency-ready "
@@ -1066,9 +1063,8 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
         f"- Strategy: {strategy_guidance} Root retains TAPL writes and cross-task decisions.\n"
         "- For delegation, choose the most efficient pair supported by both this configuration and the current runtime:\n"
         f"{available_models}\n"
-        "- Atomically dispatch, concurrently spawn one SubAgent per manifest execution, constrain owned_paths, settle by "
-        "exact execution_id, and recover or cancel on spawn failure/interruption. Record actual runtime model/reasoning "
-        "effort in task `custom_fields`."
+        "- Atomically dispatch, verify the persisted `SubAgent Model` record, then spawn each manifest SubAgent; constrain "
+        "`owned_paths`, settle by exact `execution_id`, and recover or cancel on spawn failure/interruption."
     )
 
 

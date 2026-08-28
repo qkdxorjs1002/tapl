@@ -1559,7 +1559,8 @@ def dispatch_tasks(
               t.execution_mode,
               t.executor_kind,
               t.parallel_group,
-              t.owned_paths_json
+              t.owned_paths_json,
+              i.custom_fields_json
             FROM items i
             JOIN tasks t ON t.item_id = i.id
             WHERE i.run_id = ?
@@ -1716,17 +1717,39 @@ def dispatch_tasks(
             ),
         )
         for row in ordered_rows:
-            updated = conn.execute(
-                """
-                UPDATE items
-                SET status = 'In Progress', updated_at = ?
-                WHERE id = ? AND status = 'Pending'
-                """,
-                (now, row["item_id"]),
-            )
+            task_metadata = metadata.get(row["task_id"], {})
+            model = str(task_metadata.get("model") or "").strip()
+            reasoning_effort = str(task_metadata.get("reasoning_effort") or "").strip()
+            if model and reasoning_effort:
+                custom_fields = merge_custom_fields(
+                    row["custom_fields_json"],
+                    {"SubAgent Model": f"{model} ({reasoning_effort})"},
+                )
+                updated = conn.execute(
+                    """
+                    UPDATE items
+                    SET status = 'In Progress', custom_fields_json = ?, updated_at = ?
+                    WHERE id = ? AND status = 'Pending'
+                    """,
+                    (serialize_custom_fields(custom_fields), now, row["item_id"]),
+                )
+            else:
+                updated = conn.execute(
+                    """
+                    UPDATE items
+                    SET status = 'In Progress', updated_at = ?
+                    WHERE id = ? AND status = 'Pending'
+                    """,
+                    (now, row["item_id"]),
+                )
             if updated.rowcount != 1:
                 raise RuntimeError(f"task status changed during dispatch: {row['task_id']}")
-            task_metadata = metadata.get(row["task_id"], {})
+            if model and reasoning_effort:
+                refreshed_item = conn.execute(
+                    "SELECT * FROM items WHERE id = ?",
+                    (row["item_id"],),
+                ).fetchone()
+                refresh_item_fts(conn, refreshed_item)
             conn.execute(
                 """
                 INSERT INTO task_executions(

@@ -167,6 +167,12 @@ class TaplRuntimeTests(unittest.TestCase):
             ["sequential", "parallel"],
         )
         self.assertNotIn("workspace", task_schema["properties"])
+        dispatch_tool = by_name["tapl_dispatch_tasks"]
+        self.assertIn(
+            "before callers spawn",
+            dispatch_tool.input_schema["properties"]["execution_metadata"]["description"],
+        )
+        self.assertIn("before returning its spawn manifest", dispatch_tool.description)
         summarize_schema = by_name["tapl_summarize_run"].input_schema
         self.assertEqual(
             set(summarize_schema["required"]),
@@ -772,12 +778,18 @@ class TaplRuntimeTests(unittest.TestCase):
             "exclusive owned_paths",
             "exact manifest execution_id",
             "recover or cancel the batch before retrying",
-            "actual runtime model/reasoning effort",
-            "not the requested pair",
-            "`서브 에이전트 모델`/`SubAgent Model`: `gpt-5.6-sol (xhigh)`",
+            "records the manifest model/reasoning effort",
+            "`SubAgent Model` in task `custom_fields` before returning",
+            "Root verifies it before spawn",
+            "settlement is not the first recording point",
+            "Example: `gpt-5.6-sol (xhigh)`",
             "omit it when no SubAgent ran",
-            "default eligible groups of at least two non-trivial dependency-ready tasks",
-            "clearly excessive overhead",
+            "maximize delegation",
+            "delegate every eligible group of at least two dependency-ready tasks",
+            "exclusive non-overlapping owned_paths",
+            "even when tasks are small",
+            "clear, material downside",
+            "delegation safety contract cannot be met",
             "execution approval",
             "only active work is In Progress",
             "Reclassify upward only when scope, risk, or uncertainty grows",
@@ -988,7 +1000,10 @@ class TaplRuntimeTests(unittest.TestCase):
                 (
                     "maximize delegation",
                     "every eligible group of at least two dependency-ready tasks",
+                    "with exclusive non-overlapping owned_paths",
                     "even when tasks are small",
+                    "clear, material downside",
+                    "delegation safety contract cannot be met",
                 ),
                 ("improve aggregate root/SubAgent token use",),
             ),
@@ -1031,7 +1046,8 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertEqual(cfg.search.semantic_provider, "auto")
             self.assertEqual(cfg.search.searchd_model_idle_timeout_seconds, 1800)
             self.assertTrue(cfg.subagents.enabled)
-            self.assertEqual(cfg.subagents.strategy, tapl_config.DEFAULT_SUBAGENT_STRATEGY)
+            self.assertEqual(tapl_config.DEFAULT_SUBAGENT_STRATEGY, "aggressive")
+            self.assertEqual(cfg.subagents.strategy, "aggressive")
             self.assertEqual(
                 cfg.subagents.as_dict()["models"],
                 {
@@ -1042,7 +1058,7 @@ class TaplRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(
                 cfg.subagents.as_dict()["strategy"],
-                tapl_config.DEFAULT_SUBAGENT_STRATEGY,
+                "aggressive",
             )
             self.assertEqual(cfg.as_dict()["subagents"], cfg.subagents.as_dict())
             self.assertNotIn("plan_task_execute", cfg.as_dict())
@@ -1054,6 +1070,7 @@ class TaplRuntimeTests(unittest.TestCase):
             fallback = tapl_install.default_config_text()
 
         self.assertEqual(tomllib.loads(fallback), tomllib.loads(template))
+        self.assertEqual(tomllib.loads(template)["subagents"]["strategy"], "aggressive")
         for text in (
             "Each value must be an exact http:// or https://",
             '"semantic": embedding similarity',
@@ -1063,6 +1080,8 @@ class TaplRuntimeTests(unittest.TestCase):
             "0 disables automatic model unload",
             "Type: true or false",
             '"conservative": delegate only',
+            '"aggressive": delegate every eligible group, including small tasks',
+            "clear, material downside",
             "non-empty array of unique reasoning-effort strings",
         ):
             with self.subTest(text=text):
@@ -1087,13 +1106,13 @@ enabled = true
             cfg = tapl_config.load(config_path)
 
             self.assertTrue(cfg.subagents.enabled)
-            # A pre-strategy config remains valid and receives the balanced default.
-            self.assertEqual(cfg.subagents.strategy, "balanced")
+            # A pre-strategy config remains valid and receives the aggressive default.
+            self.assertEqual(cfg.subagents.strategy, "aggressive")
             self.assertEqual(
                 cfg.subagents.as_dict(),
                 {
                     "enabled": True,
-                    "strategy": "balanced",
+                    "strategy": "aggressive",
                     "models": {
                         "gpt-5.6-luna": ["high", "xhigh"],
                         "future-runtime-model": ["custom-effort"],
@@ -1117,7 +1136,7 @@ enabled = false
             self.assertEqual(disabled.subagents.models, ())
             self.assertEqual(
                 disabled.as_dict()["subagents"],
-                {"enabled": False, "strategy": "balanced", "models": {}},
+                {"enabled": False, "strategy": "aggressive", "models": {}},
             )
 
             config_path.write_text(
@@ -1128,7 +1147,7 @@ enabled = false
             disabled_with_defaults = tapl_config.load(config_path)
 
             self.assertFalse(disabled_with_defaults.subagents.enabled)
-            self.assertEqual(disabled_with_defaults.subagents.strategy, "balanced")
+            self.assertEqual(disabled_with_defaults.subagents.strategy, "aggressive")
             self.assertEqual(
                 disabled_with_defaults.subagents.as_dict()["models"],
                 {
@@ -1137,6 +1156,21 @@ enabled = false
                     "gpt-5.6-luna": ["xhigh", "max"],
                 },
             )
+
+    def test_config_preserves_explicit_subagent_strategies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "tapl.toml"
+            for strategy in tapl_config.SUBAGENT_STRATEGIES:
+                with self.subTest(strategy=strategy):
+                    config_path.write_text(
+                        f'[subagents]\nstrategy = "{strategy}"\n',
+                        encoding="utf-8",
+                    )
+
+                    cfg = tapl_config.load(config_path)
+
+                    self.assertEqual(cfg.subagents.strategy, strategy)
+                    self.assertEqual(cfg.subagents.as_dict()["strategy"], strategy)
 
     def test_config_strictly_rejects_invalid_subagent_settings(self) -> None:
         cases = (
@@ -1534,7 +1568,7 @@ searchd_start_timeout_ms = 1
                 tapl_config_data["subagents"],
                 {
                     "enabled": True,
-                    "strategy": "balanced",
+                    "strategy": "aggressive",
                     "models": {
                         "gpt-5.6-sol": ["medium", "high", "xhigh", "max"],
                         "gpt-5.6-terra": ["high", "xhigh"],
@@ -1729,7 +1763,7 @@ experimental = true
             tapl_config_data = tomllib.loads((repo / ".tapl" / "config.toml").read_text())
             self.assertEqual(
                 tapl_config_data["subagents"]["strategy"],
-                tapl_config.DEFAULT_SUBAGENT_STRATEGY,
+                "aggressive",
             )
             self.assertNotIn("plan-task-execute", tapl_config_data)
             self.assertNotIn("plan_task_execute", tapl_config_data)
@@ -1807,7 +1841,7 @@ keep = true
             parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(parsed["search"]["max_results"], tapl_config.DEFAULT_SEARCH_MAX_RESULTS)
             self.assertTrue(parsed["subagents"]["enabled"])
-            self.assertEqual(parsed["subagents"]["strategy"], "balanced")
+            self.assertEqual(parsed["subagents"]["strategy"], "aggressive")
             self.assertEqual(
                 parsed["subagents"]["models"],
                 {
@@ -1879,7 +1913,7 @@ keep = true
             self.assertEqual(parsed["user"]["keep"], True)
             self.assertEqual(parsed["search"]["mode"], tapl_config.DEFAULT_SEARCH_MODE)
             self.assertFalse(parsed["subagents"]["enabled"])
-            self.assertEqual(parsed["subagents"]["strategy"], "balanced")
+            self.assertEqual(parsed["subagents"]["strategy"], "aggressive")
             self.assertEqual(
                 parsed["subagents"]["models"]["user-runtime-model"],
                 ["custom-effort"],

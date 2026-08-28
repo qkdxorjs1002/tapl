@@ -529,9 +529,9 @@ def create_server(
         task_ids: Annotated[list[TaskId], Field(description="At least two compatible Pending subagent task ids.", min_length=2)],
         batch_id: Annotated[str | None, Field(description="Optional stable batch id for idempotent retry.")] = None,
         failure_policy: Annotated[str, Field(description="Non-empty batch failure policy.", min_length=1)] = db.DEFAULT_FAILURE_POLICY,
-        execution_metadata: Annotated[dict[str, dict[str, Any]] | None, Field(description="Per-task runtime model and reasoning metadata.")] = None,
+        execution_metadata: Annotated[dict[str, dict[str, Any]] | None, Field(description="Per-task runtime model and reasoning metadata; when both are non-empty, dispatch records SubAgent Model before callers spawn.")] = None,
     ) -> dict[str, Any]:
-        """Atomically validate and dispatch compatible parallel tasks; retain every returned execution id for settlement."""
+        """Atomically validate and dispatch compatible tasks, recording each complete SubAgent Model before returning its spawn manifest."""
 
         return await call_application_write(
             application,

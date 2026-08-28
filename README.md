@@ -276,7 +276,10 @@ SQLite FTS works in every installation. Install the semantic extra—or the
 TAPL coordinates execution manifests; it does not spawn workers. The Codex/root
 runtime creates and manages SubAgents. Parallel tasks are valid only when their
 dependencies are complete and they own non-overlapping files or directories.
-Sequential tasks remain on the main agent by default.
+With the default `aggressive` strategy, every eligible group—including groups
+containing small tasks—is delegated unless delegation has a clear or material
+downside. Sequential tasks, shared files or state, and root-level decisions
+remain on the main agent.
 
 ## How it works
 
@@ -349,9 +352,10 @@ runtime config policy explicitly.
 ```toml
 [subagents]
 enabled = true
-# conservative proves net efficiency; balanced (the default) delegates eligible
-# non-trivial groups; aggressive delegates every eligible group, including small tasks.
-strategy = "balanced"
+# aggressive (the default) delegates every eligible group, including small tasks,
+# unless delegation has a clear or material downside. balanced and conservative
+# remain available as opt-down choices.
+strategy = "aggressive"
 
 [subagents.models]
 "gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
@@ -366,25 +370,31 @@ type, and its allowed values inline.
 
 The `strategy` setting controls how actively the runtime delegates:
 
-- `balanced` (the default) delegates eligible groups of at least two non-trivial,
+- `aggressive` (the default) delegates every eligible group of at least two
+  dependency-ready tasks with exclusive, non-overlapping `owned_paths`, including
+  groups containing small tasks, unless delegation has a clear or material
+  downside. Root keeps execution when the delegation safety contract cannot be
+  met, or when root execution is clearly or materially better.
+- `balanced` (opt-down) delegates eligible groups of at least two non-trivial,
   dependency-ready tasks to parallel SubAgents when each task has exclusive,
   non-overlapping `owned_paths`. Root execution remains appropriate for trivial
   work, shared files/state or decisions, dependent tasks, or clearly excessive
   overhead.
-- `conservative` preserves the net-efficiency proof: delegate only when expected
-  aggregate root/SubAgent token use or wall-clock time improves without materially
-  worsening the other after spawn, context-transfer, coordination, and result
-  integration overhead.
-- `aggressive` prefers every eligible group of at least two dependency-ready tasks
-  with exclusive, non-overlapping `owned_paths`, including small tasks. Root keeps
-  execution only when the delegation safety contract cannot be met.
+- `conservative` (rollback/opt-down) preserves the net-efficiency proof: delegate
+  only when expected aggregate root/SubAgent token use or wall-clock time improves
+  without materially worsening the other after spawn, context-transfer,
+  coordination, and result integration overhead.
 
 Every strategy still requires execution approval, dependency readiness, exclusive
 non-overlapping ownership, atomic dispatch, and settlement by the exact
-`execution_id`; the root retains TAPL writes and cross-task decisions. To roll back
-to the conservative behavior, set `strategy = "conservative"`. Set `enabled = false`
-to omit TAPL's delegation guidance entirely; this does not remove delegation
-instructions from another source such as `AGENTS.md`.
+`execution_id`; the root retains TAPL writes and cross-task decisions. These safety
+conditions remain in force even with the aggressive default. Dispatch records the
+manifest model and reasoning effort in the task's `SubAgent Model` custom field
+before the runtime spawns that SubAgent. To opt down to
+`balanced`, set `strategy = "balanced"`; to roll back to conservative behavior, set
+`strategy = "conservative"`. To disable TAPL delegation guidance, set
+`enabled = false`; this does not remove delegation instructions from another source
+such as `AGENTS.md`.
 
 Plan and task policy is fixed: executable work uses detailed planning, explicit
 plan confirmation, independently split tasks, and recorded approval before
