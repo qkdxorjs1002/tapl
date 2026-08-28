@@ -97,6 +97,7 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
         "apply-plan": "tapl_apply_plan",
         "create-task": "tapl_create_task",
         "decide-after-plan": ["tapl_create_task", "tapl_finish_run"],
+        "confirm-after-plan": "request_user_input",
         "approve-execution": "tapl_approve_execution",
         "settle-parallel-task": ["tapl_complete_task", "tapl_block_task", "tapl_skip_task"],
         "recover-parallel-batch": "tapl_recover_batch",
@@ -701,7 +702,10 @@ def create_server(
     async def finish_run(
         result: Annotated[str, Field(description=tapl_prompt.field_help("run", "result"), min_length=1)],
     ) -> dict[str, Any]:
-        """Record the verified final result after no actionable tasks remain and before archiving."""
+        """Record the verified final result after no actionable tasks remain and before archiving.
+
+        For planning-only scope, call this only after the user explicitly chooses to finish or archive the run.
+        """
 
         return await call_application_write(
             application,
@@ -715,7 +719,10 @@ def create_server(
         slug: Annotated[str, Field(description="Stable timestamped archive slug.", min_length=1, max_length=120)],
         summary: Annotated[str, Field(description="Concise archive summary.", max_length=2000)] = "",
     ) -> dict[str, Any]:
-        """Archive a completed, superseded, or intentionally deferred run after every task and batch is settled."""
+        """Archive a completed, superseded, or intentionally deferred run after every task and batch is settled.
+
+        For planning-only scope, call this only after the user explicitly chooses to archive the run.
+        """
 
         return await call_application_write(
             application,

@@ -287,7 +287,7 @@ def test_application_partial_updates_preserve_omitted_fields_and_nested_null_del
         assert plan["custom_fields"] == {"keep": "value"}
 
 
-def test_plan_without_tasks_offers_execution_or_non_execution_completion() -> None:
+def test_non_planning_plan_without_tasks_offers_execution_or_completion() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         _, app = workspace(tmp)
         app.summarize_run("analyze and report without implementation")
@@ -310,7 +310,7 @@ def test_plan_without_tasks_offers_execution_or_non_execution_completion() -> No
             {
                 "name": "decide-after-plan",
                 "reason": (
-                    "The plan has no executable tasks. Finish the run for analysis, planning, or reporting scope; "
+                    "The plan has no executable tasks. Finish the run for analysis or reporting scope; "
                     "create a task only when execution was explicitly requested."
                 ),
             }
@@ -321,6 +321,55 @@ def test_plan_without_tasks_offers_execution_or_non_execution_completion() -> No
             "tapl_create_task",
             "tapl_finish_run",
         ]
+
+
+def test_planning_plan_without_tasks_requires_user_confirmation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run(
+            "draft an implementation plan",
+            work_type="planning",
+            workflow_mode="standard",
+        )
+        app.apply_plan(
+            "PLAN-001",
+            title="Implementation plan",
+            status="Finalized",
+            summary="REQ-001: describe the implementation",
+            objective="Provide a plan without executing it.",
+            requirements_trace="REQ-001",
+            selected_approach="Describe the intended changes.",
+            affected_files="Example module",
+            execution_order="Plan only.",
+            risks="None",
+            validation="Review the plan.",
+        )
+
+        next_payload = app.get_next()
+        recommendation = next_payload["recommendations"][0]
+        assert recommendation["name"] == "confirm-after-plan"
+        assert "Do not finish or archive before the user chooses" in recommendation["reason"]
+
+        mcp_payload = mcp_server.mcp_next_recommendations(next_payload)
+        assert mcp_payload["recommendations"][0]["tool"] == "request_user_input"
+
+
+def test_lightweight_planning_run_requires_user_confirmation_before_archive() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run(
+            "draft a short plan",
+            work_type="planning",
+            workflow_mode="fast",
+        )
+
+        before_result = app.get_next()
+        assert before_result["recommendations"][0]["name"] == "confirm-after-plan"
+
+        app.finish_run("The requested plan was reported.")
+        after_result = app.get_next()
+        assert after_result["recommendations"][0]["name"] == "confirm-after-plan"
+        assert mcp_server.mcp_next_recommendations(after_result)["recommendations"][0]["tool"] == "request_user_input"
 
 
 def test_application_missing_item_has_actionable_error() -> None:

@@ -248,7 +248,7 @@ ${history_search_guidance}
 
 When external search or documentation review affects the task, store only decision-relevant findings with source and impact; never store raw dumps, long candidate lists, or stale findings.
 
-Archive the active run when no actionable tasks remain, the workflow is superseded, the user chooses to archive or discard remaining work, or the active run is stale.
+Archive when no actionable work remains, the run is superseded or stale, or the user chooses archive/discard. Planning-only: ask with request_user_input to keep active, execute, or archive; never finish/archive before the choice.
 
 ## Completion Report
 
@@ -268,7 +268,7 @@ SessionStart is bootstrap only; wait for a concrete user request before creating
 
 STOP_GUIDANCE_TEMPLATE = """# TAPL MCP
 
-Use `tapl_get_next` to settle remaining tasks or batches. When work is verified, record the result with `tapl_finish_run`, archive eligible work with `tapl_finish_archive`, and report changed behavior, verification, remaining risk, and archive status."""
+Use `tapl_get_next` to settle remaining tasks or batches. When work is verified, record the result with `tapl_finish_run`, archive eligible work with `tapl_finish_archive`, and report changed behavior, verification, remaining risk, and archive status. A planning-only run stays active after the plan is reported; ask the user what to do next and do not finish or archive it before their choice."""
 
 def render_template(template: str, **variables: Any) -> str:
     values = {key: str(value) for key, value in variables.items()}
@@ -567,22 +567,30 @@ def create_plan_next_action() -> str:
 
 def lightweight_run_next_action() -> str:
     return (
-        "This run is lightweight: complete the Fast non-durable work without plan/task records, then use `tapl_finish_run` and "
-        "`tapl_finish_archive`. If the work becomes complex or needs durable edits, call `tapl_apply_plan`; "
+        "This run is lightweight: complete the Fast non-durable work without plan/task records. For work_type=planning, "
+        "report the plan, keep the run active, and use request_user_input to ask whether to keep it active, proceed to "
+        "execution, or finish and archive it; do not finish or archive before the user chooses. For other work types, use "
+        "`tapl_finish_run` and `tapl_finish_archive` after completion. If the work becomes complex or needs durable edits, "
+        "call `tapl_apply_plan`; "
         "creating the plan promotes its record_mode to planned."
     )
 
 
 def archive_lightweight_run_next_action() -> str:
-    return "The lightweight result is recorded; archive it with `tapl_finish_archive`."
+    return (
+        "The lightweight result is recorded. For work_type=planning, keep the run active and use request_user_input to "
+        "ask whether to keep it active, proceed to execution, or finish and archive it; do not archive before the user "
+        "chooses. For other work types, archive it with `tapl_finish_archive`."
+    )
 
 
 def decide_after_plan_next_action() -> str:
     return (
         "Plan is ready and no tasks exist; agent must judge the user's requested scope directly. "
-        "If the user limited work to planning/reporting, report the plan/status and stop without tasks, "
-        "execution approval, or durable edits. If planning was requested without execution, use "
-        "request_user_input to ask whether to continue. If execution, edits, testing, or verification were "
+        "If work_type=planning or the user limited work to planning, report the plan/status, keep the run active, and use "
+        "request_user_input to ask whether to keep it active, proceed to execution, or finish and archive it. Do not call "
+        "`tapl_finish_run` or `tapl_finish_archive` before the user chooses. For analysis or reporting scope, finish the run "
+        "without executable tasks. If execution, edits, testing, or verification were "
         "explicitly requested, create executable tasks and record execution approval with "
         "`tapl_approve_execution` using source `explicit_user` "
         "before task execution."
@@ -934,9 +942,10 @@ def request_partition_guidance() -> str:
 def workflow_stage_progression_guidance() -> str:
     return (
         "unless the user explicitly limits the workflow to a specific stage, continue to the next "
-        "lifecycle step automatically. If the user asks for planning only, stop after the plan and report status. "
+        "lifecycle step automatically. If the user asks for planning only, report the plan and keep the run active. "
         "If the user asks to plan but does not explicitly ask for implementation/execution, ask with request_user_input "
-        "whether to continue after the plan. If the user explicitly asks for implementation, edits, verification, or "
+        "whether to keep the run active, proceed to execution, or finish and archive it; do not finish or archive before "
+        "the user chooses. If the user explicitly asks for implementation, edits, verification, or "
         "testing, treat that as explicit_user execution approval and record approval source accordingly before execution."
     )
 

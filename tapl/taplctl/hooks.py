@@ -169,6 +169,8 @@ def should_auto_archive_on_stop(
     run = state.get("active_run")
     if not isinstance(run, dict):
         return False
+    if str(run.get("work_type") or "") == "planning":
+        return False
     if state.get("active_batches") or state.get("active_executions"):
         return False
 

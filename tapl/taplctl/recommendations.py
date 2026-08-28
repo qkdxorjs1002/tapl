@@ -45,8 +45,11 @@ def next_recommendations(
 
     plans = state.get("plans") if isinstance(state.get("plans"), list) else []
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
+    is_planning_scope = str(run.get("work_type") or "") == "planning"
     if not plans:
         if str(run.get("record_mode") or db.DEFAULT_RECORD_MODE) == "lightweight":
+            if is_planning_scope:
+                return [planning_confirmation_recommendation()]
             if str(run.get("result_summary") or "").strip():
                 return [
                     recommendation(
@@ -70,11 +73,13 @@ def next_recommendations(
             )
         ]
     if not tasks:
+        if is_planning_scope:
+            return [planning_confirmation_recommendation()]
         return [
             recommendation(
                 "decide-after-plan",
                 (
-                    "The plan has no executable tasks. Finish the run for analysis, planning, or reporting scope; "
+                    "The plan has no executable tasks. Finish the run for analysis or reporting scope; "
                     "create a task only when execution was explicitly requested."
                 ),
             )
@@ -183,6 +188,19 @@ def recommendation(name: str, reason: str) -> dict[str, str]:
     """Create the stable recommendation shape used by MCP adapters."""
 
     return {"name": name, "reason": reason}
+
+
+def planning_confirmation_recommendation() -> dict[str, str]:
+    """Keep planning-only work open until the user chooses its disposition."""
+
+    return recommendation(
+        "confirm-after-plan",
+        (
+            "Complete and report the requested planning scope, then use request_user_input to ask whether to keep "
+            "the run active, proceed to execution, or finish and archive it. Do not finish or archive before the "
+            "user chooses."
+        ),
+    )
 
 
 def first_task_with_status(

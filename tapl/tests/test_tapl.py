@@ -34,6 +34,7 @@ from taplctl import (
     config as tapl_config,
     db as tapl_db,
     embeddings as tapl_embeddings,
+    hooks as tapl_hooks,
     install as tapl_install,
     mcp_server as tapl_mcp,
     prompt as tapl_prompt,
@@ -90,6 +91,52 @@ class TaplRuntimeTests(unittest.TestCase):
         version = self.run_taplctl("--version")
         self.assertEqual(version.returncode, 0, version.stderr)
         self.assertEqual(version.stdout.strip(), f"taplctl {expected_version}")
+
+    def test_stop_auto_archive_keeps_planning_run_active(self) -> None:
+        planning_state = {
+            "active_run": {"work_type": "planning", "result_summary": ""},
+            "plans": [],
+            "tasks": [],
+            "findings": [],
+            "active_batches": [],
+            "active_executions": [],
+            "incomplete_tasks": 0,
+        }
+        check = {"errors": []}
+
+        self.assertFalse(
+            tapl_hooks.should_auto_archive_on_stop(
+                planning_state,
+                check,
+                False,
+                {"assistant_response": "The requested plan was reported."},
+            )
+        )
+
+        completed_planning_state = {
+            **planning_state,
+            "tasks": [{"status": "Completed"}],
+        }
+        self.assertFalse(
+            tapl_hooks.should_auto_archive_on_stop(
+                completed_planning_state,
+                check,
+                False,
+            )
+        )
+
+        answer_state = {
+            **planning_state,
+            "active_run": {"work_type": "answer", "result_summary": ""},
+        }
+        self.assertTrue(
+            tapl_hooks.should_auto_archive_on_stop(
+                answer_state,
+                check,
+                False,
+                {"assistant_response": "The requested answer was reported."},
+            )
+        )
 
     def test_mcp_tools_expose_typed_high_level_contracts(self) -> None:
         server = tapl_mcp.create_server(workspace_root=ROOT)
@@ -739,7 +786,9 @@ class TaplRuntimeTests(unittest.TestCase):
             "During execution, search again",
             "decision-relevant findings with source and impact",
             "never store raw dumps, long candidate lists, or stale findings",
-            "Archive the active run when no actionable tasks remain",
+            "Archive when no actionable work remains",
+            "Planning-only: ask with request_user_input",
+            "never finish/archive before the choice",
             "When the user asks to run, test, inspect, or show output",
             "lead with the observed result",
             "include the relevant raw output or a faithful excerpt",
@@ -960,10 +1009,14 @@ class TaplRuntimeTests(unittest.TestCase):
         work_type_help = tapl_prompt.field_help("run", "work_type")
         mode_help = tapl_prompt.field_help("run", "workflow_mode")
         next_action = tapl_prompt.lightweight_run_next_action()
+        recorded_action = tapl_prompt.archive_lightweight_run_next_action()
 
         self.assertIn("answer, investigation, analysis, planning, implementation, or mixed", work_type_help)
         self.assertIn("fast, standard, or strict", mode_help)
         self.assertIn("complete the Fast non-durable work", next_action)
+        self.assertIn("For work_type=planning", next_action)
+        self.assertIn("keep the run active", next_action)
+        self.assertIn("do not archive before the user chooses", recorded_action)
         self.assertIn("record_mode to planned", next_action)
         self.assertNotIn("answer directly", next_action)
 
