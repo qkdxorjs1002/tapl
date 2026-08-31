@@ -3,6 +3,9 @@
 ## Test Rule
 - 격리 환경에서 테스트가 필요한 경우 `moraebox`를 사용한다.
 
+## SubAgent Rule
+- TAPL 워크플로우에서 SubAgent에게 전달하는 모든 작업 지시는 영어로 작성한다.
+
 ## Gitops Rule
 - 작업을 실행하기 이전에 작업 브랜치를 먼저 생성한 후 진행한다.
 - 워크스페이스를 수정한 경우, 작업 내용들을 commit 한다.
