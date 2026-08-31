@@ -32,6 +32,7 @@ from taplctl import (
     __version__,
     cli as tapl_cli,
     config as tapl_config,
+    config_editor as tapl_config_editor,
     db as tapl_db,
     embeddings as tapl_embeddings,
     hooks as tapl_hooks,
@@ -1063,6 +1064,269 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertEqual(cfg.as_dict()["subagents"], cfg.subagents.as_dict())
             self.assertNotIn("plan_task_execute", cfg.as_dict())
             self.assertFalse(hasattr(cfg, "plan_task_execute"))
+
+    def test_editable_config_schema_parses_supported_value_types(self) -> None:
+        self.assertEqual(
+            [spec.key for spec in tapl_config.EDITABLE_CONFIG_KEYS],
+            [
+                "search.mode",
+                "search.max_results",
+                "search.hybrid_semantic_ratio",
+                "search.semantic_provider",
+                "search.searchd_model_idle_timeout_seconds",
+                "viewer.allowed_origins",
+                "subagents.enabled",
+                "subagents.strategy",
+                "subagents.models.<model-id>",
+            ],
+        )
+        cases = (
+            ("search.mode", "bm25", "bm25"),
+            ("search.mode", '"word"', "word"),
+            ("search.max_results", "24", 24),
+            ("search.hybrid_semantic_ratio", "0.4", 0.4),
+            ("search.semantic_provider", "daemon", "daemon"),
+            ("search.searchd_model_idle_timeout_seconds", "0", 0),
+            ("viewer.allowed_origins", '["HTTPS://Example.COM:443"]', ["https://example.com"]),
+            ("subagents.enabled", "false", False),
+            ("subagents.strategy", "conservative", "conservative"),
+            ("subagents.models.future-model", '["high", "xhigh"]', ["high", "xhigh"]),
+        )
+        for key, raw_value, expected in cases:
+            with self.subTest(key=key):
+                self.assertEqual(
+                    tapl_config.parse_editable_value(key, raw_value),
+                    expected,
+                )
+
+        invalid = (
+            ("unknown.key", "true"),
+            ("search.mode", "unknown"),
+            ("search.max_results", "0"),
+            ("search.hybrid_semantic_ratio", "true"),
+            ("subagents.enabled", "yes"),
+            ("subagents.models.future-model", "[]"),
+            ("search.max_results", "24\nextra = 1"),
+        )
+        for key, raw_value in invalid:
+            with self.subTest(key=key, raw_value=raw_value):
+                with self.assertRaises(ValueError):
+                    tapl_config.parse_editable_value(key, raw_value)
+
+    def test_config_editor_sets_and_unsets_without_rewriting_unrelated_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".tapl" / "config.toml"
+            config_path.parent.mkdir()
+            original = """# user header
+[search]
+mode = "word" # keep this comment
+custom_setting = "untouched"
+
+[viewer]
+allowed_origins = [
+  "https://old.example.com",
+] # viewer note
+
+[custom]
+payload = { answer = 42 }
+"""
+            config_path.write_text(original, encoding="utf-8")
+
+            mode = tapl_config_editor.set_value(config_path, "search.mode", "hybrid")
+            origins = tapl_config_editor.set_value(
+                config_path,
+                "viewer.allowed_origins",
+                '["https://new.example.com"]',
+            )
+            limit = tapl_config_editor.set_value(config_path, "search.max_results", "25")
+
+            self.assertTrue(mode.changed)
+            self.assertTrue(origins.changed)
+            self.assertTrue(limit.changed)
+            edited = config_path.read_text(encoding="utf-8")
+            self.assertIn('mode = "hybrid" # keep this comment', edited)
+            self.assertIn(
+                'allowed_origins = ["https://new.example.com"] # viewer note',
+                edited,
+            )
+            self.assertIn('custom_setting = "untouched"', edited)
+            self.assertIn("payload = { answer = 42 }", edited)
+            self.assertEqual(tapl_config.load(config_path).search.max_results, 25)
+
+            removed = tapl_config_editor.unset_value(config_path, "search.mode")
+            self.assertTrue(removed.changed)
+            after_unset = config_path.read_text(encoding="utf-8")
+            self.assertNotIn('mode = "hybrid"', after_unset)
+            self.assertIn("# keep this comment", edited)
+            self.assertIn('custom_setting = "untouched"', after_unset)
+            self.assertEqual(tapl_config.load(config_path).search.mode, "hybrid")
+
+    def test_config_editor_handles_dotted_and_dynamic_model_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.toml"
+            config_path.write_text(
+                """search.mode = "word" # dotted
+
+[subagents]
+enabled = true
+
+[subagents.models]
+"base-model" = ["high"]
+
+[[custom.items]]
+name = "preserved"
+""",
+                encoding="utf-8",
+            )
+
+            tapl_config_editor.set_value(config_path, "search.mode", "semantic")
+            added = tapl_config_editor.set_value(
+                config_path,
+                "subagents.models.model.with-dots",
+                '["medium", "high"]',
+            )
+            self.assertTrue(added.changed)
+            text = config_path.read_text(encoding="utf-8")
+            self.assertIn('search.mode = "semantic" # dotted', text)
+            self.assertIn('"model.with-dots" = ["medium", "high"]', text)
+            self.assertIn('name = "preserved"', text)
+            self.assertEqual(
+                tapl_config.load(config_path).subagents.as_dict()["models"]["model.with-dots"],
+                ["medium", "high"],
+            )
+
+            removed = tapl_config_editor.unset_value(
+                config_path,
+                "subagents.models.model.with-dots",
+            )
+            self.assertTrue(removed.changed)
+            self.assertNotIn("model.with-dots", config_path.read_text(encoding="utf-8"))
+
+            unicode_model = tapl_config_editor.set_value(
+                config_path,
+                "subagents.models.모델",
+                '["high"]',
+            )
+            self.assertTrue(unicode_model.changed)
+            self.assertIn('"모델" = ["high"]', config_path.read_text(encoding="utf-8"))
+
+    def test_config_editor_rejects_invalid_result_without_changing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.toml"
+            original = """[subagents]
+enabled = true
+
+[subagents.models]
+"only-model" = ["high"]
+"""
+            config_path.write_text(original, encoding="utf-8")
+
+            with mock.patch.object(tapl_config_editor.os, "replace") as replace:
+                with self.assertRaisesRegex(ValueError, "must define at least one model"):
+                    tapl_config_editor.unset_value(
+                        config_path,
+                        "subagents.models.only-model",
+                    )
+                replace.assert_not_called()
+
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+            with self.assertRaises(ValueError):
+                tapl_config_editor.set_value(config_path, "search.max_results", "0")
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+
+            with mock.patch.object(
+                tapl_config_editor.os,
+                "replace",
+                side_effect=OSError("replace failed"),
+            ):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    tapl_config_editor.set_value(
+                        config_path,
+                        "search.max_results",
+                        "8",
+                    )
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+            self.assertEqual(list(config_path.parent.glob(".config.toml.*.tmp")), [])
+
+    def test_config_editor_creates_missing_config_atomically_and_noops_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "nested" / ".tapl" / "config.toml"
+            created = tapl_config_editor.set_value(config_path, "search.max_results", "7")
+            self.assertTrue(created.changed)
+            self.assertEqual(tapl_config.load(config_path).search.max_results, 7)
+            self.assertEqual(list(config_path.parent.glob(f".{config_path.name}.*.tmp")), [])
+
+            unchanged = tapl_config_editor.set_value(config_path, "search.max_results", "7")
+            missing = tapl_config_editor.unset_value(config_path, "viewer.allowed_origins")
+            self.assertFalse(unchanged.changed)
+            self.assertFalse(missing.changed)
+
+            config_path.write_bytes(b"[search]\r\nmode = \"word\"\r\n")
+            tapl_config_editor.set_value(config_path, "search.max_results", "9")
+            edited_bytes = config_path.read_bytes()
+            self.assertIn(b"mode = \"word\"\r\nmax_results = 9\r\n", edited_bytes)
+            self.assertNotIn(b"\nmax_results = 9\n", edited_bytes)
+
+    def test_config_cli_set_unset_and_structured_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".tapl" / "config.toml"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                '# user comment\n[search]\nmode = "word"\n',
+                encoding="utf-8",
+            )
+
+            set_result = self.run_taplctl(
+                "--config",
+                str(config_path),
+                "config",
+                "set",
+                "search.mode",
+                "hybrid",
+                "--json",
+            )
+            self.assertEqual(set_result.returncode, 0, set_result.stderr)
+            payload = json.loads(set_result.stdout)
+            self.assertEqual(payload["config_action"], "set")
+            self.assertEqual(payload["key"], "search.mode")
+            self.assertEqual(payload["value"], "hybrid")
+            self.assertTrue(payload["changed"])
+            self.assertEqual(payload["path"], str(config_path))
+            self.assertIn("# user comment", config_path.read_text(encoding="utf-8"))
+
+            unset_result = self.run_taplctl(
+                "--config",
+                str(config_path),
+                "config",
+                "unset",
+                "search.mode",
+                "--agent",
+            )
+            self.assertEqual(unset_result.returncode, 0, unset_result.stderr)
+            self.assertIn("<config_action>unset</config_action>", unset_result.stdout)
+            self.assertIn("<key>search.mode</key>", unset_result.stdout)
+            self.assertIn("<changed>true</changed>", unset_result.stdout)
+            self.assertEqual(tapl_config.load(config_path).search.mode, "hybrid")
+
+    def test_config_cli_invalid_value_reports_error_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.toml"
+            original = '[search]\nmax_results = 5\n'
+            config_path.write_text(original, encoding="utf-8")
+
+            result = self.run_taplctl(
+                "--config",
+                str(config_path),
+                "config",
+                "set",
+                "search.max_results",
+                "0",
+                "--json",
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("must be a positive integer", json.loads(result.stdout)["error"])
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
 
     def test_default_config_documents_options_and_fallback_matches_template(self) -> None:
         template = (ROOT / ".tapl" / "config.toml").read_text(encoding="utf-8")

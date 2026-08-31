@@ -11,6 +11,7 @@ from taplctl import cli, hook_cli, install
 
 
 MANAGEMENT_COMMANDS = {
+    "config",
     "init",
     "doctor",
     "update",
@@ -41,6 +42,46 @@ class PublicCliBoundaryTests(unittest.TestCase):
     def test_workflow_commands_are_not_registered_by_management_cli(self) -> None:
         commands = root_commands(cli.build_parser())
         self.assertTrue({"status", "mcp", "hook-event"}.isdisjoint(commands))
+
+    def test_config_command_is_management_only_and_skips_auto_install(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["config", "set", "search.mode", "hybrid"]
+        )
+
+        self.assertEqual(args.command, "config")
+        self.assertTrue(cli.should_skip_auto_install(args))
+
+    def test_config_help_lists_keys_value_formats_allowed_values_and_examples(self) -> None:
+        parser = cli.build_parser()
+        config_action = next(
+            action
+            for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
+        ).choices["config"]
+        config_sub = next(
+            action
+            for action in config_action._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+        set_parser = config_sub.choices["set"]
+        unset_parser = config_sub.choices["unset"]
+
+        config_help = config_action.format_help()
+        set_help = set_parser.format_help()
+        unset_help = unset_parser.format_help()
+        for expected in (
+            "search.mode MODE",
+            "semantic, bm25, word, hybrid",
+            "viewer.allowed_origins TOML_ARRAY",
+            "subagents.enabled BOOLEAN",
+            "true, false",
+            "subagents.models.<model-id> TOML_ARRAY",
+        ):
+            self.assertIn(expected, config_help)
+            self.assertIn(expected, set_help)
+            self.assertIn(expected, unset_help)
+        self.assertIn("taplctl config set search.mode hybrid", set_help)
+        self.assertIn("taplctl config unset search.mode", unset_help)
 
 
 class HookEntrypointTests(unittest.TestCase):

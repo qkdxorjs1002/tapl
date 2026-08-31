@@ -2,7 +2,7 @@
 
 Workflow operations are exposed by the dedicated ``tapl-mcp`` server and hook
 events by ``tapl-hook``.  This module intentionally contains only installation,
-health, viewer, update, and semantic-index management commands.
+configuration, health, viewer, update, and semantic-index management commands.
 """
 
 from __future__ import annotations
@@ -16,7 +16,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__, config as tapl_config, db, embeddings, searchd, updater, viewer
+from . import (
+    __version__,
+    config as tapl_config,
+    config_editor,
+    db,
+    embeddings,
+    searchd,
+    updater,
+    viewer,
+)
 from . import install as tapl_install
 
 
@@ -82,7 +91,7 @@ def should_skip_auto_install(args: argparse.Namespace) -> bool:
     command = getattr(args, "command", None)
     if args.db is not None or args.config is not None:
         return True
-    if command in {None, "init", "install", "update", "viewer"}:
+    if command in {None, "config", "init", "install", "update", "viewer"}:
         return True
     return command == "searchd" and getattr(args, "searchd_command", None) == "run"
 
@@ -90,7 +99,9 @@ def should_skip_auto_install(args: argparse.Namespace) -> bool:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="taplctl",
-        description="Manage TAPL installation, health, indexing, and local services.",
+        description=(
+            "Manage TAPL installation, configuration, health, indexing, and local services."
+        ),
         epilog="Agent workflow operations are available through the dedicated `tapl-mcp` server.",
     )
     parser.add_argument("--db", type=Path, default=None, help="Path to TAPL SQLite DB.")
@@ -139,6 +150,46 @@ def build_parser() -> argparse.ArgumentParser:
     install_repo.add_argument("--repo", type=Path, default=None)
     add_install_common_args(install_repo)
     install_repo.set_defaults(handler=cmd_install_repo)
+
+    config_cmd = sub.add_parser(
+        "config",
+        help="Edit TAPL's TOML configuration.",
+        description=(
+            "Set or unset supported .tapl/config.toml values without rewriting "
+            "comments or unrelated settings."
+        ),
+        epilog=config_key_help(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
+    config_set = config_sub.add_parser(
+        "set",
+        help="Set a supported configuration value.",
+        description=(
+            "Set KEY to VALUE. VALUE uses TOML syntax; enum strings such as hybrid "
+            "may be passed without quotes."
+        ),
+        epilog=config_key_help(include_examples=True),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    config_set.add_argument("key", metavar="KEY", help="Supported dot-separated key.")
+    config_set.add_argument("value", metavar="VALUE", help="Value in the format listed below.")
+    add_agent_output_args(config_set)
+    config_set.set_defaults(handler=cmd_config_set)
+
+    config_unset = config_sub.add_parser(
+        "unset",
+        help="Remove a supported configuration value.",
+        description=(
+            "Remove KEY so TAPL's built-in default applies. The resulting complete "
+            "configuration must remain valid."
+        ),
+        epilog=config_key_help(include_examples=True),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    config_unset.add_argument("key", metavar="KEY", help="Supported dot-separated key.")
+    add_agent_output_args(config_unset)
+    config_unset.set_defaults(handler=cmd_config_unset)
 
     viewer_cmd = sub.add_parser("viewer", help="Serve the workflow viewer locally.")
     viewer_cmd.add_argument(
@@ -215,6 +266,40 @@ def add_agent_output_args(parser: argparse.ArgumentParser) -> None:
     output = parser.add_mutually_exclusive_group()
     output.add_argument("--json", action="store_true", help=JSON_HELP)
     output.add_argument("--agent", action="store_true", help=AGENT_HELP)
+
+
+def config_key_help(*, include_examples: bool = False) -> str:
+    lines = [
+        "Target file:",
+        "  Use `taplctl --config PATH config ...` to select a file explicitly.",
+        "  Otherwise TAPL prefers repo-local .tapl/config.toml, then ~/.tapl/config.toml.",
+        "",
+        "Supported KEY values:",
+    ]
+    for spec in tapl_config.EDITABLE_CONFIG_KEYS:
+        details = spec.description
+        if spec.allowed:
+            details += f" Allowed: {', '.join(spec.allowed)}."
+        lines.append(f"  {spec.key} {spec.value_name}")
+        lines.append(f"      {details}")
+    lines.extend(
+        (
+            "",
+            "TOML_ARRAY examples: [\"https://tapl.example.com\"] or [\"high\", \"xhigh\"].",
+        )
+    )
+    if include_examples:
+        lines.extend(
+            (
+                "",
+                "Examples:",
+                "  taplctl config set search.mode hybrid",
+                "  taplctl config set viewer.allowed_origins '[\"https://tapl.example.com\"]'",
+                "  taplctl config set subagents.models.gpt-5.6-sol '[\"high\", \"xhigh\"]'",
+                "  taplctl config unset search.mode",
+            )
+        )
+    return "\n".join(lines)
 
 
 def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
@@ -386,6 +471,41 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config_set(args: argparse.Namespace) -> int:
+    path = tapl_config.resolve_config_path(args.config)
+    result = config_editor.set_value(path, args.key, args.value)
+    emit(
+        {
+            "ok": True,
+            "config_action": "set",
+            "path": result.path,
+            "key": result.key,
+            "value": result.value,
+            "changed": result.changed,
+        },
+        args.json,
+        args.agent,
+    )
+    return 0
+
+
+def cmd_config_unset(args: argparse.Namespace) -> int:
+    path = tapl_config.resolve_config_path(args.config)
+    result = config_editor.unset_value(path, args.key)
+    emit(
+        {
+            "ok": True,
+            "config_action": "unset",
+            "path": result.path,
+            "key": result.key,
+            "changed": result.changed,
+        },
+        args.json,
+        args.agent,
+    )
+    return 0
+
+
 def cmd_reindex(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     try:
@@ -495,6 +615,12 @@ def humanize(payload: dict[str, Any]) -> str:
         lines = [f"tapl install {payload['install']}: {payload.get('repo') or payload.get('codex_home')}"]
         lines.extend(f"{item['action']}: {item['path']}" for item in payload.get("files", []))
         return "\n".join(lines)
+    if "config_action" in payload:
+        state = "updated" if payload.get("changed") else "unchanged"
+        return (
+            f"config {payload['config_action']} {payload.get('key')}: {state} "
+            f"({payload.get('path')})"
+        )
     if "running" in payload:
         state = "running" if payload.get("running") else "stopped"
         return f"searchd {state}: {payload.get('socket_path', '')}".rstrip()

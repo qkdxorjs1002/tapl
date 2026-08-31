@@ -258,8 +258,8 @@ plane을 감싸지 않습니다. `tapl-hook`은 Codex lifecycle 지점에서 간
 더하고 durable-edit boundary를 지킵니다. SQLite database는 Codex, hook, viewer가 공유하는
 source of truth입니다.
 
-`taplctl`은 management-only입니다. 공개 명령은 정확히 일곱 가지인 `init`, `doctor`,
-`update`, `install`, `viewer`, `reindex`, `searchd`입니다. agent는 workflow record를
+`taplctl`은 management-only입니다. 공개 명령은 정확히 여덟 가지인 `init`, `doctor`,
+`update`, `install`, `config`, `viewer`, `reindex`, `searchd`입니다. agent는 workflow record를
 만들거나 dispatch·정산·검색·조회하려고 이 CLI를 사용해서는 안 됩니다.
 
 ## 설치 관리
@@ -269,6 +269,7 @@ source of truth입니다.
 | `taplctl init --workspace-root /path/to/workspace` | workspace root 선택 또는 초기화 |
 | `taplctl doctor` | 설치와 workspace 문제 진단 |
 | `taplctl install SCOPE --taplctl-command PATH` | Codex integration 설치 또는 갱신 |
+| `taplctl config set/unset` | 지원 runtime config 값 편집 |
 | `taplctl viewer [--port 9000]` | local browser viewer 열기 |
 | `taplctl update --check` / `update` | 독립형 설치 업데이트 확인 또는 실행 |
 | `taplctl reindex` | search index 다시 만들기 |
@@ -302,6 +303,40 @@ installation은 관련 없는 Codex setting을 보존합니다. `hooks.json`은 
 install에 생성됩니다. upgrade 때 default overwrite 또는 누락 key merge를 물을 수
 있습니다. TAPL managed template value를 우선하려면 `--force`를, runtime config policy를
 명시하려면 `--tapl-config-policy {prompt,overwrite,merge}`를 사용하세요.
+
+TOML을 직접 편집하지 않고 runtime 값을 바꿀 수 있습니다.
+
+```sh
+taplctl config set search.mode hybrid
+taplctl config set search.max_results 20
+taplctl config set viewer.allowed_origins '["https://tapl.example.com"]'
+taplctl config set subagents.models.gpt-5.6-sol '["high", "xhigh"]'
+taplctl config unset search.mode
+```
+
+`set`은 점 표기 `KEY`와 `VALUE` 하나를 받습니다. 값은 TOML 문법을 사용하며 enum 문자열은
+따옴표 없이 전달할 수 있습니다. 배열은 위 예시처럼 보통 shell에서 따옴표로 감싸세요.
+`unset`은 `KEY`만 받고 해당 값을 제거해 내장 기본값을 복원합니다. 두 명령 모두 변경 후의
+전체 config를 검증하며 주석과 관련 없는 설정을 보존합니다. 지원 key, 값 형식, enum
+허용값, 예시는 `taplctl config --help` 또는 `taplctl config set --help`에서 확인할 수
+있습니다.
+
+지원 key는 `search.mode`(`semantic`, `bm25`, `word`, `hybrid`),
+`search.max_results`(1 이상의 정수), `search.hybrid_semantic_ratio`(0.0–1.0),
+`search.semantic_provider`(`local`, `daemon`, `auto`),
+`search.searchd_model_idle_timeout_seconds`(0 이상의 정수),
+`viewer.allowed_origins`(중복 없는 HTTP(S) origin 문자열의 TOML 배열),
+`subagents.enabled`(`true` 또는 `false`), `subagents.strategy`(`conservative`,
+`balanced`, `aggressive`), `subagents.models.<model-id>`(중복 없는 reasoning-effort
+문자열의 비어 있지 않은 TOML 배열)입니다.
+
+별도 지정이 없으면 위에서 설명한 repo-local, user-global 순서로 대상을 선택하고 두 파일이
+모두 없으면 repo-local 경로를 생성합니다. 다른 파일을 편집하려면 global option을 명령
+앞에 놓으세요.
+
+```sh
+taplctl --config /path/to/config.toml config set search.mode bm25
+```
 
 </details>
 

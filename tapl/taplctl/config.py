@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from pathlib import Path
 from typing import Any
 import tomllib
@@ -29,6 +30,77 @@ DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
 SUBAGENT_STRATEGIES = ("conservative", "balanced", "aggressive")
+
+
+@dataclass(frozen=True)
+class EditableConfigKey:
+    """A public config key accepted by ``taplctl config set``."""
+
+    key: str
+    value_name: str
+    description: str
+    allowed: tuple[str, ...] = ()
+    dynamic_prefix: str = ""
+
+    def matches(self, candidate: str) -> bool:
+        if self.dynamic_prefix:
+            suffix = candidate.removeprefix(self.dynamic_prefix)
+            return candidate.startswith(self.dynamic_prefix) and bool(suffix)
+        return candidate == self.key
+
+
+EDITABLE_CONFIG_KEYS = (
+    EditableConfigKey(
+        "search.mode",
+        "MODE",
+        "Search backend.",
+        allowed=SEARCH_MODES,
+    ),
+    EditableConfigKey(
+        "search.max_results",
+        "INTEGER",
+        "Default result limit; integer greater than or equal to 1.",
+    ),
+    EditableConfigKey(
+        "search.hybrid_semantic_ratio",
+        "NUMBER",
+        "Hybrid semantic weight; number from 0.0 to 1.0.",
+    ),
+    EditableConfigKey(
+        "search.semantic_provider",
+        "PROVIDER",
+        "Semantic model provider.",
+        allowed=SEMANTIC_PROVIDERS,
+    ),
+    EditableConfigKey(
+        "search.searchd_model_idle_timeout_seconds",
+        "SECONDS",
+        "Idle model timeout; integer greater than or equal to 0.",
+    ),
+    EditableConfigKey(
+        "viewer.allowed_origins",
+        "TOML_ARRAY",
+        "Unique HTTP(S) origins as a TOML string array.",
+    ),
+    EditableConfigKey(
+        "subagents.enabled",
+        "BOOLEAN",
+        "Whether eligible tasks may be delegated; true or false.",
+        allowed=("true", "false"),
+    ),
+    EditableConfigKey(
+        "subagents.strategy",
+        "STRATEGY",
+        "SubAgent delegation strategy.",
+        allowed=SUBAGENT_STRATEGIES,
+    ),
+    EditableConfigKey(
+        "subagents.models.<model-id>",
+        "TOML_ARRAY",
+        "Allowed reasoning efforts for one model as a non-empty, unique TOML string array.",
+        dynamic_prefix="subagents.models.",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -167,6 +239,19 @@ def load(
             raise ValueError(f"tapl config must be a TOML table: {config_path}")
         data = parsed
 
+    return from_mapping(data, path=config_path, exists=exists)
+
+
+def from_mapping(
+    data: dict[str, Any],
+    *,
+    path: Path | str,
+    exists: bool = True,
+) -> TaplConfig:
+    """Validate already parsed TOML data using the runtime config rules."""
+
+    config_path = Path(path)
+
     search_data = table(data, "search")
     search = SearchConfig(
         mode=choice(
@@ -270,6 +355,61 @@ def load(
             models=subagent_models,
         ),
     )
+
+
+def editable_config_key(key: str) -> EditableConfigKey:
+    candidate = key.strip()
+    if candidate != key or not candidate:
+        raise ValueError("config key must be a non-empty dot-separated key")
+    for spec in EDITABLE_CONFIG_KEYS:
+        if spec.matches(candidate):
+            return spec
+    supported = ", ".join(spec.key for spec in EDITABLE_CONFIG_KEYS)
+    raise ValueError(f"unsupported config key: {key}; supported keys: {supported}")
+
+
+def parse_editable_value(key: str, raw_value: str) -> Any:
+    """Parse and normalize a CLI value for one editable config key."""
+
+    spec = editable_config_key(key)
+    value: Any
+    normalized = raw_value.strip().lower().replace("-", "_")
+    if key != "subagents.enabled" and spec.allowed and normalized in spec.allowed:
+        value = raw_value
+    else:
+        try:
+            parsed_value = tomllib.loads(f"value = {raw_value}\n")
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(
+                f"{key} value must use TOML syntax (string choices may be unquoted)"
+            ) from exc
+        if set(parsed_value) != {"value"}:
+            raise ValueError(f"{key} value must be one TOML value")
+        value = parsed_value["value"]
+
+    if key == "search.mode":
+        return choice(value, SEARCH_MODES, key)
+    if key == "search.max_results":
+        return positive_int(value, key)
+    if key == "search.hybrid_semantic_ratio":
+        return ratio(value, key)
+    if key == "search.semantic_provider":
+        return choice(value, SEMANTIC_PROVIDERS, key)
+    if key == "search.searchd_model_idle_timeout_seconds":
+        return non_negative_int(value, key)
+    if key == "viewer.allowed_origins":
+        return list(origin_array(value, key))
+    if key == "subagents.enabled":
+        return boolean(value, key)
+    if key == "subagents.strategy":
+        return choice(value, SUBAGENT_STRATEGIES, key)
+    if spec.dynamic_prefix:
+        model_name = key.removeprefix(spec.dynamic_prefix)
+        if model_name != model_name.strip():
+            raise ValueError("subagents.models model names must not have surrounding whitespace")
+        parsed = parse_subagent_models({model_name: value}, enabled=False)
+        return list(parsed[0].reasoning_efforts)
+    raise AssertionError(f"editable config key has no parser: {key}")
 
 
 def table(data: dict[str, Any], *keys: str) -> dict[str, Any]:
@@ -407,10 +547,10 @@ def parse_subagent_models(
 
 
 def ratio(value: Any, key: str) -> float:
-    if not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{key} must be a number between 0.0 and 1.0")
     parsed = float(value)
-    if parsed < 0.0 or parsed > 1.0:
+    if not math.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
         raise ValueError(f"{key} must be between 0.0 and 1.0")
     return parsed
 

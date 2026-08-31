@@ -298,9 +298,9 @@ flowchart LR
 state at Codex lifecycle points and guards durable-edit boundaries. The SQLite
 database is the shared source of truth for Codex, hooks, and viewers.
 
-`taplctl` is management-only. Its seven public commands are `init`, `doctor`,
-`update`, `install`, `viewer`, `reindex`, and `searchd`. Agents should never use
-it to create, dispatch, settle, search, or inspect workflow records.
+`taplctl` is management-only. Its eight public commands are `init`, `doctor`,
+`update`, `install`, `config`, `viewer`, `reindex`, and `searchd`. Agents should
+never use it to create, dispatch, settle, search, or inspect workflow records.
 
 ## Manage your installation
 
@@ -309,6 +309,7 @@ it to create, dispatch, settle, search, or inspect workflow records.
 | `taplctl init --workspace-root /path/to/workspace` | Select or initialize a workspace root |
 | `taplctl doctor` | Diagnose installation and workspace problems |
 | `taplctl install SCOPE --taplctl-command PATH` | Install or refresh Codex integration |
+| `taplctl config set/unset` | Edit supported runtime configuration values |
 | `taplctl viewer [--port 9000]` | Open the local browser viewer |
 | `taplctl update --check` / `update` | Check or update standalone installations |
 | `taplctl reindex` | Rebuild search indexes |
@@ -343,6 +344,40 @@ precedence. Runtime config is created on first install; upgrades can prompt to
 overwrite defaults or merge missing keys. Use `--force` for TAPL-managed template
 values to win, or `--tapl-config-policy {prompt,overwrite,merge}` to select the
 runtime config policy explicitly.
+
+Edit runtime values without hand-editing TOML:
+
+```sh
+taplctl config set search.mode hybrid
+taplctl config set search.max_results 20
+taplctl config set viewer.allowed_origins '["https://tapl.example.com"]'
+taplctl config set subagents.models.gpt-5.6-sol '["high", "xhigh"]'
+taplctl config unset search.mode
+```
+
+`set` accepts a dot-separated `KEY` and one `VALUE`. Values use TOML syntax;
+enum strings may be unquoted, while arrays should normally be shell-quoted as
+shown above. `unset` accepts only `KEY` and restores the built-in default. Both
+commands validate the complete resulting config and preserve comments and
+unrelated settings. Use `taplctl config --help` or `taplctl config set --help`
+for every supported key, value format, allowed enum, and example.
+
+The supported keys are `search.mode` (`semantic`, `bm25`, `word`, or `hybrid`),
+`search.max_results` (integer ≥ 1), `search.hybrid_semantic_ratio` (0.0–1.0),
+`search.semantic_provider` (`local`, `daemon`, or `auto`),
+`search.searchd_model_idle_timeout_seconds` (integer ≥ 0),
+`viewer.allowed_origins` (unique HTTP(S) origins in a TOML string array),
+`subagents.enabled` (`true` or `false`), `subagents.strategy` (`conservative`,
+`balanced`, or `aggressive`), and `subagents.models.<model-id>` (a non-empty
+TOML array of unique reasoning-effort strings).
+
+Without an override, the command uses the same repo-local-then-user lookup order
+described above and creates the repo-local path when neither file exists. To edit
+another file, place the global option before the command:
+
+```sh
+taplctl --config /path/to/config.toml config set search.mode bm25
+```
 
 </details>
 
