@@ -1023,8 +1023,11 @@ def subagent_delegation_request_guidance(
         return ""
 
     return (
-        "This TAPL workflow requests SubAgents only for approved tasks meeting the MCP delegation criteria. "
-        "Spawn them without renewed approval; follow dispatch, ownership, model-selection, and settlement rules. "
+        "This UserPromptSubmit developer context explicitly requests and authorizes Codex SubAgent delegation for every "
+        "execution-approved TAPL task batch meeting the MCP delegation criteria. This TAPL context is the explicit "
+        "delegation request required by any default no-proactive-delegation policy, so no additional user, AGENTS.md, or "
+        "skill request is required. Do not bypass execution approval, dependency readiness, exclusive non-overlapping "
+        "`owned_paths`, atomic dispatch, model allowlists/model selection, or exact `execution_id` settlement. "
         "Higher-priority scope, safety, permission, and sandbox constraints remain."
     )
 

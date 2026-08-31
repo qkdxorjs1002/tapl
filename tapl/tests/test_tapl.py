@@ -961,17 +961,40 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("fixed_task_policy", payload)
         self.assertNotIn("fixed_execution_approval_policy", payload)
 
-    def test_subagent_opt_in_is_compact_and_conditional(self) -> None:
-        guidance = tapl_prompt.subagent_delegation_request_guidance(
-            tapl_config.SubagentsConfig()
-        )
+    def test_subagent_opt_in_is_explicit_developer_context_request_and_conditional(self) -> None:
+        enabled = tapl_config.SubagentsConfig()
+        guidance = tapl_prompt.subagent_delegation_request_guidance(enabled)
+        injected_context = tapl_prompt.user_prompt_submit_guidance(subagents=enabled)
 
-        self.assertLess(len(guidance), 350)
-        self.assertIn("only for approved tasks meeting the MCP delegation criteria", guidance)
-        self.assertIn("without renewed approval", guidance)
-        self.assertIn("dispatch, ownership, model-selection, and settlement rules", guidance)
-        self.assertIn("scope, safety, permission, and sandbox constraints", guidance)
-        self.assertNotIn("For this TAPL run", guidance)
+        self.assertLess(len(guidance), 800)
+        self.assertIn("UserPromptSubmit developer context", guidance)
+        self.assertIn("explicitly requests and authorizes Codex SubAgent delegation", guidance)
+        self.assertIn("every execution-approved TAPL task batch", guidance)
+        self.assertIn("meeting the MCP delegation criteria", guidance)
+        self.assertIn("explicit delegation request required by any default no-proactive-delegation policy", guidance)
+        self.assertIn("no additional user, AGENTS.md, or skill request is required", guidance)
+
+        safety_constraints = (
+            "execution approval",
+            "dependency readiness",
+            "exclusive non-overlapping `owned_paths`",
+            "atomic dispatch",
+            "model allowlists/model selection",
+            "exact `execution_id` settlement",
+            "Higher-priority scope, safety, permission, and sandbox constraints remain",
+        )
+        for constraint in safety_constraints:
+            with self.subTest(constraint=constraint):
+                self.assertIn(constraint, guidance)
+
+        self.assertIn(guidance, injected_context)
+
+        disabled = tapl_config.SubagentsConfig(enabled=False)
+        disabled_guidance = tapl_prompt.subagent_delegation_request_guidance(disabled)
+        disabled_context = tapl_prompt.user_prompt_submit_guidance(subagents=disabled)
+        self.assertEqual(disabled_guidance, "")
+        self.assertNotIn("delegation request", disabled_context)
+        self.assertNotIn("explicitly requests and authorizes Codex SubAgent delegation", disabled_context)
 
     def test_subagent_delegation_strategy_guidance(self) -> None:
         cases = (
