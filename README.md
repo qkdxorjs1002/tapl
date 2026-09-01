@@ -280,8 +280,9 @@ The `strategy` value is a decision bias, not a forced outcome: the agent weighs
 task independence, required context, risk, coordination cost, and parallel
 value before choosing root execution or delegation. Sequential tasks, shared
 files or state, and root-level decisions remain on the main agent. User task
-profiles can add advisory characteristics and an ordered model/effort preference
-for recurring work; the agent may override either with a recorded reason.
+profiles can add advisory characteristics and ordered model/effort preferences
+for recurring work; they are replaceable presets, not permanent roles for model
+IDs, and the agent may override either with a recorded reason.
 
 ## How it works
 
@@ -399,38 +400,52 @@ strategy = "aggressive"
 "gpt-5.6-terra" = ["high", "xhigh"]
 "gpt-5.6-luna" = ["xhigh", "max"]
 
+# The installed template writes all four profiles; remove the blocks to use equivalent built-ins.
+# profiles = [] # Explicitly disable all profile presets.
+```
+
+When `subagents.profiles` is absent, TAPL uses these built-in advisory presets,
+listed in safety-first order:
+
+| Profile | Use when | Bias | Candidate preference |
+| --- | --- | --- | --- |
+| `high-risk-cross-cutting` | High-risk, cross-cutting, shared-context, or coordination-heavy work | `avoid` | gpt-5.6-sol/max → gpt-5.6-sol/xhigh → gpt-5.6-terra/xhigh |
+| `deep-reasoning` | Complex, uncertain, or context-heavy decisions | `neutral` | gpt-5.6-sol/xhigh → gpt-5.6-terra/xhigh → gpt-5.6-sol/max |
+| `general-implementation` | Ordinary bounded implementation work | `inherit` | gpt-5.6-terra/high → gpt-5.6-luna/xhigh → gpt-5.6-sol/high |
+| `bounded-routine` | Small, local, predictable, low-risk work | `prefer` | gpt-5.6-luna/xhigh → gpt-5.6-terra/high → gpt-5.6-sol/medium |
+
+The model/effort entries above are preference candidates, not fixed semantic
+roles for those model IDs. Each built-in profile only offers pairs present in
+the active `subagents.models` allowlist. If customization removes every pair,
+the profile still supplies its task/bias guidance and selection falls back to
+another allowlisted pair or root execution.
+
+An explicit `profiles = []` disables the built-ins. Any non-empty user
+`subagents.profiles` array fully replaces them (rather than extending them),
+and its candidates are strictly validated against `subagents.models`.
+
+When enabled, TAPL includes its delegation policy, active profiles, and
+model/reasoning allowlist in MCP instructions. Matching remains advisory: the
+agent evaluates all task characteristics, prefers the most specific profile,
+and uses configured order only as a tie-break. It may choose and record a
+justified profile or candidate override, skips unavailable candidates, and
+falls back to another allowlisted pair or root when needed. The installed
+`.tapl/config.toml` writes all four profiles explicitly and documents every
+runtime option, its type, and allowed values inline.
+
+For example, this array replaces all four built-ins with one strictly validated
+preference:
+
+```toml
 [[subagents.profiles]]
-name = "bounded-routine"
-description = "Small, independent changes with limited context"
-characteristics = "low complexity, local scope, low risk, high parallel value"
+name = "release-automation"
+characteristics = "bounded deployment steps with a known rollback"
 delegation_bias = "prefer"
 candidates = [
   { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
   { model = "gpt-5.6-terra", reasoning_effort = "high" },
 ]
-
-[[subagents.profiles]]
-name = "complex-reasoning"
-description = "Cross-module work or uncertain decisions"
-characteristics = "high context, high uncertainty, high coordination cost"
-delegation_bias = "neutral"
-candidates = [
-  { model = "gpt-5.6-sol", reasoning_effort = "high" },
-  { model = "gpt-5.6-sol", reasoning_effort = "xhigh" },
-]
 ```
-
-When enabled, TAPL includes its delegation policy, user profiles, and configured
-model/reasoning allowlist in MCP instructions. Profiles are advisory: the agent
-selects the best match for the task and may justify a profile or candidate
-override. Candidates are tried in their configured order when supported by the
-current runtime and allowlist. If no profile matches, the agent uses the general
-strategy and legacy model allowlist; if no safe candidate remains, execution
-stays on root. The installed `.tapl/config.toml` documents every runtime option,
-its type, and its allowed values inline.
-
-Profile names, task characteristics, delegation biases, and candidate mappings
-are user-defined. TAPL does not assign a fixed task role to any model ID.
 
 The `strategy` setting controls the delegation bias:
 

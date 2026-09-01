@@ -786,10 +786,15 @@ class TaplRuntimeTests(unittest.TestCase):
             "omit when no SubAgent runs",
             "bias toward delegation, not a forced outcome",
             "Assess independence, context, risk, coordination cost, and parallel value",
-            "Profiles/candidate order are advisory",
-            "record justified overrides",
-            "No match -> legacy allowlist",
-            "skip unavailable candidates, then root if none is safe",
+            "Advisory profiles",
+            "most specific wins, order breaks ties",
+            "Record overrides",
+            "skip unavailable candidates; no match -> allowlist, then root",
+            "Default profiles (also used when `profiles` is absent)",
+            "high-risk-cross-cutting=avoid",
+            "general-implementation=inherit",
+            "bounded-routine=prefer",
+            "Allowlist: sol[medium,high,xhigh,max]",
             "execution approval",
             "only active work is In Progress",
             "Reclassify upward only when scope, risk, or uncertainty grows",
@@ -1035,7 +1040,8 @@ class TaplRuntimeTests(unittest.TestCase):
                     self.assertIn(text, guidance)
                 for text in absent:
                     self.assertNotIn(text, guidance)
-                self.assertIn("Profiles/candidate order are advisory", guidance)
+                self.assertIn("Advisory profiles", guidance)
+                self.assertIn("most specific wins, order breaks ties", guidance)
                 self.assertIn("Atomic dispatch verifies legacy `SubAgent Model`", guidance)
 
     def test_lightweight_help_covers_all_fast_non_durable_work(self) -> None:
@@ -1078,8 +1084,31 @@ class TaplRuntimeTests(unittest.TestCase):
                 cfg.subagents.as_dict()["strategy"],
                 "aggressive",
             )
-            self.assertEqual(cfg.subagents.profiles, ())
-            self.assertNotIn("profiles", cfg.subagents.as_dict())
+            self.assertEqual(
+                tuple(profile.name for profile in cfg.subagents.profiles),
+                (
+                    "high-risk-cross-cutting",
+                    "deep-reasoning",
+                    "general-implementation",
+                    "bounded-routine",
+                ),
+            )
+            self.assertEqual(
+                tuple(profile.delegation_bias for profile in cfg.subagents.profiles),
+                ("avoid", "neutral", "inherit", "prefer"),
+            )
+            self.assertEqual(
+                [
+                    (candidate.model, candidate.reasoning_effort)
+                    for candidate in cfg.subagents.profiles[0].candidates
+                ],
+                [
+                    ("gpt-5.6-sol", "max"),
+                    ("gpt-5.6-sol", "xhigh"),
+                    ("gpt-5.6-terra", "xhigh"),
+                ],
+            )
+            self.assertEqual(len(cfg.subagents.as_dict()["profiles"]), 4)
             self.assertEqual(cfg.as_dict()["subagents"], cfg.subagents.as_dict())
             self.assertNotIn("plan_task_execute", cfg.as_dict())
             self.assertFalse(hasattr(cfg, "plan_task_execute"))
@@ -1282,6 +1311,19 @@ enabled = true
             removed = tapl_config_editor.unset_value(config_path, "subagents.profiles")
 
             self.assertTrue(removed.changed)
+            restored = tapl_config.load(config_path).subagents.profiles
+            self.assertEqual(
+                tuple(profile.name for profile in restored),
+                tuple(spec[0] for spec in tapl_config.DEFAULT_SUBAGENT_PROFILE_SPECS),
+            )
+            self.assertTrue(all(not profile.candidates for profile in restored))
+
+            disabled = tapl_config_editor.set_value(
+                config_path,
+                "subagents.profiles",
+                "[]",
+            )
+            self.assertTrue(disabled.changed)
             self.assertEqual(tapl_config.load(config_path).subagents.profiles, ())
 
             config_path.write_text(
@@ -1328,7 +1370,13 @@ candidates = [{ model = "base-model", reasoning_effort = "high" }]
                 "subagents.profiles",
             )
             self.assertTrue(removed_canonical.changed)
-            self.assertEqual(tapl_config.load(config_path).subagents.profiles, ())
+            self.assertEqual(
+                tuple(
+                    profile.name
+                    for profile in tapl_config.load(config_path).subagents.profiles
+                ),
+                tuple(spec[0] for spec in tapl_config.DEFAULT_SUBAGENT_PROFILE_SPECS),
+            )
 
     def test_config_loads_and_renders_advisory_subagent_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1373,6 +1421,21 @@ candidates = [
                 "ordered candidates: `fast-custom` (`medium`) -> `deep-custom` (`high`)",
                 guidance,
             )
+
+    def test_profile_names_alone_do_not_mark_user_profiles_as_built_in(self) -> None:
+        profiles = tuple(
+            tapl_config.SubagentTaskProfileConfig(
+                name=spec[0],
+                description="User replacement",
+            )
+            for spec in tapl_config.DEFAULT_SUBAGENT_PROFILE_SPECS
+        )
+        subagents = tapl_config.SubagentsConfig(profiles=profiles)
+
+        guidance = tapl_prompt.subagent_delegation_guidance(subagents)
+
+        self.assertIn("User profiles replace built-ins", guidance)
+        self.assertNotIn("Default profiles (also used when `profiles` is absent)", guidance)
 
     def test_config_editor_rejects_invalid_result_without_changing_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1498,7 +1561,12 @@ enabled = true
             fallback = tapl_install.default_config_text()
 
         self.assertEqual(tomllib.loads(fallback), tomllib.loads(template))
-        self.assertEqual(tomllib.loads(template)["subagents"]["strategy"], "aggressive")
+        parsed_template = tomllib.loads(template)
+        self.assertEqual(parsed_template["subagents"]["strategy"], "aggressive")
+        self.assertEqual(
+            parsed_template["subagents"]["profiles"],
+            [profile.as_dict() for profile in tapl_config.default_subagent_profiles()],
+        )
         for text in (
             "Each value must be an exact http:// or https://",
             '"semantic": embedding similarity',
@@ -1511,9 +1579,13 @@ enabled = true
             '"aggressive": delegate every eligible group, including small tasks',
             "clear, material downside",
             "non-empty array of unique reasoning-effort strings",
-            "Optional advisory task profiles",
-            'delegation_bias` is one of "inherit", "prefer", "neutral", or "avoid"',
-            "Candidates are tried in listed order",
+            "Four safety-first advisory task profiles",
+            "`delegation_bias` is one of",
+            "Candidates are ordered preferences",
+            "`profiles = []`",
+            "Removing the",
+            'name = "high-risk-cross-cutting"',
+            'name = "bounded-routine"',
         ):
             with self.subTest(text=text):
                 self.assertIn(text, template)
@@ -1540,16 +1612,37 @@ enabled = true
             # A pre-strategy config remains valid and receives the aggressive default.
             self.assertEqual(cfg.subagents.strategy, "aggressive")
             self.assertEqual(
-                cfg.subagents.as_dict(),
+                cfg.subagents.as_dict()["models"],
                 {
-                    "enabled": True,
-                    "strategy": "aggressive",
-                    "models": {
-                        "gpt-5.6-luna": ["high", "xhigh"],
-                        "future-runtime-model": ["custom-effort"],
-                    },
+                    "gpt-5.6-luna": ["high", "xhigh"],
+                    "future-runtime-model": ["custom-effort"],
                 },
             )
+            filtered = {profile.name: profile for profile in cfg.subagents.profiles}
+            self.assertEqual(
+                [
+                    (candidate.model, candidate.reasoning_effort)
+                    for candidate in filtered["general-implementation"].candidates
+                ],
+                [("gpt-5.6-luna", "xhigh")],
+            )
+            self.assertFalse(filtered["deep-reasoning"].candidates)
+
+            config_path.write_text(
+                """
+[subagents]
+enabled = true
+profiles = []
+
+[subagents.models]
+"future-runtime-model" = ["custom-effort"]
+""".lstrip(),
+                encoding="utf-8",
+            )
+
+            opted_out = tapl_config.load(config_path)
+            self.assertEqual(opted_out.subagents.profiles, ())
+            self.assertNotIn("profiles", opted_out.subagents.as_dict())
 
             config_path.write_text(
                 """
@@ -1565,10 +1658,8 @@ enabled = false
 
             self.assertFalse(disabled.subagents.enabled)
             self.assertEqual(disabled.subagents.models, ())
-            self.assertEqual(
-                disabled.as_dict()["subagents"],
-                {"enabled": False, "strategy": "aggressive", "models": {}},
-            )
+            self.assertTrue(all(not profile.candidates for profile in disabled.subagents.profiles))
+            self.assertEqual(disabled.as_dict()["subagents"]["models"], {})
 
             config_path.write_text(
                 "[subagents]\nenabled = false\n",
@@ -2011,17 +2102,22 @@ searchd_start_timeout_ms = 1
             tapl_config_data = tomllib.loads(
                 (base / "home" / ".tapl" / "config.toml").read_text(encoding="utf-8")
             )
+            self.assertTrue(tapl_config_data["subagents"]["enabled"])
+            self.assertEqual(tapl_config_data["subagents"]["strategy"], "aggressive")
             self.assertEqual(
-                tapl_config_data["subagents"],
+                tapl_config_data["subagents"]["models"],
                 {
-                    "enabled": True,
-                    "strategy": "aggressive",
-                    "models": {
-                        "gpt-5.6-sol": ["medium", "high", "xhigh", "max"],
-                        "gpt-5.6-terra": ["high", "xhigh"],
-                        "gpt-5.6-luna": ["xhigh", "max"],
-                    },
+                    "gpt-5.6-sol": ["medium", "high", "xhigh", "max"],
+                    "gpt-5.6-terra": ["high", "xhigh"],
+                    "gpt-5.6-luna": ["xhigh", "max"],
                 },
+            )
+            self.assertEqual(
+                [
+                    profile["name"]
+                    for profile in tapl_config_data["subagents"]["profiles"]
+                ],
+                [spec[0] for spec in tapl_config.DEFAULT_SUBAGENT_PROFILE_SPECS],
             )
             self.assertNotIn("plan-task-execute", tapl_config_data)
             self.assertNotIn("plan_task_execute", tapl_config_data)
@@ -2368,6 +2464,10 @@ keep = true
             self.assertEqual(
                 parsed["subagents"]["models"]["gpt-5.6-luna"],
                 ["xhigh", "max"],
+            )
+            self.assertEqual(
+                [profile["name"] for profile in parsed["subagents"]["profiles"]],
+                [spec[0] for spec in tapl_config.DEFAULT_SUBAGENT_PROFILE_SPECS],
             )
             config_text = config_path.read_text(encoding="utf-8")
             for key in (

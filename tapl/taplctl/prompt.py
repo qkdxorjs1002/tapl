@@ -200,11 +200,11 @@ AGENT_ITEM_FIELDS = {
     "finding": ("body", "impact", "related_ids"),
 }
 
-MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is the workflow system for this workspace. Its `tapl_*` MCP tools call the repo-local workflow application directly. Call `tapl_get_status` and `tapl_get_next` before non-trivial work or whenever state is uncertain. These server instructions, tool descriptions, and JSON schemas are the authoritative workflow and field contract.
+MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is this workspace's workflow system. Its `tapl_*` MCP tools call the repo-local application. Call `tapl_get_status` and `tapl_get_next` before non-trivial or uncertain work. These instructions, tool descriptions, and JSON schemas are the authoritative workflow contract.
 
 # Workflow
 
-Write workflow records and reports in the user's language unless asked otherwise. Keep them short, practical, and current. Do not add unstated requirements or expand scope without explicit user approval.
+Write workflow records and reports in the user's language unless asked otherwise. Keep them short and current. Do not add unstated requirements or expand scope without explicit approval.
 
 ## Role Boundaries
 
@@ -224,14 +224,14 @@ ${request_partition_guidance}
 
 ${workflow_mode_guidance}
 
-Planning must happen before implementation. Requirements are captured inside the plan, not in a separate requirements file or request artifact.
+Planning must happen before implementation; keep requirements in the plan, not a separate artifact.
 
 ${plan_detail_guidance}
 ${planning_approval_guidance}
 
 ## Tasks And Execution
 
-Tasks are executable implementation or verification work derived from the stored plan, not planning or task-design work.
+Tasks are executable implementation or verification work from the stored plan, not task-design work.
 
 - ${task_granularity_guidance}
 ${task_execution_order_guidance}
@@ -240,7 +240,7 @@ ${context_execution_approval_guidance}
 
 - Task state must reflect current reality: only active work is In Progress, completed work has implementation and verification done, and blocked work records the blocker and next action.
 - Keep blocked, skipped, pending, or unverified work in TAPL records.
-- Reclassify upward only when scope, risk, or uncertainty grows; then update the plan/tasks and ask the user before continuing when required.
+- Reclassify upward only when scope, risk, or uncertainty grows; update the plan/tasks and ask when required.
 
 ## Records And History
 
@@ -1074,7 +1074,12 @@ def configured_subagent_profiles(
     return tuple(profiles)
 
 
-def _render_profile(profile: Any, index: int) -> str:
+def _render_profile(
+    profile: Any,
+    index: int,
+    *,
+    available_candidates: set[tuple[str, str]] | None = None,
+) -> str:
     name = str(_config_value(profile, "name", "")).strip() or f"profile-{index}"
     description = str(_config_value(profile, "description", "")).strip()
     characteristics = _render_profile_characteristics(
@@ -1099,15 +1104,97 @@ def _render_profile(profile: Any, index: int) -> str:
                 _config_value(candidate, "effort", ""),
             )
         ).strip()
-        if model and effort:
+        if (
+            model
+            and effort
+            and (
+                available_candidates is None
+                or (model, effort) in available_candidates
+            )
+        ):
             rendered_candidates.append(f"`{model}` (`{effort}`)")
-        elif model:
+        elif model and available_candidates is None:
             rendered_candidates.append(f"`{model}`")
     if rendered_candidates:
         parts.append("; ordered candidates: " + " -> ".join(rendered_candidates))
     else:
-        parts.append("; ordered candidates: none")
+        parts.append("; ordered candidates: none (use allowlist/root fallback)")
     return "".join(parts)
+
+
+def _profile_signature(profile: Any) -> tuple[Any, ...]:
+    candidates = _config_value(profile, "candidates", ()) or ()
+    return (
+        str(_config_value(profile, "name", "")).strip(),
+        str(_config_value(profile, "description", "")).strip(),
+        _render_profile_characteristics(
+            _config_value(profile, "characteristics", "")
+        ),
+        str(_config_value(profile, "delegation_bias", "inherit")).strip(),
+        tuple(
+            (
+                str(_config_value(candidate, "model", "")).strip(),
+                str(
+                    _config_value(
+                        candidate,
+                        "reasoning_effort",
+                        _config_value(candidate, "effort", ""),
+                    )
+                ).strip(),
+            )
+            for candidate in candidates
+        ),
+    )
+
+
+def _uses_builtin_profiles(
+    profiles: tuple[Any, ...],
+    models: tuple[tuple[str, tuple[str, ...]], ...],
+) -> bool:
+    signature = tuple(_profile_signature(profile) for profile in profiles)
+    if not signature:
+        return False
+
+    model_configs = tuple(
+        tapl_config.SubagentModelConfig(name=name, reasoning_efforts=efforts)
+        for name, efforts in models
+    )
+    expected_sets = (
+        tapl_config.default_subagent_profiles(),
+        tapl_config.default_subagent_profiles(model_configs),
+    )
+    return any(
+        signature == tuple(_profile_signature(profile) for profile in expected)
+        for expected in expected_sets
+    )
+
+
+def _render_builtin_profile(
+    profile: Any,
+    *,
+    available_candidates: set[tuple[str, str]],
+) -> str:
+    name = str(_config_value(profile, "name", "")).strip()
+    bias = str(_config_value(profile, "delegation_bias", "inherit")).strip()
+    candidates = _config_value(profile, "candidates", ()) or ()
+    rendered = [
+        f"{str(_config_value(candidate, 'model', '')).strip().removeprefix('gpt-5.6-')}/"
+        f"{_config_value(candidate, 'reasoning_effort', _config_value(candidate, 'effort', '')).strip()}"
+        for candidate in candidates
+        if (
+            str(_config_value(candidate, "model", "")).strip(),
+            str(
+                _config_value(
+                    candidate,
+                    "reasoning_effort",
+                    _config_value(candidate, "effort", ""),
+                )
+            ).strip(),
+        )
+        in available_candidates
+    ]
+    candidate_text = ",".join(rendered) or "fallback"
+    return f"{name}={bias}[{candidate_text}]"
 
 
 def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None = None) -> str:
@@ -1116,37 +1203,54 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
 
     profiles = configured_subagent_profiles(subagents)
     models = configured_subagent_models(subagents)
-    available_models = "\n".join(
-        f"- `{name}`: {', '.join(f'`{effort}`' for effort in efforts)}"
+    available_candidates = {
+        (name, effort)
         for name, efforts in models
-    )
-    if not available_models:
-        available_models = "- No configured model/reasoning-effort pairs are available; do not delegate work."
+        for effort in efforts
+    }
+    available_models = "; ".join(
+        f"{name.removeprefix('gpt-5.6-')}[{','.join(efforts)}]"
+        for name, efforts in models
+    ) or "none (root only)"
     strategy_guidance = subagent_strategy_guidance(subagents)
     if profiles:
-        profile_guidance = "\n".join(
-            _render_profile(profile, index)
-            for index, profile in enumerate(profiles, start=1)
-        )
-        profile_section = (
-            "- User task profiles (in order; bias inherit=global, prefer=delegate, neutral=neutral, avoid=root):\n"
-            f"{profile_guidance}\n"
-        )
+        if _uses_builtin_profiles(profiles, models):
+            profile_guidance = "; ".join(
+                _render_builtin_profile(
+                    profile,
+                    available_candidates=available_candidates,
+                )
+                for profile in profiles
+            )
+            profile_section = (
+                f"- Default profiles (also used when `profiles` is absent): {profile_guidance}.\n"
+            )
+        else:
+            profile_guidance = "\n".join(
+                _render_profile(
+                    profile,
+                    index,
+                    available_candidates=available_candidates,
+                )
+                for index, profile in enumerate(profiles, start=1)
+            )
+            profile_section = (
+                "- User profiles replace built-ins; bias inherit=global, prefer=delegate, neutral=neutral, avoid=root:\n"
+                f"{profile_guidance}\n"
+            )
     else:
-        profile_section = ""
+        profile_section = "- Profiles: disabled by explicit `profiles=[]`.\n"
 
     return (
         "### SubAgent Delegation\n\n"
         f"- Strategy: {strategy_guidance}\n"
         "- Assess independence, context, risk, coordination cost, and parallel value; record it in canonical task "
         "fields.\n"
-        "- Profiles/candidate order are advisory: choose a supported match and record justified overrides. No match "
-        "-> legacy allowlist; skip unavailable candidates, then root if none is safe.\n"
+        "- Advisory profiles: assess all characteristics; most specific wins, order breaks ties. Record overrides; skip "
+        "unavailable candidates; no match -> allowlist, then root. Presets are replaceable, not model roles.\n"
         f"{profile_section}"
-        "- Legacy model/effort allowlist (fallback):\n"
-        f"{available_models}\n"
-        "- Atomic dispatch verifies legacy `SubAgent Model`, spawns manifests in exclusive `owned_paths`, settles the "
-        "exact `execution_id`, and recovers/cancels on interruption."
+        f"- Allowlist: {available_models}.\n"
+        "- Atomic dispatch verifies legacy `SubAgent Model`, uses `owned_paths`, settles `execution_id`, and recovers/cancels."
     )
 
 

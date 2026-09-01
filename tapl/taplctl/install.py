@@ -568,6 +568,30 @@ def merge_tapl_config(path: Path, template: str, *, dry_run: bool) -> dict[str, 
     return {"path": str(path), "action": action}
 
 
+def default_subagent_profile_text() -> str:
+    blocks: list[str] = []
+    for name, description, characteristics, delegation_bias, candidates in (
+        config.DEFAULT_SUBAGENT_PROFILE_SPECS
+    ):
+        lines = [
+            "[[subagents.profiles]]",
+            format_toml_assignment(("name",), name).rstrip(),
+            format_toml_assignment(("description",), description).rstrip(),
+            format_toml_assignment(("characteristics",), characteristics).rstrip(),
+            format_toml_assignment(("delegation_bias",), delegation_bias).rstrip(),
+            "candidates = [",
+        ]
+        lines.extend(
+            "  { model = "
+            f"{format_toml_value(model)}, reasoning_effort = "
+            f"{format_toml_value(reasoning_effort)} }},"
+            for model, reasoning_effort in candidates
+        )
+        lines.append("]")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 def default_config_text() -> str:
     template = template_text(".tapl", "config.toml")
     if template is not None:
@@ -575,7 +599,8 @@ def default_config_text() -> str:
     model_lines = "".join(
         format_toml_assignment((name,), list(reasoning_efforts))
         for name, reasoning_efforts in config.DEFAULT_SUBAGENT_MODELS
-    )
+    ).rstrip()
+    profile_lines = default_subagent_profile_text()
     return f"""[viewer]
 # Additional browser origins allowed to call the viewer API through a trusted proxy.
 # Type: array of unique strings. Each value must be an exact http:// or https://
@@ -622,6 +647,15 @@ enabled = {str(config.DEFAULT_SUBAGENTS_ENABLED).lower()}
 # - "aggressive": delegate every eligible group, including small tasks, unless there is a clear, material downside.
 strategy = "{config.DEFAULT_SUBAGENT_STRATEGY}"
 
+# Four safety-first advisory task profiles are written explicitly below in
+# priority order:
+# high-risk-cross-cutting (avoid), deep-reasoning (neutral),
+# general-implementation (inherit), then bounded-routine (prefer).
+# The first applicable profile has priority, but profiles remain guidance that
+# the agent can override. To disable all profiles, remove the four
+# `[[subagents.profiles]]` blocks and set `profiles = []` here. Removing the
+# blocks without setting an empty array restores the same runtime defaults.
+
 [subagents.models]
 # Delegation allowlist. Each key is a runtime-supported model ID and each value
 # is a non-empty array of unique reasoning-effort strings supported by that model.
@@ -629,21 +663,13 @@ strategy = "{config.DEFAULT_SUBAGENT_STRATEGY}"
 # model/effort pairs are listed below; unsupported pairs fail at delegation time.
 {model_lines}
 
-# Optional advisory task profiles. The agent remains the final decision-maker;
-# profiles communicate your preferences for recognizable work characteristics.
+# Edit, reorder, or replace these blocks to customize task routing.
 # `delegation_bias` is one of "inherit", "prefer", "neutral", or "avoid".
-# Candidates are tried in listed order and each model/reasoning_effort pair must
-# appear in subagents.models above.
-#
-# [[subagents.profiles]]
-# name = "bounded-routine"
-# description = "Small, independent work with limited required context."
-# characteristics = "local changes, routine tests, predictable implementation"
-# delegation_bias = "prefer"
-# candidates = [
-#   {{ model = "gpt-5.6-luna", reasoning_effort = "xhigh" }},
-#   {{ model = "gpt-5.6-terra", reasoning_effort = "high" }},
-# ]
+# Candidates are ordered preferences, not fixed roles, and every candidate must
+# appear in the model allowlist above. If none is suitable, use the allowlist or
+# keep the work on the root agent.
+
+{profile_lines}
 """
 
 
@@ -956,6 +982,12 @@ def format_toml_value(value: Any) -> str:
         return repr(value).lower()
     if isinstance(value, list):
         return "[" + ", ".join(format_toml_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        assignments = ", ".join(
+            f"{format_toml_key(key)} = {format_toml_value(item)}"
+            for key, item in value.items()
+        )
+        return "{ " + assignments + " }"
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, (date, time)):

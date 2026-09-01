@@ -246,8 +246,9 @@ runtime이 SubAgent를 만들고 관리합니다. 병렬 task는 dependency가 �
 판단 bias입니다. agent는 task independence, 필요한 context, risk, coordination cost,
 parallel value를 평가한 뒤 root 실행 또는 위임을 선택합니다. 순차 task, 공유 file 또는
 state, root 수준의 결정은 main agent가 수행합니다. 사용자 task profile은 반복 작업에
-대한 advisory 특성과 순서가 있는 model/effort 선호를 추가할 수 있으며, agent는 이유를
-기록하고 profile이나 candidate를 override할 수 있습니다.
+대한 advisory 특성과 순서가 있는 model/effort 선호를 추가할 수 있습니다. 이는 model ID의
+영구 역할이 아닌 교체 가능한 preset이며, agent는 이유를 기록하고 profile이나 candidate를
+override할 수 있습니다.
 
 ## 동작 방식
 
@@ -358,37 +359,49 @@ strategy = "aggressive"
 "gpt-5.6-terra" = ["high", "xhigh"]
 "gpt-5.6-luna" = ["xhigh", "max"]
 
+# 설치 템플릿은 아래 네 profile을 명시하며, 블록을 지우면 동일한 built-in을 사용합니다.
+# profiles = [] # 모든 profile preset을 명시적으로 비활성화합니다.
+```
+
+`subagents.profiles`가 없으면 TAPL은 다음 built-in advisory preset을 안전 우선 순서로
+사용합니다.
+
+| Profile | 적용 task | Bias | Candidate 선호 순서 |
+| --- | --- | --- | --- |
+| `high-risk-cross-cutting` | risk가 높고 범위가 넓거나 shared context·coordination이 큰 작업 | `avoid` | gpt-5.6-sol/max → gpt-5.6-sol/xhigh → gpt-5.6-terra/xhigh |
+| `deep-reasoning` | 복잡하거나 불확실하고 많은 context가 필요한 판단 | `neutral` | gpt-5.6-sol/xhigh → gpt-5.6-terra/xhigh → gpt-5.6-sol/max |
+| `general-implementation` | 일반적인 범위의 구현 작업 | `inherit` | gpt-5.6-terra/high → gpt-5.6-luna/xhigh → gpt-5.6-sol/high |
+| `bounded-routine` | 작고 local하며 예측 가능하고 risk가 낮은 작업 | `prefer` | gpt-5.6-luna/xhigh → gpt-5.6-terra/high → gpt-5.6-sol/medium |
+
+위 model/effort는 선호 candidate일 뿐 model ID에 고정된 semantic role이 아닙니다. 각
+built-in profile은 활성 `subagents.models` allowlist에 있는 pair만 제공합니다. 사용자
+설정이 모든 pair를 제거해도 profile의 task/bias guidance는 남고, 선택은 다른 allowlisted
+pair 또는 root 실행으로 fallback합니다.
+
+명시적 `profiles = []`는 built-in을 비활성화합니다. 비어 있지 않은 사용자
+`subagents.profiles` 배열은 built-in을 확장하지 않고 완전히 대체하며, candidate는
+`subagents.models`에 대해 엄격히 검증됩니다.
+
+활성화하면 TAPL은 delegation policy, 활성 profile, model/reasoning allowlist를 MCP
+instruction에 포함합니다. matching은 advisory입니다. agent는 모든 task 특성을 평가하고
+가장 구체적인 profile을 우선하며 설정 순서는 동률일 때만 사용합니다. 필요한 경우 이유를
+기록해 profile/candidate를 override하고, 사용할 수 없는 candidate는 건너뛰며, 필요하면
+다른 allowlisted pair 또는 root로 fallback합니다. 설치된 `.tapl/config.toml`에는 네
+profile이 모두 명시되어 있고 모든 runtime option의 type과 허용값이 주석으로 설명되어
+있습니다.
+
+예를 들어 아래 배열은 네 built-in을 모두 대체하는 하나의 엄격히 검증된 preference입니다.
+
+```toml
 [[subagents.profiles]]
-name = "bounded-routine"
-description = "Small, independent changes with limited context"
-characteristics = "low complexity, local scope, low risk, high parallel value"
+name = "release-automation"
+characteristics = "bounded deployment steps with a known rollback"
 delegation_bias = "prefer"
 candidates = [
   { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
   { model = "gpt-5.6-terra", reasoning_effort = "high" },
 ]
-
-[[subagents.profiles]]
-name = "complex-reasoning"
-description = "Cross-module work or uncertain decisions"
-characteristics = "high context, high uncertainty, high coordination cost"
-delegation_bias = "neutral"
-candidates = [
-  { model = "gpt-5.6-sol", reasoning_effort = "high" },
-  { model = "gpt-5.6-sol", reasoning_effort = "xhigh" },
-]
 ```
-
-활성화하면 TAPL은 delegation policy와 model/reasoning allowlist를 MCP instruction에
-포함합니다. profile도 함께 전달되지만 advisory preference로만 사용됩니다. agent는 task에
-가장 잘 맞는 profile과 candidate를 선택하고, 필요하면 이유를 기록한 뒤 override할 수
-있습니다. 현재 runtime과 allowlist가 지원하는 candidate를 설정된 순서대로 시도합니다.
-일치하는 profile이 없으면 일반 strategy와 legacy model allowlist를 사용하고, 안전한
-candidate가 남지 않으면 root가 실행합니다. 설치된 `.tapl/config.toml`에는 모든 runtime
-option의 type과 허용값이 주석으로 설명되어 있습니다.
-
-profile 이름, task 특성, 위임 bias, candidate 매핑은 모두 사용자가 정의합니다. TAPL은
-특정 model ID에 고정된 작업 역할을 부여하지 않습니다.
 
 `strategy`는 위임 방향의 bias를 결정합니다.
 

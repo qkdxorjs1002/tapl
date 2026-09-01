@@ -26,6 +26,75 @@ DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("gpt-5.6-terra", ("high", "xhigh")),
     ("gpt-5.6-luna", ("xhigh", "max")),
 )
+DEFAULT_SUBAGENT_PROFILE_SPECS: tuple[
+    tuple[str, str, str, str, tuple[tuple[str, str], ...]], ...
+] = (
+    (
+        "high-risk-cross-cutting",
+        (
+            "High-risk, cross-cutting work where mistakes could affect security, "
+            "data integrity, compatibility, or multiple system boundaries."
+        ),
+        (
+            "Broad changes across components; ambiguous failure modes; security, "
+            "migration, concurrency, or irreversible-impact concerns."
+        ),
+        "avoid",
+        (
+            ("gpt-5.6-sol", "max"),
+            ("gpt-5.6-sol", "xhigh"),
+            ("gpt-5.6-terra", "xhigh"),
+        ),
+    ),
+    (
+        "deep-reasoning",
+        (
+            "Complex analysis or implementation that benefits from sustained "
+            "reasoning and careful trade-off evaluation."
+        ),
+        (
+            "Novel architecture, subtle debugging, multi-step inference, competing "
+            "constraints, or uncertain solution paths."
+        ),
+        "neutral",
+        (
+            ("gpt-5.6-sol", "xhigh"),
+            ("gpt-5.6-terra", "xhigh"),
+            ("gpt-5.6-sol", "max"),
+        ),
+    ),
+    (
+        "general-implementation",
+        "Typical implementation work with a clear outcome and moderate scope.",
+        (
+            "Feature changes, refactoring, integration work, and tests spanning a "
+            "small number of related components."
+        ),
+        "inherit",
+        (
+            ("gpt-5.6-terra", "high"),
+            ("gpt-5.6-luna", "xhigh"),
+            ("gpt-5.6-sol", "high"),
+        ),
+    ),
+    (
+        "bounded-routine",
+        (
+            "Small, well-scoped routine work with clear inputs, outputs, and "
+            "verification."
+        ),
+        (
+            "Local edits, mechanical updates, focused tests, and predictable "
+            "implementation with limited context."
+        ),
+        "prefer",
+        (
+            ("gpt-5.6-luna", "xhigh"),
+            ("gpt-5.6-terra", "high"),
+            ("gpt-5.6-sol", "medium"),
+        ),
+    ),
+)
 
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
@@ -189,12 +258,51 @@ def default_subagent_models() -> tuple[SubagentModelConfig, ...]:
     )
 
 
+def default_subagent_profiles(
+    models: tuple[SubagentModelConfig, ...] | None = None,
+) -> tuple[SubagentTaskProfileConfig, ...]:
+    """Build advisory defaults, retaining candidates supported by ``models``."""
+
+    allowed_efforts = None
+    if models is not None:
+        allowed_efforts = {
+            model.name: set(model.reasoning_efforts)
+            for model in models
+        }
+
+    profiles: list[SubagentTaskProfileConfig] = []
+    for name, description, characteristics, delegation_bias, candidate_specs in (
+        DEFAULT_SUBAGENT_PROFILE_SPECS
+    ):
+        candidates = tuple(
+            SubagentModelCandidateConfig(
+                model=model_name,
+                reasoning_effort=reasoning_effort,
+            )
+            for model_name, reasoning_effort in candidate_specs
+            if allowed_efforts is None
+            or reasoning_effort in allowed_efforts.get(model_name, set())
+        )
+        profiles.append(
+            SubagentTaskProfileConfig(
+                name=name,
+                description=description,
+                characteristics=characteristics,
+                delegation_bias=delegation_bias,
+                candidates=candidates,
+            )
+        )
+    return tuple(profiles)
+
+
 @dataclass(frozen=True)
 class SubagentsConfig:
     enabled: bool = DEFAULT_SUBAGENTS_ENABLED
     strategy: str = DEFAULT_SUBAGENT_STRATEGY
     models: tuple[SubagentModelConfig, ...] = field(default_factory=default_subagent_models)
-    profiles: tuple[SubagentTaskProfileConfig, ...] = ()
+    profiles: tuple[SubagentTaskProfileConfig, ...] = field(
+        default_factory=default_subagent_profiles
+    )
 
     def as_dict(self) -> dict[str, Any]:
         rendered: dict[str, Any] = {
@@ -375,10 +483,13 @@ def from_mapping(
         )
     else:
         subagent_models = default_subagent_models()
-    subagent_profiles = parse_subagent_profiles(
-        setting(subagents_data, "profiles", default=[]),
-        models=subagent_models,
-    )
+    if "profiles" in subagents_data:
+        subagent_profiles = parse_subagent_profiles(
+            subagents_data["profiles"],
+            models=subagent_models,
+        )
+    else:
+        subagent_profiles = default_subagent_profiles(subagent_models)
     viewer_data = table(data, "viewer")
     viewer = ViewerConfig(
         allowed_origins=origin_array(

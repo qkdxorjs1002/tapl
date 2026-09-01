@@ -44,6 +44,15 @@ enabled = true
 # - "aggressive": delegate every eligible group, including small tasks, unless there is a clear, material downside.
 strategy = "aggressive"
 
+# Four safety-first advisory task profiles are written explicitly below in
+# priority order:
+# high-risk-cross-cutting (avoid), deep-reasoning (neutral),
+# general-implementation (inherit), then bounded-routine (prefer).
+# The first applicable profile has priority, but profiles remain guidance that
+# the agent can override. To disable all profiles, remove the four
+# `[[subagents.profiles]]` blocks and set `profiles = []` here. Removing the
+# blocks without setting an empty array restores the same runtime defaults.
+
 [subagents.models]
 # Delegation allowlist. Each key is a runtime-supported model ID and each value
 # is a non-empty array of unique reasoning-effort strings supported by that model.
@@ -53,18 +62,52 @@ strategy = "aggressive"
 "gpt-5.6-terra" = ["high", "xhigh"]
 "gpt-5.6-luna" = ["xhigh", "max"]
 
-# Optional advisory task profiles. The agent remains the final decision-maker;
-# profiles communicate your preferences for recognizable work characteristics.
+# Edit, reorder, or replace these blocks to customize task routing.
 # `delegation_bias` is one of "inherit", "prefer", "neutral", or "avoid".
-# Candidates are tried in listed order and each model/reasoning_effort pair must
-# appear in subagents.models above.
-#
-# [[subagents.profiles]]
-# name = "bounded-routine"
-# description = "Small, independent work with limited required context."
-# characteristics = "local changes, routine tests, predictable implementation"
-# delegation_bias = "prefer"
-# candidates = [
-#   { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
-#   { model = "gpt-5.6-terra", reasoning_effort = "high" },
-# ]
+# Candidates are ordered preferences, not fixed roles, and every candidate must
+# appear in the model allowlist above. If none is suitable, use the allowlist or
+# keep the work on the root agent.
+
+[[subagents.profiles]]
+name = "high-risk-cross-cutting"
+description = "High-risk, cross-cutting work where mistakes could affect security, data integrity, compatibility, or multiple system boundaries."
+characteristics = "Broad changes across components; ambiguous failure modes; security, migration, concurrency, or irreversible-impact concerns."
+delegation_bias = "avoid"
+candidates = [
+  { model = "gpt-5.6-sol", reasoning_effort = "max" },
+  { model = "gpt-5.6-sol", reasoning_effort = "xhigh" },
+  { model = "gpt-5.6-terra", reasoning_effort = "xhigh" },
+]
+
+[[subagents.profiles]]
+name = "deep-reasoning"
+description = "Complex analysis or implementation that benefits from sustained reasoning and careful trade-off evaluation."
+characteristics = "Novel architecture, subtle debugging, multi-step inference, competing constraints, or uncertain solution paths."
+delegation_bias = "neutral"
+candidates = [
+  { model = "gpt-5.6-sol", reasoning_effort = "xhigh" },
+  { model = "gpt-5.6-terra", reasoning_effort = "xhigh" },
+  { model = "gpt-5.6-sol", reasoning_effort = "max" },
+]
+
+[[subagents.profiles]]
+name = "general-implementation"
+description = "Typical implementation work with a clear outcome and moderate scope."
+characteristics = "Feature changes, refactoring, integration work, and tests spanning a small number of related components."
+delegation_bias = "inherit"
+candidates = [
+  { model = "gpt-5.6-terra", reasoning_effort = "high" },
+  { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
+  { model = "gpt-5.6-sol", reasoning_effort = "high" },
+]
+
+[[subagents.profiles]]
+name = "bounded-routine"
+description = "Small, well-scoped routine work with clear inputs, outputs, and verification."
+characteristics = "Local edits, mechanical updates, focused tests, and predictable implementation with limited context."
+delegation_bias = "prefer"
+candidates = [
+  { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
+  { model = "gpt-5.6-terra", reasoning_effort = "high" },
+  { model = "gpt-5.6-sol", reasoning_effort = "medium" },
+]
