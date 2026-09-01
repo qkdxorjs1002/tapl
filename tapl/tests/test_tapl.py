@@ -751,13 +751,14 @@ class TaplRuntimeTests(unittest.TestCase):
             "Do not commit, push, rebase, reset, discard changes",
             "Never overwrite user changes",
             "current-state snapshots, not logs",
-            "Record user-relevant facts not carried by standard fields",
-            "remain true after work and affect result interpretation, later decisions, or operation",
-            "user impact, constraints, compatibility, remaining risks, unverified scope, or follow-up actions",
-            "`사용자 참고사항`/`User Notes` as concise entries",
-            "`종류`/`category`, `내용`/`content`, and `영향`/`impact`",
-            "Put shared facts on the plan and task-specific facts on its task",
-            "preserve keys/types, avoid duplicates/transient progress",
+            "Use `custom_fields` for durable searchable metadata",
+            "canonical fields `Task Profile`",
+            "`Task Characteristics`",
+            "`Execution Decision`",
+            "`사용자 참고사항`/`User Notes` only for durable user facts absent from standard fields",
+            "`종류`/`category`, `내용`/`content`, `영향`/`impact`",
+            "Put shared facts on plan and task-specific facts on task",
+            "preserve keys/types; omit duplicates or transient progress",
             "Classify once from the request and readily available context: Answer, Investigation, Analysis, Planning, Implementation, or Mixed.",
             "First choose Strict",
             "Otherwise choose Fast",
@@ -779,18 +780,16 @@ class TaplRuntimeTests(unittest.TestCase):
             "exclusive owned_paths",
             "exact manifest execution_id",
             "recover or cancel the batch before retrying",
-            "records the manifest model/reasoning effort",
-            "`SubAgent Model` in task `custom_fields` before returning",
-            "Root verifies it before spawn",
-            "settlement is not the first recording point",
+            "Dispatch writes legacy `SubAgent Model`",
+            "before return; root verifies before spawn",
             "Example: `gpt-5.6-sol (xhigh)`",
-            "omit it when no SubAgent ran",
-            "maximize delegation",
-            "delegate every eligible group of at least two dependency-ready tasks",
-            "exclusive non-overlapping owned_paths",
-            "even when tasks are small",
-            "clear, material downside",
-            "delegation safety contract cannot be met",
+            "omit when no SubAgent runs",
+            "bias toward delegation, not a forced outcome",
+            "Assess independence, context, risk, coordination cost, and parallel value",
+            "Profiles/candidate order are advisory",
+            "record justified overrides",
+            "No match -> legacy allowlist",
+            "skip unavailable candidates, then root if none is safe",
             "execution approval",
             "only active work is In Progress",
             "Reclassify upward only when scope, risk, or uncertainty grows",
@@ -1000,36 +999,30 @@ class TaplRuntimeTests(unittest.TestCase):
         cases = (
             (
                 "conservative",
-                "Conservative:",
+                "Conservative bias against delegation, not a ban",
                 (
-                    "improve aggregate root/SubAgent token use",
-                    "wall-clock time",
-                    "without materially worsening the other",
+                    "parallel value clearly exceeds",
+                    "context, coordination, and risk costs",
                 ),
-                ("default eligible groups",),
+                ("forced outcome",),
             ),
             (
                 "balanced",
-                "Balanced:",
+                "Balanced neutral bias",
                 (
-                    "default eligible groups of at least two non-trivial dependency-ready tasks",
-                    "exclusive non-overlapping owned_paths",
-                    "clearly excessive overhead",
+                    "weigh independence, context, risk, coordination cost, and parallel value",
+                    "only when value wins",
                 ),
-                ("improve aggregate root/SubAgent token use",),
+                ("bias toward delegation",),
             ),
             (
                 "aggressive",
-                "Aggressive:",
+                "Aggressive bias toward delegation, not a forced outcome",
                 (
-                    "maximize delegation",
-                    "every eligible group of at least two dependency-ready tasks",
-                    "with exclusive non-overlapping owned_paths",
-                    "even when tasks are small",
-                    "clear, material downside",
-                    "delegation safety contract cannot be met",
+                    "prefer independent low-risk work with high parallel value",
+                    "keep root when shared context or coordination dominates",
                 ),
-                ("improve aggregate root/SubAgent token use",),
+                ("parallel value clearly exceeds",),
             ),
         )
         for strategy, label, expected, absent in cases:
@@ -1042,7 +1035,8 @@ class TaplRuntimeTests(unittest.TestCase):
                     self.assertIn(text, guidance)
                 for text in absent:
                     self.assertNotIn(text, guidance)
-                self.assertIn("Atomically dispatch", guidance)
+                self.assertIn("Profiles/candidate order are advisory", guidance)
+                self.assertIn("Atomic dispatch verifies legacy `SubAgent Model`", guidance)
 
     def test_lightweight_help_covers_all_fast_non_durable_work(self) -> None:
         work_type_help = tapl_prompt.field_help("run", "work_type")
@@ -1084,6 +1078,8 @@ class TaplRuntimeTests(unittest.TestCase):
                 cfg.subagents.as_dict()["strategy"],
                 "aggressive",
             )
+            self.assertEqual(cfg.subagents.profiles, ())
+            self.assertNotIn("profiles", cfg.subagents.as_dict())
             self.assertEqual(cfg.as_dict()["subagents"], cfg.subagents.as_dict())
             self.assertNotIn("plan_task_execute", cfg.as_dict())
             self.assertFalse(hasattr(cfg, "plan_task_execute"))
@@ -1101,6 +1097,7 @@ class TaplRuntimeTests(unittest.TestCase):
                 "subagents.enabled",
                 "subagents.strategy",
                 "subagents.models.<model-id>",
+                "subagents.profiles",
             ],
         )
         cases = (
@@ -1114,6 +1111,21 @@ class TaplRuntimeTests(unittest.TestCase):
             ("subagents.enabled", "false", False),
             ("subagents.strategy", "conservative", "conservative"),
             ("subagents.models.future-model", '["high", "xhigh"]', ["high", "xhigh"]),
+            (
+                "subagents.profiles",
+                '[{ name = "routine", characteristics = "small local work", delegation_bias = "prefer", candidates = [{ model = "future-model", reasoning_effort = "high" }] }]',
+                [
+                    {
+                        "name": "routine",
+                        "description": "",
+                        "characteristics": "small local work",
+                        "delegation_bias": "prefer",
+                        "candidates": [
+                            {"model": "future-model", "reasoning_effort": "high"}
+                        ],
+                    }
+                ],
+            ),
         )
         for key, raw_value, expected in cases:
             with self.subTest(key=key):
@@ -1129,6 +1141,7 @@ class TaplRuntimeTests(unittest.TestCase):
             ("search.hybrid_semantic_ratio", "true"),
             ("subagents.enabled", "yes"),
             ("subagents.models.future-model", "[]"),
+            ("subagents.profiles", '[{ name = "" }]'),
             ("search.max_results", "24\nextra = 1"),
         )
         for key, raw_value in invalid:
@@ -1232,6 +1245,134 @@ name = "preserved"
             )
             self.assertTrue(unicode_model.changed)
             self.assertIn('"모델" = ["high"]', config_path.read_text(encoding="utf-8"))
+
+    def test_config_editor_sets_and_unsets_subagent_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.toml"
+            config_path.write_text(
+                """[subagents]
+enabled = true
+
+[subagents.models]
+"base-model" = ["high"]
+""",
+                encoding="utf-8",
+            )
+            raw_profiles = (
+                '[{ name = "bounded", description = "Small independent work", '
+                'characteristics = "local changes, bounded context", '
+                'delegation_bias = "prefer", candidates = [{ model = "base-model", '
+                'reasoning_effort = "high" }] }]'
+            )
+
+            added = tapl_config_editor.set_value(
+                config_path,
+                "subagents.profiles",
+                raw_profiles,
+            )
+
+            self.assertTrue(added.changed)
+            profile = tapl_config.load(config_path).subagents.profiles[0]
+            self.assertEqual(profile.name, "bounded")
+            self.assertEqual(profile.delegation_bias, "prefer")
+            self.assertEqual(profile.candidates[0].model, "base-model")
+            self.assertEqual(profile.candidates[0].reasoning_effort, "high")
+            self.assertIn("profiles = [{", config_path.read_text(encoding="utf-8"))
+
+            removed = tapl_config_editor.unset_value(config_path, "subagents.profiles")
+
+            self.assertTrue(removed.changed)
+            self.assertEqual(tapl_config.load(config_path).subagents.profiles, ())
+
+            config_path.write_text(
+                """[subagents]
+enabled = true
+
+[subagents.models]
+"base-model" = ["high"]
+
+[[subagents.profiles]]
+name = "canonical-array-table"
+delegation_bias = "neutral"
+candidates = [{ model = "base-model", reasoning_effort = "high" }]
+""",
+                encoding="utf-8",
+            )
+            replaced = tapl_config_editor.set_value(
+                config_path,
+                "subagents.profiles",
+                raw_profiles,
+            )
+            self.assertTrue(replaced.changed)
+            self.assertNotIn(
+                "[[subagents.profiles]]",
+                config_path.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(tapl_config.load(config_path).subagents.profiles[0].name, "bounded")
+
+            config_path.write_text(
+                """[subagents]
+enabled = true
+
+[subagents.models]
+"base-model" = ["high"]
+
+[[subagents.profiles]]
+name = "canonical-array-table"
+candidates = [{ model = "base-model", reasoning_effort = "high" }]
+""",
+                encoding="utf-8",
+            )
+            removed_canonical = tapl_config_editor.unset_value(
+                config_path,
+                "subagents.profiles",
+            )
+            self.assertTrue(removed_canonical.changed)
+            self.assertEqual(tapl_config.load(config_path).subagents.profiles, ())
+
+    def test_config_loads_and_renders_advisory_subagent_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.toml"
+            config_path.write_text(
+                """[subagents]
+strategy = "balanced"
+
+[subagents.models]
+"fast-custom" = ["medium"]
+"deep-custom" = ["high", "xhigh"]
+
+[[subagents.profiles]]
+name = "bounded-routine"
+description = "Small independent work"
+characteristics = "local changes, bounded context"
+delegation_bias = "prefer"
+candidates = [
+  { model = "fast-custom", reasoning_effort = "medium" },
+  { model = "deep-custom", reasoning_effort = "high" },
+]
+""",
+                encoding="utf-8",
+            )
+
+            cfg = tapl_config.load(config_path)
+            rendered = cfg.subagents.as_dict()["profiles"]
+            guidance = tapl_prompt.subagent_delegation_guidance(cfg.subagents)
+
+            self.assertEqual(rendered[0]["name"], "bounded-routine")
+            self.assertEqual(rendered[0]["delegation_bias"], "prefer")
+            self.assertEqual(
+                rendered[0]["candidates"],
+                [
+                    {"model": "fast-custom", "reasoning_effort": "medium"},
+                    {"model": "deep-custom", "reasoning_effort": "high"},
+                ],
+            )
+            self.assertIn("`bounded-routine`", guidance)
+            self.assertIn("characteristics: local changes, bounded context", guidance)
+            self.assertIn(
+                "ordered candidates: `fast-custom` (`medium`) -> `deep-custom` (`high`)",
+                guidance,
+            )
 
     def test_config_editor_rejects_invalid_result_without_changing_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1370,6 +1511,9 @@ enabled = true
             '"aggressive": delegate every eligible group, including small tasks',
             "clear, material downside",
             "non-empty array of unique reasoning-effort strings",
+            "Optional advisory task profiles",
+            'delegation_bias` is one of "inherit", "prefer", "neutral", or "avoid"',
+            "Candidates are tried in listed order",
         ):
             with self.subTest(text=text):
                 self.assertIn(text, template)
@@ -1512,6 +1656,22 @@ enabled = false
             (
                 "[subagents]\nstrategy = 7\n",
                 "subagents.strategy must be a string",
+            ),
+            (
+                '[subagents]\nprofiles = "routine"\n',
+                "subagents.profiles must be an array of TOML inline tables",
+            ),
+            (
+                '[[subagents.profiles]]\nname = "routine"\ndelegation_bias = "force"\n',
+                "subagents.profiles[0].delegation_bias must be one of: inherit, prefer, neutral, avoid",
+            ),
+            (
+                '[[subagents.profiles]]\nname = "routine"\ncandidates = [{ model = "unknown", reasoning_effort = "high" }]\n',
+                "subagents.profiles[0].candidates[0].model must be defined in subagents.models: unknown",
+            ),
+            (
+                '[[subagents.profiles]]\nname = "routine"\n[[subagents.profiles]]\nname = "routine"\n',
+                "subagents.profiles contains duplicate profile name: routine",
             ),
         )
         with tempfile.TemporaryDirectory() as tmp:

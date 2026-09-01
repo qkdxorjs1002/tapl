@@ -242,10 +242,12 @@ Codex는 typed MCP tool로 current state, archive detail, history를 읽습니�
 
 TAPL은 execution manifest를 조율하지만 worker를 spawn하지는 않습니다. Codex/root
 runtime이 SubAgent를 만들고 관리합니다. 병렬 task는 dependency가 완료되고 서로 겹치지
-않는 file 또는 directory를 소유할 때만 유효합니다. 기본값인 `aggressive` strategy에서는
-작은 task가 포함된 그룹도 포함해 모든 적격 그룹을 위임하되, 위임에 명확하거나 중대한
-단점이 있으면 root가 수행합니다. 순차 task, 공유 file 또는 state, root 수준의 결정은
-main agent가 수행합니다.
+않는 file 또는 directory를 소유할 때만 유효합니다. `strategy`는 강제 결과가 아니라
+판단 bias입니다. agent는 task independence, 필요한 context, risk, coordination cost,
+parallel value를 평가한 뒤 root 실행 또는 위임을 선택합니다. 순차 task, 공유 file 또는
+state, root 수준의 결정은 main agent가 수행합니다. 사용자 task profile은 반복 작업에
+대한 advisory 특성과 순서가 있는 model/effort 선호를 추가할 수 있으며, agent는 이유를
+기록하고 profile이나 candidate를 override할 수 있습니다.
 
 ## 동작 방식
 
@@ -311,6 +313,7 @@ taplctl config set search.mode hybrid
 taplctl config set search.max_results 20
 taplctl config set viewer.allowed_origins '["https://tapl.example.com"]'
 taplctl config set subagents.models.gpt-5.6-sol '["high", "xhigh"]'
+taplctl config set subagents.profiles '[{name="bounded-routine", description="Small independent changes", characteristics="low risk, local context", delegation_bias="prefer", candidates=[{model="gpt-5.6-luna", reasoning_effort="xhigh"}, {model="gpt-5.6-terra", reasoning_effort="high"}]}]'
 taplctl config unset search.mode
 ```
 
@@ -328,7 +331,8 @@ taplctl config unset search.mode
 `viewer.allowed_origins`(중복 없는 HTTP(S) origin 문자열의 TOML 배열),
 `subagents.enabled`(`true` 또는 `false`), `subagents.strategy`(`conservative`,
 `balanced`, `aggressive`), `subagents.models.<model-id>`(중복 없는 reasoning-effort
-문자열의 비어 있지 않은 TOML 배열)입니다.
+문자열의 비어 있지 않은 TOML 배열), `subagents.profiles`(inline profile table의
+TOML 배열)입니다.
 
 별도 지정이 없으면 위에서 설명한 repo-local, user-global 순서로 대상을 선택하고 두 파일이
 모두 없으면 repo-local 경로를 생성합니다. 다른 파일을 편집하려면 global option을 명령
@@ -346,45 +350,78 @@ taplctl --config /path/to/config.toml config set search.mode bm25
 ```toml
 [subagents]
 enabled = true
-# aggressive(기본값)는 작은 task를 포함한 모든 적격 그룹을 위임합니다.
-# 단, 위임에 명확하거나 중대한 단점이 있으면 위임하지 않으며 balanced와 conservative는
-# 위임 수준을 낮추는 선택으로 남아 있습니다.
+# strategy는 판단 bias이며 각 task를 agent가 평가합니다.
 strategy = "aggressive"
 
 [subagents.models]
 "gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
 "gpt-5.6-terra" = ["high", "xhigh"]
 "gpt-5.6-luna" = ["xhigh", "max"]
+
+[[subagents.profiles]]
+name = "bounded-routine"
+description = "Small, independent changes with limited context"
+characteristics = "low complexity, local scope, low risk, high parallel value"
+delegation_bias = "prefer"
+candidates = [
+  { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
+  { model = "gpt-5.6-terra", reasoning_effort = "high" },
+]
+
+[[subagents.profiles]]
+name = "complex-reasoning"
+description = "Cross-module work or uncertain decisions"
+characteristics = "high context, high uncertainty, high coordination cost"
+delegation_bias = "neutral"
+candidates = [
+  { model = "gpt-5.6-sol", reasoning_effort = "high" },
+  { model = "gpt-5.6-sol", reasoning_effort = "xhigh" },
+]
 ```
 
 활성화하면 TAPL은 delegation policy와 model/reasoning allowlist를 MCP instruction에
-포함합니다. runtime은 이 allowlist 중 실제 지원하는 pair만 사용할 수 있습니다. 설치된
-`.tapl/config.toml`에는 모든 runtime option의 type과 허용값이 주석으로 설명되어 있습니다.
+포함합니다. profile도 함께 전달되지만 advisory preference로만 사용됩니다. agent는 task에
+가장 잘 맞는 profile과 candidate를 선택하고, 필요하면 이유를 기록한 뒤 override할 수
+있습니다. 현재 runtime과 allowlist가 지원하는 candidate를 설정된 순서대로 시도합니다.
+일치하는 profile이 없으면 일반 strategy와 legacy model allowlist를 사용하고, 안전한
+candidate가 남지 않으면 root가 실행합니다. 설치된 `.tapl/config.toml`에는 모든 runtime
+option의 type과 허용값이 주석으로 설명되어 있습니다.
 
-`strategy`는 runtime이 얼마나 적극적으로 위임할지 결정합니다.
+profile 이름, task 특성, 위임 bias, candidate 매핑은 모두 사용자가 정의합니다. TAPL은
+특정 model ID에 고정된 작업 역할을 부여하지 않습니다.
 
-- `aggressive`(기본값)는 작은 task가 포함된 그룹도 포함해, 배타적이고 서로 겹치지 않는
-  `owned_paths`를 가진 최소 두 개의 dependency-ready task로 이루어진 모든 적격 그룹을
-  위임합니다. 단, 위임에 명확하거나 중대한 단점이 있으면 root가 실행합니다. delegation
-  safety contract를 충족할 수 없거나 root 실행이 명확하거나 중대하게 더 나은 경우에도
-  root가 실행합니다.
-- `balanced`(위임 수준을 낮추는 선택)는 최소 두 개의 비사소하고 dependency-ready인 task로
-  이루어진 적격 그룹을 병렬 SubAgent에 기본 위임합니다. 각 task는 배타적이고 서로 겹치지
-  않는 `owned_paths`를 가져야 합니다. trivial 작업, 공유 file/state 또는 결정, 의존 task,
-  또는 overhead가 명백히 큰 경우에는 root가 실행합니다.
-- `conservative`(롤백/위임 수준을 낮추는 선택)는 순효율 입증 기준을 유지합니다. spawn,
-  context 전달, 조율, 결과 통합 overhead를 포함했을 때 root/SubAgent 전체 토큰 사용량 또는
-  wall-clock 시간이 개선되고 다른 축이 유의미하게 악화되지 않을 때만 위임합니다.
+`strategy`는 위임 방향의 bias를 결정합니다.
+
+- `aggressive`(기본값)는 task가 독립적이고 필요한 context가 충분히 전달되며 risk가
+  관리 가능하고 parallel value가 클 때 위임을 선호합니다. context 공유나 coordination
+  cost 때문에 root가 더 나으면 위임하지 않습니다.
+- `balanced`는 같은 판단 기준을 방향성 없이 적용합니다.
+- `conservative`는 root 실행을 선호하며 parallel value가 context 전달, coordination,
+  risk 비용을 명확히 넘어설 때만 위임합니다.
 
 어떤 strategy에서도 execution approval, dependency readiness, 배타적이고 겹치지 않는
 소유 범위, 원자적 dispatch, 정확한 `execution_id`를 사용한 정산이 필요합니다. TAPL
-write와 task 간 결정은 root만 담당합니다. aggressive 기본값에서도 이 safety 조건은
-그대로 적용됩니다. dispatch는 runtime이 SubAgent를 spawn하기 전에 manifest의 model과
-reasoning effort를 task의 `SubAgent Model` custom field에 기록합니다. 위임 수준을 낮추려면
-`strategy = "balanced"`로, 보수적인 동작으로
-롤백하려면 `strategy = "conservative"`로 설정하세요. TAPL의 delegation guidance를
-비활성화하려면 `enabled = false`로 설정할 수 있지만, `AGENTS.md` 같은 다른 source의
-delegation instruction까지 제거하지는 않습니다.
+write와 task 간 결정은 root만 담당합니다. dispatch는 runtime이 SubAgent를 spawn하기
+전에 manifest의 model과 reasoning effort를 legacy `SubAgent Model` custom field에
+기록합니다. bias를 바꾸려면 `strategy = "balanced"` 또는 `"conservative"`로, TAPL의
+delegation guidance를 비활성화하려면 `enabled = false`로 설정하세요. 다른 source(예:
+`AGENTS.md`)의 delegation instruction까지 제거하지는 않습니다.
+
+각 executable task는 lifecycle 전체에서 다음 네 가지 canonical task custom field를
+사용합니다.
+
+- `Task Profile`: 선택한 profile(또는 match 없음)과 match 이유를 기록합니다.
+- `Task Characteristics`: independence, 필요한 context, risk, coordination cost,
+  parallel value를 기록합니다.
+- `Execution Decision`: root 또는 SubAgent, model/effort, rationale, profile/model
+  override를 기록합니다. task 설계 시, dispatch 전, decision이 바뀐 settlement 후에
+  생성하거나 갱신합니다.
+- `User Notes`: 조건부 field입니다. standard field에 없는 durable user-relevant fact만
+  간결한 category/content/impact entry로 기록합니다.
+
+legacy `SubAgent Model`은 호환성을 위해 atomic dispatch에서 계속 기록하고 SubAgent가
+실행되지 않으면 생략합니다. 설정은 preference input이며 실제 runtime 지원, safety gate,
+기록된 decision이 최종 기준입니다.
 
 plan/task policy는 고정입니다. 실행 작업은 상세 plan, 명시적인 plan confirmation,
 독립적으로 나뉜 task, durable edit 전의 기록된 approval을 사용합니다.

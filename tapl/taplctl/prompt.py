@@ -863,15 +863,16 @@ def structured_record_guidance(subject: str = "plan and task content") -> str:
 
 def custom_fields_guidance() -> str:
     return (
-        "Use `custom_fields` for durable, searchable non-standard metadata. Record user-relevant facts not carried by "
-        "standard fields when they remain true after work and affect result interpretation, later decisions, or operation: "
-        "user impact, constraints, compatibility, remaining risks, unverified scope, or follow-up actions. Group related facts "
-        "under `사용자 참고사항`/`User Notes` as concise entries with `종류`/`category`, `내용`/`content`, and "
-        "`영향`/`impact`. Put shared facts on the plan and "
-        "task-specific facts on its task; preserve keys/types, avoid duplicates/transient progress, and use top-level null only "
-        "to delete a duplicate. Atomic dispatch records the manifest model/reasoning effort as `SubAgent Model` in task "
-        "`custom_fields` before returning. Root verifies it before spawn; settlement is not the first recording point. "
-        "Example: `gpt-5.6-sol (xhigh)`; omit it when no SubAgent ran."
+        "Use `custom_fields` for durable searchable metadata. Executable tasks maintain "
+        "canonical fields `Task Profile` (profile or none plus match reason), `Task Characteristics` (independence, "
+        "context, risk, coordination cost, parallel value), and `Execution Decision` (executor, model/effort, "
+        "rationale, override). Set at design and before dispatch; update after settlement if changed. Add "
+        "`사용자 참고사항`/`User Notes` only for durable user facts absent from "
+        "standard fields, using concise `종류`/`category`, `내용`/`content`, `영향`/`impact`. Put shared "
+        "facts on plan and task-specific facts on task; preserve keys/types; omit duplicates or "
+        "transient progress. Dispatch writes legacy `SubAgent Model` (manifest model/effort) before return; root "
+        "verifies before spawn. Example: `gpt-5.6-sol (xhigh)`; omit when no SubAgent runs. "
+        "Use top-level null only to delete a duplicate."
     )
 
 
@@ -1000,19 +1001,17 @@ def subagent_strategy_guidance(
     strategy = (subagents or tapl_config.SubagentsConfig()).strategy
     if strategy == "conservative":
         return (
-            "Conservative: delegate only when parallel SubAgents are expected to improve aggregate "
-            "root/SubAgent token use or wall-clock time without materially worsening the other after overhead."
+            "Conservative bias against delegation, not a ban: delegate only when parallel value clearly exceeds "
+            "context, coordination, and risk costs."
         )
     if strategy == "aggressive":
         return (
-            "Aggressive: maximize delegation during task design: delegate every eligible group of at least two "
-            "dependency-ready tasks with exclusive non-overlapping owned_paths, even when tasks are small. Keep root "
-            "only for a clear, material downside or when the delegation safety contract cannot be met."
+            "Aggressive bias toward delegation, not a forced outcome: prefer independent low-risk work with high "
+            "parallel value; keep root when shared context or coordination dominates."
         )
     return (
-        "Balanced: at task design, default eligible groups of at least two non-trivial dependency-ready "
-        "tasks with exclusive non-overlapping owned_paths to parallel SubAgents. Keep root execution only for "
-        "trivial work, shared files/state or decisions, task dependencies, or clearly excessive overhead."
+        "Balanced neutral bias: weigh independence, context, risk, coordination cost, and parallel value; delegate "
+        "only when value wins."
     )
 
 
@@ -1048,10 +1047,74 @@ def configured_subagent_models(
     return tuple(configured)
 
 
+def _config_value(value: Any, key: str, default: Any = "") -> Any:
+    """Read config objects and dict-like test doubles without coupling prompt code to them."""
+
+    if isinstance(value, dict):
+        return value.get(key, default)
+    return getattr(value, key, default)
+
+
+def _render_profile_characteristics(value: Any) -> str:
+    if isinstance(value, dict):
+        return ", ".join(f"{key}={item}" for key, item in value.items())
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(item) for item in value)
+    return str(value).strip() if value else ""
+
+
+def configured_subagent_profiles(
+    subagents: tapl_config.SubagentsConfig | None = None,
+) -> tuple[Any, ...]:
+    """Return user profiles while remaining compatible with older config objects."""
+
+    profiles = _config_value(subagents or tapl_config.SubagentsConfig(), "profiles", ())
+    if profiles is None:
+        return ()
+    return tuple(profiles)
+
+
+def _render_profile(profile: Any, index: int) -> str:
+    name = str(_config_value(profile, "name", "")).strip() or f"profile-{index}"
+    description = str(_config_value(profile, "description", "")).strip()
+    characteristics = _render_profile_characteristics(
+        _config_value(profile, "characteristics", "")
+    )
+    bias = str(_config_value(profile, "delegation_bias", "inherit")).strip()
+    parts = [f"- `{name}`"]
+    if description:
+        parts.append(f"— {description}")
+    if characteristics:
+        parts.append(f"; characteristics: {characteristics}")
+    parts.append(f"; bias: `{bias or 'inherit'}`")
+
+    candidates = _config_value(profile, "candidates", ()) or ()
+    rendered_candidates: list[str] = []
+    for candidate in candidates:
+        model = str(_config_value(candidate, "model", "")).strip()
+        effort = str(
+            _config_value(
+                candidate,
+                "reasoning_effort",
+                _config_value(candidate, "effort", ""),
+            )
+        ).strip()
+        if model and effort:
+            rendered_candidates.append(f"`{model}` (`{effort}`)")
+        elif model:
+            rendered_candidates.append(f"`{model}`")
+    if rendered_candidates:
+        parts.append("; ordered candidates: " + " -> ".join(rendered_candidates))
+    else:
+        parts.append("; ordered candidates: none")
+    return "".join(parts)
+
+
 def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None = None) -> str:
     if not subagents_enabled(subagents):
         return ""
 
+    profiles = configured_subagent_profiles(subagents)
     models = configured_subagent_models(subagents)
     available_models = "\n".join(
         f"- `{name}`: {', '.join(f'`{effort}`' for effort in efforts)}"
@@ -1060,14 +1123,30 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
     if not available_models:
         available_models = "- No configured model/reasoning-effort pairs are available; do not delegate work."
     strategy_guidance = subagent_strategy_guidance(subagents)
+    if profiles:
+        profile_guidance = "\n".join(
+            _render_profile(profile, index)
+            for index, profile in enumerate(profiles, start=1)
+        )
+        profile_section = (
+            "- User task profiles (in order; bias inherit=global, prefer=delegate, neutral=neutral, avoid=root):\n"
+            f"{profile_guidance}\n"
+        )
+    else:
+        profile_section = ""
 
     return (
         "### SubAgent Delegation\n\n"
-        f"- Strategy: {strategy_guidance} Root retains TAPL writes and cross-task decisions.\n"
-        "- For delegation, choose the most efficient pair supported by both this configuration and the current runtime:\n"
+        f"- Strategy: {strategy_guidance}\n"
+        "- Assess independence, context, risk, coordination cost, and parallel value; record it in canonical task "
+        "fields.\n"
+        "- Profiles/candidate order are advisory: choose a supported match and record justified overrides. No match "
+        "-> legacy allowlist; skip unavailable candidates, then root if none is safe.\n"
+        f"{profile_section}"
+        "- Legacy model/effort allowlist (fallback):\n"
         f"{available_models}\n"
-        "- Atomically dispatch, verify the persisted `SubAgent Model` record, then spawn each manifest SubAgent; constrain "
-        "`owned_paths`, settle by exact `execution_id`, and recover or cancel on spawn failure/interruption."
+        "- Atomic dispatch verifies legacy `SubAgent Model`, spawns manifests in exclusive `owned_paths`, settles the "
+        "exact `execution_id`, and recovers/cancels on interruption."
     )
 
 

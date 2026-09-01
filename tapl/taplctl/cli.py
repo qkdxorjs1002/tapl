@@ -286,6 +286,7 @@ def config_key_help(*, include_examples: bool = False) -> str:
         (
             "",
             "TOML_ARRAY examples: [\"https://tapl.example.com\"] or [\"high\", \"xhigh\"].",
+            "Profile arrays use inline tables; each candidate must be allowlisted in subagents.models.",
         )
     )
     if include_examples:
@@ -296,6 +297,7 @@ def config_key_help(*, include_examples: bool = False) -> str:
                 "  taplctl config set search.mode hybrid",
                 "  taplctl config set viewer.allowed_origins '[\"https://tapl.example.com\"]'",
                 "  taplctl config set subagents.models.gpt-5.6-sol '[\"high\", \"xhigh\"]'",
+                "  taplctl config set subagents.profiles '[{ name = \"routine\", characteristics = \"small, local changes\", delegation_bias = \"prefer\", candidates = [{ model = \"gpt-5.6-luna\", reasoning_effort = \"xhigh\" }, { model = \"gpt-5.6-terra\", reasoning_effort = \"high\" }] }]'",
                 "  taplctl config unset search.mode",
             )
         )

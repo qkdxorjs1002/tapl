@@ -37,6 +37,7 @@ class _Table:
     start: int
     content_start: int
     end: int
+    array: bool = False
 
 
 def set_value(path: Path | str, key: str, raw_value: str) -> ConfigEditResult:
@@ -46,7 +47,9 @@ def set_value(path: Path | str, key: str, raw_value: str) -> ConfigEditResult:
     value = config.parse_editable_value(key, raw_value)
     original = _read(config_path)
     rendered = _render_value(value)
-    candidate = _replace_or_add(original, _key_path(key), rendered)
+    target = _key_path(key)
+    prepared = _remove_array_tables(original, target)
+    candidate = _replace_or_add(prepared, target, rendered)
     _validate(candidate, config_path)
     changed = candidate != original
     if changed:
@@ -64,6 +67,11 @@ def unset_value(path: Path | str, key: str) -> ConfigEditResult:
     assignments, _ = _scan(original)
     assignment = next((item for item in assignments if item.path == target), None)
     if assignment is None:
+        candidate = _remove_array_tables(original, target)
+        if candidate != original:
+            _validate(candidate, config_path)
+            _atomic_write(config_path, candidate)
+            return ConfigEditResult(str(config_path), key, True)
         parsed = _parse(original, config_path)
         if _mapping_contains(parsed, target):
             raise ValueError(
@@ -77,6 +85,21 @@ def unset_value(path: Path | str, key: str) -> ConfigEditResult:
     if candidate != original:
         _atomic_write(config_path, candidate)
     return ConfigEditResult(str(config_path), key, candidate != original)
+
+
+def _remove_array_tables(text: str, target: tuple[str, ...]) -> str:
+    """Remove array-of-table entries for a settable aggregate value.
+
+    `subagents.profiles` is documented in readable ``[[...]]`` form, while the
+    config editor writes one equivalent inline-table array assignment. Removing
+    all matching blocks first lets set/unset work with either representation.
+    """
+
+    _, tables = _scan(text)
+    matches = [table for table in tables if table.array and table.path == target]
+    for table in reversed(matches):
+        text = text[: table.start] + text[table.end :]
+    return text
 
 
 def _read(path: Path) -> str:
@@ -129,7 +152,7 @@ def _replace_or_add(text: str, target: tuple[str, ...], rendered: str) -> str:
 
 def _scan(text: str) -> tuple[list[_Assignment], list[_Table]]:
     assignments: list[_Assignment] = []
-    table_markers: list[tuple[tuple[str, ...], int, int]] = []
+    table_markers: list[tuple[tuple[str, ...], int, int, bool]] = []
     current_table: tuple[str, ...] = ()
     offset = 0
     lines = text.splitlines(keepends=True)
@@ -141,7 +164,9 @@ def _scan(text: str) -> tuple[list[_Assignment], list[_Table]]:
         table_path = _parse_table_path(line)
         if table_path is not None:
             current_table = table_path
-            table_markers.append((table_path, line_start, line_end))
+            table_markers.append(
+                (table_path, line_start, line_end, line.lstrip().startswith("[["))
+            )
             offset = line_end
             index += 1
             continue
@@ -179,8 +204,9 @@ def _scan(text: str) -> tuple[list[_Assignment], list[_Table]]:
             end=table_markers[position + 1][1]
             if position + 1 < len(table_markers)
             else len(text),
+            array=is_array,
         )
-        for position, (path, start, content_start) in enumerate(table_markers)
+        for position, (path, start, content_start, is_array) in enumerate(table_markers)
     ]
     return assignments, tables
 
@@ -338,6 +364,11 @@ def _render_value(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False)
     if isinstance(value, list):
         return "[" + ", ".join(_render_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(
+            f"{_render_key(key)} = {_render_value(item)}"
+            for key, item in value.items()
+        ) + "}"
     if isinstance(value, (int, float)):
         return repr(value)
     raise TypeError(f"unsupported TOML value type: {type(value).__name__}")

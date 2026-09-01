@@ -627,7 +627,24 @@ strategy = "{config.DEFAULT_SUBAGENT_STRATEGY}"
 # is a non-empty array of unique reasoning-effort strings supported by that model.
 # At least one model is required when subagents.enabled is true. Current bundled
 # model/effort pairs are listed below; unsupported pairs fail at delegation time.
-{model_lines}"""
+{model_lines}
+
+# Optional advisory task profiles. The agent remains the final decision-maker;
+# profiles communicate your preferences for recognizable work characteristics.
+# `delegation_bias` is one of "inherit", "prefer", "neutral", or "avoid".
+# Candidates are tried in listed order and each model/reasoning_effort pair must
+# appear in subagents.models above.
+#
+# [[subagents.profiles]]
+# name = "bounded-routine"
+# description = "Small, independent work with limited required context."
+# characteristics = "local changes, routine tests, predictable implementation"
+# delegation_bias = "prefer"
+# candidates = [
+#   {{ model = "gpt-5.6-luna", reasoning_effort = "xhigh" }},
+#   {{ model = "gpt-5.6-terra", reasoning_effort = "high" }},
+# ]
+"""
 
 
 def install_static_codex_templates(

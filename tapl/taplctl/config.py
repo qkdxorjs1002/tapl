@@ -30,6 +30,7 @@ DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
 SUBAGENT_STRATEGIES = ("conservative", "balanced", "aggressive")
+SUBAGENT_DELEGATION_BIASES = ("inherit", "prefer", "neutral", "avoid")
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,11 @@ EDITABLE_CONFIG_KEYS = (
         "Allowed reasoning efforts for one model as a non-empty, unique TOML string array.",
         dynamic_prefix="subagents.models.",
     ),
+    EditableConfigKey(
+        "subagents.profiles",
+        "TOML_ARRAY",
+        "Ordered advisory task profiles as TOML inline tables.",
+    ),
 )
 
 
@@ -142,6 +148,40 @@ class SubagentModelConfig:
         }
 
 
+@dataclass(frozen=True)
+class SubagentModelCandidateConfig:
+    """One ordered, allowlisted model/effort preference for a task profile."""
+
+    model: str
+    reasoning_effort: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
+        }
+
+
+@dataclass(frozen=True)
+class SubagentTaskProfileConfig:
+    """User-defined advisory routing preferences for a class of tasks."""
+
+    name: str
+    description: str = ""
+    characteristics: str = ""
+    delegation_bias: str = "inherit"
+    candidates: tuple[SubagentModelCandidateConfig, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "characteristics": self.characteristics,
+            "delegation_bias": self.delegation_bias,
+            "candidates": [candidate.as_dict() for candidate in self.candidates],
+        }
+
+
 def default_subagent_models() -> tuple[SubagentModelConfig, ...]:
     return tuple(
         SubagentModelConfig(name=name, reasoning_efforts=reasoning_efforts)
@@ -154,9 +194,10 @@ class SubagentsConfig:
     enabled: bool = DEFAULT_SUBAGENTS_ENABLED
     strategy: str = DEFAULT_SUBAGENT_STRATEGY
     models: tuple[SubagentModelConfig, ...] = field(default_factory=default_subagent_models)
+    profiles: tuple[SubagentTaskProfileConfig, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        rendered: dict[str, Any] = {
             "enabled": self.enabled,
             "strategy": self.strategy,
             "models": {
@@ -164,6 +205,9 @@ class SubagentsConfig:
                 for model in self.models
             },
         }
+        if self.profiles:
+            rendered["profiles"] = [profile.as_dict() for profile in self.profiles]
+        return rendered
 
 
 @dataclass(frozen=True)
@@ -331,6 +375,10 @@ def from_mapping(
         )
     else:
         subagent_models = default_subagent_models()
+    subagent_profiles = parse_subagent_profiles(
+        setting(subagents_data, "profiles", default=[]),
+        models=subagent_models,
+    )
     viewer_data = table(data, "viewer")
     viewer = ViewerConfig(
         allowed_origins=origin_array(
@@ -353,6 +401,7 @@ def from_mapping(
             enabled=subagents_enabled,
             strategy=subagent_strategy,
             models=subagent_models,
+            profiles=subagent_profiles,
         ),
     )
 
@@ -403,6 +452,13 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
         return boolean(value, key)
     if key == "subagents.strategy":
         return choice(value, SUBAGENT_STRATEGIES, key)
+    if key == "subagents.profiles":
+        profiles = parse_subagent_profiles(
+            value,
+            models=None,
+            key=key,
+        )
+        return [profile.as_dict() for profile in profiles]
     if spec.dynamic_prefix:
         model_name = key.removeprefix(spec.dynamic_prefix)
         if model_name != model_name.strip():
@@ -544,6 +600,117 @@ def parse_subagent_models(
             f"{key} must define at least one model when subagents.enabled is true"
         )
     return tuple(models)
+
+
+def parse_subagent_profiles(
+    value: Any,
+    *,
+    models: tuple[SubagentModelConfig, ...] | None,
+    key: str = "subagents.profiles",
+) -> tuple[SubagentTaskProfileConfig, ...]:
+    """Validate ordered advisory task profiles against the model allowlist."""
+
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be an array of TOML inline tables")
+
+    allowed_efforts: dict[str, set[str]] | None = None
+    if models is not None:
+        allowed_efforts = {
+            model.name: set(model.reasoning_efforts)
+            for model in models
+        }
+    profiles: list[SubagentTaskProfileConfig] = []
+    seen_names: set[str] = set()
+    for index, raw_profile in enumerate(value):
+        profile_key = f"{key}[{index}]"
+        if not isinstance(raw_profile, dict):
+            raise ValueError(f"{profile_key} must be a TOML inline table")
+
+        name = non_empty_string(raw_profile.get("name"), f"{profile_key}.name")
+        if name in seen_names:
+            raise ValueError(f"{key} contains duplicate profile name: {name}")
+        seen_names.add(name)
+        description = optional_string(
+            raw_profile.get("description", ""),
+            f"{profile_key}.description",
+        )
+        characteristics = optional_string(
+            raw_profile.get("characteristics", ""),
+            f"{profile_key}.characteristics",
+        )
+        delegation_bias = choice(
+            raw_profile.get("delegation_bias", "inherit"),
+            SUBAGENT_DELEGATION_BIASES,
+            f"{profile_key}.delegation_bias",
+        )
+        raw_candidates = raw_profile.get("candidates", [])
+        if not isinstance(raw_candidates, list):
+            raise ValueError(
+                f"{profile_key}.candidates must be an array of TOML inline tables"
+            )
+
+        candidates: list[SubagentModelCandidateConfig] = []
+        seen_candidates: set[tuple[str, str]] = set()
+        for candidate_index, raw_candidate in enumerate(raw_candidates):
+            candidate_key = f"{profile_key}.candidates[{candidate_index}]"
+            if not isinstance(raw_candidate, dict):
+                raise ValueError(f"{candidate_key} must be a TOML inline table")
+            model_name = non_empty_string(
+                raw_candidate.get("model"),
+                f"{candidate_key}.model",
+            )
+            reasoning_effort = non_empty_string(
+                raw_candidate.get("reasoning_effort"),
+                f"{candidate_key}.reasoning_effort",
+            )
+            if allowed_efforts is not None and model_name not in allowed_efforts:
+                raise ValueError(
+                    f"{candidate_key}.model must be defined in subagents.models: "
+                    f"{model_name}"
+                )
+            if (
+                allowed_efforts is not None
+                and reasoning_effort not in allowed_efforts[model_name]
+            ):
+                raise ValueError(
+                    f"{candidate_key}.reasoning_effort is not allowed for {model_name}: "
+                    f"{reasoning_effort}"
+                )
+            candidate_id = (model_name, reasoning_effort)
+            if candidate_id in seen_candidates:
+                raise ValueError(
+                    f"{profile_key}.candidates contains duplicate model/effort pair: "
+                    f"{model_name}/{reasoning_effort}"
+                )
+            seen_candidates.add(candidate_id)
+            candidates.append(
+                SubagentModelCandidateConfig(
+                    model=model_name,
+                    reasoning_effort=reasoning_effort,
+                )
+            )
+        profiles.append(
+            SubagentTaskProfileConfig(
+                name=name,
+                description=description,
+                characteristics=characteristics,
+                delegation_bias=delegation_bias,
+                candidates=tuple(candidates),
+            )
+        )
+    return tuple(profiles)
+
+
+def non_empty_string(value: Any, key: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be a non-empty string")
+    return value.strip()
+
+
+def optional_string(value: Any, key: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string")
+    return value.strip()
 
 
 def ratio(value: Any, key: str) -> float:

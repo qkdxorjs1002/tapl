@@ -1483,7 +1483,8 @@ def execution_batch_payload(conn: sqlite3.Connection, batch_id: str) -> dict[str
           t.execution_mode,
           t.executor_kind,
           t.parallel_group,
-          t.owned_paths_json
+          t.owned_paths_json,
+          i.custom_fields_json
         FROM task_executions te
         JOIN tasks t ON t.item_id = te.task_item_id
         JOIN items i ON i.id = t.item_id
@@ -1496,6 +1497,126 @@ def execution_batch_payload(conn: sqlite3.Connection, batch_id: str) -> dict[str
     batch_data = row_to_dict(batch)
     batch_data["batch_id"] = batch_data["id"]
     return {"batch": batch_data, "executions": executions}
+
+
+def _merge_nested_custom_field(
+    custom_fields: dict[str, Any],
+    key: str,
+    patch: dict[str, Any],
+) -> None:
+    """Merge one canonical advisory object without discarding design-time values."""
+
+    if not patch:
+        return
+    current = custom_fields.get(key)
+    merged = dict(current) if isinstance(current, dict) else {}
+    merged.update(patch)
+    custom_fields[key] = merged
+
+
+def _dispatch_custom_fields_patch(
+    existing: Any,
+    task_metadata: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Return custom fields enriched with compatible runtime selection context."""
+
+    custom_fields = parse_custom_fields(existing)
+    changed = False
+    model = str(task_metadata.get("model") or "").strip()
+    reasoning_effort = str(task_metadata.get("reasoning_effort") or "").strip()
+    if model and reasoning_effort:
+        custom_fields["SubAgent Model"] = f"{model} ({reasoning_effort})"
+        changed = True
+
+    task_profile = task_metadata.get("task_profile")
+    profile_patch = dict(task_profile) if isinstance(task_profile, dict) else {}
+    supplied_decision = task_metadata.get("execution_decision")
+    decision_patch = dict(supplied_decision) if isinstance(supplied_decision, dict) else {}
+    profile = str(
+        task_metadata.get("profile")
+        or profile_patch.get("name")
+        or decision_patch.get("profile")
+        or ""
+    ).strip()
+    if profile:
+        profile_patch["name"] = profile
+    profile_match_reason = str(
+        task_metadata.get("profile_match_reason")
+        or task_metadata.get("match_reason")
+        or ""
+    ).strip()
+    if profile_match_reason:
+        profile_patch["match_reason"] = profile_match_reason
+
+    characteristics = task_metadata.get("task_characteristics")
+    if not isinstance(characteristics, dict):
+        characteristics = task_metadata.get("characteristics")
+    characteristics_patch = dict(characteristics) if isinstance(characteristics, dict) else {}
+
+    delegation_reason = str(
+        task_metadata.get("delegation_reason")
+        or task_metadata.get("execution_reason")
+        or task_metadata.get("delegation_rationale")
+        or ""
+    ).strip()
+    model_reason = str(
+        task_metadata.get("model_reason")
+        or task_metadata.get("model_rationale")
+        or ""
+    ).strip()
+    if delegation_reason:
+        decision_patch["delegation_reason"] = delegation_reason
+    if model_reason:
+        decision_patch["model_reason"] = model_reason
+    if profile:
+        decision_patch["profile"] = profile
+
+    advisory_keys = {
+        "task_profile",
+        "profile",
+        "profile_match_reason",
+        "match_reason",
+        "task_characteristics",
+        "characteristics",
+        "execution_decision",
+        "delegation_reason",
+        "execution_reason",
+        "delegation_rationale",
+        "model_reason",
+        "model_rationale",
+        "profile_overridden",
+        "profile_override",
+        "profile_override_reason",
+        "override_reason",
+    }
+    has_advisory_context = any(key in task_metadata for key in advisory_keys)
+    if has_advisory_context:
+        decision_patch.setdefault("executor", "subagent")
+        if model:
+            decision_patch["model"] = model
+        if reasoning_effort:
+            decision_patch["reasoning_effort"] = reasoning_effort
+    if "profile_overridden" in task_metadata or "profile_override" in task_metadata:
+        decision_patch["profile_overridden"] = task_metadata.get(
+            "profile_overridden", task_metadata.get("profile_override")
+        )
+    override_reason = str(
+        task_metadata.get("profile_override_reason")
+        or task_metadata.get("override_reason")
+        or ""
+    ).strip()
+    if override_reason:
+        decision_patch["profile_override_reason"] = override_reason
+
+    for key, patch in (
+        ("Task Profile", profile_patch),
+        ("Task Characteristics", characteristics_patch),
+        ("Execution Decision", decision_patch),
+    ):
+        if patch:
+            _merge_nested_custom_field(custom_fields, key, patch)
+            changed = True
+    return custom_fields, changed
 
 
 def dispatch_tasks(
@@ -1718,13 +1839,10 @@ def dispatch_tasks(
         )
         for row in ordered_rows:
             task_metadata = metadata.get(row["task_id"], {})
-            model = str(task_metadata.get("model") or "").strip()
-            reasoning_effort = str(task_metadata.get("reasoning_effort") or "").strip()
-            if model and reasoning_effort:
-                custom_fields = merge_custom_fields(
-                    row["custom_fields_json"],
-                    {"SubAgent Model": f"{model} ({reasoning_effort})"},
-                )
+            custom_fields, custom_fields_changed = _dispatch_custom_fields_patch(
+                row["custom_fields_json"], task_metadata
+            )
+            if custom_fields_changed:
                 updated = conn.execute(
                     """
                     UPDATE items
@@ -1744,7 +1862,7 @@ def dispatch_tasks(
                 )
             if updated.rowcount != 1:
                 raise RuntimeError(f"task status changed during dispatch: {row['task_id']}")
-            if model and reasoning_effort:
+            if custom_fields_changed:
                 refreshed_item = conn.execute(
                     "SELECT * FROM items WHERE id = ?",
                     (row["item_id"],),

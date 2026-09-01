@@ -42,6 +42,7 @@ def validate_plan_task_execute(
     issues.extend(validate_task_granularity(plans, tasks))
     issues.extend(validate_task_content(tasks))
     issues.extend(validate_task_planning_contract(tasks))
+    issues.extend(validate_advisory_selection_context(tasks))
     issues.extend(validate_task_dependencies(tasks))
     issues.extend(validate_owned_path_exclusivity(state, tasks))
     issues.extend(validate_execution_state(state, tasks))
@@ -325,6 +326,154 @@ def validate_task_planning_contract(tasks: list[dict[str, Any]]) -> list[dict[st
                     f"Parallel group `{group}` has only one executable task.",
                     tapl_prompt.parallel_group_size_remediation(),
                     stable_id=task_label(executable_members[0]),
+                )
+            )
+    return issues
+
+
+def validate_advisory_selection_context(
+    tasks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Report incomplete advisory records without weakening execution safety."""
+
+    issues: list[dict[str, Any]] = []
+    for task in tasks:
+        label = task_label(task)
+        custom_fields = task.get("custom_fields")
+        if not isinstance(custom_fields, dict):
+            continue
+        profile_value = custom_fields.get("Task Profile")
+        characteristics_value = custom_fields.get("Task Characteristics")
+        decision_value = custom_fields.get("Execution Decision")
+        legacy_model = str(custom_fields.get("SubAgent Model") or "").strip()
+        has_advisory_record = any(
+            key in custom_fields
+            for key in ("Task Profile", "Task Characteristics", "Execution Decision")
+        )
+        selection_recorded = bool(legacy_model or has_advisory_record)
+        if not selection_recorded:
+            continue
+
+        if "Task Profile" not in custom_fields:
+            issues.append(
+                issue(
+                    "warning",
+                    "advisory_task_profile_missing",
+                    f"{label} records an execution selection without profile match context.",
+                    "Record the selected profile, or an explicit no-match result, with match_reason in Task Profile.",
+                    stable_id=label,
+                )
+            )
+
+        decision = decision_value if isinstance(decision_value, dict) else {}
+        if not isinstance(decision_value, dict):
+            issues.append(
+                issue(
+                    "warning",
+                    "advisory_execution_decision_missing",
+                    f"{label} has runtime selection context without an Execution Decision object.",
+                    "Record delegation_reason and model_reason in the canonical Execution Decision custom field.",
+                    stable_id=label,
+                )
+            )
+            if legacy_model:
+                issues.append(
+                    issue(
+                        "warning",
+                        "advisory_model_rationale_missing",
+                        f"{label} records a selected model without its rationale.",
+                        "Record model_reason in the Execution Decision custom field.",
+                        stable_id=label,
+                    )
+                )
+        else:
+            if not str(
+                decision.get("delegation_reason")
+                or decision.get("execution_reason")
+                or decision.get("rationale")
+                or decision.get("reason")
+                or ""
+            ).strip():
+                issues.append(
+                    issue(
+                        "warning",
+                        "advisory_delegation_rationale_missing",
+                        f"{label} does not record why its executor was selected.",
+                        "Record delegation_reason or execution_reason in the Execution Decision custom field.",
+                        stable_id=label,
+                    )
+                )
+            selected_model = str(decision.get("model") or legacy_model).strip()
+            if selected_model and not str(
+                decision.get("model_reason")
+                or decision.get("model_rationale")
+                or decision.get("reason")
+                or ""
+            ).strip():
+                issues.append(
+                    issue(
+                        "warning",
+                        "advisory_model_rationale_missing",
+                        f"{label} records a selected model without its rationale.",
+                        "Record model_reason in the Execution Decision custom field.",
+                        stable_id=label,
+                    )
+                )
+
+        profile = profile_value if isinstance(profile_value, dict) else {}
+        profile_name = str(profile.get("name") or decision.get("profile") or "").strip()
+        if "Task Profile" in custom_fields and not isinstance(profile_value, dict):
+            issues.append(
+                issue(
+                    "warning",
+                    "advisory_task_profile_invalid",
+                    f"{label} has a non-object Task Profile advisory field.",
+                    "Store the selected profile name and match_reason in a Task Profile object.",
+                    stable_id=label,
+                )
+            )
+        if profile_name:
+            if not str(profile.get("match_reason") or "").strip():
+                issues.append(
+                    issue(
+                        "warning",
+                        "advisory_profile_match_rationale_missing",
+                        f"{label} selects profile `{profile_name}` without a match rationale.",
+                        "Record profile_match_reason as Task Profile.match_reason.",
+                        stable_id=label,
+                    )
+                )
+            if not isinstance(characteristics_value, dict) or not characteristics_value:
+                issues.append(
+                    issue(
+                        "warning",
+                        "advisory_task_characteristics_missing",
+                        f"{label} selects profile `{profile_name}` without task characteristics.",
+                        "Record the characteristics used to match the profile in Task Characteristics.",
+                        stable_id=label,
+                    )
+                )
+            decision_profile = str(decision.get("profile") or "").strip()
+            if decision_profile and decision_profile != profile_name:
+                issues.append(
+                    issue(
+                        "warning",
+                        "advisory_profile_mismatch",
+                        f"{label} records different Task Profile and Execution Decision profiles.",
+                        "Use the same selected profile name in both canonical advisory fields.",
+                        stable_id=label,
+                    )
+                )
+        if decision.get("profile_overridden") is True and not str(
+            decision.get("profile_override_reason") or ""
+        ).strip():
+            issues.append(
+                issue(
+                    "warning",
+                    "advisory_profile_override_rationale_missing",
+                    f"{label} marks its profile selection overridden without a rationale.",
+                    "Record profile_override_reason in the Execution Decision custom field.",
+                    stable_id=label,
                 )
             )
     return issues

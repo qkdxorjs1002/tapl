@@ -104,6 +104,7 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
         "complete-or-block-task": ["tapl_complete_task", "tapl_block_task"],
         "block-task": "tapl_block_task",
         "dispatch-parallel-tasks": "tapl_dispatch_tasks",
+        "review-advisory-selection-context": "tapl_get_status",
         "start-task": "tapl_start_task",
         "finish-run": "tapl_finish_run",
         "archive-run": "tapl_finish_archive",
@@ -187,6 +188,7 @@ def compact_batch_receipt(payload: dict[str, Any], *, include_contract: bool) ->
         "parallel_group",
         "owned_paths",
         "owned_paths_json",
+        "custom_fields",
     )
     executions = []
     for execution in payload.get("executions") or []:
@@ -529,9 +531,9 @@ def create_server(
         task_ids: Annotated[list[TaskId], Field(description="At least two compatible Pending subagent task ids.", min_length=2)],
         batch_id: Annotated[str | None, Field(description="Optional stable batch id for idempotent retry.")] = None,
         failure_policy: Annotated[str, Field(description="Non-empty batch failure policy.", min_length=1)] = db.DEFAULT_FAILURE_POLICY,
-        execution_metadata: Annotated[dict[str, dict[str, Any]] | None, Field(description="Per-task runtime model and reasoning metadata; when both are non-empty, dispatch records SubAgent Model before callers spawn.")] = None,
+        execution_metadata: Annotated[dict[str, dict[str, Any]] | None, Field(description="Per-task runtime selection metadata. Complete model/reasoning pairs record legacy SubAgent Model before callers spawn; advisory profile, characteristics, delegation/model rationale, and override fields are merged into canonical task custom fields before the manifest returns.")] = None,
     ) -> dict[str, Any]:
-        """Atomically validate and dispatch compatible tasks, recording each complete SubAgent Model before returning its spawn manifest."""
+        """Atomically dispatch tasks, recording compatible legacy plus advisory selection context before returning its spawn manifest."""
 
         return await call_application_write(
             application,

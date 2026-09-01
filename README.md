@@ -276,10 +276,12 @@ SQLite FTS works in every installation. Install the semantic extra—or the
 TAPL coordinates execution manifests; it does not spawn workers. The Codex/root
 runtime creates and manages SubAgents. Parallel tasks are valid only when their
 dependencies are complete and they own non-overlapping files or directories.
-With the default `aggressive` strategy, every eligible group—including groups
-containing small tasks—is delegated unless delegation has a clear or material
-downside. Sequential tasks, shared files or state, and root-level decisions
-remain on the main agent.
+The `strategy` value is a decision bias, not a forced outcome: the agent weighs
+task independence, required context, risk, coordination cost, and parallel
+value before choosing root execution or delegation. Sequential tasks, shared
+files or state, and root-level decisions remain on the main agent. User task
+profiles can add advisory characteristics and an ordered model/effort preference
+for recurring work; the agent may override either with a recorded reason.
 
 ## How it works
 
@@ -352,6 +354,7 @@ taplctl config set search.mode hybrid
 taplctl config set search.max_results 20
 taplctl config set viewer.allowed_origins '["https://tapl.example.com"]'
 taplctl config set subagents.models.gpt-5.6-sol '["high", "xhigh"]'
+taplctl config set subagents.profiles '[{name="bounded-routine", description="Small independent changes", characteristics="low risk, local context", delegation_bias="prefer", candidates=[{model="gpt-5.6-luna", reasoning_effort="xhigh"}, {model="gpt-5.6-terra", reasoning_effort="high"}]}]'
 taplctl config unset search.mode
 ```
 
@@ -369,7 +372,8 @@ The supported keys are `search.mode` (`semantic`, `bm25`, `word`, or `hybrid`),
 `viewer.allowed_origins` (unique HTTP(S) origins in a TOML string array),
 `subagents.enabled` (`true` or `false`), `subagents.strategy` (`conservative`,
 `balanced`, or `aggressive`), and `subagents.models.<model-id>` (a non-empty
-TOML array of unique reasoning-effort strings).
+TOML array of unique reasoning-effort strings), or `subagents.profiles` (a
+TOML array of inline profile tables).
 
 Without an override, the command uses the same repo-local-then-user lookup order
 described above and creates the repo-local path when neither file exists. To edit
@@ -387,49 +391,82 @@ taplctl --config /path/to/config.toml config set search.mode bm25
 ```toml
 [subagents]
 enabled = true
-# aggressive (the default) delegates every eligible group, including small tasks,
-# unless delegation has a clear or material downside. balanced and conservative
-# remain available as opt-down choices.
+# strategy is a decision bias; the agent still evaluates each task.
 strategy = "aggressive"
 
 [subagents.models]
 "gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
 "gpt-5.6-terra" = ["high", "xhigh"]
 "gpt-5.6-luna" = ["xhigh", "max"]
+
+[[subagents.profiles]]
+name = "bounded-routine"
+description = "Small, independent changes with limited context"
+characteristics = "low complexity, local scope, low risk, high parallel value"
+delegation_bias = "prefer"
+candidates = [
+  { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
+  { model = "gpt-5.6-terra", reasoning_effort = "high" },
+]
+
+[[subagents.profiles]]
+name = "complex-reasoning"
+description = "Cross-module work or uncertain decisions"
+characteristics = "high context, high uncertainty, high coordination cost"
+delegation_bias = "neutral"
+candidates = [
+  { model = "gpt-5.6-sol", reasoning_effort = "high" },
+  { model = "gpt-5.6-sol", reasoning_effort = "xhigh" },
+]
 ```
 
-When enabled, TAPL includes its delegation policy and configured model/reasoning
-allowlist in MCP instructions. The runtime may use only supported pairs in that
-allowlist. The installed `.tapl/config.toml` documents every runtime option, its
-type, and its allowed values inline.
+When enabled, TAPL includes its delegation policy, user profiles, and configured
+model/reasoning allowlist in MCP instructions. Profiles are advisory: the agent
+selects the best match for the task and may justify a profile or candidate
+override. Candidates are tried in their configured order when supported by the
+current runtime and allowlist. If no profile matches, the agent uses the general
+strategy and legacy model allowlist; if no safe candidate remains, execution
+stays on root. The installed `.tapl/config.toml` documents every runtime option,
+its type, and its allowed values inline.
 
-The `strategy` setting controls how actively the runtime delegates:
+Profile names, task characteristics, delegation biases, and candidate mappings
+are user-defined. TAPL does not assign a fixed task role to any model ID.
 
-- `aggressive` (the default) delegates every eligible group of at least two
-  dependency-ready tasks with exclusive, non-overlapping `owned_paths`, including
-  groups containing small tasks, unless delegation has a clear or material
-  downside. Root keeps execution when the delegation safety contract cannot be
-  met, or when root execution is clearly or materially better.
-- `balanced` (opt-down) delegates eligible groups of at least two non-trivial,
-  dependency-ready tasks to parallel SubAgents when each task has exclusive,
-  non-overlapping `owned_paths`. Root execution remains appropriate for trivial
-  work, shared files/state or decisions, dependent tasks, or clearly excessive
-  overhead.
-- `conservative` (rollback/opt-down) preserves the net-efficiency proof: delegate
-  only when expected aggregate root/SubAgent token use or wall-clock time improves
-  without materially worsening the other after spawn, context-transfer,
-  coordination, and result integration overhead.
+The `strategy` setting controls the delegation bias:
+
+- `aggressive` (the default) favors delegation when tasks are independent,
+  sufficiently self-contained, low enough risk, and have meaningful parallel
+  value. It does not require delegation when context sharing or coordination cost
+  makes root execution better.
+- `balanced` weighs the same dimensions without a directional preference.
+- `conservative` favors root execution and delegates only when the expected
+  parallel value clearly outweighs context transfer, coordination, and risk.
 
 Every strategy still requires execution approval, dependency readiness, exclusive
 non-overlapping ownership, atomic dispatch, and settlement by the exact
-`execution_id`; the root retains TAPL writes and cross-task decisions. These safety
-conditions remain in force even with the aggressive default. Dispatch records the
-manifest model and reasoning effort in the task's `SubAgent Model` custom field
-before the runtime spawns that SubAgent. To opt down to
-`balanced`, set `strategy = "balanced"`; to roll back to conservative behavior, set
-`strategy = "conservative"`. To disable TAPL delegation guidance, set
-`enabled = false`; this does not remove delegation instructions from another source
-such as `AGENTS.md`.
+`execution_id`; the root retains TAPL writes and cross-task decisions. Dispatch
+records the manifest model and reasoning effort in the legacy `SubAgent Model`
+custom field before the runtime spawns that SubAgent. To change the bias, set
+`strategy` to `balanced` or `conservative`; to disable TAPL delegation guidance,
+set `enabled = false`. This does not remove delegation instructions from another
+source such as `AGENTS.md`.
+
+For each executable task, TAPL uses four canonical task custom fields throughout
+the lifecycle:
+
+- `Task Profile` records the selected profile (or no match) and match reason.
+- `Task Characteristics` records independence, required context, risk,
+  coordination cost, and parallel value.
+- `Execution Decision` records root versus SubAgent, model/effort, rationale,
+  and any profile or model override. Create or update these fields during task
+  design, before dispatch, and after settlement when the decision changes.
+- `User Notes` is conditional. Add it only for durable user-relevant facts not
+  represented by standard fields, using concise category/content/impact entries.
+
+The legacy `SubAgent Model` field remains written at atomic dispatch for
+compatibility and is omitted when no SubAgent runs. The installed configuration
+is preference input; runtime support, safety gates, and the recorded decision
+remain authoritative.
 
 Plan and task policy is fixed: executable work uses detailed planning, explicit
 plan confirmation, independently split tasks, and recorded approval before

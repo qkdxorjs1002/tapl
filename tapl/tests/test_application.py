@@ -442,6 +442,18 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
         dispatched_tasks = {
             task["stable_id"]: task for task in dispatched_status["tasks"]
         }
+        advisory_codes = {
+            issue["code"]
+            for issue in dispatched_status["plan_task_execute"]["warnings"]
+        }
+        assert "advisory_execution_decision_missing" in advisory_codes
+        assert "advisory_model_rationale_missing" in advisory_codes
+        assert "advisory_task_profile_missing" in advisory_codes
+        assert dispatched_status["plan_task_execute"]["ok"] is True
+        assert any(
+            item["name"] == "review-advisory-selection-context"
+            for item in app.get_next()["recommendations"]
+        )
         assert dispatched_tasks["TASK-001"]["custom_fields"] == {
             "Existing": "preserved",
             "SubAgent Model": "gpt-5.6-sol (xhigh)",
@@ -469,6 +481,105 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
         assert tasks["TASK-001"]["custom_fields"]["SubAgent Model"] == "gpt-5.6-sol (xhigh)"
         assert tasks["TASK-001"]["custom_fields"]["Existing"] == "preserved"
         assert tasks["TASK-002"]["custom_fields"]["SubAgent Model"] == "gpt-5.6-terra (high)"
+
+
+def test_application_dispatch_merges_complete_advisory_selection_context() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run("advisory dispatch metadata")
+        app.apply_plan(
+            "PLAN-001",
+            title="Advisory metadata plan",
+            status="Finalized",
+            summary="REQ-001: preserve agent routing decisions.",
+            objective="Record complete advisory dispatch metadata.",
+            requirements_trace="REQ-001",
+            selected_approach="Deep merge canonical task custom fields.",
+            affected_files="src/a.py, src/b.py",
+            execution_order="approve, dispatch, inspect",
+            risks="Design-time task metadata must be preserved.",
+            validation="Inspect dispatch manifest and validation warnings.",
+        )
+        for task_id, owned_path in (("TASK-001", "src/a.py"), ("TASK-002", "src/b.py")):
+            app.create_task(
+                task_id,
+                f"Advisory {task_id}",
+                "PLAN-001",
+                f"Complete {task_id}",
+                f"Implement {task_id}",
+                f"Verify {task_id}",
+                execution_mode="parallel",
+                executor_kind="subagent",
+                parallel_group="workers",
+                owned_paths=[owned_path],
+                custom_fields=(
+                    {
+                        "Existing": "preserved",
+                        "Task Profile": {
+                            "name": "routine",
+                            "match_reason": "design-time match",
+                        },
+                        "Task Characteristics": {"risk": "low"},
+                        "Execution Decision": {"profile_overridden": False},
+                    }
+                    if task_id == "TASK-001"
+                    else None
+                ),
+            )
+        app.record_approval(
+            decision="approved", prompt="Execute advisory tasks", source="explicit_user"
+        )
+
+        manifest = app.dispatch_tasks(
+            ["TASK-001", "TASK-002"],
+            batch_id="BATCH-ADVISORY",
+            execution_metadata={
+                "TASK-001": {
+                    "model": "gpt-5.6-terra",
+                    "reasoning_effort": "high",
+                    "profile": "routine",
+                    "profile_match_reason": "runtime match",
+                    "task_characteristics": {"parallel_value": "high"},
+                    "delegation_reason": "independent owned path",
+                    "model_reason": "balanced implementation model",
+                    "profile_overridden": False,
+                },
+                "TASK-002": {
+                    "model": "gpt-5.6-luna",
+                    "reasoning_effort": "xhigh",
+                    "profile": "bounded",
+                    "profile_match_reason": "bounded context",
+                    "characteristics": {"risk": "low", "scope": "local"},
+                    "delegation_reason": "safe parallel work",
+                    "model_reason": "fast bounded-work model",
+                },
+            },
+        )
+
+        executions = {row["task_id"]: row for row in manifest["executions"]}
+        first = executions["TASK-001"]["custom_fields"]
+        second = executions["TASK-002"]["custom_fields"]
+        assert first["Existing"] == "preserved"
+        assert first["Task Profile"] == {
+            "name": "routine",
+            "match_reason": "runtime match",
+        }
+        assert first["Task Characteristics"] == {
+            "risk": "low",
+            "parallel_value": "high",
+        }
+        assert first["Execution Decision"]["executor"] == "subagent"
+        assert first["Execution Decision"]["model"] == "gpt-5.6-terra"
+        assert first["Execution Decision"]["model_reason"] == "balanced implementation model"
+        assert first["SubAgent Model"] == "gpt-5.6-terra (high)"
+        assert second["Task Profile"]["name"] == "bounded"
+        assert second["Task Characteristics"] == {"risk": "low", "scope": "local"}
+        assert second["Execution Decision"]["delegation_reason"] == "safe parallel work"
+        assert second["SubAgent Model"] == "gpt-5.6-luna (xhigh)"
+
+        status = app.get_status(full=True)
+        assert status["plan_task_execute"]["ok"] is True
+        assert status["plan_task_execute"]["warnings"] == []
 
 
 def test_application_dispatch_ignores_incomplete_model_metadata() -> None:

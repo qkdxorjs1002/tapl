@@ -52,3 +52,19 @@ strategy = "aggressive"
 "gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
 "gpt-5.6-terra" = ["high", "xhigh"]
 "gpt-5.6-luna" = ["xhigh", "max"]
+
+# Optional advisory task profiles. The agent remains the final decision-maker;
+# profiles communicate your preferences for recognizable work characteristics.
+# `delegation_bias` is one of "inherit", "prefer", "neutral", or "avoid".
+# Candidates are tried in listed order and each model/reasoning_effort pair must
+# appear in subagents.models above.
+#
+# [[subagents.profiles]]
+# name = "bounded-routine"
+# description = "Small, independent work with limited required context."
+# characteristics = "local changes, routine tests, predictable implementation"
+# delegation_bias = "prefer"
+# candidates = [
+#   { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
+#   { model = "gpt-5.6-terra", reasoning_effort = "high" },
+# ]

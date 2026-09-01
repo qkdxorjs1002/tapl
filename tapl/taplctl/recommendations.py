@@ -17,7 +17,7 @@ def next_recommendations(
     Recommendations currently derive from the snapshot itself.
     """
 
-    del plan_task_execute
+    advisory_recommendations = advisory_selection_recommendations(plan_task_execute)
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else None
     if not run:
         queued = state.get("queued_runs") if isinstance(state.get("queued_runs"), list) else []
@@ -92,7 +92,7 @@ def next_recommendations(
                 "approve-execution",
                 "Executable tasks exist but execution approval is not recorded.",
             )
-        ]
+        ] + advisory_recommendations
 
     in_progress = first_task_with_status(tasks, ("In Progress",))
     if in_progress:
@@ -116,7 +116,7 @@ def next_recommendations(
                     "recover-parallel-batch",
                     "Use the dispatch manifest batch id if an interrupted batch must return to Pending.",
                 ),
-            ]
+            ] + advisory_recommendations
         return [
             recommendation(
                 "complete-or-block-task",
@@ -126,7 +126,7 @@ def next_recommendations(
                 "block-task",
                 "Use this if the current task cannot proceed.",
             ),
-        ]
+        ] + advisory_recommendations
 
     pending = first_task_with_status(tasks, ("Pending",))
     if pending:
@@ -156,13 +156,13 @@ def next_recommendations(
                         "dispatch validates dependencies and owned paths atomically."
                     ),
                 )
-            ]
+            ] + advisory_recommendations
         return [
             recommendation(
                 "start-task",
                 "Start the next pending task with the high-level lifecycle command.",
             )
-        ]
+        ] + advisory_recommendations
 
     if int(state.get("incomplete_tasks") or 0) == 0:
         return [
@@ -174,12 +174,41 @@ def next_recommendations(
                 "archive-run",
                 "Archive when no actionable tasks remain.",
             ),
-        ]
+        ] + advisory_recommendations
 
     return [
         recommendation(
             "inspect-status",
             "No single safe lifecycle command was inferred; inspect current state.",
+        )
+    ] + advisory_recommendations
+
+
+def advisory_selection_recommendations(
+    plan_task_execute: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Surface advisory record gaps without changing the primary safe action."""
+
+    issues = (
+        plan_task_execute.get("issues")
+        if isinstance(plan_task_execute, dict)
+        and isinstance(plan_task_execute.get("issues"), list)
+        else []
+    )
+    if not any(
+        isinstance(item, dict)
+        and str(item.get("severity") or "") == "warning"
+        and str(item.get("code") or "").startswith("advisory_")
+        for item in issues
+    ):
+        return []
+    return [
+        recommendation(
+            "review-advisory-selection-context",
+            (
+                "Advisory profile or model-selection context has gaps; review validation warnings and record "
+                "the missing rationale or profile details without treating them as execution blockers."
+            ),
         )
     ]
 
