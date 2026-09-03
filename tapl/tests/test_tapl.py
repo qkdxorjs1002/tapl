@@ -759,22 +759,24 @@ class TaplRuntimeTests(unittest.TestCase):
             "`종류`/`category`, `내용`/`content`, `영향`/`impact`",
             "Put shared facts on plan and task-specific facts on task",
             "preserve keys/types; omit duplicates or transient progress",
-            "Classify once from the request and readily available context: Answer, Investigation, Analysis, Planning, Implementation, or Mixed.",
+            "Classify requested outcome as Answer/Investigation/Analysis/Planning/Implementation/Mixed.",
+            "at most three targeted read-only local lookups",
+            "Skip for self-contained requests or sufficient context",
+            "Choose mode from surface/coupling/uncertainty/risk/validation",
             "First choose Strict",
-            "Otherwise choose Fast",
-            "All other work is Standard.",
+            "Choose Fast only",
+            "Otherwise use Standard; unknowns never qualify for Fast",
             "Mixed uses its highest child mode.",
-            "Pass the selected work_type and workflow_mode explicitly",
+            "Pass final work_type and workflow_mode",
             "record_mode=`lightweight` only for Fast non-durable Answer, Investigation, Analysis, or Planning work",
-            "`tapl_apply_plan` promotes only record_mode when scope or risk grows.",
+            "`tapl_apply_plan` promotes only record_mode",
             "Planning must happen before implementation",
             "Finalize only after explicit user confirmation.",
             "use request_user_input Tool early",
             "continue with follow-ups until the plan is materially clear",
             "batch up to three short questions",
-            "Do not search, query history, or create plan/tasks solely to classify",
-            "Record at most two short reasons",
-            "uncertainty defaults to Standard",
+            "during the scout do not edit/test, use external research/TAPL history, or create plan/tasks",
+            "store at most two reasons in needed records",
             "Split every independent edit, migration, and verification step.",
             "Execute planned tasks one at a time in task order",
             "exclusive owned_paths",
@@ -820,6 +822,37 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("improve aggregate root/SubAgent token use", instructions)
         self.assertNotIn("one compact plan and task", instructions)
         self.assertNotIn("1–3 coherent tasks", instructions)
+
+    def test_classification_scout_precedes_workflow_mode_selection(self) -> None:
+        guidance = tapl_prompt.workflow_mode_guidance()
+        next_action = tapl_prompt.summarize_request_next_action()
+
+        self.assertLess(
+            guidance.index("Classify requested outcome"),
+            guidance.index("at most three targeted read-only local lookups"),
+        )
+        self.assertLess(
+            guidance.index("at most three targeted read-only local lookups"),
+            guidance.index("Choose mode from surface/coupling/uncertainty/risk/validation"),
+        )
+        for contract in (
+            "workspace-dependent work",
+            "Skip for self-contained requests or sufficient context",
+            "during the scout do not edit/test, use external research/TAPL history, or create plan/tasks",
+            "First choose Strict",
+            "Choose Fast only when every dimension is known low",
+            "Otherwise use Standard; unknowns never qualify for Fast",
+            "Reclassify upward if scope, risk, or uncertainty grows",
+        ):
+            self.assertIn(contract, guidance)
+
+        self.assertIn("each outcome's work_type from the requested result", next_action)
+        self.assertIn("at most three targeted read-only local lookups", next_action)
+        self.assertIn("before selecting workflow_mode", next_action)
+        self.assertIn("`tapl_split_run` for independent outcomes", next_action)
+        self.assertIn("`tapl_summarize_run` for one cohesive request", next_action)
+        self.assertNotIn("Classify once from the request and readily available context", guidance)
+        self.assertNotIn("Do not search, query history, or create plan/tasks solely to classify", guidance)
 
     def test_mcp_result_notice_guidance_stays_in_server_instructions(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions()

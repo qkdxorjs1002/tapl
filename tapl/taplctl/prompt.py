@@ -556,8 +556,11 @@ def task_granularity_remediation() -> str:
 
 def summarize_request_next_action() -> str:
     return (
-        "Classify request boundaries before planning: use `tapl_split_run` for two or more independent outcomes, "
-        "otherwise summarize the cohesive request with `tapl_summarize_run`."
+        "Before planning, identify request boundaries and each outcome's work_type from the requested result. For "
+        "workspace-dependent outcomes whose scope is not already clear, use at most three targeted read-only local "
+        "lookups to locate the target, inspect immediate dependencies, and identify validation or risk boundaries "
+        "before selecting workflow_mode. Then use `tapl_split_run` for independent outcomes or "
+        "`tapl_summarize_run` for one cohesive request."
     )
 
 
@@ -902,9 +905,10 @@ def stable_id_guidance() -> str:
 def workflow_order_guidance() -> str:
     return (
         "Lifecycle order: `tapl_get_status`/`tapl_get_next` -> resolve residual run direction with user approval -> "
-        "inspect the latest prompt for independent outcomes -> call `tapl_split_run` when needed, otherwise "
-        "`tapl_search_history` and clarify until unblocked -> `tapl_summarize_run` with agent-selected "
-        "work_type and `fast`, `standard`, or `strict` workflow_mode. A derived lightweight record may finish/archive "
+        "identify independent outcomes and their work_type -> perform the bounded local scout when workspace facts "
+        "are needed -> call `tapl_split_run` when needed, otherwise `tapl_summarize_run` with the selected "
+        "work_type and evidence-based `fast`, `standard`, or `strict` workflow_mode -> search relevant history before "
+        "planning. A derived lightweight record may finish/archive "
         "without plan/tasks and `tapl_apply_plan` promotes record_mode to planned. Each split child searches relevant history "
         "before its own plan. Planned records continue through `tapl_apply_plan` -> "
         "`tapl_create_task` -> `tapl_approve_execution` -> sequential start and settlement tools or "
@@ -914,18 +918,20 @@ def workflow_order_guidance() -> str:
 
 def workflow_mode_guidance() -> str:
     return (
-        "Classify once from the request and readily available context: Answer, Investigation, Analysis, Planning, "
-        "Implementation, or Mixed. Mixed uses its highest child mode. First choose Strict for security/permission/privacy, "
-        "data schema or destructive work, public compatibility, deployment/external writes, incident/data-correctness, "
-        "irreversible high-cost decisions, or materially conflicting evidence. Otherwise choose Fast only when every "
-        "relevant condition is small and clear: one objective and evidence/domain/change surface, routine reversible "
-        "work, and a single targeted validation; Fast implementation also has at most two direct files. All other work "
-        "is Standard. Do not search, query history, or create plan/tasks solely to classify: uncertainty defaults to "
-        "Standard and Strict requires a known hard gate. Record at most two short reasons only when a plan/task record "
-        "is needed. Pass the selected work_type and workflow_mode explicitly to `tapl_summarize_run`. TAPL derives "
+        "Classify requested outcome as Answer/Investigation/Analysis/Planning/Implementation/Mixed. For unscoped "
+        "workspace-dependent work, before workflow_mode make at most three targeted read-only local lookups: target, "
+        "immediate dependencies, and test/config/public-interface/risk boundaries. Skip for self-contained requests or "
+        "sufficient context; during the scout do not edit/test, use external research/TAPL history, or create plan/tasks. "
+        "Choose mode from surface/coupling/uncertainty/risk/validation. Mixed uses its highest child mode. First choose "
+        "Strict for security/privacy/permission, schema/destructive work, public compatibility, deploy/external writes, "
+        "incident/data-correctness, irreversible impact, or conflicting evidence. Choose Fast only when every dimension "
+        "is known low: one objective/surface, reversible change, one validation, closed boundaries, and implementation "
+        "touches at most two files. Otherwise use Standard; unknowns never qualify for Fast. Pass final work_type and "
+        "workflow_mode to `tapl_summarize_run`; store at most two reasons in needed records. TAPL derives "
         "record_mode=`lightweight` only for Fast non-durable Answer, Investigation, Analysis, or Planning work; durable "
-        "work and every Standard or Strict run derive record_mode=`planned`. A lightweight record may finish/archive "
-        "without plan/tasks; `tapl_apply_plan` promotes only record_mode when scope or risk grows."
+        "work and every Standard or Strict run derive record_mode=`planned`. Lightweight runs need no plan/tasks; "
+        "`tapl_apply_plan` promotes only record_mode. Reclassify upward if scope, risk, or "
+        "uncertainty grows."
     )
 
 
