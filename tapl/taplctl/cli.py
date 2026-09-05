@@ -296,8 +296,8 @@ def config_key_help(*, include_examples: bool = False) -> str:
                 "Examples:",
                 "  taplctl config set search.mode hybrid",
                 "  taplctl config set viewer.allowed_origins '[\"https://tapl.example.com\"]'",
-                "  taplctl config set subagents.models.gpt-5.6-sol '[\"high\", \"xhigh\"]'",
-                "  taplctl config set subagents.profiles '[{ name = \"routine\", characteristics = \"small, local changes\", delegation_bias = \"prefer\", candidates = [{ model = \"gpt-5.6-luna\", reasoning_effort = \"xhigh\" }, { model = \"gpt-5.6-terra\", reasoning_effort = \"high\" }] }]'",
+                "  taplctl config set subagents.models.chosen-model '[\"high\", \"xhigh\"]'",
+                "  taplctl config set subagents.profiles '[{ name = \"routine\", characteristics = \"small, local changes\", delegation_bias = \"prefer\", candidates = [{ model = \"chosen-model\", reasoning_effort = \"xhigh\" }, { model = \"another-chosen-model\", reasoning_effort = \"high\" }] }]'",
                 "  taplctl config unset search.mode",
             )
         )

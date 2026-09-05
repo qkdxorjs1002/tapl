@@ -35,8 +35,16 @@ semantic_provider = "auto"
 searchd_model_idle_timeout_seconds = 1800
 
 [subagents]
-# Whether eligible tasks may be delegated to SubAgents. Type: true or false.
+# TAPL asks for SubAgent preferences on first use. Until setup is complete,
+# SubAgent delegation remains inactive even when enabled is true.
+setup_complete = false
+
+# Whether eligible tasks may be delegated after setup. Type: true or false.
 enabled = true
+
+# Free-form preference captured during setup. It guides the agent's choices
+# without naming provider models in TAPL defaults.
+preference = ""
 
 # Delegation strategy. Allowed values:
 # - "conservative": delegate only when net efficiency is clearly established.
@@ -44,70 +52,45 @@ enabled = true
 # - "aggressive": delegate every eligible group, including small tasks, unless there is a clear, material downside.
 strategy = "aggressive"
 
-# Four safety-first advisory task profiles are written explicitly below in
-# priority order:
-# high-risk-cross-cutting (avoid), deep-reasoning (neutral),
-# general-implementation (inherit), then bounded-routine (prefer).
-# The first applicable profile has priority, but profiles remain guidance that
-# the agent can override. To disable all profiles, remove the four
-# `[[subagents.profiles]]` blocks and set `profiles = []` here. Removing the
-# blocks without setting an empty array restores the same runtime defaults.
+# Four model-neutral advisory task profiles are written explicitly below in
+# priority order. The first applicable profile has priority, but profiles
+# remain guidance that the agent can override.
 
 [subagents.models]
 # Delegation allowlist. Each key is a runtime-supported model ID and each value
 # is a non-empty array of unique reasoning-effort strings supported by that model.
-# At least one model is required when subagents.enabled is true. Current bundled
-# model/effort pairs are listed below; unsupported pairs fail at delegation time.
-"gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
-"gpt-5.6-terra" = ["high", "xhigh"]
-"gpt-5.6-luna" = ["xhigh", "max"]
+# It is empty until first-use setup records models available in the current
+# runtime. TAPL does not advertise a provider model list.
 
-# Edit, reorder, or replace these blocks to customize task routing.
+# Edit, reorder, or replace these blocks to customize task routing after setup.
 # `delegation_bias` is one of "inherit", "prefer", "neutral", or "avoid".
-# Candidates are ordered preferences, not fixed roles, and every candidate must
-# appear in the model allowlist above. If none is suitable, use the allowlist or
-# keep the work on the root agent.
+# Candidates are ordered preferences and every candidate must appear in the
+# model allowlist above. Empty candidates let the runtime select from that list.
 
 [[subagents.profiles]]
 name = "high-risk-cross-cutting"
 description = "High-risk, cross-cutting work where mistakes could affect security, data integrity, compatibility, or multiple system boundaries."
 characteristics = "Broad changes across components; ambiguous failure modes; security, migration, concurrency, or irreversible-impact concerns."
 delegation_bias = "avoid"
-candidates = [
-  { model = "gpt-5.6-sol", reasoning_effort = "max" },
-  { model = "gpt-5.6-sol", reasoning_effort = "xhigh" },
-  { model = "gpt-5.6-terra", reasoning_effort = "xhigh" },
-]
+candidates = []
 
 [[subagents.profiles]]
 name = "deep-reasoning"
 description = "Complex analysis or implementation that benefits from sustained reasoning and careful trade-off evaluation."
 characteristics = "Novel architecture, subtle debugging, multi-step inference, competing constraints, or uncertain solution paths."
 delegation_bias = "neutral"
-candidates = [
-  { model = "gpt-5.6-sol", reasoning_effort = "xhigh" },
-  { model = "gpt-5.6-terra", reasoning_effort = "xhigh" },
-  { model = "gpt-5.6-sol", reasoning_effort = "max" },
-]
+candidates = []
 
 [[subagents.profiles]]
 name = "general-implementation"
 description = "Typical implementation work with a clear outcome and moderate scope."
 characteristics = "Feature changes, refactoring, integration work, and tests spanning a small number of related components."
 delegation_bias = "inherit"
-candidates = [
-  { model = "gpt-5.6-terra", reasoning_effort = "high" },
-  { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
-  { model = "gpt-5.6-sol", reasoning_effort = "high" },
-]
+candidates = []
 
 [[subagents.profiles]]
 name = "bounded-routine"
 description = "Small, well-scoped routine work with clear inputs, outputs, and verification."
 characteristics = "Local edits, mechanical updates, focused tests, and predictable implementation with limited context."
 delegation_bias = "prefer"
-candidates = [
-  { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
-  { model = "gpt-5.6-terra", reasoning_effort = "high" },
-  { model = "gpt-5.6-sol", reasoning_effort = "medium" },
-]
+candidates = []

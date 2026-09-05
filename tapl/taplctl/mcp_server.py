@@ -92,6 +92,8 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
     """Replace command recipes with MCP tool names in MCP-facing output."""
 
     tool_map: dict[str, str | list[str]] = {
+        "configure-subagents": "request_user_input",
+        "review-subagent-models": "request_user_input",
         "classify-request": ["tapl_split_run", "tapl_summarize_run"],
         "summarize-request": "tapl_summarize_run",
         "apply-plan": "tapl_apply_plan",
@@ -216,6 +218,10 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
         "ok": bool(payload.get("ok", True)),
         "operation": str(payload.get("operation") or operation),
     }
+    if receipt["operation"] == "subagents_configure":
+        for key in ("path", "changed", "subagents", "subagent_guidance"):
+            if key in payload:
+                receipt[key] = payload[key]
     object_fields = (
         (
             "active_run",
@@ -341,10 +347,39 @@ def create_server(
         )
 
     @server.tool(name="tapl_get_next", title="Get safest TAPL action", annotations=READ_ONLY)
-    async def get_next() -> dict[str, Any]:
-        """Return the safest next lifecycle tool without exposing a shell command. Use when workflow state is uncertain."""
+    async def get_next(
+        available_models: Annotated[dict[str, list[str]] | None, Field(description="Current session delegation-tool model IDs and supported reasoning efforts. Supply on the first user request of a session or when this catalog changes to check for a reconfiguration suggestion. Omit if unavailable; never guess.")] = None,
+    ) -> dict[str, Any]:
+        """Return the safest next lifecycle action and current SubAgent settings. Compare a supplied runtime catalog without changing the config."""
 
-        return mcp_next_recommendations(await call_application(application.get_next))
+        return mcp_next_recommendations(await call_application(application.get_next, available_models=available_models))
+
+    @server.tool(name="tapl_configure_subagents", title="Save SubAgent preferences", annotations=WRITE)
+    async def configure_subagents(
+        user_confirmed: Annotated[bool, Field(description="True only after the user actually answers the setup question or requests these exact changes; no answer or timeout is not confirmation.")],
+        enabled: Annotated[bool, Field(description="Whether the user wants SubAgent delegation enabled.")],
+        strategy: Annotated[Literal["conservative", "balanced", "aggressive"], Field(description="Delegation bias selected from the user's preference.")],
+        models: Annotated[dict[str, list[str]], Field(description="Chosen model IDs and reasoning efforts verified against the current session's delegation tool. Empty is allowed only when disabled.")],
+        available_models: Annotated[dict[str, list[str]], Field(description="Full current delegation-tool catalog, including unselected models, saved as the last user-confirmed snapshot for change detection.")],
+        preference: Annotated[str, Field(description="Concise user preference, such as quality, speed, cost, or specific model constraints.")] = "",
+        profiles: Annotated[list[dict[str, Any]] | None, Field(description="Optional ordered task profiles with allowlisted model/effort candidates. Omit for model-neutral profiles; [] disables profiles.")] = None,
+    ) -> dict[str, Any]:
+        """Save the user's setup answer atomically to the effective .tapl/config.toml.
+
+        Inspect tapl_get_next for its exact path. Ask about SubAgent use and preferences first;
+        the answer authorizes this config write without a separate workflow or approval prompt. Use only models and
+        efforts exposed by the current delegation tool, never a provider API catalog or guesses.
+        If that catalog is unavailable, keep setup pending and work on the root agent. Preserve
+        existing choices unless the user requests an update. Returned settings and guidance
+        take effect immediately and supersede the MCP initialization snapshot.
+        """
+
+        return await call_application_write(
+            application, application.configure_subagents, operation="subagents_configure",
+            user_confirmed=user_confirmed, enabled=enabled, strategy=strategy,
+            models=models, preference=preference, profiles=profiles,
+            available_models=available_models,
+        )
 
     @server.tool(name="tapl_validate_state", title="Validate TAPL state", annotations=READ_ONLY)
     async def validate_state() -> dict[str, Any]:

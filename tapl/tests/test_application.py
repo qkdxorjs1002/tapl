@@ -11,6 +11,10 @@ def workspace(tmp: str) -> tuple[Path, WorkflowApplication]:
     root = Path(tmp) / "workspace"
     (root / ".git").mkdir(parents=True)
     db.initialize_workspace(root)
+    (root / ".tapl/config.toml").write_text(
+        '[subagents.models]\n"gpt-5.6-sol" = ["xhigh"]\n"gpt-5.6-terra" = ["high"]\n"gpt-5.6-luna" = ["xhigh"]\n',
+        encoding="utf-8",
+    )
     return root, WorkflowApplication(root)
 
 

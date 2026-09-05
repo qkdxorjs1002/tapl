@@ -757,7 +757,10 @@ def context_workflow_guidance(
     subagents: tapl_config.SubagentsConfig | None = None,
 ) -> list[str]:
     if event == "SessionStart":
-        return [session_start_guidance()]
+        guidance = [session_start_guidance()]
+        if subagents is not None and not subagents.setup_complete:
+            guidance.append("SubAgent setup is pending. On the first concrete user request, call `tapl_get_next` for setup guidance.")
+        return guidance
     if event == "Stop":
         return [stop_guidance()]
 
@@ -774,16 +777,29 @@ def stop_guidance() -> str:
 
 def user_prompt_submit_guidance(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
     guidance = render(CONTEXT_INJECTION_PROMPT_TEMPLATE)
-    delegation_request = subagent_delegation_request_guidance(subagents)
-    return "\n\n".join(part for part in (guidance, delegation_request) if part)
+    setup = subagents or tapl_config.SubagentsConfig()
+    if not setup.setup_complete:
+        return "\n\n".join(part for part in (
+            guidance, subagent_setup_guidance(), subagent_delegation_request_guidance(setup),
+        ) if part)
+    delegation_request = subagent_delegation_request_guidance(setup)
+    return "\n\n".join(part for part in (
+        guidance, delegation_request, subagent_catalog_guidance() if setup.enabled else "",
+    ) if part)
 
 
 def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
     """Render the complete invariant workflow policy once at MCP initialization."""
 
+    settings = subagents or tapl_config.SubagentsConfig()
     return render(
         MCP_SERVER_INSTRUCTIONS_TEMPLATE,
-        subagent_delegation_guidance=subagent_delegation_guidance(subagents),
+        subagent_delegation_guidance=(
+            "Startup snapshot; `tapl_get_next(available_models=...)` returns current settings and model changes.\n\n"
+            + (subagent_delegation_guidance(settings) if settings.setup_complete else
+               "Setup pending: on the first concrete user request follow `tapl_get_next` to ask preferences, then "
+               "save the actual answer with `tapl_configure_subagents`. Until setup completes use the root agent.")
+        ),
     )
 
 
@@ -874,7 +890,7 @@ def custom_fields_guidance() -> str:
         "standard fields, using concise `종류`/`category`, `내용`/`content`, `영향`/`impact`. Put shared "
         "facts on plan and task-specific facts on task; preserve keys/types; omit duplicates or "
         "transient progress. Dispatch writes legacy `SubAgent Model` (manifest model/effort) before return; root "
-        "verifies before spawn. Example: `gpt-5.6-sol (xhigh)`; omit when no SubAgent runs. "
+        "verifies before spawn. Example: `<model-id> (<effort>)`; omit when no SubAgent runs. "
         "Use top-level null only to delete a duplicate."
     )
 
@@ -998,7 +1014,48 @@ def task_execution_order_guidance() -> str:
 
 
 def subagents_enabled(subagents: tapl_config.SubagentsConfig | None = None) -> bool:
-    return (subagents or tapl_config.SubagentsConfig()).enabled
+    settings = subagents or tapl_config.SubagentsConfig()
+    return settings.setup_complete and settings.enabled
+
+
+def subagent_setup_guidance() -> str:
+    return (
+        "SubAgent setup: while current `config.subagents.setup_complete` is false, ask once on the first "
+        "concrete user request whether to use SubAgents and what to prioritize (quality, speed, cost, or model "
+        "preferences). Check `tapl_get_next` for the effective config path. Derive choices only from the current "
+        "session's delegation tool model IDs and supported reasoning efforts; do not guess or use a provider API "
+        "catalog. If unavailable, defer setup and continue on the root agent. Use request_user_input when available. "
+        "Wait for the actual answer; no answer or timeout is not confirmation. Do not repeat a pending question. "
+        "After the answer, use `tapl_configure_subagents` with user_confirmed=true to save enabled, preference, "
+        "strategy, models, the full available_models catalog and optional profiles; no second confirmation is needed. Until then use the root agent, "
+        "and settle or recover any already active batch first. Preserve completed settings unless the user asks "
+        "to update them; new model releases do not overwrite choices."
+    )
+
+
+def subagent_catalog_guidance() -> str:
+    return (
+        "On the first concrete request of each session, and when the delegation tool's catalog changes, call "
+        "`tapl_get_next(available_models=...)` with all currently exposed model IDs and their supported efforts. "
+        "Do not substitute the chosen allowlist for the full catalog or guess unavailable information. "
+        "If model_changes.changed is true, briefly show what changed and offer to update or keep preferences. "
+        "Wait for the actual answer; do not repeat an unanswered proposal. After either answer save the confirmed "
+        "catalog through `tapl_configure_subagents`; keeping means passing the existing settings unchanged "
+        "(profiles=[] if absent). Skip unavailable model/effort pairs and use the root agent if none remain."
+    )
+
+
+def subagent_current_guidance(
+    subagents: tapl_config.SubagentsConfig, *, include_request: bool = True,
+) -> str:
+    if not subagents.setup_complete:
+        return subagent_setup_guidance()
+    if not subagents.enabled:
+        return "SubAgent setup is complete and delegation is disabled by the user's preference. Use the root agent."
+    parts = [subagent_delegation_guidance(subagents), subagent_catalog_guidance()]
+    if include_request:
+        parts.append(subagent_delegation_request_guidance(subagents))
+    return "\n\n".join(parts)
 
 
 def subagent_strategy_guidance(
@@ -1024,10 +1081,15 @@ def subagent_strategy_guidance(
 def subagent_delegation_request_guidance(
     subagents: tapl_config.SubagentsConfig | None = None,
 ) -> str:
-    if not subagents_enabled(subagents):
+    settings = subagents or tapl_config.SubagentsConfig()
+    if not settings.enabled:
         return ""
 
-    return (
+    condition = (
+        "Only after the user completes setup and current config enables delegation: "
+        if not settings.setup_complete else ""
+    )
+    return condition + (
         "This UserPromptSubmit developer context explicitly requests and authorizes Codex SubAgent delegation for every "
         "execution-approved TAPL task batch meeting the MCP delegation criteria. This TAPL context is the explicit "
         "delegation request required by any default no-proactive-delegation policy, so no additional user, AGENTS.md, or "
@@ -1184,7 +1246,7 @@ def _render_builtin_profile(
     bias = str(_config_value(profile, "delegation_bias", "inherit")).strip()
     candidates = _config_value(profile, "candidates", ()) or ()
     rendered = [
-        f"{str(_config_value(candidate, 'model', '')).strip().removeprefix('gpt-5.6-')}/"
+        f"{str(_config_value(candidate, 'model', '')).strip()}/"
         f"{_config_value(candidate, 'reasoning_effort', _config_value(candidate, 'effort', '')).strip()}"
         for candidate in candidates
         if (
@@ -1215,10 +1277,11 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
         for effort in efforts
     }
     available_models = "; ".join(
-        f"{name.removeprefix('gpt-5.6-')}[{','.join(efforts)}]"
+        f"{name}[{','.join(efforts)}]"
         for name, efforts in models
     ) or "none (root only)"
     strategy_guidance = subagent_strategy_guidance(subagents)
+    preference_guidance = f"- User preference: {subagents.preference!r}.\n" if subagents.preference else ""
     if profiles:
         if _uses_builtin_profiles(profiles, models):
             profile_guidance = "; ".join(
@@ -1249,6 +1312,7 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
 
     return (
         "### SubAgent Delegation\n\n"
+        f"{preference_guidance}"
         f"- Strategy: {strategy_guidance}\n"
         "- Assess independence, context, risk, coordination cost, and parallel value; record it in canonical task "
         "fields.\n"

@@ -354,8 +354,7 @@ Edit runtime values without hand-editing TOML:
 taplctl config set search.mode hybrid
 taplctl config set search.max_results 20
 taplctl config set viewer.allowed_origins '["https://tapl.example.com"]'
-taplctl config set subagents.models.gpt-5.6-sol '["high", "xhigh"]'
-taplctl config set subagents.profiles '[{name="bounded-routine", description="Small independent changes", characteristics="low risk, local context", delegation_bias="prefer", candidates=[{model="gpt-5.6-luna", reasoning_effort="xhigh"}, {model="gpt-5.6-terra", reasoning_effort="high"}]}]'
+taplctl config set subagents.strategy balanced
 taplctl config unset search.mode
 ```
 
@@ -372,9 +371,10 @@ The supported keys are `search.mode` (`semantic`, `bm25`, `word`, or `hybrid`),
 `search.searchd_model_idle_timeout_seconds` (integer ≥ 0),
 `viewer.allowed_origins` (unique HTTP(S) origins in a TOML string array),
 `subagents.enabled` (`true` or `false`), `subagents.strategy` (`conservative`,
-`balanced`, or `aggressive`), and `subagents.models.<model-id>` (a non-empty
-TOML array of unique reasoning-effort strings), or `subagents.profiles` (a
-TOML array of inline profile tables).
+`balanced`, or `aggressive`), `subagents.setup_complete` (`true` or `false`),
+`subagents.preference` (a free-form string), `subagents.models.<model-id>` (a
+non-empty TOML array of unique reasoning-effort strings), or
+`subagents.profiles` (a TOML array of inline profile tables).
 
 Without an override, the command uses the same repo-local-then-user lookup order
 described above and creates the repo-local path when neither file exists. To edit
@@ -391,38 +391,48 @@ taplctl --config /path/to/config.toml config set search.mode bm25
 
 ```toml
 [subagents]
+# TAPL asks for preferences on the first concrete request.
+setup_complete = false
 enabled = true
 # strategy is a decision bias; the agent still evaluates each task.
 strategy = "aggressive"
+preference = ""
 
 [subagents.models]
-"gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
-"gpt-5.6-terra" = ["high", "xhigh"]
-"gpt-5.6-luna" = ["xhigh", "max"]
-
-# The installed template writes all four profiles; remove the blocks to use equivalent built-ins.
-# profiles = [] # Explicitly disable all profile presets.
+# Models are recorded from the current runtime during first-use setup.
 ```
 
-When `subagents.profiles` is absent, TAPL uses these built-in advisory presets,
-listed in safety-first order:
+On the first concrete TAPL request, the agent checks the model IDs and reasoning
+efforts exposed by its current runtime, then asks whether to use SubAgents and
+what preferences to apply. It saves the answer in the resolved
+configuration file and marks setup complete. TAPL never calls a provider API or
+ships an external model list for this step. `enabled = true` takes effect only
+after setup is complete. If the runtime catalog is unavailable, setup remains
+pending and work stays on the root agent. After an answer, the agent records it
+with `tapl_configure_subagents`; the answer itself is the user confirmation.
+Existing configurations with an explicit model allowlist or `enabled = false`
+remain complete and retain their choices; new model settings apply only when
+the user requests an update.
 
-| Profile | Use when | Bias | Candidate preference |
-| --- | --- | --- | --- |
-| `high-risk-cross-cutting` | High-risk, cross-cutting, shared-context, or coordination-heavy work | `avoid` | gpt-5.6-sol/max → gpt-5.6-sol/xhigh → gpt-5.6-terra/xhigh |
-| `deep-reasoning` | Complex, uncertain, or context-heavy decisions | `neutral` | gpt-5.6-sol/xhigh → gpt-5.6-terra/xhigh → gpt-5.6-sol/max |
-| `general-implementation` | Ordinary bounded implementation work | `inherit` | gpt-5.6-terra/high → gpt-5.6-luna/xhigh → gpt-5.6-sol/high |
-| `bounded-routine` | Small, local, predictable, low-risk work | `prefer` | gpt-5.6-luna/xhigh → gpt-5.6-terra/high → gpt-5.6-sol/medium |
+After your answer, TAPL also records the full runtime catalog in `subagents.available_models`. On the first request in each session, the agent passes the current catalog to `tapl_get_next`. Added or removed models and changed reasoning efforts trigger an update-or-keep suggestion. Keeping your choices records the new catalog without changing your allowlist, so the same change is not proposed again. Existing configurations without a catalog keep working; the agent can offer to record a baseline once.
 
-The model/effort entries above are preference candidates, not fixed semantic
-roles for those model IDs. Each built-in profile only offers pairs present in
-the active `subagents.models` allowlist. If customization removes every pair,
-the profile still supplies its task/bias guidance and selection falls back to
-another allowlisted pair or root execution.
+The installed template includes these model-neutral advisory profiles, listed
+in safety-first order:
 
-An explicit `profiles = []` disables the built-ins. Any non-empty user
-`subagents.profiles` array fully replaces them (rather than extending them),
-and its candidates are strictly validated against `subagents.models`.
+| Profile | Use when | Bias |
+| --- | --- | --- |
+| `high-risk-cross-cutting` | High-risk, cross-cutting, shared-context, or coordination-heavy work | `avoid` |
+| `deep-reasoning` | Complex, uncertain, or context-heavy decisions | `neutral` |
+| `general-implementation` | Ordinary bounded implementation work | `inherit` |
+| `bounded-routine` | Small, local, predictable, low-risk work | `prefer` |
+
+Profiles have empty candidates until setup supplies the runtime-supported model
+and effort pairs. They describe task characteristics and delegation bias; they
+do not assign permanent roles to model IDs.
+
+An explicit `profiles = []` disables profiles. Any non-empty user
+`subagents.profiles` array fully replaces the template profiles, and its
+candidates must be present in `subagents.models`.
 
 When enabled, TAPL includes its delegation policy, active profiles, and
 model/reasoning allowlist in MCP instructions. Matching remains advisory: the
@@ -430,10 +440,10 @@ agent evaluates all task characteristics, prefers the most specific profile,
 and uses configured order only as a tie-break. It may choose and record a
 justified profile or candidate override, skips unavailable candidates, and
 falls back to another allowlisted pair or root when needed. The installed
-`.tapl/config.toml` writes all four profiles explicitly and documents every
-runtime option, its type, and allowed values inline.
+`.tapl/config.toml` records selected models and preferences, then documents
+every runtime option, its type, and allowed values inline.
 
-For example, this array replaces all four built-ins with one strictly validated
+For example, this array replaces the template profiles with one model-neutral
 preference:
 
 ```toml
@@ -441,10 +451,7 @@ preference:
 name = "release-automation"
 characteristics = "bounded deployment steps with a known rollback"
 delegation_bias = "prefer"
-candidates = [
-  { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
-  { model = "gpt-5.6-terra", reasoning_effort = "high" },
-]
+candidates = []
 ```
 
 The `strategy` setting controls the delegation bias:

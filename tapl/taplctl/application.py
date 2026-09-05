@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from . import config, context as tapl_context, db, embeddings, recommendations, validation
+from . import config, config_editor, context as tapl_context, db, embeddings, prompt, recommendations, validation
 
 
 UNSET = object()
@@ -116,11 +116,93 @@ class WorkflowApplication:
             ]
         return payload
 
-    def get_next(self) -> dict[str, Any]:
+    def get_next(self, *, available_models: dict[str, list[str]] | None = None) -> dict[str, Any]:
         with self._connection() as conn:
             state = db.status_payload(conn)
             check = validation.validate_plan_task_execute(conn)
-        return {"ok": True, "recommendations": recommendations.next_recommendations(state, check)}
+        settings = self._settings()
+        actions = recommendations.next_recommendations(state, check)
+        if not settings.subagents.setup_complete and not state.get("active_batches"):
+            actions.insert(0, {
+                "name": "configure-subagents",
+                "reason": prompt.subagent_setup_guidance(),
+            })
+        payload = {
+            "ok": True,
+            "recommendations": actions,
+            "config": settings.as_dict(),
+            "subagent_guidance": prompt.subagent_current_guidance(settings.subagents),
+        }
+        if available_models is not None:
+            current = config.parse_subagent_models(available_models, enabled=False, key="available_models")
+            baseline = settings.subagents.available_models
+            previous = {model.name: set(model.reasoning_efforts) for model in (baseline or ())}
+            observed = {model.name: set(model.reasoning_efforts) for model in current}
+            changes = {
+                "baseline_recorded": baseline is not None,
+                "added": sorted(observed.keys() - previous.keys()),
+                "removed": sorted(previous.keys() - observed.keys()),
+                "reasoning_efforts_changed": sorted(
+                    name for name in observed.keys() & previous.keys() if observed[name] != previous[name]
+                ),
+            }
+            changes["changed"] = baseline is not None and any(
+                changes[key] for key in ("added", "removed", "reasoning_efforts_changed")
+            )
+            payload["model_changes"] = changes
+            if settings.subagents.setup_complete and settings.subagents.enabled and not state.get("active_batches"):
+                if changes["changed"]:
+                    actions.insert(0, {
+                        "name": "review-subagent-models",
+                        "reason": "Available models or reasoning efforts changed. Show the concise difference and ask whether to update preferences or keep them. Do not overwrite settings before the answer. Use tapl_configure_subagents with the confirmed current catalog after either choice; when keeping, pass the existing enabled/strategy/models/preference/profiles unchanged, using profiles=[] if absent.",
+                    })
+                elif baseline is None:
+                    # Legacy allowlists remain active; never reinterpret their
+                    # chosen subset as a full historical runtime catalog.
+                    payload["model_catalog_note"] = "No confirmed runtime catalog exists for this legacy config. Keep current preferences; offer to record the current catalog once for future change detection. Save only after the user's answer."
+        return payload
+
+    def configure_subagents(
+        self,
+        *,
+        user_confirmed: bool,
+        enabled: bool,
+        strategy: str,
+        models: dict[str, list[str]],
+        profiles: list[dict[str, Any]] | None = None,
+        preference: str = "",
+        available_models: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        """Save the user's actual setup answer at the effective config path."""
+
+        if user_confirmed is not True:
+            raise WorkflowApplicationError("Ask the user before saving SubAgent preferences; no answer is not confirmation.")
+        settings = self._settings()
+        if available_models is not None and enabled:
+            observed = config.parse_subagent_models(available_models, enabled=False, key="available_models")
+            selected = config.parse_subagent_models(models, enabled=True)
+            pairs = lambda entries: {(item.name, effort) for item in entries for effort in item.reasoning_efforts}
+            # Keeping an existing selection is permitted after a model disappears;
+            # guidance skips those pairs until the user chooses replacements.
+            if pairs(selected) != pairs(settings.subagents.models) and not pairs(selected) <= pairs(observed):
+                raise WorkflowApplicationError("New model selections must be present in the current delegation-tool catalog.")
+        edited = config_editor.configure_subagents(
+            settings.path,
+            enabled=enabled,
+            strategy=strategy,
+            models=models,
+            profiles=profiles,
+            preference=preference,
+            available_models=available_models,
+        )
+        return {
+            "ok": True,
+            "operation": "subagents_configure",
+            "path": edited.path,
+            "changed": edited.changed,
+            "subagents": edited.config.as_dict(),
+            "subagent_guidance": prompt.subagent_current_guidance(edited.config),
+        }
 
     def validate_state(self) -> dict[str, Any]:
         with self._connection() as conn:
@@ -289,6 +371,11 @@ class WorkflowApplication:
         return {"ok": True, "item": db.row_to_dict(item), "plan_task_execute": check}
 
     def dispatch_tasks(self, task_ids: list[str], *, batch_id: str | None = None, failure_policy: str = db.DEFAULT_FAILURE_POLICY, execution_metadata: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+        subagents = self._settings().subagents
+        if not subagents.setup_complete or not subagents.enabled:
+            raise WorkflowApplicationError(
+                "SubAgent delegation requires completed, enabled setup; use tapl_get_next for current preferences."
+            )
         with self._connection() as conn:
             manifest = db.dispatch_tasks(
                 conn, task_ids, batch_id=batch_id, failure_policy=failure_policy,

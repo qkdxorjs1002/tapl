@@ -16,6 +16,7 @@ def _workspace(tmp: str) -> Path:
     root = Path(tmp) / "workspace"
     (root / ".git").mkdir(parents=True)
     db.initialize_workspace(root)
+    (root / ".tapl/config.toml").write_text("[subagents]\nenabled = false\n", encoding="utf-8")
     return root
 
 
@@ -33,7 +34,7 @@ def test_mcp_exposes_native_application_tools() -> None:
         tools = asyncio.run(mcp_server.create_server(workspace_root=_workspace(tmp)).list_tools())
 
     by_name = {tool.name: tool for tool in tools}
-    assert len(tools) == 24
+    assert len(tools) == 25
     assert "tapl_get_context" in by_name
     assert "tapl_list_archives" in by_name
     assert "tapl_get_archive" in by_name

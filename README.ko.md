@@ -313,8 +313,7 @@ TOML을 직접 편집하지 않고 runtime 값을 바꿀 수 있습니다.
 taplctl config set search.mode hybrid
 taplctl config set search.max_results 20
 taplctl config set viewer.allowed_origins '["https://tapl.example.com"]'
-taplctl config set subagents.models.gpt-5.6-sol '["high", "xhigh"]'
-taplctl config set subagents.profiles '[{name="bounded-routine", description="Small independent changes", characteristics="low risk, local context", delegation_bias="prefer", candidates=[{model="gpt-5.6-luna", reasoning_effort="xhigh"}, {model="gpt-5.6-terra", reasoning_effort="high"}]}]'
+taplctl config set subagents.strategy balanced
 taplctl config unset search.mode
 ```
 
@@ -331,9 +330,10 @@ taplctl config unset search.mode
 `search.searchd_model_idle_timeout_seconds`(0 이상의 정수),
 `viewer.allowed_origins`(중복 없는 HTTP(S) origin 문자열의 TOML 배열),
 `subagents.enabled`(`true` 또는 `false`), `subagents.strategy`(`conservative`,
-`balanced`, `aggressive`), `subagents.models.<model-id>`(중복 없는 reasoning-effort
-문자열의 비어 있지 않은 TOML 배열), `subagents.profiles`(inline profile table의
-TOML 배열)입니다.
+`balanced`, `aggressive`), `subagents.setup_complete`(`true` 또는 `false`),
+`subagents.preference`(free-form 문자열), `subagents.models.<model-id>`(중복 없는
+reasoning-effort 문자열의 비어 있지 않은 TOML 배열), `subagents.profiles`(inline
+profile table의 TOML 배열)입니다.
 
 별도 지정이 없으면 위에서 설명한 repo-local, user-global 순서로 대상을 선택하고 두 파일이
 모두 없으면 repo-local 경로를 생성합니다. 다른 파일을 편집하려면 global option을 명령
@@ -350,57 +350,61 @@ taplctl --config /path/to/config.toml config set search.mode bm25
 
 ```toml
 [subagents]
+# 첫 구체적인 TAPL 요청에서 사용자 선호를 묻습니다.
+setup_complete = false
 enabled = true
 # strategy는 판단 bias이며 각 task를 agent가 평가합니다.
 strategy = "aggressive"
+preference = ""
 
 [subagents.models]
-"gpt-5.6-sol" = ["medium", "high", "xhigh", "max"]
-"gpt-5.6-terra" = ["high", "xhigh"]
-"gpt-5.6-luna" = ["xhigh", "max"]
-
-# 설치 템플릿은 아래 네 profile을 명시하며, 블록을 지우면 동일한 built-in을 사용합니다.
-# profiles = [] # 모든 profile preset을 명시적으로 비활성화합니다.
+# first-use setup이 현재 runtime에서 model을 기록합니다.
 ```
 
-`subagents.profiles`가 없으면 TAPL은 다음 built-in advisory preset을 안전 우선 순서로
-사용합니다.
+첫 번째 구체적인 TAPL 요청 시 agent는 현재 runtime이 제공하는 model ID와 reasoning
+effort를 확인한 뒤 SubAgent 사용 여부와 preference를 묻습니다. 답변은 현재 적용되는
+설정 파일에 저장되고 setup이 완료됩니다. 이 과정에서 TAPL은 provider API를
+호출하거나 외부 model 목록을 포함하지 않습니다. `enabled = true`는 setup 완료 후에만
+효력이 있습니다. runtime catalog를 확인할 수 없으면 setup은 pending으로 남고 work는
+root agent가 처리합니다. 답변을 받은 뒤 agent는 `tapl_configure_subagents`로 저장하며,
+그 답변 자체가 user confirmation입니다. 명시적 model allowlist가 있거나
+`enabled = false`인 기존 configuration은 완료 상태를 유지하고 user가 업데이트할 때까지
+선택을 보존합니다. 새 model 설정은 user가 요청할 때에만 적용됩니다.
 
-| Profile | 적용 task | Bias | Candidate 선호 순서 |
-| --- | --- | --- | --- |
-| `high-risk-cross-cutting` | risk가 높고 범위가 넓거나 shared context·coordination이 큰 작업 | `avoid` | gpt-5.6-sol/max → gpt-5.6-sol/xhigh → gpt-5.6-terra/xhigh |
-| `deep-reasoning` | 복잡하거나 불확실하고 많은 context가 필요한 판단 | `neutral` | gpt-5.6-sol/xhigh → gpt-5.6-terra/xhigh → gpt-5.6-sol/max |
-| `general-implementation` | 일반적인 범위의 구현 작업 | `inherit` | gpt-5.6-terra/high → gpt-5.6-luna/xhigh → gpt-5.6-sol/high |
-| `bounded-routine` | 작고 local하며 예측 가능하고 risk가 낮은 작업 | `prefer` | gpt-5.6-luna/xhigh → gpt-5.6-terra/high → gpt-5.6-sol/medium |
+사용자 답변 뒤에는 전체 모델 목록도 `subagents.available_models`에 저장합니다. 각 세션의 첫 요청에서 에이전트가 현재 목록을 `tapl_get_next`에 전달하며, 모델 추가·제거 또는 추론 옵션 변경이 있으면 재설정 여부를 제안합니다. 기존 설정을 유지하겠다고 답하면 선택한 모델은 그대로 두고 확인한 목록만 갱신하므로 같은 변경을 반복해서 묻지 않습니다. 목록이 없는 기존 설정도 계속 사용할 수 있으며, 에이전트가 변화 감지 기준을 한 번 기록하도록 제안할 수 있습니다.
 
-위 model/effort는 선호 candidate일 뿐 model ID에 고정된 semantic role이 아닙니다. 각
-built-in profile은 활성 `subagents.models` allowlist에 있는 pair만 제공합니다. 사용자
-설정이 모든 pair를 제거해도 profile의 task/bias guidance는 남고, 선택은 다른 allowlisted
-pair 또는 root 실행으로 fallback합니다.
+설치 템플릿은 다음 model-neutral advisory profile을 안전 우선 순서로 포함합니다.
 
-명시적 `profiles = []`는 built-in을 비활성화합니다. 비어 있지 않은 사용자
-`subagents.profiles` 배열은 built-in을 확장하지 않고 완전히 대체하며, candidate는
-`subagents.models`에 대해 엄격히 검증됩니다.
+| Profile | 적용 task | Bias |
+| --- | --- | --- |
+| `high-risk-cross-cutting` | risk가 높고 범위가 넓거나 shared context·coordination이 큰 작업 | `avoid` |
+| `deep-reasoning` | 복잡하거나 불확실하고 많은 context가 필요한 판단 | `neutral` |
+| `general-implementation` | 일반적인 범위의 구현 작업 | `inherit` |
+| `bounded-routine` | 작고 local하며 예측 가능하고 risk가 낮은 작업 | `prefer` |
+
+profile의 candidate는 setup이 runtime-supported model/effort pair를 제공할 때까지
+비어 있습니다. profile은 task characteristics와 delegation bias를 설명하며 model ID에
+영구 role을 부여하지 않습니다.
+
+명시적 `profiles = []`는 profile을 비활성화합니다. 비어 있지 않은 사용자
+`subagents.profiles` 배열은 template profile을 완전히 대체하며 candidate는
+`subagents.models`에 있어야 합니다.
 
 활성화하면 TAPL은 delegation policy, 활성 profile, model/reasoning allowlist를 MCP
 instruction에 포함합니다. matching은 advisory입니다. agent는 모든 task 특성을 평가하고
 가장 구체적인 profile을 우선하며 설정 순서는 동률일 때만 사용합니다. 필요한 경우 이유를
 기록해 profile/candidate를 override하고, 사용할 수 없는 candidate는 건너뛰며, 필요하면
-다른 allowlisted pair 또는 root로 fallback합니다. 설치된 `.tapl/config.toml`에는 네
-profile이 모두 명시되어 있고 모든 runtime option의 type과 허용값이 주석으로 설명되어
-있습니다.
+다른 allowlisted pair 또는 root로 fallback합니다. 설치된 `.tapl/config.toml`은 선택한
+model과 preference를 기록하고 모든 runtime option의 type과 허용값을 주석으로 설명합니다.
 
-예를 들어 아래 배열은 네 built-in을 모두 대체하는 하나의 엄격히 검증된 preference입니다.
+예를 들어 아래 배열은 template profile을 하나의 model-neutral preference로 대체합니다.
 
 ```toml
 [[subagents.profiles]]
 name = "release-automation"
 characteristics = "bounded deployment steps with a known rollback"
 delegation_bias = "prefer"
-candidates = [
-  { model = "gpt-5.6-luna", reasoning_effort = "xhigh" },
-  { model = "gpt-5.6-terra", reasoning_effort = "high" },
-]
+candidates = []
 ```
 
 `strategy`는 위임 방향의 bias를 결정합니다.

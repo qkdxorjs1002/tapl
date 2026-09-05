@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 import zipfile
 from pathlib import Path
@@ -16,6 +17,37 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = REPOSITORY_ROOT / "install.sh"
 MANIFEST_URL = "https://fixtures.invalid/taplctl-install-manifest.json"
+
+PACKAGE_ROOT = REPOSITORY_ROOT / "tapl"
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
+from taplctl import install as tapl_install
+
+
+class TaplConfigMergeTests(unittest.TestCase):
+    def test_legacy_subagent_choices_do_not_receive_incomplete_setup(self) -> None:
+        cases = (
+            "[subagents]\nenabled = false\n",
+            (
+                "[subagents]\nenabled = true\n\n"
+                "[subagents.models]\n"
+                '"legacy-runtime-model" = ["high"]\n'
+            ),
+        )
+        template = tapl_install.default_config_text()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for index, original in enumerate(cases):
+                with self.subTest(original=original):
+                    path = Path(tmp) / f"legacy-{index}.toml"
+                    path.write_text(original, encoding="utf-8")
+
+                    result = tapl_install.merge_tapl_config(path, template, dry_run=False)
+
+                    self.assertEqual(result["action"], "merged")
+                    parsed = tomllib.loads(path.read_text(encoding="utf-8"))
+                    self.assertNotIn("setup_complete", parsed["subagents"])
 
 
 class CurlShInstallerTests(unittest.TestCase):

@@ -47,7 +47,11 @@ def build_context(
             prompt=prompt,
             subagents=settings.subagents,
         ),
-        "next_actions": next_actions(state, plan_task, event, prompt),
+        "next_actions": (
+            ["Call `tapl_get_next` and ask the first-use SubAgent preference question before delegating."]
+            if event != "SessionStart" and event != "Stop" and not settings.subagents.setup_complete
+            else []
+        ) + next_actions(state, plan_task, event, prompt),
         "validation_issues": validation_issues(plan_task, covered_issue_codes),
         "prompt_summary": prompt,
     }

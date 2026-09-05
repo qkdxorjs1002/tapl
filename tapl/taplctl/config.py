@@ -21,11 +21,7 @@ DEFAULT_SEMANTIC_PROVIDER = "auto"
 DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
 DEFAULT_SUBAGENTS_ENABLED = True
 DEFAULT_SUBAGENT_STRATEGY = "aggressive"
-DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("gpt-5.6-sol", ("medium", "high", "xhigh", "max")),
-    ("gpt-5.6-terra", ("high", "xhigh")),
-    ("gpt-5.6-luna", ("xhigh", "max")),
-)
+DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = ()
 DEFAULT_SUBAGENT_PROFILE_SPECS: tuple[
     tuple[str, str, str, str, tuple[tuple[str, str], ...]], ...
 ] = (
@@ -40,11 +36,7 @@ DEFAULT_SUBAGENT_PROFILE_SPECS: tuple[
             "migration, concurrency, or irreversible-impact concerns."
         ),
         "avoid",
-        (
-            ("gpt-5.6-sol", "max"),
-            ("gpt-5.6-sol", "xhigh"),
-            ("gpt-5.6-terra", "xhigh"),
-        ),
+        (),
     ),
     (
         "deep-reasoning",
@@ -57,11 +49,7 @@ DEFAULT_SUBAGENT_PROFILE_SPECS: tuple[
             "constraints, or uncertain solution paths."
         ),
         "neutral",
-        (
-            ("gpt-5.6-sol", "xhigh"),
-            ("gpt-5.6-terra", "xhigh"),
-            ("gpt-5.6-sol", "max"),
-        ),
+        (),
     ),
     (
         "general-implementation",
@@ -71,11 +59,7 @@ DEFAULT_SUBAGENT_PROFILE_SPECS: tuple[
             "small number of related components."
         ),
         "inherit",
-        (
-            ("gpt-5.6-terra", "high"),
-            ("gpt-5.6-luna", "xhigh"),
-            ("gpt-5.6-sol", "high"),
-        ),
+        (),
     ),
     (
         "bounded-routine",
@@ -88,11 +72,7 @@ DEFAULT_SUBAGENT_PROFILE_SPECS: tuple[
             "implementation with limited context."
         ),
         "prefer",
-        (
-            ("gpt-5.6-luna", "xhigh"),
-            ("gpt-5.6-terra", "high"),
-            ("gpt-5.6-sol", "medium"),
-        ),
+        (),
     ),
 )
 
@@ -163,6 +143,17 @@ EDITABLE_CONFIG_KEYS = (
         "STRATEGY",
         "SubAgent delegation strategy.",
         allowed=SUBAGENT_STRATEGIES,
+    ),
+    EditableConfigKey(
+        "subagents.setup_complete",
+        "BOOLEAN",
+        "Whether first-use SubAgent model setup is complete; true or false.",
+        allowed=("true", "false"),
+    ),
+    EditableConfigKey(
+        "subagents.preference",
+        "STRING",
+        "Free-form user preference recorded during SubAgent setup.",
     ),
     EditableConfigKey(
         "subagents.models.<model-id>",
@@ -299,6 +290,9 @@ def default_subagent_profiles(
 class SubagentsConfig:
     enabled: bool = DEFAULT_SUBAGENTS_ENABLED
     strategy: str = DEFAULT_SUBAGENT_STRATEGY
+    setup_complete: bool = False
+    preference: str = ""
+    available_models: tuple[SubagentModelConfig, ...] | None = None
     models: tuple[SubagentModelConfig, ...] = field(default_factory=default_subagent_models)
     profiles: tuple[SubagentTaskProfileConfig, ...] = field(
         default_factory=default_subagent_profiles
@@ -308,6 +302,8 @@ class SubagentsConfig:
         rendered: dict[str, Any] = {
             "enabled": self.enabled,
             "strategy": self.strategy,
+            "setup_complete": self.setup_complete,
+            "preference": self.preference,
             "models": {
                 model.name: list(model.reasoning_efforts)
                 for model in self.models
@@ -315,6 +311,10 @@ class SubagentsConfig:
         }
         if self.profiles:
             rendered["profiles"] = [profile.as_dict() for profile in self.profiles]
+        if self.available_models is not None:
+            rendered["available_models"] = {
+                model.name: list(model.reasoning_efforts) for model in self.available_models
+            }
         return rendered
 
 
@@ -476,13 +476,37 @@ def from_mapping(
         SUBAGENT_STRATEGIES,
         "subagents.strategy",
     )
+    if "setup_complete" in subagents_data:
+        subagent_setup_complete = boolean(
+            subagents_data["setup_complete"],
+            "subagents.setup_complete",
+        )
+    else:
+        raw_models = subagents_data.get("models")
+        subagent_setup_complete = (
+            not subagents_enabled
+            or (isinstance(raw_models, dict) and bool(raw_models))
+        )
+    subagent_preference = string(
+        setting(subagents_data, "preference", default=""),
+        "subagents.preference",
+    )
+    available_models = (
+        parse_subagent_models(subagents_data["available_models"], enabled=False, key="subagents.available_models")
+        if "available_models" in subagents_data else None
+    )
     if "models" in subagents_data:
         subagent_models = parse_subagent_models(
             subagents_data["models"],
             enabled=subagents_enabled,
+            setup_complete=subagent_setup_complete,
         )
     else:
-        subagent_models = default_subagent_models()
+        subagent_models = parse_subagent_models(
+            {},
+            enabled=subagents_enabled,
+            setup_complete=subagent_setup_complete,
+        )
     if "profiles" in subagents_data:
         subagent_profiles = parse_subagent_profiles(
             subagents_data["profiles"],
@@ -511,6 +535,9 @@ def from_mapping(
         subagents=SubagentsConfig(
             enabled=subagents_enabled,
             strategy=subagent_strategy,
+            setup_complete=subagent_setup_complete,
+            preference=subagent_preference,
+            available_models=available_models,
             models=subagent_models,
             profiles=subagent_profiles,
         ),
@@ -534,7 +561,7 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
     spec = editable_config_key(key)
     value: Any
     normalized = raw_value.strip().lower().replace("-", "_")
-    if key != "subagents.enabled" and spec.allowed and normalized in spec.allowed:
+    if key not in {"subagents.enabled", "subagents.setup_complete"} and spec.allowed and normalized in spec.allowed:
         value = raw_value
     else:
         try:
@@ -563,6 +590,10 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
         return boolean(value, key)
     if key == "subagents.strategy":
         return choice(value, SUBAGENT_STRATEGIES, key)
+    if key == "subagents.setup_complete":
+        return boolean(value, key)
+    if key == "subagents.preference":
+        return string(value, key)
     if key == "subagents.profiles":
         profiles = parse_subagent_profiles(
             value,
@@ -664,6 +695,7 @@ def parse_subagent_models(
     value: Any,
     *,
     enabled: bool,
+    setup_complete: bool = True,
     key: str = "subagents.models",
 ) -> tuple[SubagentModelConfig, ...]:
     if not isinstance(value, dict):
@@ -706,7 +738,7 @@ def parse_subagent_models(
             )
         )
 
-    if enabled and not models:
+    if enabled and setup_complete and not models:
         raise ValueError(
             f"{key} must define at least one model when subagents.enabled is true"
         )
@@ -822,6 +854,12 @@ def optional_string(value: Any, key: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{key} must be a string")
     return value.strip()
+
+
+def string(value: Any, key: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string")
+    return value
 
 
 def ratio(value: Any, key: str) -> float:

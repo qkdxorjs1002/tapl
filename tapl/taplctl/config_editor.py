@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, time
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,15 @@ class ConfigEditResult:
     key: str
     changed: bool
     value: Any = None
+
+
+@dataclass(frozen=True)
+class SubagentsConfigEditResult:
+    """The result of replacing the standard SubAgent setup settings."""
+
+    path: str
+    changed: bool
+    config: config.SubagentsConfig
 
 
 @dataclass(frozen=True)
@@ -50,6 +60,7 @@ def set_value(path: Path | str, key: str, raw_value: str) -> ConfigEditResult:
     target = _key_path(key)
     prepared = _remove_array_tables(original, target)
     candidate = _replace_or_add(prepared, target, rendered)
+    candidate = _preserve_inferred_setup_completion(original, candidate, config_path)
     _validate(candidate, config_path)
     changed = candidate != original
     if changed:
@@ -69,6 +80,11 @@ def unset_value(path: Path | str, key: str) -> ConfigEditResult:
     if assignment is None:
         candidate = _remove_array_tables(original, target)
         if candidate != original:
+            candidate = _preserve_inferred_setup_completion(
+                original,
+                candidate,
+                config_path,
+            )
             _validate(candidate, config_path)
             _atomic_write(config_path, candidate)
             return ConfigEditResult(str(config_path), key, True)
@@ -81,10 +97,243 @@ def unset_value(path: Path | str, key: str) -> ConfigEditResult:
         return ConfigEditResult(str(config_path), key, False)
 
     candidate = original[: assignment.start] + original[assignment.end :]
+    candidate = _preserve_inferred_setup_completion(original, candidate, config_path)
     _validate(candidate, config_path)
     if candidate != original:
         _atomic_write(config_path, candidate)
     return ConfigEditResult(str(config_path), key, candidate != original)
+
+
+def configure_subagents(
+    path: Path | str,
+    *,
+    enabled: bool,
+    strategy: str,
+    models: dict[str, list[str]],
+    profiles: list[dict] | None = None,
+    preference: str = "",
+    available_models: dict[str, list[str]] | None = None,
+) -> SubagentsConfigEditResult:
+    """Atomically save a completed first-use SubAgent configuration.
+
+    The editor owns the standard setup fields, while retaining nonstandard
+    ``subagents`` settings and all unrelated TOML content.
+    """
+
+    normalized_enabled = config.boolean(enabled, "subagents.enabled")
+    normalized_strategy = config.choice(
+        strategy,
+        config.SUBAGENT_STRATEGIES,
+        "subagents.strategy",
+    )
+    normalized_preference = config.string(preference, "subagents.preference")
+    normalized_available = (
+        config.parse_subagent_models(available_models, enabled=False, key="subagents.available_models")
+        if available_models is not None else None
+    )
+    normalized_models = config.parse_subagent_models(
+        models,
+        enabled=normalized_enabled,
+        setup_complete=True,
+    )
+    raw_profiles: list[dict]
+    if profiles is None:
+        raw_profiles = [
+            profile.as_dict()
+            for profile in config.default_subagent_profiles(normalized_models)
+        ]
+    else:
+        raw_profiles = profiles
+    normalized_profiles = config.parse_subagent_profiles(
+        raw_profiles,
+        models=normalized_models,
+    )
+
+    config_path = Path(path).expanduser()
+    original = _read(config_path)
+    prepared, inline_custom = _remove_standard_subagent_settings(original, config_path)
+    if inline_custom:
+        prepared = _add_inline_subagent_custom_settings(prepared, inline_custom)
+    candidate = _add_standard_subagent_settings(
+        prepared,
+        enabled=normalized_enabled,
+        strategy=normalized_strategy,
+        models=normalized_models,
+        profiles=normalized_profiles,
+        preference=normalized_preference,
+    )
+    if normalized_available is not None:
+        # An omitted catalog preserves the last confirmed snapshot. Only an
+        # actual setup/keep answer may advance it to a newly observed catalog.
+        assignments, tables = _scan(candidate)
+        target = ("subagents", "available_models")
+        ranges = [(item.start, item.end) for item in assignments if item.path[:2] == target]
+        ranges.extend((item.start, item.end) for item in tables if item.path[:2] == target)
+        candidate = _remove_ranges(candidate, ranges)
+        candidate = _replace_or_add_subagent_setting(candidate, target, _render_value({
+            model.name: list(model.reasoning_efforts) for model in normalized_available
+        }))
+    parsed = _parse(candidate, config_path)
+    loaded = config.from_mapping(parsed, path=config_path, exists=bool(candidate))
+    changed = candidate != original
+    if changed:
+        _atomic_write(config_path, candidate)
+    return SubagentsConfigEditResult(
+        path=str(config_path),
+        changed=changed,
+        config=loaded.subagents,
+    )
+
+
+_STANDARD_SUBAGENT_ASSIGNMENTS = frozenset(
+    {
+        ("subagents", "enabled"),
+        ("subagents", "strategy"),
+        ("subagents", "setup_complete"),
+        ("subagents", "preference"),
+        ("subagents", "models"),
+        ("subagents", "profiles"),
+    }
+)
+
+
+def _remove_standard_subagent_settings(
+    text: str,
+    path: Path,
+) -> tuple[str, dict[str, Any]]:
+    """Drop standard settings while retaining custom SubAgent settings."""
+
+    parsed = _parse(text, path)
+    assignments, tables = _scan(text)
+    ranges: list[tuple[int, int]] = []
+    inline_custom: dict[str, Any] = {}
+    for assignment in assignments:
+        if assignment.path == ("subagents",):
+            raw_subagents = parsed.get("subagents")
+            if isinstance(raw_subagents, dict):
+                inline_custom = {
+                    key: value
+                    for key, value in raw_subagents.items()
+                    if key not in {
+                        "enabled",
+                        "strategy",
+                        "setup_complete",
+                        "preference",
+                        "models",
+                        "profiles",
+                    }
+                }
+            ranges.append((assignment.start, assignment.end))
+        elif (
+            assignment.path in _STANDARD_SUBAGENT_ASSIGNMENTS
+            or assignment.path[:2] in {
+                ("subagents", "models"),
+                ("subagents", "profiles"),
+            }
+        ):
+            ranges.append((assignment.start, assignment.end))
+    for table in tables:
+        if table.path[:2] in {
+            ("subagents", "models"),
+            ("subagents", "profiles"),
+        }:
+            ranges.append((table.start, table.end))
+    return _remove_ranges(text, ranges), inline_custom
+
+
+def _remove_ranges(text: str, ranges: list[tuple[int, int]]) -> str:
+    """Remove possibly overlapping ranges from right to left."""
+
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(ranges):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    for start, end in reversed(merged):
+        text = text[:start] + text[end:]
+    return text
+
+
+def _add_inline_subagent_custom_settings(text: str, custom: dict[str, Any]) -> str:
+    for key, value in custom.items():
+        text = _replace_or_add(
+            text,
+            ("subagents", key),
+            _render_value(value),
+        )
+    return text
+
+
+def _add_standard_subagent_settings(
+    text: str,
+    *,
+    enabled: bool,
+    strategy: str,
+    models: tuple[config.SubagentModelConfig, ...],
+    profiles: tuple[config.SubagentTaskProfileConfig, ...],
+    preference: str,
+) -> str:
+    values = {
+        "enabled": enabled,
+        "strategy": strategy,
+        "setup_complete": True,
+        "preference": preference,
+        "profiles": [profile.as_dict() for profile in profiles],
+    }
+    for key, value in values.items():
+        text = _replace_or_add_subagent_setting(
+            text,
+            ("subagents", key),
+            _render_value(value),
+        )
+    for model in models:
+        text = _replace_or_add_subagent_setting(
+            text,
+            ("subagents", "models", model.name),
+            _render_value(list(model.reasoning_efforts)),
+        )
+    if not models:
+        text = _ensure_table(text, ("subagents", "models"))
+    return text
+
+
+def _replace_or_add_subagent_setting(
+    text: str,
+    target: tuple[str, ...],
+    rendered: str,
+) -> str:
+    """Add a setting without redefining a parent created by dotted keys."""
+
+    assignments, tables = _scan(text)
+    if any(assignment.path == target for assignment in assignments) or any(
+        table.path == ("subagents",) for table in tables
+    ):
+        return _replace_or_add(text, target, rendered)
+    if any(assignment.path[:1] == ("subagents",) for assignment in assignments):
+        newline = "\r\n" if "\r\n" in text else "\n"
+        line = ".".join(_render_key(part) for part in target)
+        line = f"{line} = {rendered}{newline}"
+        position = min((table.start for table in tables), default=len(text))
+        prefix = text[:position]
+        if prefix and not prefix.endswith(("\n", "\r")):
+            line = newline + line
+        return prefix + line + text[position:]
+    return _replace_or_add(text, target, rendered)
+
+
+def _ensure_table(text: str, target: tuple[str, ...]) -> str:
+    _, tables = _scan(text)
+    if any(table.path == target for table in tables):
+        return text
+    newline = "\r\n" if "\r\n" in text else "\n"
+    prefix = text
+    if prefix and not prefix.endswith(("\n", "\r")):
+        prefix += newline
+    if prefix and not prefix.endswith(newline * 2):
+        prefix += newline
+    header = ".".join(_render_key(part) for part in target)
+    return f"{prefix}[{header}]{newline}"
 
 
 def _remove_array_tables(text: str, target: tuple[str, ...]) -> str:
@@ -100,6 +349,45 @@ def _remove_array_tables(text: str, target: tuple[str, ...]) -> str:
     for table in reversed(matches):
         text = text[: table.start] + text[table.end :]
     return text
+
+
+def _preserve_inferred_setup_completion(
+    original: str,
+    candidate: str,
+    path: Path,
+) -> str:
+    """Persist a legacy completed state before an ordinary field edit.
+
+    A legacy file has no explicit setup marker.  Removing its last model must
+    not accidentally turn an enabled configuration back into first-use setup.
+    """
+
+    original_data = _parse(original, path)
+    original_subagents = original_data.get("subagents", {})
+    if (
+        not isinstance(original_subagents, dict)
+        or "setup_complete" in original_subagents
+    ):
+        return candidate
+    original_config = config.from_mapping(
+        original_data,
+        path=path,
+        exists=bool(original),
+    )
+    candidate_data = _parse(candidate, path)
+    candidate_subagents = candidate_data.get("subagents", {})
+    if (
+        original_config.subagents.setup_complete
+        and isinstance(candidate_subagents, dict)
+        and "setup_complete" not in candidate_subagents
+        and not config.from_mapping(candidate_data, path=path, exists=bool(candidate)).subagents.setup_complete
+    ):
+        return _replace_or_add_subagent_setting(
+            candidate,
+            ("subagents", "setup_complete"),
+            "true",
+        )
+    return candidate
 
 
 def _read(path: Path) -> str:
@@ -362,6 +650,8 @@ def _render_value(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
     if isinstance(value, list):
         return "[" + ", ".join(_render_value(item) for item in value) + "]"
     if isinstance(value, dict):

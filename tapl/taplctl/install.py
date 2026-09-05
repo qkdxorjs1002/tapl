@@ -552,6 +552,12 @@ def merge_tapl_config(path: Path, template: str, *, dry_run: bool) -> dict[str, 
         return {"path": str(path), "action": "skipped", "reason": "invalid_toml"}
 
     missing = missing_toml_values(existing, managed)
+    if legacy_subagent_setup_is_complete(existing):
+        # A pre-onboarding configuration with an explicit choice must remain
+        # complete by inference. Adding false would re-prompt configured users.
+        missing = [
+            item for item in missing if item[0] != ("subagents", "setup_complete")
+        ]
     if not missing:
         if original_text == existing_text:
             return {"path": str(path), "action": "unchanged"}
@@ -568,6 +574,18 @@ def merge_tapl_config(path: Path, template: str, *, dry_run: bool) -> dict[str, 
     return {"path": str(path), "action": action}
 
 
+def legacy_subagent_setup_is_complete(existing: dict[str, Any]) -> bool:
+    """Recognize pre-onboarding configs that already express a user choice."""
+
+    subagents = existing.get("subagents")
+    if not isinstance(subagents, dict) or "setup_complete" in subagents:
+        return False
+    if subagents.get("enabled") is False:
+        return True
+    models = subagents.get("models")
+    return isinstance(models, dict) and bool(models)
+
+
 def default_subagent_profile_text() -> str:
     blocks: list[str] = []
     for name, description, characteristics, delegation_bias, candidates in (
@@ -579,15 +597,18 @@ def default_subagent_profile_text() -> str:
             format_toml_assignment(("description",), description).rstrip(),
             format_toml_assignment(("characteristics",), characteristics).rstrip(),
             format_toml_assignment(("delegation_bias",), delegation_bias).rstrip(),
-            "candidates = [",
         ]
-        lines.extend(
-            "  { model = "
-            f"{format_toml_value(model)}, reasoning_effort = "
-            f"{format_toml_value(reasoning_effort)} }},"
-            for model, reasoning_effort in candidates
-        )
-        lines.append("]")
+        if candidates:
+            lines.append("candidates = [")
+            lines.extend(
+                "  { model = "
+                f"{format_toml_value(model)}, reasoning_effort = "
+                f"{format_toml_value(reasoning_effort)} }},"
+                for model, reasoning_effort in candidates
+            )
+            lines.append("]")
+        else:
+            lines.append("candidates = []")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
@@ -596,10 +617,6 @@ def default_config_text() -> str:
     template = template_text(".tapl", "config.toml")
     if template is not None:
         return template
-    model_lines = "".join(
-        format_toml_assignment((name,), list(reasoning_efforts))
-        for name, reasoning_efforts in config.DEFAULT_SUBAGENT_MODELS
-    ).rstrip()
     profile_lines = default_subagent_profile_text()
     return f"""[viewer]
 # Additional browser origins allowed to call the viewer API through a trusted proxy.
@@ -638,8 +655,16 @@ semantic_provider = "{config.DEFAULT_SEMANTIC_PROVIDER}"
 searchd_model_idle_timeout_seconds = {config.DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS}
 
 [subagents]
-# Whether eligible tasks may be delegated to SubAgents. Type: true or false.
+# TAPL asks for SubAgent preferences on first use. Until setup is complete,
+# SubAgent delegation remains inactive even when enabled is true.
+setup_complete = false
+
+# Whether eligible tasks may be delegated after setup. Type: true or false.
 enabled = {str(config.DEFAULT_SUBAGENTS_ENABLED).lower()}
+
+# Free-form preference captured during setup. It guides the agent's choices
+# without naming provider models in TAPL defaults.
+preference = ""
 
 # Delegation strategy. Allowed values:
 # - "conservative": delegate only when net efficiency is clearly established.
@@ -647,27 +672,20 @@ enabled = {str(config.DEFAULT_SUBAGENTS_ENABLED).lower()}
 # - "aggressive": delegate every eligible group, including small tasks, unless there is a clear, material downside.
 strategy = "{config.DEFAULT_SUBAGENT_STRATEGY}"
 
-# Four safety-first advisory task profiles are written explicitly below in
-# priority order:
-# high-risk-cross-cutting (avoid), deep-reasoning (neutral),
-# general-implementation (inherit), then bounded-routine (prefer).
-# The first applicable profile has priority, but profiles remain guidance that
-# the agent can override. To disable all profiles, remove the four
-# `[[subagents.profiles]]` blocks and set `profiles = []` here. Removing the
-# blocks without setting an empty array restores the same runtime defaults.
+# Four model-neutral advisory task profiles are written explicitly below in
+# priority order. The first applicable profile has priority, but profiles
+# remain guidance that the agent can override.
 
 [subagents.models]
 # Delegation allowlist. Each key is a runtime-supported model ID and each value
 # is a non-empty array of unique reasoning-effort strings supported by that model.
-# At least one model is required when subagents.enabled is true. Current bundled
-# model/effort pairs are listed below; unsupported pairs fail at delegation time.
-{model_lines}
+# It is empty until first-use setup records models available in the current
+# runtime. TAPL does not advertise a provider model list.
 
-# Edit, reorder, or replace these blocks to customize task routing.
+# Edit, reorder, or replace these blocks to customize task routing after setup.
 # `delegation_bias` is one of "inherit", "prefer", "neutral", or "avoid".
-# Candidates are ordered preferences, not fixed roles, and every candidate must
-# appear in the model allowlist above. If none is suitable, use the allowlist or
-# keep the work on the root agent.
+# Candidates are ordered preferences and every candidate must appear in the
+# model allowlist above. Empty candidates let the runtime select from that list.
 
 {profile_lines}
 """
