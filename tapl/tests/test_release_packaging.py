@@ -11,6 +11,7 @@ import tomllib
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -326,6 +327,63 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertLess(
             [step.get("name") for step in steps].index("Publish GitHub Release"),
             [step.get("name") for step in steps].index("Update taplctl Homebrew package"),
+        )
+
+
+class ReleaseMcpSmokeTests(unittest.TestCase):
+    def _run_smoke(self) -> None:
+        from taplctl import db
+
+        workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+        smoke_step = next(
+            step for step in workflow["jobs"]["release"]["steps"]
+            if step.get("name") == "Smoke-test isolated MCP runtime"
+        )
+        source = smoke_step["run"].split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace = Path(temporary_directory) / "workspace"
+            (workspace / ".git").mkdir(parents=True)
+            db.initialize_workspace(workspace)
+            with mock.patch.object(sys, "argv", ["-", str(workspace)]):
+                exec(compile(source, str(RELEASE_WORKFLOW), "exec"), {})
+
+    def test_smoke_accepts_current_mcp_tools(self) -> None:
+        self._run_smoke()
+
+    def test_smoke_accepts_new_registered_tools(self) -> None:
+        from taplctl.mcp_server import create_server
+
+        def extended_server(**kwargs):
+            server = create_server(**kwargs)
+
+            @server.tool(name="tapl_future_tool")
+            def future_tool() -> dict[str, bool]:
+                return {"ok": True}
+
+            return server
+
+        with mock.patch("taplctl.mcp_server.create_server", side_effect=extended_server):
+            self._run_smoke()
+
+    def test_smoke_rejects_missing_tool_even_when_count_matches(self) -> None:
+        from mcp import Client
+
+        original_list_tools = Client.list_tools
+
+        async def renamed_tool(client, *args, **kwargs):
+            result = await original_list_tools(client, *args, **kwargs)
+            for tool in result.tools:
+                if tool.name == "tapl_configure_subagents":
+                    tool.name = "tapl_unexpected_tool"
+                    break
+            return result
+
+        with mock.patch.object(Client, "list_tools", renamed_tool):
+            with self.assertRaises(BaseExceptionGroup) as raised:
+                self._run_smoke()
+        self.assertRegex(
+            repr(raised.exception.subgroup(SystemExit)),
+            "missing=.*tapl_configure_subagents.*unexpected=.*tapl_unexpected_tool",
         )
 
 

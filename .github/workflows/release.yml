@@ -435,10 +435,15 @@ jobs:
 
           async def main() -> None:
               server = create_server(workspace_root=Path(sys.argv[1]))
+              expected_tools = {tool.name for tool in await server.list_tools()}
               async with Client(server) as client:
                   tools = await client.list_tools()
-                  if len(tools.tools) != 24:
-                      raise SystemExit(f"expected 24 TAPL MCP tools, got {len(tools.tools)}")
+                  actual_tools = {tool.name for tool in tools.tools}
+                  if actual_tools != expected_tools:
+                      raise SystemExit(
+                          f"TAPL MCP tool mismatch: missing={sorted(expected_tools - actual_tools)}, "
+                          f"unexpected={sorted(actual_tools - expected_tools)}"
+                      )
                   result = await client.call_tool("tapl_get_status", {})
                   if result.is_error:
                       raise SystemExit("tapl_get_status failed in isolated runtime")

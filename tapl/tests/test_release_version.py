@@ -137,7 +137,6 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
         )
         self.assertIn("create_args+=(--prerelease)", workflow)
         self.assertIn("edit_args+=(--prerelease=false)", workflow)
-        self.assertIn("expected 24 TAPL MCP tools", workflow)
 
     def test_marketplace_job_publishes_only_stable_tags_with_entra_id(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
