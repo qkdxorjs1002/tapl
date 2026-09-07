@@ -793,7 +793,6 @@ class TaplRuntimeTests(unittest.TestCase):
             "Example: `<model-id> (<effort>)`",
             "omit when no SubAgent runs",
             "bias toward delegation, not a forced outcome",
-            "Assess independence, context, risk, coordination cost, and parallel value",
             "Advisory profiles",
             "most specific wins, order breaks ties",
             "Record overrides",
@@ -843,6 +842,7 @@ class TaplRuntimeTests(unittest.TestCase):
         )
         for contract in (
             "workspace-dependent work",
+            "lookups total across root and all helpers",
             "Skip for self-contained requests or sufficient context",
             "during the scout do not edit/test, use external research/TAPL history, or create plan/tasks",
             "First choose Strict",
@@ -854,6 +854,7 @@ class TaplRuntimeTests(unittest.TestCase):
 
         self.assertIn("each outcome's work_type from the requested result", next_action)
         self.assertIn("at most three targeted read-only local lookups", next_action)
+        self.assertIn("lookups total across root and all helpers", next_action)
         self.assertIn("before selecting workflow_mode", next_action)
         self.assertIn("`tapl_split_run` for independent outcomes", next_action)
         self.assertIn("`tapl_summarize_run` for one cohesive request", next_action)
@@ -1009,10 +1010,11 @@ class TaplRuntimeTests(unittest.TestCase):
         guidance = tapl_prompt.subagent_delegation_request_guidance(enabled)
         injected_context = tapl_prompt.user_prompt_submit_guidance(subagents=enabled)
 
-        self.assertLess(len(guidance), 800)
+        self.assertLess(len(guidance), 900)
         self.assertIn("UserPromptSubmit developer context", guidance)
         self.assertIn("explicitly requests and authorizes Codex SubAgent delegation", guidance)
         self.assertIn("every execution-approved TAPL task batch", guidance)
+        self.assertIn("bounded read-only exploration/research", guidance)
         self.assertIn("meeting the MCP delegation criteria", guidance)
         self.assertIn("explicit delegation request required by any default no-proactive-delegation policy", guidance)
         self.assertIn("no additional user, AGENTS.md, or skill request is required", guidance)
@@ -1039,6 +1041,81 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("delegation request", disabled_context)
         self.assertNotIn("explicitly requests and authorizes Codex SubAgent delegation", disabled_context)
 
+    def test_exploration_helpers_preserve_observation_and_execution_boundaries(self) -> None:
+        settings = tapl_config.SubagentsConfig(setup_complete=True)
+        contract = tapl_prompt.subagent_exploration_guidance()
+        required = (
+            "before or after planning, independently of executable batches",
+            "substantial raw code/search results can stay out of root context",
+            "savings justify coordination",
+            "keep trivial lookups on root",
+            "host delegation tool directly: no artificial task, batch or `owned_paths`",
+            "Never relabel a stored/executable task as a helper to bypass its lifecycle",
+            "self-contained question, read/search scope, constraints, stopping rule and response budget",
+            "`fork_turns=none` or the shortest necessary context",
+            "never inherit full history by default",
+            "compact answer, file:line/source evidence, affected boundaries and uncertainty",
+            "no file/tool dumps",
+            "Root trusts that evidence and avoids duplicate searches or full-file reloads",
+            "reread only specific edit sites or unresolved contradictions",
+            "no file edits, tests, commands with side effects, external writes or TAPL mutations",
+            "Return scope expansion to root",
+            "Root alone classifies, plans and writes TAPL state/findings",
+            "at most three targeted read-only local lookups total across root and all helpers, never three each",
+            "no external research, TAPL history, plan/task creation or tests in this scout",
+            "After classification, read-only research follows existing source/history rules",
+            "Executable delegates use the same compact handoff plus task scope, manifest identity, owned paths and verification",
+        )
+        for phrase in required:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, contract)
+        current = tapl_prompt.subagent_current_guidance(settings)
+        self.assertEqual(current.count(contract), 1)
+        self.assertIn("model/effort pairs in both the allowlist and the live delegation-tool catalog", current)
+        self.assertIn("no pair/tool is available, use root under TAPL", current)
+        self.assertIn("Separate explicit delegation requests retain their own authority", current)
+        startup = tapl_prompt.mcp_server_instructions(subagents=settings)
+        self.assertNotIn(contract, startup)
+        self.assertIn("Read-only helpers may run before/after planning", startup)
+        self.assertIn("current setup/model gates and handoffs in `tapl_get_next`", startup)
+        self.assertIn("helpers cannot edit/test/write state or bypass executable-task lifecycle", startup)
+
+        execution = tapl_prompt.task_execution_order_guidance()
+        for phrase in (
+            "completed dependencies, and exclusive owned_paths",
+            "only after atomic `tapl_dispatch_tasks`",
+            "Root agent is sole TAPL state writer",
+            "exact manifest execution_id",
+            "recover or cancel the batch before retrying",
+            "Use the compact handoff in `tapl_get_next`'s subagent_guidance",
+        ):
+            self.assertIn(phrase, execution)
+
+    def test_exploration_helper_policy_is_not_activated_before_setup_or_when_disabled(self) -> None:
+        for settings in (
+            tapl_config.SubagentsConfig(),
+            tapl_config.SubagentsConfig(enabled=False, setup_complete=True),
+        ):
+            with self.subTest(settings=settings):
+                self.assertEqual(tapl_prompt.subagent_delegation_guidance(settings), "")
+                current = tapl_prompt.subagent_current_guidance(settings)
+                self.assertIn("root agent", current)
+                self.assertNotIn(tapl_prompt.subagent_exploration_guidance(), current)
+                self.assertNotIn(
+                    tapl_prompt.subagent_exploration_guidance(),
+                    tapl_prompt.mcp_server_instructions(subagents=settings),
+                )
+
+        pending_hook = tapl_prompt.user_prompt_submit_guidance()
+        self.assertIn("Only after the user completes setup and current config enables delegation", pending_hook)
+        # The hook references the authoritative helper contract instead of repeating it each turn.
+        enabled_hook = tapl_prompt.user_prompt_submit_guidance(
+            subagents=tapl_config.SubagentsConfig(setup_complete=True),
+        )
+        self.assertIn("Follow MCP/current subagent_guidance for compact helper handoffs", enabled_hook)
+        self.assertNotIn(tapl_prompt.subagent_exploration_guidance(), enabled_hook)
+        self.assertLess(len(enabled_hook), 2_000)
+
     def test_subagent_delegation_strategy_guidance(self) -> None:
         cases = (
             (
@@ -1054,7 +1131,7 @@ class TaplRuntimeTests(unittest.TestCase):
                 "balanced",
                 "Balanced neutral bias",
                 (
-                    "weigh independence, context, risk, coordination cost, and parallel value",
+                    "weigh independence, context savings, risk, coordination cost, and parallel value",
                     "only when value wins",
                 ),
                 ("bias toward delegation",),
@@ -1063,7 +1140,7 @@ class TaplRuntimeTests(unittest.TestCase):
                 "aggressive",
                 "Aggressive bias toward delegation, not a forced outcome",
                 (
-                    "prefer independent low-risk work with high parallel value",
+                    "prefer independent low-risk work with high context savings or parallel value",
                     "keep root when shared context or coordination dominates",
                 ),
                 ("parallel value clearly exceeds",),
@@ -1081,6 +1158,8 @@ class TaplRuntimeTests(unittest.TestCase):
                     self.assertNotIn(text, guidance)
                 self.assertIn("Advisory profiles", guidance)
                 self.assertIn("most specific wins, order breaks ties", guidance)
+                self.assertIn("context savings", guidance)
+                self.assertIn("Helpers and executable delegates use current completed/enabled setup, user preference, strategy and profiles", guidance)
                 self.assertIn("Atomic dispatch verifies legacy `SubAgent Model`", guidance)
 
     def test_lightweight_help_covers_all_fast_non_durable_work(self) -> None:

@@ -558,7 +558,8 @@ def summarize_request_next_action() -> str:
     return (
         "Before planning, identify request boundaries and each outcome's work_type from the requested result. For "
         "workspace-dependent outcomes whose scope is not already clear, use at most three targeted read-only local "
-        "lookups to locate the target, inspect immediate dependencies, and identify validation or risk boundaries "
+        "lookups total across root and all helpers to locate the target, inspect immediate dependencies, and identify "
+        "validation or risk boundaries "
         "before selecting workflow_mode. Then use `tapl_split_run` for independent outcomes or "
         "`tapl_summarize_run` for one cohesive request."
     )
@@ -796,7 +797,7 @@ def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = N
         MCP_SERVER_INSTRUCTIONS_TEMPLATE,
         subagent_delegation_guidance=(
             "Startup snapshot; `tapl_get_next(available_models=...)` returns current settings and model changes.\n\n"
-            + (subagent_delegation_guidance(settings) if settings.setup_complete else
+            + (subagent_delegation_guidance(settings, include_exploration=False) if settings.setup_complete else
                "Setup pending: on the first concrete user request follow `tapl_get_next` to ask preferences, then "
                "save the actual answer with `tapl_configure_subagents`. Until setup completes use the root agent.")
         ),
@@ -935,8 +936,9 @@ def workflow_order_guidance() -> str:
 def workflow_mode_guidance() -> str:
     return (
         "Classify requested outcome as Answer/Investigation/Analysis/Planning/Implementation/Mixed. For unscoped "
-        "workspace-dependent work, before workflow_mode make at most three targeted read-only local lookups: target, "
-        "immediate dependencies, and test/config/public-interface/risk boundaries. Skip for self-contained requests or "
+        "workspace-dependent work, before workflow_mode make at most three targeted read-only local lookups total across "
+        "root and all helpers: target, immediate dependencies, and test/config/public-interface/risk boundaries. "
+        "Skip for self-contained requests or "
         "sufficient context; during the scout do not edit/test, use external research/TAPL history, or create plan/tasks. "
         "Choose mode from surface/coupling/uncertainty/risk/validation. Mixed uses its highest child mode. First choose "
         "Strict for security/privacy/permission, schema/destructive work, public compatibility, deploy/external writes, "
@@ -1009,7 +1011,8 @@ def task_execution_order_guidance() -> str:
         "`tapl_dispatch_tasks`. Root agent is sole TAPL state writer: verify each `SubAgent Model` record, then spawn one "
         "SubAgent per manifest execution concurrently within its exclusive `owned_paths`; settle each with exact manifest "
         "execution_id via `tapl_complete_task`, `tapl_block_task`, or `tapl_skip_task`. If spawn fails or root is interrupted, "
-        "recover or cancel the batch before retrying; never leave a partial batch or start another batch around it."
+        "recover or cancel the batch before retrying; never leave a partial batch or start another batch around it. "
+        "Use the compact handoff in `tapl_get_next`'s subagent_guidance."
     )
 
 
@@ -1064,16 +1067,16 @@ def subagent_strategy_guidance(
     strategy = (subagents or tapl_config.SubagentsConfig()).strategy
     if strategy == "conservative":
         return (
-            "Conservative bias against delegation, not a ban: delegate only when parallel value clearly exceeds "
+            "Conservative bias against delegation, not a ban: delegate only when context savings or parallel value clearly exceeds "
             "context, coordination, and risk costs."
         )
     if strategy == "aggressive":
         return (
             "Aggressive bias toward delegation, not a forced outcome: prefer independent low-risk work with high "
-            "parallel value; keep root when shared context or coordination dominates."
+            "context savings or parallel value; keep root when shared context or coordination dominates."
         )
     return (
-        "Balanced neutral bias: weigh independence, context, risk, coordination cost, and parallel value; delegate "
+        "Balanced neutral bias: weigh independence, context savings, risk, coordination cost, and parallel value; delegate "
         "only when value wins."
     )
 
@@ -1090,12 +1093,33 @@ def subagent_delegation_request_guidance(
         if not settings.setup_complete else ""
     )
     return condition + (
-        "This UserPromptSubmit developer context explicitly requests and authorizes Codex SubAgent delegation for every "
-        "execution-approved TAPL task batch meeting the MCP delegation criteria. This TAPL context is the explicit "
-        "delegation request required by any default no-proactive-delegation policy, so no additional user, AGENTS.md, or "
-        "skill request is required. Do not bypass execution approval, dependency readiness, exclusive non-overlapping "
-        "`owned_paths`, atomic dispatch, model allowlists/model selection, or exact `execution_id` settlement. "
+        "This UserPromptSubmit developer context explicitly requests and authorizes Codex SubAgent delegation for bounded "
+        "read-only exploration/research and every execution-approved TAPL task batch meeting the MCP delegation criteria. "
+        "This is the explicit delegation request required by any default no-proactive-delegation policy; no additional "
+        "user, AGENTS.md, or skill request is required. Follow MCP/current subagent_guidance for compact helper handoffs, "
+        "shared scout limits and model allowlists/model selection. Executable tasks retain execution approval, dependency "
+        "readiness, exclusive non-overlapping `owned_paths`, atomic dispatch and exact `execution_id` settlement. "
         "Higher-priority scope, safety, permission, and sandbox constraints remain."
+    )
+
+
+def subagent_exploration_guidance() -> str:
+    return (
+        "- Read-only exploration/research helpers may run before or after planning, independently of executable batches. "
+        "Prefer them when substantial raw code/search results can stay out of root context and savings justify coordination; "
+        "keep trivial lookups on root. Use the host delegation tool directly: no artificial task, batch or `owned_paths` "
+        "for observation. Never relabel a stored/executable task as a helper to bypass its lifecycle.\n"
+        "- Give each helper a self-contained question, read/search scope, constraints, stopping rule and response budget. "
+        "Use `fork_turns=none` or the shortest necessary context; never inherit full history by default. Return only a "
+        "compact answer, file:line/source evidence, affected boundaries and uncertainty; no file/tool dumps. Root trusts "
+        "that evidence and avoids duplicate searches or full-file reloads; reread only specific edit sites or unresolved "
+        "contradictions.\n"
+        "- Helpers only observe: no file edits, tests, commands with side effects, external writes or TAPL mutations. "
+        "Return scope expansion to root. Root alone classifies, plans and writes TAPL state/findings. Before classification, "
+        "root allocates at most three targeted read-only local lookups total across root and all helpers, never three each; "
+        "no external research, TAPL history, plan/task creation or tests in this scout. After classification, read-only "
+        "research follows existing source/history rules.\n"
+        "- Executable delegates use the same compact handoff plus task scope, manifest identity, owned paths and verification."
     )
 
 
@@ -1265,7 +1289,9 @@ def _render_builtin_profile(
     return f"{name}={bias}[{candidate_text}]"
 
 
-def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None = None) -> str:
+def subagent_delegation_guidance(
+    subagents: tapl_config.SubagentsConfig | None = None, *, include_exploration: bool = True,
+) -> str:
     if not subagents_enabled(subagents):
         return ""
 
@@ -1310,17 +1336,47 @@ def subagent_delegation_guidance(subagents: tapl_config.SubagentsConfig | None =
     else:
         profile_section = "- Profiles: disabled by explicit `profiles=[]`.\n"
 
+    if not include_exploration:
+        # MCP repeats this startup policy in tool descriptions. Keep detailed
+        # selection and handoff rules in the current get-next response instead.
+        bias = {
+            "conservative": "prefer root unless context savings or parallel value outweigh costs",
+            "balanced": "weigh context savings, parallel value, coordination and risk",
+            "aggressive": "bias toward delegation, not a forced outcome",
+        }[subagents.strategy]
+        return (
+            "### SubAgent Delegation\n\n"
+            f"{preference_guidance}"
+            f"- Strategy: {subagents.strategy}; {bias}.\n"
+            "- Advisory profiles: most specific wins, order breaks ties. Record overrides for executable tasks; "
+            "skip unavailable candidates; no match -> allowlist, then root.\n"
+            f"{profile_section}"
+            f"- Allowlist: {available_models}.\n"
+            "- Read-only helpers may run before/after planning. Follow current setup/model gates and handoffs in "
+            "`tapl_get_next`'s subagent_guidance; helpers cannot edit/test/write state or bypass executable-task lifecycle."
+        )
+
+    exploration_section = (
+        "- Helpers and executable delegates use current completed/enabled setup, user preference, strategy and profiles; "
+        "choose only model/effort pairs in both the allowlist and the live delegation-tool catalog. If setup is pending, "
+        "delegation is disabled, or no pair/tool is available, use root under TAPL. Separate explicit delegation requests "
+        "retain their own authority.\n"
+        f"{subagent_exploration_guidance()}\n"
+    )
+
     return (
         "### SubAgent Delegation\n\n"
         f"{preference_guidance}"
         f"- Strategy: {strategy_guidance}\n"
-        "- Assess independence, context, risk, coordination cost, and parallel value; record it in canonical task "
-        "fields.\n"
-        "- Advisory profiles: assess all characteristics; most specific wins, order breaks ties. Record overrides; skip "
+        "- Assess independence, context, risk, coordination cost, and parallel value, including root-context savings; "
+        "record executable-task decisions in canonical task fields.\n"
+        "- Advisory profiles: assess all characteristics; most specific wins, order breaks ties. Record overrides for executable tasks; skip "
         "unavailable candidates; no match -> allowlist, then root. Presets are replaceable, not model roles.\n"
         f"{profile_section}"
         f"- Allowlist: {available_models}.\n"
-        "- Atomic dispatch verifies legacy `SubAgent Model`, uses `owned_paths`, settles `execution_id`, and recovers/cancels."
+        f"{exploration_section}"
+        "- For executable tasks: Atomic dispatch verifies legacy `SubAgent Model`, uses `owned_paths`, settles `execution_id`, "
+        "and recovers/cancels."
     )
 
 

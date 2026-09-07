@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp import Client
 import pytest
 
-from taplctl import config, db, mcp_server
+from taplctl import config, db, mcp_server, prompt
 from taplctl.application import WorkflowApplication, WorkflowApplicationError
 
 
@@ -154,8 +154,43 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
             assert saved.structured_content["operation"] == "subagents_configure"
             assert "runtime-a[high]" in saved.structured_content["subagent_guidance"]
             assert saved.structured_content["subagents"]["available_models"] == args["available_models"]
+            # Read-only helper policy becomes available in the same MCP session before
+            # any plan, executable task, batch, or execution approval exists.
+            helper_contract = prompt.subagent_exploration_guidance()
+            assert helper_contract in saved.structured_content["subagent_guidance"]
+            before_reads = await client.call_tool("tapl_get_status", {})
+            ready = await client.call_tool("tapl_get_next", {"available_models": args["available_models"]})
+            assert helper_contract in ready.structured_content["subagent_guidance"]
+            assert "model/effort pairs in both the allowlist and the live delegation-tool catalog" in ready.structured_content["subagent_guidance"]
+            hook = await client.call_tool("tapl_get_context", {"event": "UserPromptSubmit"})
+            hook_guidance = " ".join(hook.structured_content["workflow_guidance"])
+            assert "bounded read-only exploration/research" in hook_guidance
+            assert "compact helper handoffs, shared scout limits" in hook_guidance
+            assert helper_contract not in hook_guidance
+            assert len(hook_guidance) < 2_000
+            after_reads = await client.call_tool("tapl_get_status", {})
+            for key in ("active_run", "counts", "approvals"):
+                assert after_reads.structured_content[key] == before_reads.structured_content[key]
+            assert after_reads.structured_content["counts"]["plans"] == 0
+            assert after_reads.structured_content["counts"]["tasks"] == 0
+            assert after_reads.structured_content["counts"]["active_batches"] == 0
             next_action = await client.call_tool("tapl_get_next", {"available_models": {"runtime-b": ["deep"]}})
             assert next_action.structured_content["recommendations"][0]["tool"] == "request_user_input"
             assert next_action.structured_content["model_changes"]["changed"]
+            # Model discovery cannot silently widen the user's saved allowlist.
+            assert "Allowlist: runtime-a[high]" in next_action.structured_content["subagent_guidance"]
+            assert "Skip unavailable model/effort pairs and use the root agent if none remain" in next_action.structured_content["subagent_guidance"]
+            disabled = await client.call_tool("tapl_configure_subagents", {
+                "user_confirmed": True, "enabled": False, "strategy": "conservative",
+                "models": {}, "available_models": {}, "profiles": [],
+            })
+            assert not disabled.is_error
+            disabled_next = await client.call_tool("tapl_get_next", {})
+            assert "delegation is disabled" in disabled_next.structured_content["subagent_guidance"]
+            assert helper_contract not in disabled_next.structured_content["subagent_guidance"]
+            disabled_hook = await client.call_tool("tapl_get_context", {"event": "UserPromptSubmit"})
+            assert "explicitly requests and authorizes Codex SubAgent delegation" not in " ".join(
+                disabled_hook.structured_content["workflow_guidance"]
+            )
 
     asyncio.run(exercise())

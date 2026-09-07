@@ -274,8 +274,8 @@ SQLite FTS works in every installation. Install the semantic extra—or the
 ### Parallel work
 
 TAPL coordinates execution manifests; it does not spawn workers. The Codex/root
-runtime creates and manages SubAgents. Parallel tasks are valid only when their
-dependencies are complete and they own non-overlapping files or directories.
+runtime creates and manages SubAgents. Parallel executable tasks are valid only
+when their dependencies are complete and they own non-overlapping files or directories.
 The `strategy` value is a decision bias, not a forced outcome: the agent weighs
 task independence, required context, risk, coordination cost, and parallel
 value before choosing root execution or delegation. Sequential tasks, shared
@@ -283,6 +283,32 @@ files or state, and root-level decisions remain on the main agent. User task
 profiles can add advisory characteristics and ordered model/effort preferences
 for recurring work; they are replaceable presets, not permanent roles for model
 IDs, and the agent may override either with a recorded reason.
+
+Bounded read-only exploration and research can also use host SubAgents before or
+after planning, without creating artificial tasks, batches, or `owned_paths`.
+Prefer this when locating code or gathering evidence would fill the root agent's
+context; keep a tiny lookup on root. This TAPL guidance requires completed setup
+and enabled delegation. Apply the existing strategy and profiles, selecting only
+model/effort pairs in both
+the configured allowlist and the live runtime catalog. If setup is pending,
+delegation is disabled, or a suitable runtime candidate is unavailable, root
+handles the lookup.
+
+Give each helper a self-contained question, a read/search scope and constraints,
+only the context it needs (no full-history fork by default), a response budget,
+and a stopping rule. Ask for a concise
+conclusion, `file:line` or source references, and remaining uncertainty, rather
+than raw file or search dumps. Root uses that report and rereads only evidence
+needed to resolve an uncertainty or make an edit. Helpers cannot edit, run tests,
+cause side effects, or write workflow records; root alone classifies the request,
+plans the work, and writes TAPL state.
+
+Before classification, the scout budget is **three targeted local read-only
+lookups total across root and all helpers**, with no tests, external research,
+or history searches. Delegation does not reset that budget. After classification,
+research follows the applicable source and history rules. Stored or executable
+tasks still follow the approval, dependency, ownership, dispatch, and settlement
+requirements below.
 
 ## How it works
 
@@ -458,16 +484,18 @@ The `strategy` setting controls the delegation bias:
 
 - `aggressive` (the default) favors delegation when tasks are independent,
   sufficiently self-contained, low enough risk, and have meaningful parallel
-  value. It does not require delegation when context sharing or coordination cost
-  makes root execution better.
+  value or save root context. It does not require delegation when context sharing
+  or coordination cost makes root execution better.
 - `balanced` weighs the same dimensions without a directional preference.
 - `conservative` favors root execution and delegates only when the expected
-  parallel value clearly outweighs context transfer, coordination, and risk.
+  parallel value or root context savings clearly outweigh context transfer,
+  coordination, and risk.
 
-Every strategy still requires execution approval, dependency readiness, exclusive
-non-overlapping ownership, atomic dispatch, and settlement by the exact
-`execution_id`; the root retains TAPL writes and cross-task decisions. Dispatch
-records the manifest model and reasoning effort in the legacy `SubAgent Model`
+For stored or executable tasks, every strategy still requires execution approval,
+dependency readiness, exclusive non-overlapping `owned_paths`, atomic dispatch,
+and settlement by the exact `execution_id`; the root retains TAPL writes and
+cross-task decisions. Dispatch records the manifest model and reasoning effort
+in the legacy `SubAgent Model`
 custom field before the runtime spawns that SubAgent. To change the bias, set
 `strategy` to `balanced` or `conservative`; to disable TAPL delegation guidance,
 set `enabled = false`. This does not remove delegation instructions from another

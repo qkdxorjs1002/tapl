@@ -241,14 +241,36 @@ Codex는 typed MCP tool로 current state, archive detail, history를 읽습니�
 ### 병렬 작업
 
 TAPL은 execution manifest를 조율하지만 worker를 spawn하지는 않습니다. Codex/root
-runtime이 SubAgent를 만들고 관리합니다. 병렬 task는 dependency가 완료되고 서로 겹치지
-않는 file 또는 directory를 소유할 때만 유효합니다. `strategy`는 강제 결과가 아니라
+runtime이 SubAgent를 만들고 관리합니다. 병렬 executable task는 dependency가 완료되고
+서로 겹치지 않는 file 또는 directory를 소유할 때만 유효합니다. `strategy`는 강제 결과가 아니라
 판단 bias입니다. agent는 task independence, 필요한 context, risk, coordination cost,
 parallel value를 평가한 뒤 root 실행 또는 위임을 선택합니다. 순차 task, 공유 file 또는
 state, root 수준의 결정은 main agent가 수행합니다. 사용자 task profile은 반복 작업에
 대한 advisory 특성과 순서가 있는 model/effort 선호를 추가할 수 있습니다. 이는 model ID의
 영구 역할이 아닌 교체 가능한 preset이며, agent는 이유를 기록하고 profile이나 candidate를
 override할 수 있습니다.
+
+범위가 정해진 읽기 전용 파일 탐색이나 조사는 계획 전후에 host SubAgent에 위임할 수
+있으며, 이를 위해 task, batch, `owned_paths`를 별도로 만들 필요는 없습니다. 코드 위치나
+근거를 찾는 과정에서 root context가 커질 때 위임을 우선하고, 작은 조회는 root가
+처리합니다. 이 TAPL 지침은 setup이 완료되고 위임이 활성화된 경우에 적용됩니다.
+기존 strategy와 profile을 따르며,
+설정된 allowlist와 현재 runtime catalog에 모두 있는 model/effort 조합을 선택합니다.
+setup이 pending이거나 위임이 비활성화되었거나 적절한 runtime candidate가 없으면
+root가 조회합니다.
+
+helper에게는 독립적으로 이해할 수 있는 질문, 읽기·검색 범위와 제약, 필요한 최소 context,
+응답 분량 제한, 중단 조건을 전달하며 기본적으로 전체 대화 이력을 fork하지 않습니다. 원본 파일이나
+검색 결과를 길게 반환하지 않고 간결한 결론, `file:line` 또는 출처, 남은 불확실성을
+보고합니다. root는 이 보고를 활용하고 불확실성 해소나 수정에 필요한 근거만 다시 읽습니다.
+helper는 파일 수정, 테스트 실행, 부수 효과가 있는 작업, workflow 기록 쓰기를 할 수
+없습니다. 요청 분류, 계획 수립, TAPL 상태 쓰기는 root만 담당합니다.
+
+요청 분류 전 scout에서는 **root와 모든 helper를 합쳐 local 읽기 전용 조회를 총 3회**까지
+할 수 있으며, 각 조회의 대상을 좁혀야 합니다. 테스트, 외부 조사, history 검색은 허용되지
+않고 위임해도 조회 한도는 늘어나지 않습니다. 분류 후 조사는 해당 source와 history
+규칙을 따릅니다. 저장되거나 실행 가능한 task에는 아래의 승인, dependency, 소유 범위,
+dispatch, 정산 요건이 그대로 적용됩니다.
 
 ## 동작 방식
 
@@ -410,16 +432,17 @@ candidates = []
 `strategy`는 위임 방향의 bias를 결정합니다.
 
 - `aggressive`(기본값)는 task가 독립적이고 필요한 context가 충분히 전달되며 risk가
-  관리 가능하고 parallel value가 클 때 위임을 선호합니다. context 공유나 coordination
-  cost 때문에 root가 더 나으면 위임하지 않습니다.
+  관리 가능하고 parallel value나 root context 절감 효과가 클 때 위임을 선호합니다.
+  context 공유나 coordination cost 때문에 root가 더 나으면 위임하지 않습니다.
 - `balanced`는 같은 판단 기준을 방향성 없이 적용합니다.
-- `conservative`는 root 실행을 선호하며 parallel value가 context 전달, coordination,
-  risk 비용을 명확히 넘어설 때만 위임합니다.
+- `conservative`는 root 실행을 선호하며 parallel value나 root context 절감 효과가
+  context 전달, coordination, risk 비용을 명확히 넘어설 때만 위임합니다.
 
-어떤 strategy에서도 execution approval, dependency readiness, 배타적이고 겹치지 않는
-소유 범위, 원자적 dispatch, 정확한 `execution_id`를 사용한 정산이 필요합니다. TAPL
-write와 task 간 결정은 root만 담당합니다. dispatch는 runtime이 SubAgent를 spawn하기
-전에 manifest의 model과 reasoning effort를 legacy `SubAgent Model` custom field에
+저장되거나 실행 가능한 task에는 어떤 strategy에서도 execution approval, dependency
+readiness, 배타적이고 겹치지 않는 `owned_paths`, 원자적 dispatch, 정확한 `execution_id`를
+사용한 정산이 필요합니다. TAPL write와 task 간 결정은 root만 담당합니다.
+dispatch는 runtime이 SubAgent를 spawn하기 전에 manifest의 model과 reasoning effort를
+legacy `SubAgent Model` custom field에
 기록합니다. bias를 바꾸려면 `strategy = "balanced"` 또는 `"conservative"`로, TAPL의
 delegation guidance를 비활성화하려면 `enabled = false`로 설정하세요. 다른 source(예:
 `AGENTS.md`)의 delegation instruction까지 제거하지는 않습니다.
