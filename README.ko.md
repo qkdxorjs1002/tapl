@@ -251,26 +251,34 @@ state, root 수준의 결정은 main agent가 수행합니다. 사용자 task pr
 override할 수 있습니다.
 
 범위가 정해진 읽기 전용 파일 탐색이나 조사는 계획 전후에 host SubAgent에 위임할 수
-있으며, 이를 위해 task, batch, `owned_paths`를 별도로 만들 필요는 없습니다. 코드 위치나
-근거를 찾는 과정에서 root context가 커질 때 위임을 우선하고, 작은 조회는 root가
-처리합니다. 이 TAPL 지침은 setup이 완료되고 위임이 활성화된 경우에 적용됩니다.
-기존 strategy와 profile을 따르며,
-설정된 allowlist와 현재 runtime catalog에 모두 있는 model/effort 조합을 선택합니다.
+있으며, 이를 위해 task, batch, `owned_paths`를 별도로 만들 필요는 없습니다. workflow
+mode 분류 전, 요청 자체로 충분하거나 이미 파악한 범위가 충분하면 scout를 생략합니다.
+알려진 대상의 확인 한 번이면 충분할 때는 root가 조회합니다. 저장소의 대상, dependency,
+검증 범위가 불명확하면 **자격을 충족하는 읽기 전용 SubAgent 하나**를 우선하며,
+중첩 helper는 허용하지 않습니다. root는 요청과 기존 context로 위임 여부를 판단하며,
+이를 결정하려고 전체 scout를 먼저 수행하지 않습니다.
+이 TAPL 지침은 setup이 완료되고 위임이 활성화된 경우에 적용됩니다.
+사용자 선호와 기존 strategy 및 profile을 따르며, 설정된 allowlist와
+현재 runtime catalog에 모두 있는 model/effort 조합만 선택합니다.
 setup이 pending이거나 위임이 비활성화되었거나 적절한 runtime candidate가 없으면
 root가 조회합니다.
 
-helper에게는 독립적으로 이해할 수 있는 질문, 읽기·검색 범위와 제약, 필요한 최소 context,
-응답 분량 제한, 중단 조건을 전달하며 기본적으로 전체 대화 이력을 fork하지 않습니다. 원본 파일이나
-검색 결과를 길게 반환하지 않고 간결한 결론, `file:line` 또는 출처, 남은 불확실성을
-보고합니다. root는 이 보고를 활용하고 불확실성 해소나 수정에 필요한 근거만 다시 읽습니다.
-helper는 파일 수정, 테스트 실행, 부수 효과가 있는 작업, workflow 기록 쓰기를 할 수
-없습니다. 요청 분류, 계획 수립, TAPL 상태 쓰기는 root만 담당합니다.
+helper에게는 요청, 읽기·검색 범위, 남은 조회 한도, 응답 분량 제한, 제약, 중단 조건만 전달하며,
+기본적으로 전체 대화 이력을 fork하지 않습니다. source, 설정, 테스트를 우선 살피고
+생성 파일, dependency, minified 파일의 대량 출력을 피합니다. `file:line` 근거,
+dependency, 필요한 검증, risk와 미확인 사항, 사용한 조회 횟수를 간결하게 보고합니다.
 
-요청 분류 전 scout에서는 **root와 모든 helper를 합쳐 local 읽기 전용 조회를 총 3회**까지
-할 수 있으며, 각 조회의 대상을 좁혀야 합니다. 테스트, 외부 조사, history 검색은 허용되지
-않고 위임해도 조회 한도는 늘어나지 않습니다. 분류 후 조사는 해당 source와 history
-규칙을 따릅니다. 저장되거나 실행 가능한 task에는 아래의 승인, dependency, 소유 범위,
-dispatch, 정산 요건이 그대로 적용됩니다.
+요청 분류 전에는 **root와 helper를 합쳐 대상을 좁힌 local 읽기 전용 조회를 최대 3회**까지
+할 수 있습니다. root는 검색을 반복하지 않고 보고를 활용하며, 미해결 모순이나 필수 질문에만
+남은 조회 한도를 씁니다. 실패해도 한도는 복구되지 않으며, 사용량이 보고되지 않으면
+helper에게 배정한 한도를 모두 사용한 것으로 처리합니다. scout 중에는 root와 helper 모두
+수정, 테스트 실행, 외부 조사, history 검색, TAPL 상태 변경을 할 수 없습니다. helper는
+부수 효과가 있는 작업이나 workflow 기록 쓰기를 할 수 없으며, 최종 workflow mode 결정,
+계획 수립, scout 이후 TAPL 상태 쓰기는 root만 담당합니다. 분류 후 조사는 해당 source와
+history 규칙을 따릅니다. 저장되거나 실행 가능한 task에는 아래의 승인, dependency,
+소유 범위, dispatch, 정산 요건이 그대로 적용되며, scout는 실행 승인을 우회하지 않습니다.
+이는 새 설정이나 database field를 추가하지 않는 지침 정책이며, 지연 시간이나 전체 token
+사용량 절감을 보장하지 않습니다.
 
 ## 동작 방식
 

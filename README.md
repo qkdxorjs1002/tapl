@@ -286,29 +286,37 @@ IDs, and the agent may override either with a recorded reason.
 
 Bounded read-only exploration and research can also use host SubAgents before or
 after planning, without creating artificial tasks, batches, or `owned_paths`.
-Prefer this when locating code or gathering evidence would fill the root agent's
-context; keep a tiny lookup on root. This TAPL guidance requires completed setup
-and enabled delegation. Apply the existing strategy and profiles, selecting only
-model/effort pairs in both
-the configured allowlist and the live runtime catalog. If setup is pending,
-delegation is disabled, or a suitable runtime candidate is unavailable, root
-handles the lookup.
+Before classifying the workflow mode, skip the scout when the request is
+self-contained or the known scope is sufficient. Root handles a known target
+needing one check. When repository targets, dependencies, or validation boundaries
+are unclear, prefer **one eligible read-only SubAgent**, with no nested helpers.
+Root makes this choice from the request and existing context, without completing
+a full scout just to decide whether to delegate.
+This TAPL instruction policy requires completed setup and enabled delegation.
+Honor user preferences and the existing strategy and profiles; select only
+model/effort pairs in both the configured allowlist and the live runtime catalog.
+If setup is pending, delegation is disabled, or a suitable runtime candidate is
+unavailable, root handles the lookup.
 
-Give each helper a self-contained question, a read/search scope and constraints,
-only the context it needs (no full-history fork by default), a response budget,
-and a stopping rule. Ask for a concise
-conclusion, `file:line` or source references, and remaining uncertainty, rather
-than raw file or search dumps. Root uses that report and rereads only evidence
-needed to resolve an uncertainty or make an edit. Helpers cannot edit, run tests,
-cause side effects, or write workflow records; root alone classifies the request,
-plans the work, and writes TAPL state.
+Give the helper only the request, read/search scope, remaining lookup budget,
+response budget, restrictions, and stop condition; do not fork full history by
+default. Prioritize source, configuration, and tests, avoiding generated,
+dependency, and minified dumps. Request a compact report of `file:line` references,
+dependencies, validation needs, risks and unknowns, and lookups used.
 
-Before classification, the scout budget is **three targeted local read-only
-lookups total across root and all helpers**, with no tests, external research,
-or history searches. Delegation does not reset that budget. After classification,
-research follows the applicable source and history rules. Stored or executable
-tasks still follow the approval, dependency, ownership, dispatch, and settlement
-requirements below.
+Before classification, root and the helper share **at most three targeted local
+read-only lookups total**. Root uses the report without repeating searches; only
+unresolved contradictions or essential questions may use the remaining budget.
+Failure does not replenish the budget, and unreported usage consumes the helper's
+allocated quota. Neither root nor the helper may edit, run tests, perform external
+research or history searches, or mutate TAPL state during the scout. Helpers
+cannot cause side effects or write workflow records; root alone makes the final
+workflow-mode decision, plans the work, and writes TAPL state after the scout.
+After classification, research follows the applicable source and history rules.
+Stored or executable tasks still follow the approval, dependency, ownership,
+dispatch, and settlement requirements below; scouting does not bypass execution
+approval. This policy adds no setting or database field and does not guarantee
+latency or total-token savings.
 
 ## How it works
 

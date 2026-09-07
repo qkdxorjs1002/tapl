@@ -861,6 +861,42 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertNotIn("Classify once from the request and readily available context", guidance)
         self.assertNotIn("Do not search, query history, or create plan/tasks solely to classify", guidance)
 
+    def test_preclassification_scout_routes_known_and_unclear_scope(self) -> None:
+        # Both entry points must retain the same conditional routing before mode selection.
+        for guidance in (
+            tapl_prompt.workflow_mode_guidance(),
+            tapl_prompt.summarize_request_next_action(),
+        ):
+            with self.subTest(guidance=guidance):
+                self.assertIn("self-contained", guidance)
+                self.assertIn("one bounded confirmation of a known target on root", guidance)
+                self.assertIn("prefer one eligible read-only helper", guidance)
+                self.assertIn("current subagent_guidance", guidance)
+                self.assertIn("lookups total across root and all helpers", guidance)
+        self.assertIn("Root alone classifies", tapl_prompt.workflow_mode_guidance())
+        next_action = tapl_prompt.summarize_request_next_action()
+        self.assertIn("unclear target/dependencies/validation boundaries", next_action)
+        self.assertIn("without a full root prescout", next_action)
+        self.assertIn("makes the final classification", next_action)
+
+    def test_preclassification_scout_preserves_budget_after_helper_failure(self) -> None:
+        contract = tapl_prompt.subagent_exploration_guidance()
+        for safeguard in (
+            "allow at most one helper: no nested helpers, replacement or respawn",
+            "During the pre-classification scout, root allocates at most three",
+            "Pass only the remaining allocated quota",
+            "count targeted searches/reads, not tool calls",
+            "Stop when scope evidence is sufficient or quota is exhausted",
+            "Failure or incomplete results never reset the budget",
+            "unreported usage consumes the helper's allocated quota",
+            "follow up only on contradictions or unresolved essential questions within the remaining budget",
+            "incomplete evidence excludes Fast",
+        ):
+            with self.subTest(safeguard=safeguard):
+                self.assertIn(safeguard, contract)
+        # The scout's cap must not become a blanket limit on later research.
+        self.assertIn("After classification, read-only research follows existing source/history rules", contract)
+
     def test_mcp_result_notice_guidance_stays_in_server_instructions(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions()
         injected_context = "\n".join(
@@ -1054,7 +1090,12 @@ class TaplRuntimeTests(unittest.TestCase):
             "self-contained question, read/search scope, constraints, stopping rule and response budget",
             "`fork_turns=none` or the shortest necessary context",
             "never inherit full history by default",
-            "compact answer, file:line/source evidence, affected boundaries and uncertainty",
+            "compact answer, file:line/source evidence, immediate dependencies, validation boundaries, risks/unknowns and lookups used",
+            "include remaining lookup budget and prohibited actions",
+            "source/config/tests first",
+            "exclude installed/vendored dependency trees and generated/minified output unless specifically relevant",
+            "This is a preference, not automatic dispatch",
+            "If ineligible, root uses the same bounded scout",
             "no file/tool dumps",
             "Root trusts that evidence and avoids duplicate searches or full-file reloads",
             "reread only specific edit sites or unresolved contradictions",

@@ -133,7 +133,9 @@ def test_setup_uses_effective_path_and_preserves_other_settings(tmp_path: Path, 
 
 
 def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: Path) -> None:
-    root, _ = fresh_workspace(tmp_path)
+    root, app = fresh_workspace(tmp_path)
+    # Mirror the fresh request created by the hook, before any plan or task exists.
+    app.summarize_run(db.DEFAULT_REQUEST_SUMMARY)
     server = mcp_server.create_server(workspace_root=root)
 
     async def exercise() -> None:
@@ -162,12 +164,24 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
             ready = await client.call_tool("tapl_get_next", {"available_models": args["available_models"]})
             assert helper_contract in ready.structured_content["subagent_guidance"]
             assert "model/effort pairs in both the allowlist and the live delegation-tool catalog" in ready.structured_content["subagent_guidance"]
+            for routing_rule in (
+                "prefer one eligible read-only helper",
+                "current setup, user preference, strategy, profile and allowlist/live-catalog gates",
+                "single bounded confirmation on root",
+                "unreported usage consumes the helper's allocated quota",
+            ):
+                assert routing_rule in ready.structured_content["subagent_guidance"]
             hook = await client.call_tool("tapl_get_context", {"event": "UserPromptSubmit"})
             hook_guidance = " ".join(hook.structured_content["workflow_guidance"])
             assert "bounded read-only exploration/research" in hook_guidance
             assert "compact helper handoffs, shared scout limits" in hook_guidance
             assert helper_contract not in hook_guidance
             assert len(hook_guidance) < 2_000
+            next_actions = " ".join(hook.structured_content["next_actions"])
+            assert prompt.summarize_request_next_action() in next_actions
+            assert "prefer one eligible read-only helper under current subagent_guidance" in next_actions
+            assert "without a full root prescout" in next_actions
+            assert helper_contract not in next_actions
             after_reads = await client.call_tool("tapl_get_status", {})
             for key in ("active_run", "counts", "approvals"):
                 assert after_reads.structured_content[key] == before_reads.structured_content[key]
