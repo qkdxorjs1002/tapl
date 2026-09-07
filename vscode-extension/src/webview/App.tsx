@@ -28,6 +28,7 @@ import type {
 } from './types';
 import { vscodeApi } from './vscodeApi';
 import { I18nProvider, useI18n } from './i18n';
+import { HoverPopover } from './HoverPopover';
 
 const TASK_STATUSES = ['Pending', 'In Progress', 'Blocked', 'Completed', 'Skipped'];
 const JOURNEY_MIN_COLUMNS = 2;
@@ -1059,19 +1060,19 @@ function CustomFieldSummary({ fields }: { fields?: Record<string, TaplJsonValue>
   const visible = entries.filter(([, value]) => isCompactCustomValue(value)).slice(0, 2);
   const remaining = entries.length - visible.length;
   return (
-    <div className="tapl-custom-summary" aria-label={t('customFields')}>
+    <HoverPopover label={t('customFields')} content={<CustomFieldRows fields={fields ?? {}} />}>
       {visible.map(([label, value]) => (
-        <span key={label} className="tapl-custom-chip" title={`${label}: ${String(value)}`}>
+        <span key={label} className="tapl-custom-chip">
           <span className="tapl-custom-chip-label">{label}</span>
           <span className="tapl-custom-chip-value">{String(value)}</span>
         </span>
       ))}
       {remaining > 0 ? (
-        <span className="tapl-custom-more" title={t('customFieldCount', { count: entries.length })}>
+        <span className="tapl-custom-more">
           +{remaining}
         </span>
       ) : null}
-    </div>
+    </HoverPopover>
   );
 }
 

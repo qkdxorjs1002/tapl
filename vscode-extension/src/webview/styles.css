@@ -489,7 +489,34 @@ pre {
 }
 
 .tapl-custom-summary {
-  @apply mt-2 grid min-w-0 items-start gap-1;
+  @apply mt-2 grid w-full min-w-0 cursor-help items-start gap-1 rounded-lg border-0 bg-transparent p-0 text-left;
+}
+
+.tapl-custom-popover {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  width: min(28rem, calc(100vw - 16px));
+  max-height: min(26rem, calc(100vh - 16px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  border: 1px solid var(--tapl-border-control);
+  border-radius: 12px;
+  color: var(--tapl-foreground);
+  background: var(--tapl-surface);
+  box-shadow: var(--tapl-shadow);
+}
+
+.tapl-custom-popover:focus-visible {
+  outline: 2px solid var(--tapl-accent);
+  outline-offset: -2px;
+}
+
+.tapl-custom-popover .tapl-custom-row,
+.tapl-custom-popover .tapl-json-entry {
+  grid-template-columns: minmax(0, 1fr);
+  overflow-wrap: anywhere;
 }
 
 .tapl-custom-chip {
