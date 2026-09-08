@@ -57,6 +57,17 @@ Ask for the outcome you want:
 
 Codex plans and executes the work normally. Behind the scenes, TAPL records the approved plan, splits executable work into tasks, keeps findings and validation state, and archives the result. A later session can recover that state directly.
 
+When one request contains independent topics, Codex keeps one RUN and writes a separate PLAN for each topic before designing TASKs. For example, a request covering these four topics produces:
+
+| PLAN | Topic |
+| --- | --- |
+| PLAN-001 | Regex filtering for irregular hostnames |
+| PLAN-002 | A default Codex CLI environment for analysis |
+| PLAN-003 | Model reasoning level settings |
+| PLAN-004 | Ad detection through web page elements |
+
+Each PLAN has its own requirements, approach, and validation; each TASK references its topic's PLAN through `spec_id`. Steps, constraints, examples, and tests serving one outcome stay together. Separate RUN lifecycles are used only when explicitly requested.
+
 <p align="center">
   <img src="assets/tapl-codex-iterm-demo.svg" alt="Terminal-style capture of Codex CLI using TAPL state before editing README files" />
 </p>

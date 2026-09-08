@@ -108,6 +108,44 @@ def test_mcp_split_run_queues_and_activates_dependent_request() -> None:
     assert "request_summary" not in archived.structured_content["next_active_run"]
 
 
+def test_mcp_topic_plans_keep_distinct_ids_and_references() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        server = mcp_server.create_server(workspace_root=_workspace(tmp))
+
+        async def exercise() -> None:
+            async with Client(server) as client:
+                summarized = await client.call_tool(
+                    "tapl_summarize_run",
+                    {"summary": "Host patterns and reasoning settings", "work_type": "implementation", "workflow_mode": "standard"},
+                )
+                run_id = summarized.structured_content["active_run"]["id"]
+                for number, topic in enumerate(("Host patterns", "Reasoning settings"), start=1):
+                    applied = await client.call_tool(
+                        "tapl_apply_plan",
+                        {"plan_id": f"PLAN-{number:03d}", "title": topic, "summary": f"REQ-{number:03d}: {topic}", "validation": "Focused regression"},
+                    )
+                    assert not applied.is_error
+                    assert applied.structured_content["item"]["stable_id"] == f"PLAN-{number:03d}"
+                    assert "title" not in applied.structured_content["item"]
+
+                status = (await client.call_tool("tapl_get_status", {"full": True})).structured_content
+                assert status["active_run"]["id"] == run_id
+                assert status["queued_runs"] == []
+                assert status["tasks"] == []
+                assert [plan["title"] for plan in status["plans"]] == ["Host patterns", "Reasoning settings"]
+
+                created = await client.call_tool(
+                    "tapl_create_task",
+                    {"task_id": "TASK-001", "title": "Configure reasoning", "spec_id": "PLAN-002", "goal": "Expose reasoning settings", "action": "Implement settings", "verification": "Settings round trip"},
+                )
+                assert not created.is_error
+                status = (await client.call_tool("tapl_get_status", {"full": True})).structured_content
+                assert status["tasks"][0]["spec_id"] == "PLAN-002"
+                assert {plan["run_id"] for plan in status["plans"]} == {run_id}
+
+        asyncio.run(exercise())
+
+
 def test_mcp_native_sequential_lifecycle_never_spawns_cli() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         server = mcp_server.create_server(workspace_root=_workspace(tmp))

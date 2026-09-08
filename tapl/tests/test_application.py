@@ -125,6 +125,68 @@ def test_application_splits_independent_requests_into_separate_runs() -> None:
         assert queued["id"] != split["active_run"]["id"]
 
 
+def test_application_keeps_topic_plans_and_task_references_in_one_run() -> None:
+    topics = (
+        "불규칙 호스트 정규식 필터링",
+        "기본 Codex CLI 분석 환경",
+        "모델 추론 레벨 설정",
+        "웹 페이지 요소 광고 탐지",
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        run = app.summarize_run(
+            "주제별 기능 개선", work_type="implementation", workflow_mode="standard"
+        )["active_run"]
+        for number, topic in enumerate(topics, start=1):
+            app.apply_plan(
+                f"PLAN-{number:03d}",
+                title=topic,
+                summary=f"REQ-{number:03d}: {topic}",
+                validation=f"{topic} 검증",
+            )
+
+        before = app.get_status(full=True)
+        assert before["tasks"] == []
+        assert before["queued_runs"] == []
+        assert len(before["plans"]) == len(topics)
+        assert {plan["run_id"] for plan in before["plans"]} == {run["id"]}
+        assert [plan["title"] for plan in before["plans"]] == list(topics)
+        assert before["approvals"]["execution"]["approved"] is False
+
+        app.apply_plan("PLAN-003", selected_approach="모델별 지원 추론 레벨 표시")
+        after = app.get_status(full=True)
+        for original, updated in zip(before["plans"], after["plans"], strict=True):
+            if original["stable_id"] == "PLAN-003":
+                assert updated["id"] == original["id"]
+                assert updated["title"] == original["title"]
+                assert updated["validation"] == original["validation"]
+                assert updated["selected_approach"] == "모델별 지원 추론 레벨 표시"
+            else:
+                assert updated == original
+
+        task_plans = {}
+        for number, topic in enumerate(topics, start=1):
+            for step in range(2):
+                task_id = f"TASK-{number * 2 - 1 + step:03d}"
+                plan_id = f"PLAN-{number:03d}"
+                task_plans[task_id] = plan_id
+                app.create_task(task_id, topic, plan_id, topic, "구현" if step == 0 else "검증", "검증 통과")
+        app.record_approval(decision="approved", prompt="모든 주제 구현·검증", source="explicit_user")
+        for task_id in task_plans:
+            app.start_task(task_id)
+            app.settle_task(task_id, status="Completed", result="완료", verification="검증 통과")
+
+        completed = app.get_status(full=True)
+        assert completed["active_run"]["id"] == run["id"]
+        assert completed["plan_task_execute"]["ok"] is True
+        assert completed["incomplete_tasks"] == 0
+        app.finish_run("모든 주제 완료")
+        app.finish_archive("topic-plans")
+        items = app.get_archive("topic-plans")["items"]
+        assert [item["title"] for item in items if item["kind"] == "plan"] == list(topics)
+        assert {item["stable_id"]: item["spec_id"] for item in items if item["kind"] == "task"} == task_plans
+
+
 def test_application_activates_dependent_run_only_after_finished_archive() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         _, app = workspace(tmp)
@@ -314,7 +376,7 @@ def test_non_planning_plan_without_tasks_offers_execution_or_completion() -> Non
             {
                 "name": "decide-after-plan",
                 "reason": (
-                    "The plan has no executable tasks. Finish the run for analysis or reporting scope; "
+                    "Ensure all topic plans are stored before task design. Finish the run for analysis or reporting scope; "
                     "create a task only when execution was explicitly requested."
                 ),
             }

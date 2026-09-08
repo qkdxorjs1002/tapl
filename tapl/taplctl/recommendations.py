@@ -31,7 +31,7 @@ def next_recommendations(
         return [
             recommendation(
                 "classify-request",
-                "Classify the prompt as one request or multiple independent requests before durable workflow work.",
+                "Summarize the whole request and identify topics for separate plans in one run; split runs only when requested.",
             )
         ]
 
@@ -39,7 +39,7 @@ def next_recommendations(
         return [
             recommendation(
                 "classify-request",
-                "The active run is fresh; split independent outcomes or summarize one cohesive request.",
+                "The active run is fresh; summarize the whole request and plan independent topics separately in this run.",
             )
         ]
 
@@ -69,7 +69,7 @@ def next_recommendations(
         return [
             recommendation(
                 "apply-plan",
-                "No plan exists for the active run; feed the plan JSON object on stdin.",
+                "Create a separate plan with a distinct plan_id for every independent topic in the active run before task design.",
             )
         ]
     if not tasks:
@@ -79,7 +79,7 @@ def next_recommendations(
             recommendation(
                 "decide-after-plan",
                 (
-                    "The plan has no executable tasks. Finish the run for analysis or reporting scope; "
+                    "Ensure all topic plans are stored before task design. Finish the run for analysis or reporting scope; "
                     "create a task only when execution was explicitly requested."
                 ),
             )
@@ -225,7 +225,7 @@ def planning_confirmation_recommendation() -> dict[str, str]:
     return recommendation(
         "confirm-after-plan",
         (
-            "Complete and report the requested planning scope, then use request_user_input to ask whether to keep "
+            "Complete and report all requested topic plans, then use request_user_input to ask whether to keep "
             "the run active, proceed to execution, or finish and archive it. Do not finish or archive before the "
             "user chooses."
         ),

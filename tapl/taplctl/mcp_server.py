@@ -94,7 +94,7 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
     tool_map: dict[str, str | list[str]] = {
         "configure-subagents": "request_user_input",
         "review-subagent-models": "request_user_input",
-        "classify-request": ["tapl_split_run", "tapl_summarize_run"],
+        "classify-request": ["tapl_summarize_run", "tapl_split_run"],
         "summarize-request": "tapl_summarize_run",
         "apply-plan": "tapl_apply_plan",
         "create-task": "tapl_create_task",
@@ -462,7 +462,7 @@ def create_server(
             ),
         ],
     ) -> dict[str, Any]:
-        """Split a fresh composite prompt before planning; add dependencies only when resolution order matters."""
+        """Split explicitly requested separate run lifecycles before planning. For multiple topics, prefer distinct PLANs in one run."""
 
         return await call_application_write(
             application,
@@ -488,7 +488,7 @@ def create_server(
         custom_fields: CustomFields = None,
         status: Annotated[str | None, Field(description=tapl_prompt.field_help("plan", "status"))] = None,
     ) -> dict[str, Any]:
-        """Create or update an adaptive-depth plan; Fast plans may be compact and omitted update fields are preserved."""
+        """Create or update one topic's plan. Use a distinct plan_id per topic in the same run before task design; reuse it only to update that topic. Omitted fields are preserved."""
 
         return await call_application_write(
             application,
