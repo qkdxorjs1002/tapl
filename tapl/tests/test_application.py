@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from unittest import mock
 
-from taplctl import db, mcp_server
+from taplctl import db, hooks, mcp_server, prompt, validation
 from taplctl.application import WorkflowApplication
 
 
@@ -67,6 +68,142 @@ def test_application_uses_fresh_connection_for_each_call() -> None:
         first = app.get_status()
         second = app.get_status()
         assert first["active_run"]["id"] == second["active_run"]["id"]
+
+
+def test_next_policy_revision_requires_explicit_retention_and_keeps_actions_fresh() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run("Read the workflow")
+        full = app.get_next()
+        assert full["workflow_policy"] == prompt.mcp_server_instructions(subagents=app._settings().subagents)
+        assert not full["policy_unchanged"]
+        revision = full["policy_revision"]
+        cached = app.get_next(known_policy_revision=revision)
+        assert cached["policy_unchanged"]
+        assert cached["policy_revision"] == revision
+        assert cached["recommendations"] == full["recommendations"]
+        assert not {"workflow_policy", "config", "subagent_guidance"} & cached.keys()
+        app.apply_plan("PLAN-001", title="Plan")
+        advanced = app.get_next(known_policy_revision=revision)
+        assert advanced["policy_unchanged"]
+        assert advanced["recommendations"] != cached["recommendations"]
+        assert advanced["recommendations"] == app.get_next_actions()["recommendations"]
+        for known in (None, "", "unknown"):
+            restored = app.get_next(known_policy_revision=known)
+            assert not restored["policy_unchanged"]
+            for key in ("workflow_policy", "config", "subagent_guidance"):
+                assert restored[key] == full[key]
+        assert not WorkflowApplication(app.workspace_root).get_next()["policy_unchanged"]
+
+
+def test_next_policy_revision_invalidates_every_delivered_policy_component() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root, app = workspace(tmp)
+        full = app.get_next()
+        revision = full["policy_revision"]
+        for renderer in ("mcp_server_instructions", "subagent_current_guidance"):
+            with mock.patch.object(prompt, renderer, return_value="Updated policy text"):
+                changed = app.get_next(known_policy_revision=revision)
+                assert not changed["policy_unchanged"]
+                assert changed["policy_revision"] != revision
+        config_file = root / ".tapl/config.toml"
+        config_file.write_text('[subagents]\nenabled=false\nsetup_complete=true\n', encoding="utf-8")
+        changed = app.get_next(known_policy_revision=revision)
+        assert not changed["policy_unchanged"]
+        assert changed["policy_revision"] != revision
+        assert changed["config"]["subagents"]["enabled"] is False
+        assert "disabled" in changed["subagent_guidance"]
+
+
+def test_next_catalog_changes_resend_policy_even_with_matching_revision() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        catalog = {"model-a": ["high"]}
+        app.configure_subagents(user_confirmed=True, enabled=True, strategy="balanced", models=catalog, available_models=catalog)
+        full = app.get_next(available_models=catalog)
+        same = app.get_next(available_models=catalog, known_policy_revision=full["policy_revision"])
+        assert same["policy_unchanged"]
+        assert not same["model_changes"]["changed"]
+        changed = app.get_next(available_models={"model-a": ["high", "xhigh"]}, known_policy_revision=full["policy_revision"])
+        assert not changed["policy_unchanged"]
+        assert changed["model_changes"]["changed"]
+        assert changed["workflow_policy"] == full["workflow_policy"]
+        assert changed["config"] == full["config"]
+        assert changed["recommendations"][0]["name"] == "review-subagent-models"
+
+
+def test_inspection_validates_one_snapshot_and_preserves_blockers() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run("Unapproved work")
+        app.apply_plan("PLAN-001", summary="REQ-001", validation="Check approvals")
+        for number in (1, 2):
+            app.create_task(f"TASK-{number:03d}", "Task", "PLAN-001", "Goal", "Edit", "Verify")
+        with app._connection() as conn:
+            expected = validation.validate_plan_task_execute(conn)
+        assert any(issue["code"] == "execution_approval_missing" for issue in expected["issues"])
+        for inspect in (app.get_status, app.get_context, app.get_next, app.get_next_actions):
+            with mock.patch.object(db, "status_payload", wraps=db.status_payload) as snapshots:
+                result = inspect()
+            assert snapshots.call_count == 1
+            if "plan_task_execute" in result:
+                assert result["plan_task_execute"] == expected
+            if "recommendations" in result:
+                assert result["recommendations"][0]["name"] == "approve-execution"
+        with app._connection() as conn:
+            with mock.patch.object(db, "status_payload", wraps=db.status_payload) as snapshots:
+                stopped = hooks.handle_event(conn, event="Stop", mode="enforce", tool=None, payload={})
+            assert snapshots.call_count == 1
+            assert stopped["block"] is True
+
+
+def test_status_snapshot_is_consistent_during_a_concurrent_commit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        app.summarize_run("Before")
+        app.apply_plan("PLAN-001", title="Snapshot fixture")
+        app.create_task("TASK-001", "Before", "PLAN-001", "Goal", "Edit", "Verify")
+        with app._connection() as reader, app._connection() as writer:
+            original = db.active_run
+            updated = False
+
+            def concurrent_update(conn):
+                nonlocal updated
+                run = original(conn)
+                if conn is reader and not updated:
+                    updated = True
+                    writer.execute("UPDATE workflow_runs SET request_summary = 'After' WHERE id = ?", (run["id"],))
+                    writer.execute("UPDATE items SET title = 'After' WHERE run_id = ? AND kind = 'task'", (run["id"],))
+                    writer.commit()
+                return run
+
+            with mock.patch.object(db, "active_run", side_effect=concurrent_update):
+                state = db.status_payload(reader)
+            assert state["active_run"]["request_summary"] == "Before"
+            assert state["tasks"][0]["title"] == "Before"
+            assert not reader.in_transaction
+            fresh = db.status_payload(reader)
+            assert fresh["active_run"]["request_summary"] == "After"
+            assert fresh["tasks"][0]["title"] == "After"
+
+
+def test_status_snapshot_preserves_caller_transaction_and_cleans_up_failure() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        with app._connection() as conn:
+            conn.execute("INSERT INTO meta(key, value) VALUES('pending-fixture', 'value')")
+            db.status_payload(conn)
+            assert conn.in_transaction
+            conn.rollback()
+            assert conn.execute("SELECT value FROM meta WHERE key = 'pending-fixture'").fetchone() is None
+            with mock.patch.object(db, "active_run", side_effect=RuntimeError("read failed")):
+                try:
+                    db.status_payload(conn)
+                except RuntimeError as error:
+                    assert str(error) == "read failed"
+                else:
+                    raise AssertionError("read failure must propagate")
+            assert not conn.in_transaction
 
 
 def test_application_derives_record_mode_from_work_type_and_workflow_mode() -> None:
@@ -496,6 +633,12 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
                 "reasoning_effort": "high",
             },
         }
+        settings = app._settings()
+        catalog = {entry.name: list(entry.reasoning_efforts) for entry in settings.subagents.models}
+        app.configure_subagents(
+            user_confirmed=True, enabled=True, strategy=settings.subagents.strategy,
+            models=catalog, available_models=catalog,
+        )
         manifest = app.dispatch_tasks(
             ["TASK-001", "TASK-002"],
             batch_id="BATCH-001",
@@ -503,6 +646,21 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
         )
         executions = {row["task_id"]: row for row in manifest["executions"]}
         assert set(executions) == {"TASK-001", "TASK-002"}
+
+        full_policy = app.get_next()
+        retained = app.get_next(known_policy_revision=full_policy["policy_revision"])
+        assert retained["policy_unchanged"]
+        assert retained["recommendations"] == full_policy["recommendations"]
+        assert retained["recommendations"][0]["name"] == "settle-parallel-task"
+        # Catalog review must not displace an active batch's settlement/recovery.
+        reviewed = app.get_next(
+            available_models={**catalog, "new-runtime": ["high"]},
+            known_policy_revision=full_policy["policy_revision"],
+        )
+        assert reviewed["model_changes"]["changed"]
+        assert not reviewed["policy_unchanged"]
+        assert reviewed["recommendations"][0]["name"] == "settle-parallel-task"
+        assert not any(action["name"] == "review-subagent-models" for action in reviewed["recommendations"])
 
         dispatched_status = app.get_status(full=True)
         dispatched_tasks = {

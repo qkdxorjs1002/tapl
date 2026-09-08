@@ -431,8 +431,8 @@ profile의 candidate는 setup이 runtime-supported model/effort pair를 제공�
 `subagents.profiles` 배열은 template profile을 완전히 대체하며 candidate는
 `subagents.models`에 있어야 합니다.
 
-활성화하면 TAPL은 delegation policy, 활성 profile, model/reasoning allowlist를 MCP
-instruction에 포함합니다. matching은 advisory입니다. agent는 모든 task 특성을 평가하고
+활성화하면 TAPL은 delegation policy, 활성 profile, model/reasoning allowlist를
+`tapl_get_next`로 전달합니다. matching은 advisory입니다. agent는 모든 task 특성을 평가하고
 가장 구체적인 profile을 우선하며 설정 순서는 동률일 때만 사용합니다. 필요한 경우 이유를
 기록해 profile/candidate를 override하고, 사용할 수 없는 candidate는 건너뛰며, 필요하면
 다른 allowlisted pair 또는 root로 fallback합니다. 설치된 `.tapl/config.toml`은 선택한
@@ -498,6 +498,24 @@ plan/task policy는 고정입니다. 실행 작업은 상세 plan, 명시적인 
 | Homebrew formula 충돌 | 다른 formula를 선택하기 전에 설치된 TAPL formula 제거 |
 
 ## 개발
+
+### 워크플로우 지침 전달
+
+MCP 초기화는 짧은 필수 bootstrap을 제공합니다. agent는 작업 전에 `tapl_get_next`에서
+권위 있는 전체 `workflow_policy`, `subagent_guidance`, `config`를 읽습니다. 기존 지침
+원문과 승인·계획·작업·위임·검증·복구·아카이브 규칙은 그대로 유지합니다.
+
+응답의 `policy_revision`은 전달한 정책·지침·설정 전체를 식별합니다. 호출자는 **해당
+내용 전체를 현재 컨텍스트에서 사용할 수 있을 때만** 이를 `known_policy_revision`으로
+전달할 수 있습니다. 같은 revision이면 변경 없는 필드만 생략하며, 다음 행동과 모델
+catalog 검사는 항상 새로 계산합니다. 알 수 없는 revision, 정책·설정 변경, 모델 catalog
+변경에는 전체 내용을 반환합니다. 새 세션, 컨텍스트 압축 후, 내용 유지가 불확실한 때에는
+revision을 생략해야 하며 요약만으로는 충분하지 않습니다. 이 선택 인자 없이 호출하면
+항상 전체 내용을 받습니다.
+
+상태 조회는 트랜잭션 안에서 읽은 동일 snapshot을 검증에 사용합니다. 쓰기 영수증은
+최신 다음 행동을 계속 제공하면서 응답에서 버릴 정책 문구의 생성만 생략합니다.
+실행 승인과 원자적 dispatch/settlement 검사는 변경하지 않습니다.
 
 ```sh
 uv --directory tapl sync --extra test

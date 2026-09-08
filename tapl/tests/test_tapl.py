@@ -292,7 +292,7 @@ class TaplRuntimeTests(unittest.TestCase):
             },
         }
         application = mock.Mock()
-        application.get_next.side_effect = RuntimeError("next unavailable")
+        application.get_next_actions.side_effect = RuntimeError("next unavailable")
         receipt = asyncio.run(
             tapl_mcp.call_application_write(
                 application,
@@ -726,6 +726,37 @@ class TaplRuntimeTests(unittest.TestCase):
                 self.assertEqual(tapl_db.get_meta(migrated)["schema_version"], "10")
             finally:
                 migrated.close()
+
+    def test_mcp_bootstrap_requires_complete_policy_before_work(self) -> None:
+        bootstrap = tapl_prompt.mcp_bootstrap_instructions()
+        self.assertLess(len(bootstrap), 2_200)
+        self.assertIn("Separate explicit delegation requests retain their own authority.", bootstrap)
+        for requirement in (
+            "not the full workflow policy",
+            "SessionStart is bootstrap only",
+            "including read-only helpers",
+            "`tapl_get_status` and `tapl_get_next`",
+            "until the full policy is available",
+            "complete `workflow_policy`, `subagent_guidance`, and config",
+            "authoritative TAPL contract",
+            "Recommendations never replace that policy",
+            "all exposed delegation model IDs and supported efforts",
+            "omit that argument if unavailable, never guess",
+            "complete matching policy, guidance and config remain in the current context",
+            "Omit it on a new session, after compaction",
+            "a summary is insufficient",
+            "approval",
+            "confirmed preferences and the live catalog",
+            "Never treat an unanswered question or timeout as approval",
+            "Root alone writes TAPL state",
+            "Parallel executable TAPL tasks require atomic dispatch",
+            "atomic dispatch",
+            "ready dependencies",
+            "exclusive owned_paths",
+            "exact execution_id settlement",
+            "recover interrupted or failed spawns",
+        ):
+            self.assertIn(requirement, bootstrap)
 
     def test_mcp_server_instructions_are_compact_and_keep_adaptive_policy(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions(

@@ -11,7 +11,7 @@ from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import __version__, config as tapl_config, db, prompt as tapl_prompt
+from . import __version__, db, prompt as tapl_prompt
 from .application import WorkflowApplication
 
 
@@ -290,7 +290,7 @@ async def call_application_write(
     result = await call_application(method, *args, **kwargs)
     receipt = mcp_write_receipt(result, operation=operation)
     try:
-        next_payload = await call_application(application.get_next)
+        next_payload = await call_application(application.get_next_actions)
         receipt["recommendations"] = mcp_next_recommendations(next_payload).get(
             "recommendations", []
         )
@@ -317,8 +317,7 @@ def create_server(
     application = WorkflowApplication(root)
     server_instructions = instructions
     if server_instructions is None:
-        settings = tapl_config.load(start=root)
-        server_instructions = tapl_prompt.mcp_server_instructions(subagents=settings.subagents)
+        server_instructions = tapl_prompt.mcp_bootstrap_instructions()
     server: MCPServer[None] = MCPServer(
         SERVER_NAME,
         title="TAPL workflow tools",
@@ -349,10 +348,16 @@ def create_server(
     @server.tool(name="tapl_get_next", title="Get safest TAPL action", annotations=READ_ONLY)
     async def get_next(
         available_models: Annotated[dict[str, list[str]] | None, Field(description="Current session delegation-tool model IDs and supported reasoning efforts. Supply on the first user request of a session or when this catalog changes to check for a reconfiguration suggestion. Omit if unavailable; never guess.")] = None,
+        known_policy_revision: Annotated[str | None, Field(description="Only supply a returned revision when its complete workflow_policy, subagent_guidance and config remain in the current context. Omit after compaction, in a new session, or whenever uncertain; summaries are insufficient.")] = None,
     ) -> dict[str, Any]:
-        """Return the safest next lifecycle action and current SubAgent settings. Compare a supplied runtime catalog without changing the config."""
+        """Load the full authoritative workflow policy and current safe action. A retained matching revision omits unchanged policy/config; action and model checks remain fresh."""
 
-        return mcp_next_recommendations(await call_application(application.get_next, available_models=available_models))
+        return mcp_next_recommendations(await call_application(
+            application.get_next,
+            available_models=available_models,
+            known_policy_revision=known_policy_revision,
+            workflow_policy=instructions,
+        ))
 
     @server.tool(name="tapl_configure_subagents", title="Save SubAgent preferences", annotations=WRITE)
     async def configure_subagents(

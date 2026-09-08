@@ -479,8 +479,8 @@ An explicit `profiles = []` disables profiles. Any non-empty user
 `subagents.profiles` array fully replaces the template profiles, and its
 candidates must be present in `subagents.models`.
 
-When enabled, TAPL includes its delegation policy, active profiles, and
-model/reasoning allowlist in MCP instructions. Matching remains advisory: the
+When enabled, TAPL delivers its delegation policy, active profiles, and
+model/reasoning allowlist through `tapl_get_next`. Matching remains advisory: the
 agent evaluates all task characteristics, prefers the most specific profile,
 and uses configured order only as a tie-break. It may choose and record a
 justified profile or candidate override, skips unavailable candidates, and
@@ -554,6 +554,27 @@ durable edits.
 | A Homebrew formula conflicts | Uninstall the installed TAPL formula before selecting another |
 
 ## Development
+
+### Workflow policy delivery
+
+MCP initialization provides a short mandatory bootstrap. Before work, agents load
+the complete, authoritative `workflow_policy`, `subagent_guidance`, and `config`
+from `tapl_get_next`. The workflow text and its approval, planning, task,
+delegation, verification, recovery, and archive rules remain intact.
+
+The response includes a `policy_revision` covering the exact policy, guidance,
+and config. A caller may send it as `known_policy_revision` only while **all of
+that content remains available in its current context**. A matching revision
+omits those unchanged fields; recommendations and model-catalog checks are
+always fresh. Unknown revisions, policy/config changes, and changed model
+catalogs return full content. Omit the revision on a new session, after
+compaction, or whenever retention is uncertain; a summary is insufficient.
+Calls without the optional revision always receive the full content.
+
+State inspection validates one transactionally consistent snapshot. Write
+receipts still return current next actions, without generating policy text that
+the receipt would discard. These optimizations do not change execution approval
+or the atomic dispatch/settlement checks.
 
 ```sh
 uv --directory tapl sync --extra test

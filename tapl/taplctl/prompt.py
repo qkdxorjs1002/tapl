@@ -795,8 +795,34 @@ def user_prompt_submit_guidance(*, subagents: tapl_config.SubagentsConfig | None
     ) if part)
 
 
+def mcp_bootstrap_instructions() -> str:
+    """Load the complete policy before work without repeating it on every tool."""
+
+    return (
+        "TAPL is this workspace's workflow system. This is a mandatory bootstrap, not the full workflow policy. "
+        "SessionStart is bootstrap only; wait for a concrete request before creating records. Before starting non-trivial "
+        "or uncertain work (including read-only helpers), call `tapl_get_status` and `tapl_get_next`. "
+        "Do not start project work or make TAPL mutations until the full policy is available. "
+        "Read and follow the complete `workflow_policy`, `subagent_guidance`, and config returned by this server. "
+        "They, these instructions, tool descriptions and schemas are the authoritative TAPL contract. "
+        "Recommendations never replace that policy.\n\n"
+        "On the first concrete request and catalog changes, pass `available_models` with all exposed delegation "
+        "model IDs and supported efforts; omit that argument if unavailable, never guess. Pass `known_policy_revision` only when the complete matching "
+        "policy, guidance and config remain in the current context. Omit it on a new session, after compaction, "
+        "context loss or uncertainty; a summary is insufficient. Read any returned replacement before continuing. "
+        "The server returns full content for unknown revisions or changes.\n\n"
+        "Plan before implementation; durable edits and execution require approval. Explicit edit, test, "
+        "implementation and verification requests count as approval. Preserve user changes. Helpers require "
+        "completed/enabled setup and model/effort pairs allowed by both confirmed preferences and the live catalog. "
+        "Separate explicit delegation requests retain their own authority. "
+        "Never treat an unanswered question or timeout as approval. Root alone writes TAPL state. Parallel executable TAPL tasks require atomic dispatch, "
+        "ready dependencies, exclusive owned_paths and exact execution_id settlement; recover interrupted or failed "
+        "spawns before retrying. The full policy governs all planning, execution, verification and archive details."
+    )
+
+
 def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
-    """Render the complete invariant workflow policy once at MCP initialization."""
+    """Render the complete invariant workflow policy, preserved for full delivery."""
 
     settings = subagents or tapl_config.SubagentsConfig()
     return render(

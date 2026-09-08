@@ -19,7 +19,16 @@ def validate_plan_task_execute(
     *,
     include_guidance: bool = False,
 ) -> dict[str, Any]:
-    state = db.status_payload(conn)
+    return validate_workflow_state(db.status_payload(conn), include_guidance=include_guidance)
+
+
+def validate_workflow_state(
+    state: dict[str, Any],
+    *,
+    include_guidance: bool = False,
+) -> dict[str, Any]:
+    """Apply the complete validation policy to one already-read snapshot."""
+
     if not state.get("active_run"):
         result: dict[str, Any] = {
             "ok": True,

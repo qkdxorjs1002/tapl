@@ -8,7 +8,7 @@ from unittest import mock
 
 from mcp import Client
 
-from taplctl import db
+from taplctl import config, db, prompt
 from taplctl import mcp_server
 
 
@@ -27,6 +27,47 @@ def test_mcp_module_has_no_cli_subprocess_data_plane() -> None:
     assert "TaplCliError" not in source
     assert not hasattr(mcp_server, "run_taplctl")
     assert not hasattr(mcp_server, "run_taplctl_write")
+
+
+def test_mcp_bootstrap_loads_full_policy_and_supports_explicit_retention() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = _workspace(tmp)
+        with mock.patch.object(mcp_server, "MCPServer", wraps=mcp_server.MCPServer) as factory:
+            server = mcp_server.create_server(workspace_root=root)
+        assert factory.call_args.kwargs["instructions"] == prompt.mcp_bootstrap_instructions()
+
+        async def exercise() -> None:
+            async with Client(server) as client:
+                full = (await client.call_tool("tapl_get_next", {})).structured_content
+                expected = prompt.mcp_server_instructions(subagents=config.load(start=root).subagents)
+                assert full["workflow_policy"] == expected
+                assert full["policy_unchanged"] is False
+                cached = (await client.call_tool("tapl_get_next", {"known_policy_revision": full["policy_revision"]})).structured_content
+                assert cached["policy_unchanged"] is True
+                assert "workflow_policy" not in cached
+                assert cached["recommendations"] == full["recommendations"]
+                reloaded = (await client.call_tool("tapl_get_next", {})).structured_content
+                assert reloaded["workflow_policy"] == expected
+            async with Client(server) as fresh_client:
+                fresh = (await fresh_client.call_tool("tapl_get_next", {})).structured_content
+                assert fresh["workflow_policy"] == expected
+
+        asyncio.run(exercise())
+
+
+def test_mcp_custom_instructions_remain_authoritative_in_full_policy() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        custom = "Custom host policy"
+        with mock.patch.object(mcp_server, "MCPServer", wraps=mcp_server.MCPServer) as factory:
+            server = mcp_server.create_server(workspace_root=_workspace(tmp), instructions=custom)
+        assert factory.call_args.kwargs["instructions"] == custom
+
+        async def exercise() -> None:
+            async with Client(server) as client:
+                full = (await client.call_tool("tapl_get_next", {})).structured_content
+                assert full["workflow_policy"] == custom
+
+        asyncio.run(exercise())
 
 
 def test_mcp_exposes_native_application_tools() -> None:

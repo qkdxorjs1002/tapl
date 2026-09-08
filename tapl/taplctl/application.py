@@ -8,6 +8,8 @@ SQLite connection so callers may safely run methods in worker threads.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -75,7 +77,7 @@ class WorkflowApplication:
     ) -> dict[str, Any]:
         with self._connection() as conn:
             state = db.status_payload(conn)
-            check = validation.validate_plan_task_execute(conn)
+        check = validation.validate_workflow_state(state)
         fields = (
             "id", "stable_id", "kind", "title", "status", "source",
             "archived", "created_at", "updated_at", "custom_fields",
@@ -116,10 +118,10 @@ class WorkflowApplication:
             ]
         return payload
 
-    def get_next(self, *, available_models: dict[str, list[str]] | None = None) -> dict[str, Any]:
+    def _next_context(self) -> tuple[dict[str, Any], config.TaplConfig, list[dict[str, str]]]:
         with self._connection() as conn:
             state = db.status_payload(conn)
-            check = validation.validate_plan_task_execute(conn)
+        check = validation.validate_workflow_state(state)
         settings = self._settings()
         actions = recommendations.next_recommendations(state, check)
         if not settings.subagents.setup_complete and not state.get("active_batches"):
@@ -127,11 +129,38 @@ class WorkflowApplication:
                 "name": "configure-subagents",
                 "reason": prompt.subagent_setup_guidance(),
             })
+        return state, settings, actions
+
+    def get_next_actions(self) -> dict[str, Any]:
+        """Compute fresh receipt recommendations without rendering policy/config."""
+
+        _, _, actions = self._next_context()
+        return {"ok": True, "recommendations": actions}
+
+    def get_next(
+        self,
+        *,
+        available_models: dict[str, list[str]] | None = None,
+        known_policy_revision: str | None = None,
+        workflow_policy: str | None = None,
+    ) -> dict[str, Any]:
+        state, settings, actions = self._next_context()
+        policy = {
+            "workflow_policy": (
+                prompt.mcp_server_instructions(subagents=settings.subagents)
+                if workflow_policy is None else workflow_policy
+            ),
+            "config": settings.as_dict(),
+            "subagent_guidance": prompt.subagent_current_guidance(settings.subagents),
+        }
+        revision = hashlib.sha256(
+            json.dumps(policy, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest()
         payload = {
             "ok": True,
             "recommendations": actions,
-            "config": settings.as_dict(),
-            "subagent_guidance": prompt.subagent_current_guidance(settings.subagents),
+            "policy_revision": revision,
+            **policy,
         }
         if available_models is not None:
             current = config.parse_subagent_models(available_models, enabled=False, key="available_models")
@@ -160,6 +189,14 @@ class WorkflowApplication:
                     # Legacy allowlists remain active; never reinterpret their
                     # chosen subset as a full historical runtime catalog.
                     payload["model_catalog_note"] = "No confirmed runtime catalog exists for this legacy config. Keep current preferences; offer to record the current catalog once for future change detection. Save only after the user's answer."
+        # Content identity is not proof of retention. The caller must explicitly
+        # attest that this exact bundle remains available in its current context.
+        # Model-catalog changes always resend it so preference review is self-contained.
+        unchanged = known_policy_revision == revision and not payload.get("model_changes", {}).get("changed")
+        payload["policy_unchanged"] = unchanged
+        if unchanged:
+            for key in policy:
+                del payload[key]
         return payload
 
     def configure_subagents(

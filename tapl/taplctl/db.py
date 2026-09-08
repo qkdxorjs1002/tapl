@@ -2518,6 +2518,21 @@ def active_execution_state(
 
 
 def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Read one consistent snapshot without committing a caller's transaction."""
+
+    if conn.in_transaction:
+        return _status_payload(conn)
+    conn.execute("BEGIN")
+    try:
+        state = _status_payload(conn)
+        conn.commit()
+        return state
+    except BaseException:
+        conn.rollback()
+        raise
+
+
+def _status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
     run = active_run(conn)
     run_id = run["id"] if run else None
     task_counts = {status: 0 for status in TASK_STATUSES}
