@@ -300,11 +300,41 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         named_steps = {step.get("name"): step for step in steps if step.get("name")}
 
         runtime_step = named_steps["Build MCP runtime wheelhouses"]["run"]
-        for target in ("macos-arm64", "macos-x86_64", "linux-arm64", "linux-x86_64"):
+        for target in ("linux-arm64", "linux-x86_64"):
             self.assertIn(target, runtime_step)
+        self.assertNotIn("macos-", runtime_step)
         self.assertIn("--only-binary=:all:", runtime_step)
         self.assertIn("mcp==", runtime_step)
         self.assertIn("--sort=name", runtime_step)
+
+        macos_job = workflow["jobs"]["macos-runtime"]
+        self.assertTrue(macos_job["runs-on"].startswith("macos-"))
+        self.assertEqual(
+            {item["target"] for item in macos_job["strategy"]["matrix"]["include"]},
+            {"macos-arm64", "macos-x86_64"},
+        )
+        self.assertIn("macos-runtime", workflow["jobs"]["release"]["needs"])
+        macos_steps = {step["name"]: step for step in macos_job["steps"]}
+        signer = macos_steps["Sign and verify macOS runtime wheels"]
+        self.assertNotIn("if", signer)
+        self.assertNotIn("continue-on-error", signer)
+        self.assertIn("sign_macos_runtime.sh", signer["run"])
+        self.assertEqual(signer["env"]["APPLE_TEAM_ID"], "${{ vars.APPLE_TEAM_ID }}")
+        self.assertEqual(
+            signer["env"]["MACOS_CERTIFICATE_P12_BASE64"],
+            "${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}",
+        )
+        macos_names = list(macos_steps)
+        self.assertLess(
+            macos_names.index("Sign and verify macOS runtime wheels"),
+            macos_names.index("Archive signed macOS runtime"),
+        )
+        download = named_steps["Download signed macOS runtimes"]
+        self.assertEqual(download["with"]["pattern"], "signed-runtime-macos-*")
+        self.assertEqual(download["with"]["path"], "release-dist")
+        self.assertIs(download["with"]["merge-multiple"], True)
+        names = [step.get("name") for step in steps]
+        self.assertLess(names.index("Download signed macOS runtimes"), names.index("Prepare release assets"))
 
         validation_step = named_steps["Validate release assets"]
         for env_name in (

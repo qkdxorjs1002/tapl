@@ -45,9 +45,120 @@ jobs:
       - name: Run Windows installer tests (stdlib-only fixtures)
         run: python -m unittest -v tapl.tests.test_installer_windows
 
+  macos-runtime:
+    name: Sign macOS runtime (${{ matrix.target }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            platform: macosx_11_0_arm64
+          - target: macos-x86_64
+            platform: macosx_10_13_x86_64
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Require macOS signing configuration
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Set ${name} before releasing macOS runtimes; see .github/MACOS_SIGNING.md." >&2
+              exit 1
+            fi
+          done
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve release version
+        id: version
+        run: >-
+          python .github/scripts/release_version.py
+          "${GITHUB_REF_NAME}"
+          --github-output "${GITHUB_OUTPUT}"
+
+      - name: Download macOS runtime wheels
+        env:
+          RUNTIME_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install 'wheel==0.46.2'
+          mcp_requirement="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          project = tomllib.loads(Path("tapl/pyproject.toml").read_text(encoding="utf-8"))["project"]
+          matches = [item for item in project["dependencies"] if item.startswith("mcp==")]
+          if len(matches) != 1:
+              raise SystemExit("tapl must pin exactly one mcp== runtime dependency")
+          print(matches[0])
+          PY
+          )"
+          python -m pip download \
+            --disable-pip-version-check --only-binary=:all: \
+            --platform "${RUNTIME_PLATFORM}" --python-version 3.12 --implementation cp \
+            --dest "${RUNNER_TEMP}/wheelhouse" "${mcp_requirement}"
+
+      - name: Sign and verify macOS runtime wheels
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        shell: bash
+        run: bash .github/scripts/sign_macos_runtime.sh "${RUNNER_TEMP}/wheelhouse"
+
+      - name: Archive signed macOS runtime
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          RUNTIME_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import gzip
+          import os
+          from pathlib import Path
+          import tarfile
+
+          wheelhouse = Path(os.environ["RUNNER_TEMP"]) / "wheelhouse"
+          archive = Path("release-dist") / (
+              f"taplctl-mcp-runtime-{os.environ['TAG_VERSION']}-{os.environ['RUNTIME_TARGET']}.tar.gz"
+          )
+          archive.parent.mkdir(exist_ok=True)
+          with archive.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as zipped:
+              with tarfile.open(fileobj=zipped, mode="w") as output:
+                  for wheel in sorted(wheelhouse.glob("*.whl")):
+                      info = output.gettarinfo(str(wheel), arcname=f"./{wheel.name}")
+                      info.uid = info.gid = info.mtime = 0
+                      info.uname = info.gname = ""
+                      info.mode = 0o644
+                      with wheel.open("rb") as data:
+                          output.addfile(info, data)
+          PY
+
+      - name: Upload signed macOS runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-runtime-${{ matrix.target }}
+          path: release-dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
   release:
     name: Build and publish release
-    needs: windows-installer-preflight
+    needs: [windows-installer-preflight, macos-runtime]
     outputs:
       prerelease: ${{ steps.version.outputs.prerelease }}
       version: ${{ steps.version.outputs.version }}
@@ -160,8 +271,8 @@ jobs:
           PY
           )"
 
-          targets=(macos-arm64 macos-x86_64 linux-arm64 linux-x86_64)
-          platforms=(macosx_11_0_arm64 macosx_10_13_x86_64 manylinux2014_aarch64 manylinux2014_x86_64)
+          targets=(linux-arm64 linux-x86_64)
+          platforms=(manylinux2014_aarch64 manylinux2014_x86_64)
           for index in "${!targets[@]}"; do
             target="${targets[index]}"
             platform="${platforms[index]}"
@@ -208,6 +319,13 @@ jobs:
               -czf "${archive}" \
               .
           done
+
+      - name: Download signed macOS runtimes
+        uses: actions/download-artifact@v4
+        with:
+          pattern: signed-runtime-macos-*
+          merge-multiple: true
+          path: release-dist
 
       - name: Build VS Code extension package
         working-directory: vscode-extension
