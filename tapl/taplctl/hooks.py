@@ -108,7 +108,7 @@ def handle_event(
                 tapl_prompt.stop_active_executions_message(len(active_executions)),
             )
             block = mode == "enforce"
-        check = validation.validate_plan_task_execute(conn)
+        check = validation.validate_workflow_state(state)
         issue_message = validation.format_issues(check)
         if issue_message:
             message = combine_messages(message, issue_message)

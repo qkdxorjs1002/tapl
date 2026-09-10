@@ -231,7 +231,7 @@ ${planning_approval_guidance}
 
 ## Tasks And Execution
 
-Tasks are executable implementation or verification work from the stored plan, not task-design work.
+Tasks execute their topic's stored plan, not task-design work. Set spec_id to that PLAN; task ids are unique per run.
 
 - ${task_granularity_guidance}
 ${task_execution_order_guidance}
@@ -564,13 +564,16 @@ def summarize_request_next_action() -> str:
         "target on root; for unclear target/dependencies/validation boundaries, prefer one eligible read-only helper "
         "under current subagent_guidance without a full root prescout. Share at most three targeted read-only local "
         "lookups total across root and all helpers before selecting workflow_mode; root allocates the remaining budget "
-        "and makes the final classification. Then use `tapl_split_run` for independent outcomes or "
-        "`tapl_summarize_run` for one cohesive request."
+        "and makes the final classification. Use `tapl_summarize_run` for the whole request, then create a separate "
+        "PLAN per independent topic in the same run. Use `tapl_split_run` only when separate run lifecycles are requested."
     )
 
 
 def create_plan_next_action() -> str:
-    return "Create or update plan state with `tapl_apply_plan` before task design."
+    return (
+        "Use `tapl_apply_plan` for every independent topic before task design; assign distinct plan_ids "
+        "such as PLAN-001 and PLAN-002 in the same run. Keep each topic's requirements and validation in its own plan."
+    )
 
 
 def lightweight_run_next_action() -> str:
@@ -594,7 +597,7 @@ def archive_lightweight_run_next_action() -> str:
 
 def decide_after_plan_next_action() -> str:
     return (
-        "Plan is ready and no tasks exist; agent must judge the user's requested scope directly. "
+        "Ensure all independent topics have distinct stored plans before task design; judge the user's requested scope directly. "
         "If work_type=planning or the user limited work to planning, report the plan/status, keep the run active, and use "
         "request_user_input to ask whether to keep it active, proceed to execution, or finish and archive it. Do not call "
         "`tapl_finish_run` or `tapl_finish_archive` before the user chooses. For analysis or reporting scope, finish the run "
@@ -634,7 +637,7 @@ def run_stopped_during_task_next_action(label: str) -> str:
     return (
         f"Run stopped during task execution at {label}; get user approval before durable edits: "
         f"continue execution from {label} and finish existing work first, defer the existing run and archive it, "
-        "or merge the work into one plan with the new request."
+        "or combine requests in this run while preserving separate topic plans."
     )
 
 
@@ -649,14 +652,16 @@ def run_stopped_during_batch_next_action(labels: str) -> str:
 def incomplete_run_next_action() -> str:
     return (
         "Open run has incomplete tasks; get user approval before durable edits: "
-        "finish existing work first, defer the existing run and archive it, or merge the work into one plan."
+        "finish existing work first, defer the existing run and archive it, or combine requests in this run "
+        "while preserving separate topic plans."
     )
 
 
 def different_request_next_action() -> str:
     return (
         "This request appears different from the open run; get user approval before durable edits: "
-        "finish existing work first, defer the existing run and archive it, or merge the work into one plan."
+        "finish existing work first, defer the existing run and archive it, or combine requests in this run "
+        "while preserving separate topic plans."
     )
 
 
@@ -793,8 +798,34 @@ def user_prompt_submit_guidance(*, subagents: tapl_config.SubagentsConfig | None
     ) if part)
 
 
+def mcp_bootstrap_instructions() -> str:
+    """Load the complete policy before work without repeating it on every tool."""
+
+    return (
+        "TAPL is this workspace's workflow system. This is a mandatory bootstrap, not the full workflow policy. "
+        "SessionStart is bootstrap only; wait for a concrete request before creating records. Before starting non-trivial "
+        "or uncertain work (including read-only helpers), call `tapl_get_status` and `tapl_get_next`. "
+        "Do not start project work or make TAPL mutations until the full policy is available. "
+        "Read and follow the complete `workflow_policy`, `subagent_guidance`, and config returned by this server. "
+        "They, these instructions, tool descriptions and schemas are the authoritative TAPL contract. "
+        "Recommendations never replace that policy.\n\n"
+        "On the first concrete request and catalog changes, pass `available_models` with all exposed delegation "
+        "model IDs and supported efforts; omit that argument if unavailable, never guess. Pass `known_policy_revision` only when the complete matching "
+        "policy, guidance and config remain in the current context. Omit it on a new session, after compaction, "
+        "context loss or uncertainty; a summary is insufficient. Read any returned replacement before continuing. "
+        "The server returns full content for unknown revisions or changes.\n\n"
+        "Plan before implementation; durable edits and execution require approval. Explicit edit, test, "
+        "implementation and verification requests count as approval. Preserve user changes. Helpers require "
+        "completed/enabled setup and model/effort pairs allowed by both confirmed preferences and the live catalog. "
+        "Separate explicit delegation requests retain their own authority. "
+        "Never treat an unanswered question or timeout as approval. Root alone writes TAPL state. Parallel executable TAPL tasks require atomic dispatch, "
+        "ready dependencies, exclusive owned_paths and exact execution_id settlement; recover interrupted or failed "
+        "spawns before retrying. The full policy governs all planning, execution, verification and archive details."
+    )
+
+
 def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
-    """Render the complete invariant workflow policy once at MCP initialization."""
+    """Render the complete invariant workflow policy, preserved for full delivery."""
 
     settings = subagents or tapl_config.SubagentsConfig()
     return render(
@@ -926,12 +957,11 @@ def stable_id_guidance() -> str:
 def workflow_order_guidance() -> str:
     return (
         "Lifecycle order: `tapl_get_status`/`tapl_get_next` -> resolve residual run direction with user approval -> "
-        "identify independent outcomes and their work_type -> perform the bounded local scout when workspace facts "
-        "are needed -> call `tapl_split_run` when needed, otherwise `tapl_summarize_run` with the selected "
-        "work_type and evidence-based `fast`, `standard`, or `strict` workflow_mode -> follow emitted memory cues and inspect original sources before "
-        "planning. A derived lightweight record may finish/archive "
-        "without plan/tasks and `tapl_apply_plan` promotes record_mode to planned. Each split child explores relevant memory cues/history "
-        "before its own plan. Planned records continue through `tapl_apply_plan` -> "
+        "identify independent topics -> bounded local scout when needed -> `tapl_summarize_run` with the whole request's "
+        "work_type and evidence-based workflow_mode -> inspect emitted memory cues and their original sources, or search "
+        "relevant history when insufficient -> `tapl_apply_plan` for each topic before task design. Lightweight records "
+        "may finish/archive without plan/tasks; `tapl_apply_plan` promotes record_mode to planned. Use separate runs "
+        "only when requested. Planned records continue through "
         "`tapl_create_task` -> `tapl_approve_execution` -> sequential start and settlement tools or "
         "`tapl_dispatch_tasks` plus execution-id settlement -> `tapl_finish_run` -> `tapl_finish_archive`."
     )
@@ -945,7 +975,8 @@ def workflow_mode_guidance() -> str:
         "read-only helper per current subagent_guidance. Skip for self-contained requests or "
         "sufficient context; during the scout do not edit/test, use external research/TAPL history, or create plan/tasks. "
         "Root alone classifies. "
-        "Choose mode from surface/coupling/uncertainty/risk/validation. Mixed uses its highest child mode. First choose "
+        "Choose mode from surface/coupling/uncertainty/risk/validation. Mixed uses its highest child mode. "
+        "Use mixed for differing topic work types and the highest topic mode. First choose "
         "Strict for security/privacy/permission, schema/destructive work, public compatibility, deploy/external writes, "
         "incident/data-correctness, irreversible impact, or conflicting evidence. Choose Fast only when every dimension "
         "is known low: one objective/surface, reversible change, one validation, closed boundaries, and implementation "
@@ -960,12 +991,11 @@ def workflow_mode_guidance() -> str:
 
 def request_partition_guidance() -> str:
     return (
-        "Before summarizing or planning, identify independently deliverable outcomes in the whole input. If at least two can "
-        "each be completed and reported alone, call `tapl_split_run` and give each child its own summary and classification. "
-        "Do not split steps, constraints, examples, or acceptance criteria serving one outcome. Preserve input order; add "
-        "`depends_on` only for stated order or when a later outcome consumes an earlier one, and reference earlier keys only. "
-        "Leave independent siblings dependency-free. Plan only the active child; finishing and archiving it activates the next "
-        "ready child. Never share one plan across split runs."
+        "Default to one RUN with a separate PLAN per independent topic, using distinct plan_ids (PLAN-001, PLAN-002, ...) "
+        "in input order. Write all topic plans before task design with their own requirements, approach and validation. "
+        "Never overwrite another topic's plan. Keep steps, constraints, examples and acceptance criteria for one outcome "
+        "together. Use `tapl_split_run` only for explicitly requested separate run lifecycles: earlier-key dependencies "
+        "only for stated order or consumed results; plan the active child, finish/archive, then plan the next ready child."
     )
 
 
@@ -1021,7 +1051,8 @@ def task_plan_dependency_guidance() -> str:
     return (
         "Create or update executable task records only after the source plan/spec exists; "
         "tasks derive from the stored plan/spec and should not represent planning or task-design work; "
-        "set `spec_id` to the stored numeric plan/spec id, e.g. `PLAN-001` or `SPEC-001`."
+        "set `spec_id` to that topic's stored numeric plan/spec id, e.g. `PLAN-001` or `PLAN-002`. "
+        "Task ids remain unique across the run; record real task dependencies across plans without merging their scope."
     )
 
 

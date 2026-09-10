@@ -20,7 +20,7 @@ def build_context(
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     state = db.status_payload(conn)
-    plan_task = validation.validate_plan_task_execute(conn)
+    plan_task = validation.validate_workflow_state(state)
     prompt = prompt_summary(payload or {})
     covered_issue_codes = covered_validation_issue_codes(state, plan_task)
     return {

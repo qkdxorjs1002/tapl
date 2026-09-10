@@ -34,6 +34,17 @@ Ask for an outcome, in your own words:
 The example below traces the permission-check call path, records the evidence,
 and saves the investigation with its follow-up work.
 
+When one request contains independent topics, Codex keeps one RUN and writes a separate PLAN for each topic before designing TASKs. For example, a request covering these four topics produces:
+
+| PLAN | Topic |
+| --- | --- |
+| PLAN-001 | Regex filtering for irregular hostnames |
+| PLAN-002 | A default Codex CLI environment for analysis |
+| PLAN-003 | Model reasoning level settings |
+| PLAN-004 | Ad detection through web page elements |
+
+Each PLAN has its own requirements, approach, and validation; each TASK references its topic's PLAN through `spec_id`. Steps, constraints, examples, and tests serving one outcome stay together. Separate RUN lifecycles are used only when explicitly requested.
+
 <p align="center">
   <img src="assets/readme/workflow-en.gif" width="100%" alt="Illustrative Codex progress messages: start a permission-check investigation, review history, define the scope, trace the call path, record evidence, and archive findings and follow-up work." />
 </p>
@@ -151,6 +162,27 @@ manages SubAgents.
 - [Issues](https://github.com/qkdxorjs1002/tapl/issues) — report a bug or request a feature.
 
 ## Development
+
+### Workflow policy delivery
+
+MCP initialization provides a short mandatory bootstrap. Before work, agents load
+the complete, authoritative `workflow_policy`, `subagent_guidance`, and `config`
+from `tapl_get_next`. The workflow text and its approval, planning, task,
+delegation, verification, recovery, and archive rules remain intact.
+
+The response includes a `policy_revision` covering the exact policy, guidance,
+and config. A caller may send it as `known_policy_revision` only while **all of
+that content remains available in its current context**. A matching revision
+omits those unchanged fields; recommendations and model-catalog checks are
+always fresh. Unknown revisions, policy/config changes, and changed model
+catalogs return full content. Omit the revision on a new session, after
+compaction, or whenever retention is uncertain; a summary is insufficient.
+Calls without the optional revision always receive the full content.
+
+State inspection validates one transactionally consistent snapshot. Write
+receipts still return current next actions, without generating policy text that
+the receipt would discard. These optimizations do not change execution approval
+or the atomic dispatch/settlement checks.
 
 ```sh
 uv --directory tapl sync --extra test

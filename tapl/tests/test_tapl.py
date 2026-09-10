@@ -292,7 +292,7 @@ class TaplRuntimeTests(unittest.TestCase):
             },
         }
         application = mock.Mock()
-        application.get_next.side_effect = RuntimeError("next unavailable")
+        application.get_next_actions.side_effect = RuntimeError("next unavailable")
         receipt = asyncio.run(
             tapl_mcp.call_application_write(
                 application,
@@ -727,6 +727,37 @@ class TaplRuntimeTests(unittest.TestCase):
             finally:
                 migrated.close()
 
+    def test_mcp_bootstrap_requires_complete_policy_before_work(self) -> None:
+        bootstrap = tapl_prompt.mcp_bootstrap_instructions()
+        self.assertLess(len(bootstrap), 2_200)
+        self.assertIn("Separate explicit delegation requests retain their own authority.", bootstrap)
+        for requirement in (
+            "not the full workflow policy",
+            "SessionStart is bootstrap only",
+            "including read-only helpers",
+            "`tapl_get_status` and `tapl_get_next`",
+            "until the full policy is available",
+            "complete `workflow_policy`, `subagent_guidance`, and config",
+            "authoritative TAPL contract",
+            "Recommendations never replace that policy",
+            "all exposed delegation model IDs and supported efforts",
+            "omit that argument if unavailable, never guess",
+            "complete matching policy, guidance and config remain in the current context",
+            "Omit it on a new session, after compaction",
+            "a summary is insufficient",
+            "approval",
+            "confirmed preferences and the live catalog",
+            "Never treat an unanswered question or timeout as approval",
+            "Root alone writes TAPL state",
+            "Parallel executable TAPL tasks require atomic dispatch",
+            "atomic dispatch",
+            "ready dependencies",
+            "exclusive owned_paths",
+            "exact execution_id settlement",
+            "recover interrupted or failed spawns",
+        ):
+            self.assertIn(requirement, bootstrap)
+
     def test_mcp_server_instructions_are_compact_and_keep_adaptive_policy(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions(
             subagents=tapl_config.SubagentsConfig(setup_complete=True)
@@ -735,10 +766,16 @@ class TaplRuntimeTests(unittest.TestCase):
         # Includes the bounded associative-memory policy; hook bootstrap stays unchanged.
         self.assertLess(len(instructions), 11_300)
         for guidance in (
-            "identify independently deliverable outcomes",
-            "call `tapl_split_run`",
-            "add `depends_on` only for stated order",
-            "Never share one plan across split runs",
+            "Default to one RUN",
+            "separate PLAN per independent topic",
+            "distinct plan_ids (PLAN-001, PLAN-002, ...)",
+            "Write all topic plans before task design",
+            "Never overwrite another topic's plan",
+            "Keep steps, constraints, examples and acceptance criteria for one outcome together",
+            "Use `tapl_split_run` only for explicitly requested separate run lifecycles",
+            "earlier-key dependencies only for stated order",
+            "plan the active child, finish/archive, then plan the next ready child",
+            "Set spec_id to that PLAN",
         ):
             self.assertIn(guidance, instructions)
         for strategy in tapl_config.SUBAGENT_STRATEGIES:
@@ -857,10 +894,24 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertIn("at most three targeted read-only local lookups", next_action)
         self.assertIn("lookups total across root and all helpers", next_action)
         self.assertIn("before selecting workflow_mode", next_action)
-        self.assertIn("`tapl_split_run` for independent outcomes", next_action)
-        self.assertIn("`tapl_summarize_run` for one cohesive request", next_action)
+        self.assertIn("`tapl_summarize_run` for the whole request", next_action)
+        self.assertIn("separate PLAN per independent topic in the same run", next_action)
+        self.assertIn("`tapl_split_run` only when separate run lifecycles are requested", next_action)
         self.assertNotIn("Classify once from the request and readily available context", guidance)
         self.assertNotIn("Do not search, query history, or create plan/tasks solely to classify", guidance)
+
+    def test_topic_planning_guidance_survives_task_design_and_recovery(self) -> None:
+        self.assertIn("every independent topic before task design", tapl_prompt.create_plan_next_action())
+        self.assertIn("all independent topics have distinct stored plans", tapl_prompt.decide_after_plan_next_action())
+        self.assertIn("that topic's stored numeric plan/spec id", tapl_prompt.task_plan_dependency_guidance())
+        self.assertIn("the highest topic mode", tapl_prompt.workflow_mode_guidance())
+        for action in (
+            tapl_prompt.run_stopped_during_task_next_action("TASK-001"),
+            tapl_prompt.incomplete_run_next_action(),
+            tapl_prompt.different_request_next_action(),
+        ):
+            self.assertNotIn("merge the work into one plan", action)
+            self.assertIn("preserving separate topic plans", action)
 
     def test_preclassification_scout_routes_known_and_unclear_scope(self) -> None:
         # Both entry points must retain the same conditional routing before mode selection.

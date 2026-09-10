@@ -8,7 +8,7 @@ from unittest import mock
 
 from mcp import Client
 
-from taplctl import db
+from taplctl import config, db, prompt
 from taplctl import mcp_server
 
 
@@ -27,6 +27,47 @@ def test_mcp_module_has_no_cli_subprocess_data_plane() -> None:
     assert "TaplCliError" not in source
     assert not hasattr(mcp_server, "run_taplctl")
     assert not hasattr(mcp_server, "run_taplctl_write")
+
+
+def test_mcp_bootstrap_loads_full_policy_and_supports_explicit_retention() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = _workspace(tmp)
+        with mock.patch.object(mcp_server, "MCPServer", wraps=mcp_server.MCPServer) as factory:
+            server = mcp_server.create_server(workspace_root=root)
+        assert factory.call_args.kwargs["instructions"] == prompt.mcp_bootstrap_instructions()
+
+        async def exercise() -> None:
+            async with Client(server) as client:
+                full = (await client.call_tool("tapl_get_next", {})).structured_content
+                expected = prompt.mcp_server_instructions(subagents=config.load(start=root).subagents)
+                assert full["workflow_policy"] == expected
+                assert full["policy_unchanged"] is False
+                cached = (await client.call_tool("tapl_get_next", {"known_policy_revision": full["policy_revision"]})).structured_content
+                assert cached["policy_unchanged"] is True
+                assert "workflow_policy" not in cached
+                assert cached["recommendations"] == full["recommendations"]
+                reloaded = (await client.call_tool("tapl_get_next", {})).structured_content
+                assert reloaded["workflow_policy"] == expected
+            async with Client(server) as fresh_client:
+                fresh = (await fresh_client.call_tool("tapl_get_next", {})).structured_content
+                assert fresh["workflow_policy"] == expected
+
+        asyncio.run(exercise())
+
+
+def test_mcp_custom_instructions_remain_authoritative_in_full_policy() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        custom = "Custom host policy"
+        with mock.patch.object(mcp_server, "MCPServer", wraps=mcp_server.MCPServer) as factory:
+            server = mcp_server.create_server(workspace_root=_workspace(tmp), instructions=custom)
+        assert factory.call_args.kwargs["instructions"] == custom
+
+        async def exercise() -> None:
+            async with Client(server) as client:
+                full = (await client.call_tool("tapl_get_next", {})).structured_content
+                assert full["workflow_policy"] == custom
+
+        asyncio.run(exercise())
 
 
 def test_mcp_exposes_native_application_tools() -> None:
@@ -106,6 +147,44 @@ def test_mcp_split_run_queues_and_activates_dependent_request() -> None:
     assert finished.structured_content["operation"] == "run_finish"
     assert archived.structured_content["next_active_run"]["split_key"] == "suggestion-chips"
     assert "request_summary" not in archived.structured_content["next_active_run"]
+
+
+def test_mcp_topic_plans_keep_distinct_ids_and_references() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        server = mcp_server.create_server(workspace_root=_workspace(tmp))
+
+        async def exercise() -> None:
+            async with Client(server) as client:
+                summarized = await client.call_tool(
+                    "tapl_summarize_run",
+                    {"summary": "Host patterns and reasoning settings", "work_type": "implementation", "workflow_mode": "standard"},
+                )
+                run_id = summarized.structured_content["active_run"]["id"]
+                for number, topic in enumerate(("Host patterns", "Reasoning settings"), start=1):
+                    applied = await client.call_tool(
+                        "tapl_apply_plan",
+                        {"plan_id": f"PLAN-{number:03d}", "title": topic, "summary": f"REQ-{number:03d}: {topic}", "validation": "Focused regression"},
+                    )
+                    assert not applied.is_error
+                    assert applied.structured_content["item"]["stable_id"] == f"PLAN-{number:03d}"
+                    assert "title" not in applied.structured_content["item"]
+
+                status = (await client.call_tool("tapl_get_status", {"full": True})).structured_content
+                assert status["active_run"]["id"] == run_id
+                assert status["queued_runs"] == []
+                assert status["tasks"] == []
+                assert [plan["title"] for plan in status["plans"]] == ["Host patterns", "Reasoning settings"]
+
+                created = await client.call_tool(
+                    "tapl_create_task",
+                    {"task_id": "TASK-001", "title": "Configure reasoning", "spec_id": "PLAN-002", "goal": "Expose reasoning settings", "action": "Implement settings", "verification": "Settings round trip"},
+                )
+                assert not created.is_error
+                status = (await client.call_tool("tapl_get_status", {"full": True})).structured_content
+                assert status["tasks"][0]["spec_id"] == "PLAN-002"
+                assert {plan["run_id"] for plan in status["plans"]} == {run_id}
+
+        asyncio.run(exercise())
 
 
 def test_mcp_native_sequential_lifecycle_never_spawns_cli() -> None:

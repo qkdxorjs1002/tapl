@@ -36,6 +36,17 @@ Codex에게 평소처럼 요청하세요.
 
 > 권한 검사 누락의 원인을 조사하고 근거를 정리해줘.
 
+한 요청에 독립적인 주제가 여러 개 있으면 Codex는 하나의 RUN 안에 주제별 PLAN을 모두 작성한 뒤 TASK를 설계합니다. 예를 들어 아래 네 주제를 함께 요청하면 다음처럼 나눕니다.
+
+| PLAN | 주제 |
+| --- | --- |
+| PLAN-001 | 불규칙 호스트명 정규식 필터링 |
+| PLAN-002 | 분석용 기본 Codex CLI 환경 |
+| PLAN-003 | 모델 추론 레벨 설정 |
+| PLAN-004 | 웹 페이지 요소를 통한 광고 탐지 |
+
+각 PLAN은 자체 요구사항·접근 방식·검증을 담고, 각 TASK는 `spec_id`로 해당 주제의 PLAN을 참조합니다. 한 결과를 위한 단계·제약·예시·테스트는 함께 유지합니다. 별도 RUN 수명주기는 사용자가 명시적으로 요청할 때만 나눕니다.
+
 <p align="center">
   <img src="assets/readme/workflow-ko.gif" alt="권한 검사 누락 조사 요청이 RUN 분류, HISTORY 검색, PLAN 수립, TASK 조사, FINDING 근거 기록, ARCHIVE 보관으로 진행되는 예시" width="100%" />
 </p>
@@ -143,6 +154,24 @@ SubAgent의 생성과 관리는 Codex 런타임이 담당하고, TAPL은 의존�
 - [GitHub Issues](https://github.com/qkdxorjs1002/tapl/issues) — 버그 신고와 기능 제안
 
 ## 개발
+
+### 워크플로우 지침 전달
+
+MCP 초기화는 짧은 필수 bootstrap을 제공합니다. agent는 작업 전에 `tapl_get_next`에서
+권위 있는 전체 `workflow_policy`, `subagent_guidance`, `config`를 읽습니다. 기존 지침
+원문과 승인·계획·작업·위임·검증·복구·아카이브 규칙은 그대로 유지합니다.
+
+응답의 `policy_revision`은 전달한 정책·지침·설정 전체를 식별합니다. 호출자는 **해당
+내용 전체를 현재 컨텍스트에서 사용할 수 있을 때만** 이를 `known_policy_revision`으로
+전달할 수 있습니다. 같은 revision이면 변경 없는 필드만 생략하며, 다음 행동과 모델
+catalog 검사는 항상 새로 계산합니다. 알 수 없는 revision, 정책·설정 변경, 모델 catalog
+변경에는 전체 내용을 반환합니다. 새 세션, 컨텍스트 압축 후, 내용 유지가 불확실한 때에는
+revision을 생략해야 하며 요약만으로는 충분하지 않습니다. 이 선택 인자 없이 호출하면
+항상 전체 내용을 받습니다.
+
+상태 조회는 트랜잭션 안에서 읽은 동일 snapshot을 검증에 사용합니다. 쓰기 영수증은
+최신 다음 행동을 계속 제공하면서 응답에서 버릴 정책 문구의 생성만 생략합니다.
+실행 승인과 원자적 dispatch/settlement 검사는 변경하지 않습니다.
 
 저장소 루트에서 실행합니다.
 

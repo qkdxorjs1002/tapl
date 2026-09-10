@@ -197,7 +197,7 @@ class NativeJsonRunner:
         conn = self._connection(db_path)
         try:
             state = db.status_payload(conn)
-            state["plan_task_execute"] = validation.validate_plan_task_execute(conn)
+            state["plan_task_execute"] = validation.validate_workflow_state(state)
         finally:
             conn.close()
         state["config"] = self._settings(db_path).as_dict()

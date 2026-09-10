@@ -407,8 +407,8 @@ profile의 candidate는 setup이 runtime-supported model/effort pair를 제공�
 `subagents.profiles` 배열은 template profile을 완전히 대체하며 candidate는
 `subagents.models`에 있어야 합니다.
 
-활성화하면 TAPL은 delegation policy, 활성 profile, model/reasoning allowlist를 MCP
-instruction에 포함합니다. matching은 advisory입니다. agent는 모든 task 특성을 평가하고
+활성화하면 TAPL은 delegation policy, 활성 profile, model/reasoning allowlist를
+`tapl_get_next`로 전달합니다. matching은 advisory입니다. agent는 모든 task 특성을 평가하고
 가장 구체적인 profile을 우선하며 설정 순서는 동률일 때만 사용합니다. 필요한 경우 이유를
 기록해 profile/candidate를 override하고, 사용할 수 없는 candidate는 건너뛰며, 필요하면
 다른 allowlisted pair 또는 root로 fallback합니다. 설치된 `.tapl/config.toml`은 선택한

@@ -398,8 +398,8 @@ An explicit `profiles = []` disables profiles. Any non-empty user
 `subagents.profiles` array fully replaces the template profiles, and its
 candidates must be present in `subagents.models`.
 
-When enabled, TAPL includes its delegation policy, active profiles, and
-model/reasoning allowlist in MCP instructions. Matching remains advisory: the
+When enabled, TAPL delivers its delegation policy, active profiles, and
+model/reasoning allowlist through `tapl_get_next`. Matching remains advisory: the
 agent evaluates all task characteristics, prefers the most specific profile,
 and uses configured order only as a tie-break. It may choose and record a
 justified profile or candidate override, skips unavailable candidates, and
