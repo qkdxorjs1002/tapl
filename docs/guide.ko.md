@@ -28,26 +28,26 @@ brew tap qkdxorjs1002/tap
 # 안정판: SQLite 전문 검색
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
-taplctl install user --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
+taplctl install user
 ```
 
 ```sh
 # 안정판: 시맨틱 검색 의존성 포함
 brew trust --formula qkdxorjs1002/tap/taplctl-semantic
 brew install taplctl-semantic
-taplctl install user --taplctl-command "$(brew --prefix taplctl-semantic)/libexec/bin/taplctl"
+taplctl install user
 ```
 
 ```sh
 # 프리릴리즈를 포함해 가장 최근에 공개된 릴리즈
 brew trust --formula qkdxorjs1002/tap/taplctl-pre
 brew install taplctl-pre
-taplctl install user --taplctl-command "$(brew --prefix taplctl-pre)/libexec/bin/taplctl"
+taplctl install user
 ```
 
 `taplctl-pre`에는 `taplctl@pre` 별칭도 있습니다. 이 가이드에서는 정식 formula 이름을 사용합니다. `taplctl`과 `taplctl-semantic`은 안정판만 따릅니다.
 
-Homebrew는 릴리즈에 포함된 wheel 묶음의 고정 의존성을 설치하며, 설치 중 PyPI에서 패키지를 해석하지 않습니다. 현재 formula는 `taplctl`, `tapl-mcp`, `tapl-hook`을 모두 연결합니다. 위 명령은 같은 패키지의 실행 파일을 명확히 지정합니다.
+Homebrew는 릴리즈에 포함된 wheel 묶음의 고정 의존성을 설치하며, 설치 중 PyPI에서 패키지를 해석하지 않습니다. 현재 formula는 `taplctl`, `tapl-mcp`, `tapl-hook`을 모두 연결하므로 실행 경로를 따로 지정할 필요가 없습니다.
 
 formula를 업그레이드하거나 재설치하면 해당 TAPL viewer 서비스가 이미 실행 중일 때만 자동 재시작을 시도합니다. 중지된 서비스와 신규 설치는 중지 상태로 유지됩니다. 직접 실행한 `searchd`나 MCP stdio 프로세스에는 적용되지 않습니다.
 
@@ -79,7 +79,31 @@ user `PATH`만 갱신하고 administrator 권한은 필요하지 않습니다. a
 
 ## TAPL을 Codex에 연결
 
-Homebrew 설치는 [위 채널별 명령](#homebrew)을 사용하세요. 독립형 설치는 아래처럼 실제 `taplctl` 실행 파일을 지정합니다. 독립형 설치 스크립트의 기본 채널은 최신 안정판입니다.
+Homebrew의 세 formula 모두 같은 명령으로 연결합니다.
+
+```sh
+taplctl install user
+```
+
+설치 프로그램이 `PATH`에서 `taplctl`을 찾고 같은 디렉터리의 `tapl-mcp`와
+`tapl-hook`을 사용합니다. 일반적인 Homebrew 설치에서는 경로 옵션이 필요하지 않습니다.
+
+<details>
+<summary>선택 사항: 특정 설치본 지정</summary>
+
+자동 탐색이 다른 실행 파일을 선택하거나 특정 설치본을 지정해야 할 때만
+`--taplctl-command`를 사용하세요. 예를 들면 다음과 같습니다.
+
+```sh
+taplctl install user --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
+```
+
+`taplctl-semantic`이나 `taplctl-pre`를 설치했다면 formula 이름을 바꾸세요.
+지정한 실행 파일을 기준으로 해당 설치본의 MCP와 hook 경로를 찾습니다.
+
+</details>
+
+독립형 설치는 아래처럼 실제 `taplctl` 실행 파일을 지정합니다. 독립형 설치 스크립트의 기본 채널은 최신 안정판입니다.
 
 Linux 독립형 설치:
 
@@ -220,7 +244,7 @@ history 규칙을 따릅니다. 저장되거나 실행 가능한 task에는 아�
 | --- | --- |
 | `taplctl init --workspace-root /path/to/workspace` | workspace root 선택 또는 초기화 |
 | `taplctl doctor` | 설치와 workspace 문제 진단 |
-| `taplctl install SCOPE --taplctl-command PATH` | Codex integration 설치 또는 갱신 |
+| `taplctl install SCOPE` | Codex integration 설치 또는 갱신 |
 | `taplctl config set/unset` | 지원 runtime config 값 편집 |
 | `taplctl viewer [--port 9000]` | local browser viewer 열기 |
 | `taplctl update --check` / `update` | 독립형 설치 업데이트 확인 또는 실행 |

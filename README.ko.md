@@ -69,7 +69,7 @@ macOS에서는 Homebrew로 안정판을 설치하고 Codex에 연결합니다.
 brew tap qkdxorjs1002/tap
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
-taplctl install user --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
+taplctl install user
 ```
 
 1. TAPL MCP 서버와 hook을 읽도록 **Codex를 재시작**합니다.

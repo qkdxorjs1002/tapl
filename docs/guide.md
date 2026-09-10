@@ -98,16 +98,31 @@ The standalone installer defaults to the latest stable release.
 
 ## Connect TAPL to Codex
 
-Use the command matching your installation. The explicit executable path also
-locates the package's sibling `tapl-mcp` and `tapl-hook` executables.
+For any of the three Homebrew formulae, run:
 
-Homebrew — run only the line for your installed formula:
+```sh
+taplctl install user
+```
+
+The installer finds `taplctl` on `PATH` and uses the sibling `tapl-mcp` and
+`tapl-hook` commands. A normal Homebrew installation needs no path override.
+
+<details>
+<summary>Optional: select a specific installation</summary>
+
+Use `--taplctl-command` only when automatic discovery selects the wrong executable
+or you need a specific installation. For example:
 
 ```sh
 taplctl install user --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
-taplctl install user --taplctl-command "$(brew --prefix taplctl-semantic)/libexec/bin/taplctl"
-taplctl install user --taplctl-command "$(brew --prefix taplctl-pre)/libexec/bin/taplctl"
 ```
+
+Replace the formula name if you installed `taplctl-semantic` or `taplctl-pre`.
+The specified executable locates that installation's companion commands.
+
+</details>
+
+Standalone installations use their actual executable paths:
 
 Linux standalone installer:
 
@@ -207,7 +222,7 @@ search, and inspect workflow records; the CLI manages the installation.
 | --- | --- |
 | `taplctl init --workspace-root /path/to/workspace` | Select or initialize a workspace root |
 | `taplctl doctor` | Diagnose installation and workspace problems |
-| `taplctl install SCOPE --taplctl-command PATH` | Install or refresh Codex integration |
+| `taplctl install SCOPE` | Install or refresh Codex integration |
 | `taplctl config set/unset` | Edit supported runtime configuration values |
 | `taplctl viewer [--port 9000]` | Serve the local browser viewer |
 | `taplctl update --check` / `update` | Check or update standalone installations |

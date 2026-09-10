@@ -59,7 +59,7 @@ On macOS with Homebrew, install the stable release and connect it to Codex:
 brew tap qkdxorjs1002/tap
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
-taplctl install user --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
+taplctl install user
 ```
 
 1. **Restart Codex** to load the TAPL MCP server and lifecycle hooks.
