@@ -1,38 +1,48 @@
-# TAPL Workflow Viewer
+<!-- Absolute repository URLs also work when VSCE packages this nested README. -->
+<p align="center">
+  <img src="https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/assets/readme/tapl-logo.png" width="100" alt="TAPL logo" />
+</p>
+<h1 align="center">TAPL Workflow Viewer</h1>
+<p align="center"><strong>Your workflow, beside your code.</strong></p>
+<p align="center">Inspect Codex plans, progress, and history from your VS Code workspace.</p>
+<p align="center">
+  <a href="#get-started">Get started</a> ·
+  <a href="https://github.com/qkdxorjs1002/tapl">TAPL</a> ·
+  <a href="https://github.com/qkdxorjs1002/tapl/issues">Report an issue</a>
+</p>
 
-Inspect the durable workflow state for the current repository without leaving
-Visual Studio Code. The extension connects to the workspace-scoped `tapl-mcp`
-server and presents active work, plans, tasks, findings, approvals, archives,
-and history in a native tree view and dashboard.
+## See the work behind the conversation
 
-## Features
+TAPL keeps workflow state in your repository's `.tapl/tapl.db`. This optional
+extension brings that record into a native tree view and a detailed dashboard.
 
-- See the active TAPL run and its plan, task, approval, and finding state.
-- Open a responsive dashboard for detailed workflow inspection.
-- Browse and open completed TAPL archives.
-- Search durable workflow history from the current workspace.
-- Refresh automatically when `.tapl/tapl.db`, its WAL, or SHM file changes.
-- Choose an automatic, compact, balanced, or spacious dashboard layout.
-- Follow the VS Code display language automatically or select Korean or English.
+| View | What you can inspect |
+| --- | --- |
+| Active work | The current run, plans, tasks, approvals, and findings |
+| Dashboard | Workflow details in a layout that fits your editor |
+| Archives | Completed work and the context behind it |
+| History search | Earlier findings and decisions in this workspace |
 
-## Requirements
+Views refresh when the workflow database changes. The interface follows your
+VS Code display language, with English and Korean available explicitly.
 
-- Visual Studio Code 1.90 or newer.
-- TAPL installed with a reachable `tapl-mcp` executable.
-- A workspace initialized by TAPL, containing `.tapl/tapl.db`.
+New to TAPL? [See the workflow example](https://github.com/qkdxorjs1002/tapl#workflow)
+and [install TAPL](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guide.md).
 
-See the [TAPL installation guide](https://github.com/qkdxorjs1002/tapl#installation)
-for macOS, Linux, and Windows setup options.
+## Get started
 
-## Getting started
+You need **VS Code 1.90+**, a reachable **`tapl-mcp`** executable, and a workspace
+initialized by TAPL.
 
-1. Install TAPL and connect it to Codex.
-2. Open a TAPL-enabled repository in VS Code.
-3. Select the TAPL icon in the Activity Bar.
-4. Open **TAPL Workflow: Open TAPL Dashboard** from the Command Palette for the
-   complete workspace view.
+1. [Install TAPL and connect it to Codex](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guide.md#connect).
+2. Install the extension. You can download a `.vsix` from
+   [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases) and use
+   **Extensions: Install from VSIX…** in the Command Palette.
+3. Open a repository containing `.tapl/tapl.db` and select **TAPL** in the Activity Bar.
+4. Run **TAPL Workflow: Open TAPL Dashboard** for the complete workspace view.
 
-If VS Code cannot find `tapl-mcp`, configure its command name or absolute path:
+If the extension cannot find the MCP executable, set its command name or absolute
+path in VS Code settings:
 
 ```json
 {
@@ -40,26 +50,37 @@ If VS Code cannot find `tapl-mcp`, configure its command name or absolute path:
 }
 ```
 
-When this setting is empty, the extension searches `PATH`,
-`/opt/homebrew/bin/tapl-mcp`, and `/usr/local/bin/tapl-mcp`.
+With the setting empty, the extension searches `PATH` and common Homebrew
+locations (`/opt/homebrew/bin/tapl-mcp` and `/usr/local/bin/tapl-mcp`). On Windows,
+it uses `tapl-mcp.exe`.
 
 ## Commands
 
-- **TAPL Workflow: Refresh Workflow Views**
-- **TAPL Workflow: Open TAPL Dashboard**
-- **TAPL Workflow: Open TAPL Archive**
-- **TAPL Workflow: Search TAPL Workflow**
+Open the Command Palette and search for **TAPL Workflow**.
 
-## Settings
+| Command | Action |
+| --- | --- |
+| **Refresh Workflow Views** | Reload the workspace's workflow state |
+| **Open TAPL Dashboard** | Inspect the detailed dashboard |
+| **Open TAPL Archive** | Browse a saved run |
+| **Search TAPL Workflow** | Find earlier workflow records |
 
-- `taplWorkflow.taplMcpPath`: command or absolute path for `tapl-mcp`.
-- `taplWorkflow.layout`: dashboard layout size.
-- `taplWorkflow.language`: automatic, Korean, or English display language.
+## Make it fit your workspace
+
+| Setting | Values | Default |
+| --- | --- | --- |
+| `taplWorkflow.taplMcpPath` | MCP command or absolute path | Automatic discovery |
+| `taplWorkflow.layout` | `auto`, `small`, `medium`, `large` | `auto` |
+| `taplWorkflow.language` | `auto`, `ko`, `en` | `auto` |
+
+The extension keeps a workspace-scoped MCP connection and watches the database,
+WAL, and SHM files so workflow changes appear without a manual refresh.
 
 ## Support and license
 
-Report problems through [GitHub Issues](https://github.com/qkdxorjs1002/tapl/issues)
-after checking the [support guide](SUPPORT.md).
+Start with the [support guide](https://github.com/qkdxorjs1002/tapl/blob/main/vscode-extension/SUPPORT.md)
+or report a problem in [GitHub Issues](https://github.com/qkdxorjs1002/tapl/issues).
 
-TAPL Workflow Viewer is released under the [MIT License](LICENSE.md). Bundled
-third-party notices are available in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Released under the [MIT License](https://github.com/qkdxorjs1002/tapl/blob/main/vscode-extension/LICENSE.md).
+See [third-party notices](https://github.com/qkdxorjs1002/tapl/blob/main/vscode-extension/THIRD_PARTY_NOTICES.md)
+for bundled dependencies.

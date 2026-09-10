@@ -1,0 +1,11 @@
+Built-in image_gen / logo-brand
+
+Use case: logo-brand
+Asset type: TAPL open-source developer tool README logo.
+Primary request: Create one original, polished logo symbol for TAPL, a local workflow memory layer that carries agent plans and tasks across sessions.
+Subject: A distinctive geometric lowercase t-inspired continuous folded ribbon. Its connected segments suggest a clear route and a persistent record. Three subtle modular turns, generous negative space, legible silhouette at small sizes.
+Style: Sophisticated contemporary software identity, minimal dimensional vector-like mark, precise edges, restrained soft depth. Mint green and deep petrol teal with one light cyan illuminated edge. No tiny decorative details.
+Composition: One centered symbol, occupying approximately 74 percent of a square image, generous balanced padding.
+Scene/backdrop: Genuinely transparent background, preserve alpha. No checkerboard pattern, no surrounding card, no scene or drop shadow outside the symbol.
+Text: None. No wordmark, letters as text, slogan or watermark.
+Constraints: Original logo. Do not resemble any existing company logo. Avoid robots, brains, circuit boards, database cylinders, generic infinity loops, glossy plastic, chrome, purple gradients or neon glow.
