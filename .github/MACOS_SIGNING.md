@@ -51,7 +51,10 @@ upstream `RECORD.jws`/`RECORD.p7s` signatures. The repacked wheels are unpacked
 again to verify their hashes and final native signatures. Pure Python wheels
 are preserved byte for byte.
 
-The temporary keychain and `.p12` are removed on exit, including failure paths.
+The temporary keychain is added to the user's keychain search list while
+signing so `codesign` can locate its identity. The original search list is
+restored, and the temporary keychain and `.p12` are removed on exit, including
+failure paths.
 GitHub-hosted macOS runners provide the signing environment. Only completed
 runtime archives are uploaded as intermediate artifacts.
 

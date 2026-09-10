@@ -5,6 +5,7 @@ import csv
 import hashlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -155,6 +156,63 @@ class MacosWheelSigningTests(unittest.TestCase):
 
 
 class MacosKeychainCleanupTests(unittest.TestCase):
+    def test_search_list_is_preserved_during_signing_and_restored_on_exit(self):
+        for previous in [[], ["/Users/runner/Login Items.keychain-db", "/Library/Keychains/System.keychain"]]:
+            for failure in ["none", "import", "search-list", "sign"]:
+                with self.subTest(previous=previous, failure=failure), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    binaries = root / "bin"
+                    binaries.mkdir()
+                    signing_root = root / "signing"
+                    signing_root.mkdir()
+                    state = root / "search-list.json"
+                    state.write_text(json.dumps(previous))
+                    wrapper = root / WRAPPER.name
+                    wrapper.write_text(WRAPPER.read_text())
+                    (root / "sign_macos_wheels.py").write_text(
+                        "import json, os, sys\nfrom pathlib import Path\n"
+                        "current = json.loads(Path(os.environ['TEST_SEARCH_LIST']).read_text())\n"
+                        "assert current == [sys.argv[-1], *json.loads(os.environ['TEST_PREVIOUS'])]\n"
+                        "assert Path(sys.argv[-1]).is_file()\n"
+                        "assert not Path(sys.argv[-1]).with_name('certificate.p12').exists()\n"
+                        "assert 'MACOS_CERTIFICATE_PASSWORD' not in os.environ\n"
+                        "sys.exit(1 if os.environ['TEST_FAILURE'] == 'sign' else 0)\n"
+                    )
+                    (binaries / "uname").write_text("#!/bin/sh\necho Darwin\n")
+                    (binaries / "security").write_text(
+                        "#!/usr/bin/env python\nimport json, os, sys\nfrom pathlib import Path\n"
+                        "args = sys.argv[1:]\n"
+                        "state = Path(os.environ['TEST_SEARCH_LIST'])\n"
+                        "current = json.loads(state.read_text())\n"
+                        "if args[0] == 'list-keychains':\n"
+                        "    if '-s' not in args:\n"
+                        "        print('\\n'.join(json.dumps(p) for p in current))\n"
+                        "    else:\n"
+                        "        replacement = args[args.index('-s') + 1:]\n"
+                        "        state.write_text(json.dumps(replacement))\n"
+                        "        if os.environ['TEST_FAILURE'] == 'search-list' and replacement != json.loads(os.environ['TEST_PREVIOUS']):\n"
+                        "            sys.exit(1)\n"
+                        "elif args[0] == 'create-keychain':\n"
+                        "    Path(args[-1]).touch()\n"
+                        "    state.write_text(json.dumps([*current, args[-1]]))\n"
+                        "elif args[0] == 'delete-keychain':\n"
+                        "    Path(args[-1]).unlink()\n"
+                        "elif args[0] == 'import' and os.environ['TEST_FAILURE'] == 'import':\n"
+                        "    sys.exit(1)\n"
+                    )
+                    for binary in binaries.iterdir():
+                        binary.chmod(0o755)
+                    env = dict(os.environ, PATH=f"{binaries}:{os.environ['PATH']}", RUNNER_TEMP=str(signing_root),
+                               MACOS_CERTIFICATE_P12_BASE64=base64.b64encode(b"fixture certificate").decode(),
+                               MACOS_CERTIFICATE_PASSWORD="fixture-password-DO-NOT-LOG", APPLE_TEAM_ID=TEAM,
+                               TEST_SEARCH_LIST=str(state), TEST_PREVIOUS=json.dumps(previous), TEST_FAILURE=failure)
+                    result = subprocess.run(["bash", str(wrapper), "unused"], env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode == 0, failure == "none", result.stderr)
+                    self.assertEqual(json.loads(state.read_text()), previous)
+                    self.assertEqual(list(signing_root.iterdir()), [])
+                    self.assertNotIn(env["MACOS_CERTIFICATE_PASSWORD"], result.stdout + result.stderr)
+                    self.assertNotIn(env["MACOS_CERTIFICATE_P12_BASE64"], result.stdout + result.stderr)
+
     def test_missing_secrets_fail_without_echoing_values(self):
         env = {key: value for key, value in os.environ.items() if key not in {
             "MACOS_CERTIFICATE_P12_BASE64", "MACOS_CERTIFICATE_PASSWORD", "APPLE_TEAM_ID",
