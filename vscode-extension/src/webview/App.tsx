@@ -29,6 +29,7 @@ import type {
 import { vscodeApi } from './vscodeApi';
 import { I18nProvider, useI18n } from './i18n';
 import { HoverPopover } from './HoverPopover';
+import { MemoryView } from './MemoryView';
 
 const TASK_STATUSES = ['Pending', 'In Progress', 'Blocked', 'Completed', 'Skipped'];
 const JOURNEY_MIN_COLUMNS = 2;
@@ -62,6 +63,7 @@ export function App(): JSX.Element {
     locale?: SupportedLocale;
     layout?: unknown;
   } | undefined;
+  const [memorySupported, setMemorySupported] = useState(false);
   const [view, setView] = useState<WebviewView | undefined>(restored?.view);
   const [locale, setLocale] = useState<SupportedLocale>(() => resolveLocale(
     restored?.locale ?? document.documentElement.lang ?? navigator.language
@@ -77,10 +79,11 @@ export function App(): JSX.Element {
       if (message.type === 'hydrate' || message.type === 'view:update') {
         const nextLocale = resolveLocale(message.locale);
         const nextLayout = resolveDisplayLayout(message.layout);
+        setMemorySupported(message.capabilities?.associativeMemory === true);
         setView(message.view);
         setLocale(nextLocale);
         setLayout(nextLayout);
-        api.setState({ view: message.view, locale: nextLocale, layout: nextLayout });
+        api.setState({ view: message.view, locale: nextLocale, layout: nextLayout, capabilities: message.capabilities, workspace: message.workspace });
       }
       if (message.type === 'error') {
         const nextLocale = resolveLocale(message.locale);
@@ -118,7 +121,7 @@ export function App(): JSX.Element {
   return (
     <I18nProvider locale={locale}>
       <main className="tapl-shell" data-theme="tapl" data-layout={layout}>
-        <ViewRenderer view={view} layout={layout} send={(message) => api.postMessage(message)} />
+        <ViewRenderer view={view} layout={layout} memorySupported={memorySupported} send={(message) => api.postMessage(message)} />
       </main>
     </I18nProvider>
   );
@@ -141,17 +144,23 @@ function LoadingView({ layout }: { layout: DisplayLayout }): JSX.Element {
 function ViewRenderer({
   view,
   layout,
+  memorySupported,
   send
 }: {
+  memorySupported: boolean;
   view: WebviewView;
   layout: DisplayLayout;
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
   switch (view.type) {
+    case 'memories':
+    case 'memory':
+    case 'memorySource':
+      return <MemoryView view={view} supported={memorySupported} send={send} />;
     case 'workspace':
       return <WorkspaceView view={view} send={send} />;
     case 'overview':
-      return <OverviewView view={view} layout={layout} send={send} />;
+      return <OverviewView view={view} layout={layout} memorySupported={memorySupported} send={send} />;
     case 'archive':
       return <ArchiveView archive={view.archive} detail={view.detail} send={send} />;
     case 'archiveEvents':
@@ -170,9 +179,11 @@ function ViewRenderer({
 function OverviewView({
   view,
   layout,
+  memorySupported,
   send
 }: {
   view: Extract<WebviewView, { type: 'overview' }>;
+  memorySupported: boolean;
   layout: DisplayLayout;
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
@@ -216,6 +227,7 @@ function OverviewView({
           </div>
           <div className="tapl-command-panel">
             <div className="tapl-command-actions">
+              {memorySupported ? <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'memories' })}>{t('memories')}</button> : null}
               {view.workspace ? (
                 <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'chooseWorkspace' })}>
                   {t('changeWorkspace')}

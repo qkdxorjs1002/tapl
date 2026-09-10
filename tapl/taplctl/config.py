@@ -19,6 +19,7 @@ DEFAULT_HYBRID_SEMANTIC_RATIO = 0.65
 DEFAULT_SEARCH_MAX_RESULTS = 12
 DEFAULT_SEMANTIC_PROVIDER = "auto"
 DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
+DEFAULT_RECALL_ENABLED = True
 DEFAULT_SUBAGENTS_ENABLED = True
 DEFAULT_SUBAGENT_STRATEGY = "aggressive"
 DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -100,6 +101,11 @@ class EditableConfigKey:
 
 
 EDITABLE_CONFIG_KEYS = (
+    EditableConfigKey(
+        "recall.enabled", "BOOLEAN",
+        "Automatic memory capture, recall, and reinforcement; true or false.",
+        allowed=("true", "false"),
+    ),
     EditableConfigKey(
         "search.mode",
         "MODE",
@@ -327,12 +333,21 @@ class ViewerConfig:
 
 
 @dataclass(frozen=True)
+class RecallConfig:
+    enabled: bool = DEFAULT_RECALL_ENABLED
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"enabled": self.enabled}
+
+
+@dataclass(frozen=True)
 class TaplConfig:
     path: str
     exists: bool
     search: SearchConfig = field(default_factory=SearchConfig)
     subagents: SubagentsConfig = field(default_factory=SubagentsConfig)
     viewer: ViewerConfig = field(default_factory=ViewerConfig)
+    recall: RecallConfig = field(default_factory=RecallConfig)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -340,6 +355,7 @@ class TaplConfig:
             "exists": self.exists,
             "search": self.search.as_dict(),
             "viewer": self.viewer.as_dict(),
+            "recall": self.recall.as_dict(),
             "subagents": self.subagents.as_dict(),
         }
 
@@ -532,6 +548,10 @@ def from_mapping(
         exists=exists,
         search=search,
         viewer=viewer,
+        recall=RecallConfig(enabled=boolean(
+            setting(table(data, "recall"), "enabled", default=DEFAULT_RECALL_ENABLED),
+            "recall.enabled",
+        )),
         subagents=SubagentsConfig(
             enabled=subagents_enabled,
             strategy=subagent_strategy,
@@ -561,7 +581,7 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
     spec = editable_config_key(key)
     value: Any
     normalized = raw_value.strip().lower().replace("-", "_")
-    if key not in {"subagents.enabled", "subagents.setup_complete"} and spec.allowed and normalized in spec.allowed:
+    if key not in {"recall.enabled", "subagents.enabled", "subagents.setup_complete"} and spec.allowed and normalized in spec.allowed:
         value = raw_value
     else:
         try:
@@ -586,7 +606,7 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
         return non_negative_int(value, key)
     if key == "viewer.allowed_origins":
         return list(origin_array(value, key))
-    if key == "subagents.enabled":
+    if key in {"recall.enabled", "subagents.enabled"}:
         return boolean(value, key)
     if key == "subagents.strategy":
         return choice(value, SUBAGENT_STRATEGIES, key)

@@ -34,7 +34,7 @@ def test_mcp_exposes_native_application_tools() -> None:
         tools = asyncio.run(mcp_server.create_server(workspace_root=_workspace(tmp)).list_tools())
 
     by_name = {tool.name: tool for tool in tools}
-    assert len(tools) == 25
+    assert len(tools) == 28
     assert "tapl_get_context" in by_name
     assert "tapl_list_archives" in by_name
     assert "tapl_get_archive" in by_name

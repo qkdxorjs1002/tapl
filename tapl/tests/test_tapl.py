@@ -144,7 +144,7 @@ class TaplRuntimeTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         by_name = {tool.name: tool for tool in tools}
 
-        self.assertEqual(len(tools), 25)
+        self.assertEqual(len(tools), 28)
         self.assertIn("tapl_get_status", by_name)
         self.assertIn("tapl_get_context", by_name)
         self.assertIn("tapl_list_archives", by_name)
@@ -333,7 +333,7 @@ class TaplRuntimeTests(unittest.TestCase):
                     return tools, result
 
             tools, result = asyncio.run(exercise())
-            self.assertEqual(len(tools.tools), 25)
+            self.assertEqual(len(tools.tools), 28)
             self.assertFalse(result.is_error)
             receipt = result.structured_content
             self.assertEqual(receipt["operation"], "run_summarize")
@@ -723,7 +723,7 @@ class TaplRuntimeTests(unittest.TestCase):
                         "record_mode": "planned",
                     },
                 )
-                self.assertEqual(tapl_db.get_meta(migrated)["schema_version"], "10")
+                self.assertEqual(tapl_db.get_meta(migrated)["schema_version"], str(tapl_db.SCHEMA_VERSION))
             finally:
                 migrated.close()
 
@@ -732,7 +732,8 @@ class TaplRuntimeTests(unittest.TestCase):
             subagents=tapl_config.SubagentsConfig(setup_complete=True)
         )
 
-        self.assertLess(len(instructions), 9_900)
+        # Includes the bounded associative-memory policy; hook bootstrap stays unchanged.
+        self.assertLess(len(instructions), 11_300)
         for guidance in (
             "identify independently deliverable outcomes",
             "call `tapl_split_run`",
@@ -748,7 +749,7 @@ class TaplRuntimeTests(unittest.TestCase):
                             subagents=tapl_config.SubagentsConfig(strategy=strategy, setup_complete=True)
                         )
                     ),
-                    9_900,
+                    11_300,
                 )
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",
@@ -1268,6 +1269,7 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertEqual(
             [spec.key for spec in tapl_config.EDITABLE_CONFIG_KEYS],
             [
+                "recall.enabled",
                 "search.mode",
                 "search.max_results",
                 "search.hybrid_semantic_ratio",

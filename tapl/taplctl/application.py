@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from . import config, config_editor, context as tapl_context, db, embeddings, prompt, recommendations, validation
+from . import config, config_editor, context as tapl_context, db, embeddings, prompt, recall as memory_store, recommendations, validation
 
 
 UNSET = object()
@@ -229,6 +229,39 @@ class WorkflowApplication:
             payload = embeddings.search(conn, query, limit=selected_limit, search_config=settings.search)
         return {"ok": True, **payload}
 
+    def recall(self, query: str = "", *, limit: int = 3, offset: int = 0) -> dict[str, Any]:
+        with self._connection() as conn:
+            payload = memory_store.recall_memories(conn, query=query, limit=limit, offset=offset)
+        return {"ok": True, **payload}
+
+    def get_memory(self, memory_id: str) -> dict[str, Any]:
+        with self._connection() as conn:
+            memory = memory_store.get_memory(conn, memory_id)
+        return {"ok": True, "memory": memory}
+
+    def update_memory(
+        self, memory_id: str, *, expected_revision: int,
+        note: str | None = None, cue: list[str] | None = None, state: str | None = None,
+    ) -> dict[str, Any]:
+        with self._connection() as conn:
+            memory = memory_store.update_memory(
+                conn, memory_id, expected_revision=expected_revision, note=note, cue=cue, state=state,
+            )
+        return {"ok": True, "memory": memory}
+
+    def delete_memory(self, memory_id: str, *, expected_revision: int) -> dict[str, Any]:
+        with self._connection() as conn:
+            memory = memory_store.delete_memory(conn, memory_id, expected_revision=expected_revision)
+        return {"ok": True, "memory": memory}
+
+    @staticmethod
+    def _memory_failure(exc: Exception) -> dict[str, Any]:
+        code = getattr(exc, "code", "memory_unavailable")
+        return {
+            "status": "error", "code": code, "message": str(exc),
+            "retryable": code not in {"invalid", "conflict", "stale_run", "not_found"},
+        }
+
     def get_item(self, item_id: int) -> dict[str, Any]:
         with self._connection() as conn:
             item = db.item_detail(conn, item_id)
@@ -258,7 +291,10 @@ class WorkflowApplication:
         *,
         work_type: str = db.DEFAULT_WORK_TYPE,
         workflow_mode: str = db.DEFAULT_WORKFLOW_MODE,
+        recall_query: str | None = None,
     ) -> dict[str, Any]:
+        if recall_query is not None and (not isinstance(recall_query, str) or len(recall_query) > 500):
+            raise WorkflowApplicationError("recall_query must be a string of at most 500 characters")
         if not summary.strip():
             raise WorkflowApplicationError("summary must not be empty")
         with self._connection() as conn:
@@ -269,13 +305,29 @@ class WorkflowApplication:
                     work_type=work_type,
                     workflow_mode=workflow_mode,
                 )
-            run = db.update_active_run_summary(
+            conn.execute("BEGIN IMMEDIATE")
+            bound_run = db.active_run(conn)
+            if bound_run is None:
+                raise WorkflowApplicationError("no active workflow run to summarize")
+            bound_run_id = str(bound_run["id"])
+            db.update_active_run_summary(
                 conn,
                 request_summary=summary,
                 work_type=work_type,
                 workflow_mode=workflow_mode,
             )
-        return {"ok": True, "active_run": db.workflow_run_to_dict(run)}
+            run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (bound_run_id,)).fetchone()
+            payload = {"ok": True, "active_run": db.workflow_run_to_dict(run)}
+            try:
+                if self._settings().recall.enabled:
+                    payload["recall"] = memory_store.emit_recall_once(
+                        conn, run_id=str(run["id"]), query=recall_query or summary,
+                    )
+                else:
+                    payload["recall"] = {"status": "disabled"}
+            except Exception as exc:
+                payload["recall"] = self._memory_failure(exc)
+        return payload
 
     def split_run(self, requests: list[dict[str, Any]]) -> dict[str, Any]:
         """Split a fresh active request into independent queued workflow runs."""
@@ -286,12 +338,41 @@ class WorkflowApplication:
             payload = db.split_active_run(conn, requests)
         return {"ok": True, **payload}
 
-    def finish_run(self, result: str) -> dict[str, Any]:
+    def finish_run(
+        self, result: str, *, expected_run_id: str | None = None,
+        memory_candidates: list[dict[str, Any]] | None = None,
+        memory_uses: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         if not result.strip():
             raise WorkflowApplicationError("result must not be empty")
+        has_memory = memory_candidates is not None or memory_uses is not None
+        if has_memory and not expected_run_id:
+            raise WorkflowApplicationError("expected_run_id is required with memory arguments")
         with self._connection() as conn:
-            run = db.update_active_run_summary(conn, result_summary=result)
-        return {"ok": True, "active_run": db.workflow_run_to_dict(run)}
+            # Bind the result write before checking identity; an archived retry
+            # must never write to the next run activated by the archive.
+            conn.execute("BEGIN IMMEDIATE")
+            run = db.active_run(conn)
+            if run is None or (expected_run_id is not None and str(run["id"]) != expected_run_id):
+                raise WorkflowApplicationError("stale_run: expected_run_id must match the active run")
+            run_id = str(run["id"])
+            db.update_active_run_summary(conn, result_summary=result)
+            run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
+            payload = {"ok": True, "active_run": db.workflow_run_to_dict(run)}
+            if has_memory:
+                try:
+                    if not self._settings().recall.enabled:
+                        payload["memory"] = {"status": "disabled"}
+                    elif (active := db.active_run(conn)) is None or str(active["id"]) != run_id:
+                        payload["memory"] = {"status": "stale_run", "retryable": False}
+                    else:
+                        details = memory_store.finish_memories(
+                            conn, run_id=run_id, candidates=memory_candidates, uses=memory_uses,
+                        )
+                        payload["memory"] = {"status": "partial" if details.get("errors") else "ok", **details}
+                except Exception as exc:
+                    payload["memory"] = self._memory_failure(exc)
+        return payload
 
     def apply_plan(self, plan_id: str = "PLAN-001", **values: Any) -> dict[str, Any]:
         with self._connection() as conn:

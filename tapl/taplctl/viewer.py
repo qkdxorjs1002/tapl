@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 from urllib.parse import unquote, urlsplit
 
-from . import config, db, embeddings, validation
+from . import config, db, embeddings, recall, validation
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -160,6 +160,13 @@ class NativeJsonRunner:
             return self._item_show(db_path, item_id)
         if command == "search" and len(args) >= 2:
             return self._search(db_path, args[1])
+        if args[:2] == ["memory", "list"]:
+            return self._memories(db_path, args)
+        if args[:2] == ["memory", "show"]:
+            memory_id = self._option(args, "--id")
+            if not memory_id:
+                raise ViewerError("Missing memory id.")
+            return self._memory(db_path, memory_id)
         raise ViewerError(f"Unsupported viewer data request: {' '.join(args)}")
 
     @staticmethod
@@ -304,6 +311,29 @@ class NativeJsonRunner:
             conn.close()
         return {"ok": True, **payload}
 
+    def _memories(self, db_path: Path, args: list[str]) -> dict[str, Any]:
+        conn = self._connection(db_path)
+        try:
+            return {"ok": True, **recall.recall_memories(
+                conn, query=self._option(args, "--query") or "", limit=50,
+                offset=int(self._option(args, "--offset") or "0"),
+            )}
+        finally:
+            conn.close()
+
+    def _memory(self, db_path: Path, memory_id: str) -> dict[str, Any]:
+        conn = self._connection(db_path)
+        try:
+            try:
+                memory = recall.get_memory(conn, memory_id)
+            except recall.MemoryError as exc:
+                if exc.code != "not_found":
+                    raise
+                memory = None
+            return {"ok": True, "memory": memory}
+        finally:
+            conn.close()
+
 
 def run_native_json(db_path: Path, args: list[str]) -> dict[str, Any]:
     """Compatibility-friendly function form of :class:`NativeJsonRunner`."""
@@ -388,6 +418,7 @@ class ViewerApplication:
             "locale": locale,
             "layout": layout,
             "workspace": str(workspace) if workspace else "",
+            "capabilities": {"associativeMemory": True},
         }
 
     def _build_view(self, payload: dict[str, Any], db_path: Path) -> dict[str, Any]:
@@ -419,6 +450,24 @@ class ViewerApplication:
             if not query:
                 raise ViewerError("Enter a search query.")
             return {"type": "search", "search": self.json_runner(db_path, ["search", query, "--json"])}
+        if command == "memories":
+            query, offset = payload.get("query", ""), payload.get("offset", 0)
+            if not isinstance(query, str) or len(query) > 2000:
+                raise ViewerError("Memory query must be a string of at most 2000 characters.")
+            if type(offset) is not int or not 0 <= offset <= 1000000:
+                raise ViewerError("Invalid memory offset.")
+            result = self.json_runner(db_path, ["memory", "list", "--query", query, "--offset", str(offset)])
+            return {"type": "memories", **{key: result[key] for key in ("memories", "total", "query", "offset", "limit")}}
+        if command in {"openMemory", "openMemorySource"}:
+            memory_id = self._required_string(payload, "memoryId")
+            memory = self.json_runner(db_path, ["memory", "show", "--id", memory_id]).get("memory")
+            if command == "openMemorySource" and isinstance(memory, dict) and memory.get("source_available"):
+                record = memory.get("source_record") or {}
+                if record.get("kind") == "item" and isinstance(record.get("item"), dict):
+                    return self._build_view({"command": "openSearchResult", "itemId": record["item"]["id"]}, db_path)
+                if isinstance(record.get("run"), dict):
+                    return {"type": "memorySource", "memoryId": memory_id, "run": record["run"]}
+            return {"type": "memory", "memoryId": memory_id, "memory": memory}
         if command == "openSearchResult":
             raw_item_id = payload.get("itemId")
             if isinstance(raw_item_id, bool):
@@ -467,6 +516,9 @@ class ViewerApplication:
             return self._build_view({**payload, "command": "search"}, db_path)
         if view_type == "searchItem" and payload.get("itemId") is not None:
             return self._build_view({**payload, "command": "openSearchResult"}, db_path)
+        if view_type in {"memories", "memory", "memorySource"}:
+            command = {"memories": "memories", "memory": "openMemory", "memorySource": "openMemorySource"}[view_type]
+            return self._build_view({**payload, "command": command}, db_path)
         return self._overview(db_path, search_query=str(payload.get("query") or ""))
 
     def _overview(self, db_path: Path, *, search_query: str) -> dict[str, Any]:

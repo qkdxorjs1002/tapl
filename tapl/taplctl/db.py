@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -154,6 +156,8 @@ def migrate(conn: sqlite3.Connection) -> None:
                 "database schema version "
                 f"{stored_schema_version} is newer than supported version {SCHEMA_VERSION}"
             )
+        if stored_schema_version < 11:
+            backup_before_memory_migration(conn)
 
     migrated_legacy_record_mode = migrate_legacy_workflow_mode(conn)
 
@@ -314,6 +318,47 @@ def migrate(conn: sqlite3.Connection) -> None:
         CREATE VIRTUAL TABLE IF NOT EXISTS items_fts
           USING fts5(stable_id, kind, title, body);
 
+        CREATE TABLE IF NOT EXISTS memories (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          memory_id TEXT NOT NULL UNIQUE,
+          created_run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+          slot INTEGER NOT NULL CHECK (slot IN (1, 2)),
+          source_run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+          source_item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
+          cues_json TEXT NOT NULL DEFAULT '[]',
+          note TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'active'
+            CHECK (state IN ('active', 'superseded', 'deleted')),
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          replaces_memory_id TEXT,
+          created_at TEXT NOT NULL,
+          content_updated_at TEXT NOT NULL,
+          last_reinforced_at TEXT,
+          half_life_days REAL NOT NULL DEFAULT 7
+            CHECK (half_life_days >= 7 AND half_life_days <= 90),
+          last_reinforced_run_id TEXT,
+          UNIQUE(created_run_id, slot)
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(cue, note);
+        CREATE TRIGGER IF NOT EXISTS memories_delete_fts
+          AFTER DELETE ON memories BEGIN
+            DELETE FROM memory_fts WHERE rowid = old.id;
+          END;
+        CREATE INDEX IF NOT EXISTS idx_memories_state ON memories(state, id);
+        CREATE INDEX IF NOT EXISTS idx_memories_fingerprint ON memories(fingerprint);
+        CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source_run_id, source_item_id);
+        CREATE INDEX IF NOT EXISTS idx_events_run_type ON events(run_id, event_type);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_capture_slot
+          ON events(run_id, json_extract(payload_json, '$.slot'))
+          WHERE event_type = 'memory_capture';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_recall_attempt
+          ON events(run_id) WHERE event_type = 'memory_recall_attempted';
+        CREATE INDEX IF NOT EXISTS idx_memory_event_fingerprint
+          ON events(json_extract(payload_json, '$.fingerprint'))
+          WHERE event_type IN ('memory_capture', 'memory_deleted', 'memory_updated');
+
         CREATE INDEX IF NOT EXISTS idx_items_kind_status ON items(kind, status);
         CREATE INDEX IF NOT EXISTS idx_items_run_kind ON items(run_id, kind);
         CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status);
@@ -392,6 +437,38 @@ def migrate(conn: sqlite3.Connection) -> None:
     set_meta(conn, "embedding_model", DEFAULT_EMBEDDING_MODEL)
     set_meta(conn, "embedding_dimension", str(DEFAULT_EMBEDDING_DIMENSION))
     conn.commit()
+
+
+def backup_before_memory_migration(conn: sqlite3.Connection) -> Path | None:
+    """Keep one consistent pre-v11 backup, including committed WAL contents.
+
+    Use an independent read snapshot: migrate() may also be called by a client
+    with uncommitted changes, which must not be committed just for a backup.
+    Publish only a complete backup, without replacing another migrator's copy.
+    """
+    main = next((row for row in conn.execute("PRAGMA database_list") if row["name"] == "main"), None)
+    if main is None or not main["file"]:
+        return None
+    path = Path(main["file"])
+    backup_path = path.with_name(f"{path.name}.pre-v11.bak")
+    if backup_path.exists():
+        return backup_path
+    temporary = backup_path.with_name(f"{backup_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as source:
+            source.execute("BEGIN")
+            version = source.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+            if version is None or int(version[0]) >= 11:
+                return None
+            with closing(sqlite3.connect(temporary)) as target:
+                source.backup(target)
+        try:
+            os.link(temporary, backup_path)
+        except FileExistsError:
+            pass
+        return backup_path
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

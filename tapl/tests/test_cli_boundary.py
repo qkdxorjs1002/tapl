@@ -41,7 +41,7 @@ class PublicCliBoundaryTests(unittest.TestCase):
 
     def test_workflow_commands_are_not_registered_by_management_cli(self) -> None:
         commands = root_commands(cli.build_parser())
-        self.assertTrue({"status", "mcp", "hook-event"}.isdisjoint(commands))
+        self.assertTrue({"status", "mcp", "hook-event", "recall", "update-memory", "delete-memory"}.isdisjoint(commands))
 
     def test_config_command_is_management_only_and_skips_auto_install(self) -> None:
         args = cli.build_parser().parse_args(
@@ -74,6 +74,7 @@ class PublicCliBoundaryTests(unittest.TestCase):
             "semantic, bm25, word, hybrid",
             "viewer.allowed_origins TOML_ARRAY",
             "subagents.enabled BOOLEAN",
+            "recall.enabled BOOLEAN",
             "true, false",
             "subagents.models.<model-id> TOML_ARRAY",
         ):

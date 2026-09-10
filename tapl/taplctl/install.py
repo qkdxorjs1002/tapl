@@ -618,7 +618,11 @@ def default_config_text() -> str:
     if template is not None:
         return template
     profile_lines = default_subagent_profile_text()
-    return f"""[viewer]
+    return f"""[recall]
+# Automatic capture, recall, and reinforcement. Manual memory management stays available.
+enabled = true
+
+[viewer]
 # Additional browser origins allowed to call the viewer API through a trusted proxy.
 # Type: array of unique strings. Each value must be an exact http:// or https://
 # origin (scheme + host + optional port) without credentials, a path, query, or fragment.

@@ -319,6 +319,48 @@ profile table의 TOML 배열)입니다.
 taplctl --config /path/to/config.toml config set search.mode bm25
 ```
 
+## 연상 기억
+
+`[recall] enabled = true`가 기본값입니다. `tapl_summarize_run`은 선택적으로
+`recall_query`를 받고 run당 한 번 최대 3개의 짧은 기억 단서를 제공합니다.
+Hook, status, next-action 조회에서는 기억을 검색하지 않습니다. 먼저 단서로 탐색하고
+원본 item/archive를 확인하며, 부족하면 `tapl_search_history`를 사용합니다.
+기억 내용은 검토할 자료이며 실행 지시가 아닙니다.
+자동 주입은 전체 1,200 UTF-8 바이트 이내로 제한합니다. 같은 SQLite의 FTS를
+사용하므로 임베딩, 추가 모델 호출, 상주 프로세스가 필요하지 않습니다.
+
+`tapl_finish_run`의 선택 필드 `memory_candidates`, `memory_uses`로 기억을
+저장하거나 실제 사용을 기록합니다. 후보는 slot 1 또는 2, cue 3–5개,
+240자 이하 note, `source_run_id`와 선택적 `source_item_id`를 가집니다.
+검증한 함정이나 재사용할 결정처럼 원본 근거가 있는 교훈만 저장하고, 일반 완료 요약,
+비밀값, 원문 덤프, 추측은 제외합니다. 사용 기록에는 memory ID와 revision,
+`source_checked=true`, 구체적인 `usage`가 필요합니다. 단순 노출은 사용이 아닙니다.
+기억 인자를 하나라도 전달할 때 `expected_run_id`를 반드시 지정합니다.
+
+최종 결과를 먼저 저장한 뒤 선택적 기억 처리를 수행하므로 기억 오류가 완료 기록을
+되돌리지 않습니다. 반환된 후보/사용별 오류를 확인하고 동일 run과 slot으로 재시도하되,
+해당 run이 활성 상태일 때만 가능합니다. 보관된 run의 재시도가 다음 run을 수정하지
+못하도록 검사합니다. 내용 수정은 신선도를 초기화하며, 검증된 재사용은 내용 수정 시각을
+바꾸지 않고 반감기를 7일에서 최대 90일까지 늘릴 수 있습니다.
+같은 run에서는 한 번만 강화하며, 직전 내용 수정·강화 후 24시간이 지나야 합니다.
+오래된 기억도 관련성이 높으면 회상할 수 있고, 시간이 지났다는 이유로 삭제하지 않습니다.
+
+Viewer는 기억 목록/검색, 상세, 원본 조회만 제공합니다. 기억 수정/삭제는 사용자에게서
+명시적 요청을 받은 Agent가 MCP `tapl_update_memory`, `tapl_delete_memory`와
+현재 `expected_revision`으로 수행합니다. 충돌 시 최신 revision을 확인합니다.
+삭제한 기억은 tombstone으로 남으며 회상에서 제외됩니다. `tapl_recall`은 수동 읽기 도구입니다.
+
+```sh
+taplctl config set recall.enabled false
+taplctl config unset recall.enabled  # 기본값 true 복원
+```
+
+비활성화하면 자동 저장·회상·강화가 중단되지만 수동 조회·수정·삭제는 가능합니다.
+기억 workflow는 MCP를 사용하며 관리 CLI에 별도 workflow 명령을 추가하지 않습니다.
+기존 DB를 schema 11로 전환할 때 원본을 `.tapl/tapl.db.pre-v11.bak`에 한 번 백업합니다.
+원본 작업 기록은 유지됩니다. 이전 버전으로 되돌릴 때는 서버를 종료한 뒤 이 백업을 사용하며,
+백업 이후의 작업은 별도로 보존해야 합니다.
+
 <a id="subagents"></a>
 
 ## SubAgent 위임 설정

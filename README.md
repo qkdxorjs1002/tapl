@@ -97,7 +97,9 @@ taplctl viewer
 ```
 
 Open **<http://127.0.0.1:8000>** in your browser to inspect runs, plans, tasks,
-findings, and archives. The command does not open a browser automatically;
+findings, archives, and associative memories. Memory screens support read-only
+list, search, detail, and original-source inspection. Ask the agent explicitly to
+edit or delete a memory through MCP. The command does not open a browser automatically;
 press `Ctrl+C` to stop it.
 
 Use `taplctl viewer --port 9000` if port 8000 is busy. If no workspace is selected,
@@ -105,6 +107,22 @@ the viewer asks for an initialized workspace folder.
 
 For login services, reverse proxies, and the optional VS Code viewer, see
 [viewer setup](docs/guide.md#viewer).
+
+## Associative memory
+
+TAPL can keep up to two short, verified lessons per completed run and emit up to
+three relevant hints once when a new run is summarized. Hints point to original
+records; the agent checks those sources before relying on them. Useful memories
+strengthen only after confirmed use. Unused memories gradually fade.
+
+Automatic capture, recall, and reinforcement are enabled by default. To disable
+them while keeping manual inspection and management available:
+
+```sh
+taplctl config set recall.enabled false
+# Restore the default:
+taplctl config unset recall.enabled
+```
 
 ## How it works
 

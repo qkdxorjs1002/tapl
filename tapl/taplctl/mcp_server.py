@@ -32,6 +32,10 @@ WRITE = ToolAnnotations(
     open_world_hint=False,
 )
 
+MEMORY_WRITE = ToolAnnotations(
+    read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False,
+)
+
 PlanId = Annotated[
     str,
     Field(description=tapl_prompt.field_help("plan", "id"), pattern=PLAN_ID_PATTERN),
@@ -47,6 +51,26 @@ CustomFields = Annotated[
 ApprovalSource = Literal["explicit_user", "request_user_input"]
 WorkType = Literal["answer", "investigation", "analysis", "planning", "implementation", "mixed"]
 WorkflowMode = Literal["fast", "standard", "strict"]
+
+
+class MemoryCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slot: int = Field(ge=1, le=2, strict=True)
+    cue: list[str] = Field(min_length=3, max_length=5)
+    note: str = Field(min_length=1, max_length=240)
+    source_run_id: str = Field(min_length=1)
+    source_item_id: int | None = Field(default=None, ge=1, strict=True)
+    replaces_memory_id: str | None = None
+
+
+class MemoryUse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str = Field(min_length=1)
+    revision: int = Field(ge=1, strict=True)
+    source_checked: bool = Field(strict=True)
+    usage: str = Field(min_length=1, max_length=500)
 
 
 class SplitRunRequest(BaseModel):
@@ -222,6 +246,10 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
         for key in ("path", "changed", "subagents", "subagent_guidance"):
             if key in payload:
                 receipt[key] = payload[key]
+    if operation == "run_summarize" and "recall" in payload:
+        receipt["recall"] = payload["recall"]
+    if operation == "run_finish" and "memory" in payload:
+        receipt["memory"] = payload["memory"]
     object_fields = (
         (
             "active_run",
@@ -400,9 +428,38 @@ def create_server(
         query: Annotated[str, Field(description="Compact task-specific query with likely files, features, or errors.", min_length=1, max_length=500)],
         limit: Annotated[int | None, Field(description="Maximum summarized matches.", ge=1, le=50)] = None,
     ) -> dict[str, Any]:
-        """Search active and archived TAPL records before planning or when prior decisions may prevent rediscovery."""
+        """Search original active and archived records when emitted memory cues are insufficient or prior evidence is needed."""
 
         return await call_application(application.search_history, query, limit=limit)
+
+    @server.tool(name="tapl_recall", title="Recall TAPL memories", annotations=READ_ONLY)
+    async def recall(
+        query: Annotated[str, Field(description="Cue query; empty lists memories for manual inspection.", max_length=500)] = "",
+        limit: Annotated[int, Field(ge=1, le=50)] = 3,
+        offset: Annotated[int, Field(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        """Read associative hints without capture or reinforcement. Verify original sources before relying on a hint."""
+        return await call_application(application.recall, query, limit=limit, offset=offset)
+
+    @server.tool(name="tapl_update_memory", title="Update TAPL memory", annotations=MEMORY_WRITE)
+    async def update_memory(
+        memory_id: str,
+        expected_revision: Annotated[int, Field(ge=1, strict=True)],
+        note: Annotated[str | None, Field(min_length=1, max_length=240)] = None,
+        cue: Annotated[list[str] | None, Field(min_length=3, max_length=5)] = None,
+        state: Literal["active", "superseded"] | None = None,
+    ) -> dict[str, Any]:
+        """Edit a memory only on an explicit user request. Use its current revision; surface conflicts for fresh review."""
+        return await call_application(application.update_memory, memory_id, expected_revision=expected_revision,
+                                      note=note, cue=cue, state=state)
+
+    @server.tool(name="tapl_delete_memory", title="Delete TAPL memory", annotations=MEMORY_WRITE)
+    async def delete_memory(
+        memory_id: str,
+        expected_revision: Annotated[int, Field(ge=1, strict=True)],
+    ) -> dict[str, Any]:
+        """Tombstone a memory only on an explicit user request. Deleted memories cannot be recalled or reinforced."""
+        return await call_application(application.delete_memory, memory_id, expected_revision=expected_revision)
 
     @server.tool(name="tapl_get_item", title="Read one TAPL item", annotations=READ_ONLY)
     async def get_item(
@@ -439,6 +496,7 @@ def create_server(
             WorkflowMode,
             Field(description=tapl_prompt.field_help("run", "workflow_mode")),
         ],
+        recall_query: Annotated[str | None, Field(description="Optional compact cues for one automatic recall per run.", max_length=500)] = None,
     ) -> dict[str, Any]:
         """Summarize the request and explicitly classify its work type and workflow mode."""
 
@@ -448,6 +506,7 @@ def create_server(
             summary,
             work_type=work_type,
             workflow_mode=workflow_mode,
+            recall_query=recall_query,
             operation="run_summarize",
         )
 
@@ -738,6 +797,9 @@ def create_server(
     @server.tool(name="tapl_finish_run", title="Finish TAPL run", annotations=WRITE)
     async def finish_run(
         result: Annotated[str, Field(description=tapl_prompt.field_help("run", "result"), min_length=1)],
+        expected_run_id: Annotated[str | None, Field(description="Required with memory arguments; must identify the active run.", min_length=1)] = None,
+        memory_candidates: Annotated[list[MemoryCandidate] | None, Field(description="At most two reusable, verified lessons; omit for ordinary completions.", max_length=2)] = None,
+        memory_uses: Annotated[list[MemoryUse] | None, Field(description="Only memories actually used after checking their original source.", max_length=50)] = None,
     ) -> dict[str, Any]:
         """Record the verified final result after no actionable tasks remain and before archiving.
 
@@ -748,6 +810,9 @@ def create_server(
             application,
             application.finish_run,
             result,
+            expected_run_id=expected_run_id,
+            memory_candidates=[entry.model_dump(exclude_none=True) for entry in memory_candidates] if memory_candidates is not None else None,
+            memory_uses=[entry.model_dump() for entry in memory_uses] if memory_uses is not None else None,
             operation="run_finish",
         )
 

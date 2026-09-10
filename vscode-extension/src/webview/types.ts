@@ -141,7 +141,30 @@ export interface TaplItemDetail extends TaplItem {
   impact?: string;
 }
 
+export interface AssociativeMemory {
+  id: string;
+  note: string;
+  cue: string[];
+  state: 'active' | 'superseded' | 'deleted';
+  revision: number;
+  source: { run_id: string; item_id: number | null; archive_id: string | null; title: string; kind: 'item' | 'run' };
+  created_at: string;
+  updated_at: string;
+  last_reinforced_at: string | null;
+  half_life_days: number;
+  strength: number;
+  matched_cues: string[];
+  source_available: boolean;
+}
+
+export interface HostCapabilities {
+  associativeMemory: boolean;
+}
+
 export type WebviewView =
+  | { type: 'memories'; query: string; offset: number; total: number; limit: number; memories: AssociativeMemory[] }
+  | { type: 'memory'; memoryId: string; memory: AssociativeMemory | null }
+  | { type: 'memorySource'; memoryId: string; run: TaplWorkflowRun }
   | { type: 'workspace'; workspace: string; message?: string }
   | { type: 'overview'; status: TaplStatus; archives: TaplArchive[]; searchQuery: string; workspace?: string }
   | { type: 'archive'; archive: TaplArchive; detail?: TaplArchiveDetail }
@@ -152,8 +175,8 @@ export type WebviewView =
   | { type: 'error'; message: string };
 
 export type HostMessage =
-  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string }
-  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string }
+  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities }
+  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities }
   | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout };
 
 /** Lightweight standalone-viewer response used to detect workspace changes. */
@@ -166,6 +189,9 @@ export interface RevisionMessage {
 }
 
 export type WebviewCommand =
+  | { command: 'memories'; query?: string; offset?: number }
+  | { command: 'openMemory'; memoryId: string }
+  | { command: 'openMemorySource'; memoryId: string }
   | { command: 'ready' }
   | { command: 'chooseWorkspace' }
   | { command: 'selectWorkspace'; workspace: string }
