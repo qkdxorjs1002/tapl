@@ -19,7 +19,6 @@ ROOT = Path(__file__).resolve().parent
 CHROME = os.environ.get("CHROME") or shutil.which("chromium") or shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 COPY = {
     "ko": {
-        "title": "요청부터 기록까지, 한눈에.",
         "example": "TAPL 진행 예시 · 실제 세션 캡처가 아닙니다",
         "user": "권한 검사 누락의 원인을 조사하고 근거를 정리해줘.",
         "rows": [
@@ -30,11 +29,9 @@ COPY = {
             ("📝", "FINDING", "확인한 근거와 영향 범위 기록 중"),
             ("📝", "ARCHIVE", "조사 결과와 후속 작업 보관 중"),
         ],
-        "footer": "대화가 끝나도, 작업의 맥락은 남습니다.",
         "record": "계획 · 작업 · 근거 · 이력",
     },
     "en": {
-        "title": "From request to a lasting record.",
         "example": "ILLUSTRATIVE WORKFLOW · NOT A SESSION CAPTURE",
         "user": "Investigate the missing permission check and document the evidence.",
         "rows": [
@@ -45,7 +42,6 @@ COPY = {
             ("📝", "FINDING", "Recording the evidence and affected paths"),
             ("📝", "ARCHIVE", "Saving the investigation and follow-up work"),
         ],
-        "footer": "The conversation ends. The context stays.",
         "record": "Plans · Tasks · Findings · History",
     },
 }
@@ -61,10 +57,8 @@ def page(lang, visible):
     )
     return f'''<!doctype html><html lang="{lang}"><meta charset="utf-8">
 <title>TAPL illustrative workflow</title><style>
-* {{box-sizing:border-box}} html,body {{margin:0;width:1280px;height:880px;overflow:hidden}}
+* {{box-sizing:border-box}} html,body {{margin:0;width:1280px;height:720px;overflow:hidden}}
 body {{background:#101b20;color:#e9f1ee;font-family:Arial,"Apple SD Gothic Neo","Noto Sans CJK KR",sans-serif;padding:44px 54px}}
-.eyebrow {{font-size:16px;letter-spacing:3px;font-weight:700;color:#85e3c1}}
-h1 {{font-size:42px;letter-spacing:-1.4px;margin:16px 0 26px;font-weight:650}}
 .window {{background:#17262c;border:1px solid #32484e;border-radius:18px;overflow:hidden}}
 .bar {{height:56px;background:#1e3036;display:flex;align-items:center;padding:0 24px;gap:8px;border-bottom:1px solid #32484e}}
 .light {{width:10px;height:10px;border-radius:50%;background:#58716f}} .light:first-child {{background:#87dfbc}}
@@ -80,16 +74,11 @@ h1 {{font-size:42px;letter-spacing:-1.4px;margin:16px 0 26px;font-weight:650}}
 .dot {{padding:0 12px;color:#7c969a}}
 .bottom {{height:46px;border-top:1px solid #30464c;display:flex;align-items:center;justify-content:space-between;color:#a9bebb;font-size:14px;padding:0 30px}}
 .db {{font-family:Menlo,Consolas,monospace;color:#91cfbc;font-size:13px}}
-.footer {{display:flex;align-items:center;justify-content:space-between;margin-top:24px;font-size:17px;color:#b3c7c4}}
-.pill {{border:1px solid #36534f;padding:8px 13px;border-radius:20px;color:#91dcbc;font-size:13px}}
 </style><body>
-<div class="eyebrow">TAPL / WORKFLOW MEMORY</div>
-<h1>{copy["title"]}</h1>
 <div class="window"><div class="bar"><i class="light"></i><i class="light"></i><i class="light"></i>
 <span class="bar-title">Codex + TAPL</span><span class="sample">{copy["example"]}</span></div>
 <div class="content"><div class="user"><b>YOU</b>{copy["user"]}</div><div class="rows">{rows}</div></div>
 <div class="bottom"><span>{copy["record"]}</span><span class="db">.tapl/tapl.db</span></div></div>
-<div class="footer"><span>{copy["footer"]}</span><span class="pill">LOCAL STATE · SHARED CONTEXT</span></div>
 </body></html>'''
 
 
@@ -100,7 +89,7 @@ def run(*args):
 def screenshot(source, frame, profile):
     args = [CHROME, "--headless", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
             "--no-default-browser-check", "--disable-extensions", "--disable-background-networking",
-            f"--user-data-dir={profile}", "--window-size=1280,880", "--force-device-scale-factor=1",
+            f"--user-data-dir={profile}", "--window-size=1280,720", "--force-device-scale-factor=1",
             f"--screenshot={frame}", source.as_uri()]
     # Some macOS Chrome builds keep the headless process alive after capture.
     with tempfile.TemporaryFile() as log:
