@@ -10,7 +10,7 @@
   <a href="docs/guide.md#requirements"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.11 or newer" /></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT license" /></a>
 </p>
-<p align="center"><a href="#quick-start">Quick start</a> · <a href="#workflow">Workflow</a> · <a href="docs/guide.md">Guide</a></p>
+<p align="center"><a href="#quick-start">Quick start</a> · <a href="#associative-memory">Associative memory</a> · <a href="#workflow">Workflow</a> · <a href="docs/guide.md">Guide</a></p>
 
 ## Why TAPL?
 
@@ -21,7 +21,41 @@ and recoverable when the conversation ends.
 - **Keep decisions close to the code.** Each workspace owns its history in `.tapl/tapl.db`.
 - **See what happened.** Inspect approvals, findings, validation, and lifecycle events.
 - **Search previous work.** Full-text search is included; semantic search is optional.
+- **Recall relevant experience.** Short memory cues point back to earlier work when it becomes useful.
 - **Coordinate parallel tasks.** Track dependencies and exclusive file ownership while Codex manages the agents.
+
+<a id="associative-memory"></a>
+
+## Associative memory
+
+“I think we implemented it this way…” can be enough to find the right record.
+TAPL's associative memory connects the current task to earlier work through short
+cues. The agent follows a cue to its original source and checks whether it applies now.
+
+For example, while revising a migration, a memory about checking transaction
+boundaries can lead back to the original implementation and validation results.
+
+1. **Keep useful lessons.** At completion, the agent can save up to two verified decisions, reusable solutions, or pitfalls. Each memory contains a note of at most 240 characters, 3–5 cues, and a reference to its source run or record.
+2. **Recall at the right moment.** When a new run is summarized, TAPL adds up to three relevant hints to the context, once per run. The agent checks the linked originals before using them.
+3. **Strengthen through actual use.** A memory lasts longer when the agent records that it checked the source and used it in the work. Simply viewing or searching for a memory does not strengthen it.
+
+Unused memories gradually fade, but age alone never deletes them. Recall uses the
+existing SQLite database and full-text search, without a separate embedding model
+or background service.
+
+The browser and VS Code Viewer offer read-only memory lists, search, details, and
+original sources. Ask the agent explicitly to edit or delete a memory.
+
+Automatic capture, recall, and reinforcement are enabled by default. To disable
+them while keeping manual inspection and management available:
+
+```sh
+taplctl config set recall.enabled false
+# Restore the default:
+taplctl config unset recall.enabled
+```
+
+See the [associative memory guide](docs/guide.md#associative-memory) for detailed rules and limits.
 
 <a id="workflow"></a>
 
@@ -120,22 +154,6 @@ the viewer asks for an initialized workspace folder.
 
 For login services, reverse proxies, and the optional VS Code viewer, see
 [viewer setup](docs/guide.md#viewer).
-
-## Associative memory
-
-TAPL can keep up to two short, verified lessons per completed run and emit up to
-three relevant hints once when a new run is summarized. Hints point to original
-records; the agent checks those sources before relying on them. Useful memories
-strengthen only after confirmed use. Unused memories gradually fade.
-
-Automatic capture, recall, and reinforcement are enabled by default. To disable
-them while keeping manual inspection and management available:
-
-```sh
-taplctl config set recall.enabled false
-# Restore the default:
-taplctl config unset recall.enabled
-```
 
 ## How it works
 
