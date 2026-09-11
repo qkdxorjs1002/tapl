@@ -137,6 +137,7 @@ declare module 'vscode' {
   export type ProviderResult<T> = T | undefined | null | Thenable<T | undefined | null>;
 
   export namespace window {
+    export function showWorkspaceFolderPick(): Thenable<WorkspaceFolder | undefined>;
     export function registerTreeDataProvider<T>(viewId: string, treeDataProvider: TreeDataProvider<T>): Disposable;
     export function createWebviewPanel(
       viewType: string,
@@ -157,6 +158,7 @@ declare module 'vscode' {
       readFile(uri: Uri): Thenable<Uint8Array>;
     };
     export function getConfiguration(section?: string, scope?: Uri | null): WorkspaceConfiguration;
+    export function onDidChangeWorkspaceFolders(listener: () => unknown): Disposable;
     export function onDidChangeConfiguration(listener: (event: ConfigurationChangeEvent) => unknown): Disposable;
     export function createFileSystemWatcher(globPattern: RelativePattern): FileSystemWatcher;
   }

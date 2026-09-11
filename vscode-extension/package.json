@@ -47,6 +47,7 @@
     "compile": "npm run compile:extension && npm run compile:webview",
     "compile:extension": "tsc -p ./ && node scripts/bundle-extension.mjs",
     "compile:webview": "vite build && node scripts/sync-viewer-assets.mjs",
+    "test:host": "tsc -p ./ && node --test tests/viewer-host.cjs",
     "watch": "tsc -watch -p ./",
     "watch:webview": "vite build --watch",
     "package": "vsce package --no-dependencies --out tapl-workflow-viewer-$npm_package_version.vsix",

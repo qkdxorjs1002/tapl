@@ -446,6 +446,13 @@ def create_server(
         """Read associative hints without capture or reinforcement. Verify original sources before relying on a hint."""
         return await call_application(application.recall, query, limit=limit, offset=offset)
 
+    @server.tool(name="tapl_get_memory", title="Read one TAPL memory", annotations=READ_ONLY)
+    async def get_memory(
+        memory_id: Annotated[str, Field(description="Memory id returned by tapl_recall.", min_length=1)],
+    ) -> dict[str, Any]:
+        """Read a memory and its original source without capture or reinforcement. Deleted or missing memories return null."""
+        return await call_application(application.get_memory, memory_id)
+
     @server.tool(name="tapl_update_memory", title="Update TAPL memory", annotations=MEMORY_WRITE)
     async def update_memory(
         memory_id: str,

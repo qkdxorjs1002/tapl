@@ -452,8 +452,8 @@ class ViewerApplication:
             return {"type": "search", "search": self.json_runner(db_path, ["search", query, "--json"])}
         if command == "memories":
             query, offset = payload.get("query", ""), payload.get("offset", 0)
-            if not isinstance(query, str) or len(query) > 2000:
-                raise ViewerError("Memory query must be a string of at most 2000 characters.")
+            if not isinstance(query, str) or len(query) > 500:
+                raise ViewerError("Memory query must be a string of at most 500 characters.")
             if type(offset) is not int or not 0 <= offset <= 1000000:
                 raise ViewerError("Invalid memory offset.")
             result = self.json_runner(db_path, ["memory", "list", "--query", query, "--offset", str(offset)])

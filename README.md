@@ -100,6 +100,8 @@ Standalone installers default to the latest stable release. See the guide for
 
 ## Open the viewer
 
+The browser and VS Code extension share the same Viewer screens, features, and message types. The browser uses the extension’s neutral default colors; VS Code’s selected theme takes precedence inside the extension.
+
 From your workspace, start the local viewer:
 
 ```sh

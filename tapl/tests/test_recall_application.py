@@ -123,6 +123,8 @@ def test_memory_mcp_schema_annotations_and_validation(app):
     server = mcp_server.create_server(workspace_root=app.workspace_root)
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert tools['tapl_recall'].annotations.read_only_hint
+    assert tools['tapl_get_memory'].annotations.read_only_hint
+    assert app.get_status()['viewer_capabilities'] == {'associativeMemory': True}
     for name in ('tapl_update_memory', 'tapl_delete_memory'):
         assert not tools[name].annotations.read_only_hint
         assert tools[name].annotations.destructive_hint
@@ -178,3 +180,32 @@ def test_archive_race_after_result_commit_skips_memory_and_keeps_bound_run(app):
     assert result['active_run']['result_summary'] == 'saved before archive'
     assert result['memory']['status'] == 'stale_run'
     assert app.recall()['total'] == 0
+
+
+def test_memory_mcp_detail_is_read_only_and_returns_current_source(app):
+    memory_id = capture(app)
+    server = mcp_server.create_server(workspace_root=app.workspace_root)
+    before = app.get_memory(memory_id)['memory']
+
+    async def read():
+        async with Client(server) as client:
+            first = await client.call_tool('tapl_get_memory', {'memory_id': memory_id})
+            second = await client.call_tool('tapl_get_memory', {'memory_id': memory_id})
+            missing = await client.call_tool('tapl_get_memory', {'memory_id': 'missing'})
+            assert not first.is_error and not second.is_error
+            for result in (first, second):
+                memory = result.structured_content['memory']
+                assert {k: v for k, v in memory.items() if k != 'strength'} == {k: v for k, v in before.items() if k != 'strength'}
+                assert memory['strength'] <= before['strength']
+            assert first.structured_content['memory']['source_record']['run']['result_summary'] == 'Verified migration'
+            assert missing.structured_content['memory'] is None
+    asyncio.run(read())
+    after = app.get_memory(memory_id)['memory']
+    assert {k: v for k, v in after.items() if k != 'strength'} == {k: v for k, v in before.items() if k != 'strength'}
+    app.delete_memory(memory_id, expected_revision=before['revision'])
+
+    async def read_deleted():
+        async with Client(server) as client:
+            result = await client.call_tool('tapl_get_memory', {'memory_id': memory_id})
+            assert not result.is_error and result.structured_content['memory'] is None
+    asyncio.run(read_deleted())

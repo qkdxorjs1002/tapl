@@ -535,6 +535,7 @@ function ErrorView({ message, send }: { message: string; send: (message: Webview
         <div className="mt-4 flex flex-wrap gap-2">
           <button className="btn btn-primary btn-sm" type="button" onClick={() => send({ command: 'refresh' })}>{t('refresh')}</button>
           <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'back' })}>{t('back')}</button>
+          <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'chooseWorkspace' })}>{t('chooseWorkspace')}</button>
         </div>
       </Card>
     </div>

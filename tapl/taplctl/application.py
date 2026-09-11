@@ -88,6 +88,7 @@ class WorkflowApplication:
         payload = {
             "ok": True,
             "schema": state.get("schema") or {},
+            "viewer_capabilities": {"associativeMemory": True},
             "active_run": state.get("active_run"),
             "task_counts": state.get("task_counts") or {},
             "incomplete_tasks": state.get("incomplete_tasks", 0),
@@ -273,7 +274,12 @@ class WorkflowApplication:
 
     def get_memory(self, memory_id: str) -> dict[str, Any]:
         with self._connection() as conn:
-            memory = memory_store.get_memory(conn, memory_id)
+            try:
+                memory = memory_store.get_memory(conn, memory_id)
+            except memory_store.MemoryError as exc:
+                if exc.code != "not_found":
+                    raise
+                memory = None
         return {"ok": True, "memory": memory}
 
     def update_memory(

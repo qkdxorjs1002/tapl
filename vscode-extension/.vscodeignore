@@ -6,6 +6,7 @@ webview-dist/**/*.map
 webview-dist/**/*.html
 src/**
 scripts/**
+tests/**
 pnpm-lock.yaml
 tsconfig.json
 tsconfig.webview.json

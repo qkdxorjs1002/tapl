@@ -9,31 +9,31 @@
   --rounded-box: 1rem;
   --rounded-btn: 0.7rem;
   --rounded-badge: 999px;
-  --tapl-tech-blue: #0066ff;
-  --tapl-tech-cyan: #00ffff;
-  --tapl-page-bg: var(--vscode-sideBar-background, var(--vscode-panel-background, var(--vscode-editor-background, #090d16)));
-  --tapl-foreground: var(--vscode-editor-foreground, #f1f5f9);
+  --tapl-tech-blue: var(--vscode-button-background, #0e639c);
+  --tapl-tech-cyan: var(--vscode-textLink-foreground, #3794ff);
+  --tapl-page-bg: var(--vscode-sideBar-background, var(--vscode-panel-background, var(--vscode-editor-background, #252526)));
+  --tapl-foreground: var(--vscode-editor-foreground, #cccccc);
   --tapl-font: var(--vscode-font-family, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
-  --tapl-muted: var(--vscode-descriptionForeground, #9ca3af);
-  --tapl-panel: color-mix(in srgb, var(--vscode-sideBar-background, var(--tapl-page-bg)) 92%, var(--tapl-tech-blue) 8%);
-  --tapl-surface: color-mix(in srgb, var(--vscode-editorWidget-background, var(--tapl-panel)) 96%, var(--tapl-tech-blue) 4%);
-  --tapl-surface-raised: color-mix(in srgb, var(--tapl-surface) 95%, #ffffff 5%);
-  --tapl-surface-muted: color-mix(in srgb, var(--vscode-input-background, var(--tapl-surface)) 94%, var(--tapl-tech-blue) 6%);
-  --tapl-item-bg: color-mix(in srgb, var(--vscode-editor-background, var(--tapl-surface)) 92%, var(--tapl-surface-raised) 8%);
-  --tapl-hover: var(--vscode-list-hoverBackground, var(--tapl-surface-muted));
-  --tapl-success: var(--vscode-testing-iconPassed, #5fd38d);
+  --tapl-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --tapl-panel: var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e));
+  --tapl-surface: var(--vscode-editorWidget-background, #252526);
+  --tapl-surface-raised: color-mix(in srgb, var(--tapl-surface) 95%, var(--tapl-foreground) 5%);
+  --tapl-surface-muted: var(--vscode-input-background, #3c3c3c);
+  --tapl-item-bg: var(--vscode-editor-background, #1e1e1e);
+  --tapl-hover: var(--vscode-list-hoverBackground, #2a2d2e);
+  --tapl-success: var(--vscode-testing-iconPassed, #89d185);
   --tapl-warning: var(--vscode-editorWarning-foreground, #cca700);
   --tapl-error: var(--vscode-errorForeground, #f48771);
-  --tapl-accent: var(--vscode-focusBorder, var(--tapl-tech-blue));
-  --tapl-highlight: color-mix(in srgb, var(--tapl-tech-cyan) 74%, var(--tapl-accent));
-  --tapl-info: var(--vscode-symbolIcon-eventForeground, var(--tapl-accent));
-  --tapl-border-base: var(--vscode-panel-border, #3f3f46);
+  --tapl-accent: var(--vscode-focusBorder, #007fd4);
+  --tapl-highlight: var(--vscode-textLink-foreground, #3794ff);
+  --tapl-info: var(--vscode-symbolIcon-eventForeground, var(--tapl-highlight));
+  --tapl-border-base: var(--vscode-panel-border, #454545);
   --tapl-border-subtle: color-mix(in srgb, var(--tapl-border-base) 24%, transparent);
   --tapl-border: color-mix(in srgb, var(--tapl-border-base) 46%, transparent);
-  --tapl-border-panel: color-mix(in srgb, var(--tapl-accent) 18%, transparent);
-  --tapl-border-item: color-mix(in srgb, var(--tapl-border-base) 26%, transparent);
-  --tapl-border-control: color-mix(in srgb, var(--tapl-accent) 38%, transparent);
-  --tapl-border-strong: var(--vscode-focusBorder, var(--tapl-tech-cyan));
+  --tapl-border-panel: color-mix(in srgb, var(--tapl-border-base) 70%, transparent);
+  --tapl-border-item: color-mix(in srgb, var(--tapl-border-base) 46%, transparent);
+  --tapl-border-control: var(--vscode-input-border, var(--tapl-border-base));
+  --tapl-border-strong: var(--vscode-focusBorder, var(--tapl-accent));
   --tapl-shadow: 0 22px 54px rgb(0 0 0 / 0.2);
   --tapl-shadow-soft: 0 10px 28px rgb(0 0 0 / 0.14);
   --tapl-shadow-raised: 0 14px 34px rgb(0 0 0 / 0.16), 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent) inset;
@@ -52,10 +52,7 @@ body {
   margin: 0;
   padding: 22px;
   color: var(--tapl-foreground);
-  background:
-    radial-gradient(circle at 2% -8%, color-mix(in srgb, var(--tapl-tech-blue) 13%, transparent), transparent 30rem),
-    radial-gradient(circle at 98% 4%, color-mix(in srgb, var(--tapl-tech-cyan) 5%, transparent), transparent 24rem),
-    var(--tapl-page-bg);
+  background: var(--tapl-page-bg);
   font-family: var(--tapl-font);
 }
 
@@ -71,30 +68,30 @@ input {
 
 .btn-primary {
   border: 0;
-  background: linear-gradient(135deg, var(--vscode-button-background, var(--tapl-tech-blue)), color-mix(in srgb, var(--vscode-button-background, var(--tapl-tech-blue)) 76%, var(--tapl-tech-cyan) 24%));
+  background: var(--vscode-button-background, #0e639c);
   color: var(--vscode-button-foreground, #ffffff);
   box-shadow: 0 8px 20px color-mix(in srgb, var(--tapl-accent) 24%, transparent);
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, var(--vscode-button-hoverBackground, var(--tapl-accent)), color-mix(in srgb, var(--tapl-accent) 72%, var(--tapl-tech-cyan) 28%));
+  background: var(--vscode-button-hoverBackground, #1177bb);
   transform: translateY(-1px);
 }
 
 .btn-secondary {
   border-color: transparent;
   background: color-mix(in srgb, var(--vscode-button-secondaryBackground, var(--tapl-panel)) 88%, transparent);
-  color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+  color: var(--vscode-button-secondaryForeground, var(--tapl-foreground));
   box-shadow: var(--tapl-shadow-inset);
 }
 
 .btn-secondary:hover {
   background: var(--vscode-button-secondaryHoverBackground, var(--tapl-surface));
-  color: var(--vscode-editor-foreground);
+  color: var(--tapl-foreground);
 }
 
 .input {
-  background: var(--vscode-input-background, #121827);
+  background: var(--tapl-surface-muted);
   color: var(--vscode-input-foreground, var(--tapl-foreground));
   border-color: color-mix(in srgb, var(--vscode-input-border, var(--tapl-border-control)) 70%, transparent);
   box-shadow: var(--tapl-shadow-inset);
@@ -131,7 +128,7 @@ pre {
 .tapl-shell {
   @apply mx-auto grid w-full gap-[18px];
   max-width: 1440px;
-  color: var(--vscode-editor-foreground, #f1f5f9);
+  color: var(--tapl-foreground);
   background: transparent;
 }
 
@@ -427,7 +424,8 @@ pre {
   height: calc(100% + var(--journey-row-gap) + 3px);
   border: 3px solid color-mix(in srgb, var(--step-color) 68%, var(--tapl-border-base));
   background: transparent;
-  box-shadow: 0 0 12px color-mix(in srgb, var(--step-color) 12%, transparent);
+  box-shadow: none;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--step-color) 12%, transparent));
 }
 
 .tapl-journey-step.turn-right::after {
@@ -456,7 +454,7 @@ pre {
 
 .tapl-step-card {
   @apply relative z-10 flex h-full w-full min-w-0 flex-col rounded-xl p-3;
-  color: var(--vscode-editor-foreground);
+  color: var(--tapl-foreground);
   background: var(--step-surface);
   border: 1px solid transparent;
   box-shadow: 0 10px 24px rgb(0 0 0 / 0.13);
@@ -473,7 +471,7 @@ pre {
 
 .tapl-task-id {
   @apply min-w-0 truncate text-[11px] font-bold tracking-wide;
-  color: color-mix(in srgb, var(--step-color) 72%, var(--vscode-editor-foreground));
+  color: color-mix(in srgb, var(--step-color) 72%, var(--tapl-foreground));
 }
 
 .tapl-step-title {
@@ -521,14 +519,14 @@ pre {
 
 .tapl-custom-chip {
   @apply grid w-full min-w-0 items-start gap-0.5 rounded-lg px-2 py-1 text-[10px];
-  color: var(--vscode-editor-foreground);
+  color: var(--tapl-foreground);
   background: color-mix(in srgb, var(--step-color, var(--tapl-accent)) 14%, var(--tapl-surface-muted));
 }
 
 .tapl-custom-chip-label {
   @apply min-w-0 font-semibold;
   overflow-wrap: anywhere;
-  color: color-mix(in srgb, var(--step-color, var(--tapl-accent)) 76%, var(--vscode-editor-foreground));
+  color: color-mix(in srgb, var(--step-color, var(--tapl-accent)) 76%, var(--tapl-foreground));
 }
 
 .tapl-custom-chip-value {
@@ -588,7 +586,7 @@ pre {
 
 .tapl-journey-step.completed {
   --step-color: color-mix(in srgb, var(--tapl-success) 45%, var(--tapl-muted));
-  --step-surface: color-mix(in srgb, var(--tapl-item-bg) 72%, #0b1020 28%);
+  --step-surface: color-mix(in srgb, var(--tapl-item-bg) 72%, var(--tapl-panel) 28%);
 }
 
 .tapl-journey-step.completed .tapl-step-card {
@@ -684,7 +682,7 @@ pre {
 .tapl-custom-row > dt,
 .tapl-json-entry > dt {
   @apply min-w-0 break-words text-xs font-semibold;
-  color: color-mix(in srgb, var(--tapl-highlight) 62%, var(--vscode-editor-foreground));
+  color: color-mix(in srgb, var(--tapl-highlight) 62%, var(--tapl-foreground));
 }
 
 .tapl-custom-row > dd,
@@ -713,7 +711,7 @@ pre {
 .tapl-json-number,
 .tapl-json-boolean {
   @apply font-mono;
-  color: color-mix(in srgb, var(--tapl-highlight) 72%, var(--vscode-editor-foreground));
+  color: color-mix(in srgb, var(--tapl-highlight) 72%, var(--tapl-foreground));
 }
 
 .tapl-json-null {
@@ -738,7 +736,7 @@ pre {
 .kbd {
   border: 0;
   background: color-mix(in srgb, var(--tapl-surface-muted) 82%, var(--tapl-accent) 18%);
-  color: var(--vscode-editor-foreground);
+  color: var(--tapl-foreground);
   box-shadow: none;
 }
 
@@ -774,7 +772,7 @@ pre {
   box-sizing: border-box;
   min-width: 0;
   max-width: 82ch;
-  color: var(--vscode-editor-foreground);
+  color: var(--tapl-foreground);
   background: transparent;
   font-family: var(--vscode-font-family);
 }
@@ -799,7 +797,7 @@ pre {
 .tapl-readable.markdown-body h4,
 .tapl-readable.markdown-body h5,
 .tapl-readable.markdown-body h6 {
-  color: var(--vscode-editor-foreground);
+  color: var(--tapl-foreground);
 }
 
 .tapl-readable.markdown-body a {
@@ -863,7 +861,7 @@ pre {
 
 .tapl-tabs .tab-active {
   background: color-mix(in srgb, var(--tapl-surface-raised) 88%, var(--tapl-accent) 12%);
-  color: var(--vscode-editor-foreground);
+  color: var(--tapl-foreground);
   box-shadow: 0 5px 14px rgb(0 0 0 / 0.12);
 }
 
@@ -1084,9 +1082,11 @@ pre {
   .tapl-journey-step::after {
     background: CanvasText;
     box-shadow: none;
+    filter: none;
   }
 
   .tapl-journey-step.turns::after {
+    filter: none;
     border-color: CanvasText;
     background: transparent;
   }

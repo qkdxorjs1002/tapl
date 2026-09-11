@@ -260,6 +260,7 @@ jobs:
           set -euo pipefail
 
           npm install --package-lock=false
+          npm run test:host
           npm run compile
 
       - name: Build Python wheel

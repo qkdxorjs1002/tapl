@@ -84,3 +84,11 @@ or report a problem in [GitHub Issues](https://github.com/qkdxorjs1002/tapl/issu
 Released under the [MIT License](https://github.com/qkdxorjs1002/tapl/blob/main/vscode-extension/LICENSE.md).
 See [third-party notices](https://github.com/qkdxorjs1002/tapl/blob/main/vscode-extension/THIRD_PARTY_NOTICES.md)
 for bundled dependencies.
+
+## Shared Viewer
+
+The extension and browser Viewer use the same React screens, CSS, and protocol types (`src/viewer/types.ts`). The extension provides the VS Code workspace and MCP adapters; the browser provides HTTP and local workspace selection.
+
+Both show associative memory lists, search, details, and original sources. Memory screens are read-only: ask the agent to change or delete a memory. Use a current `tapl-mcp` for memory support; older servers keep the other Viewer screens available.
+
+Run `npm run test:host` to check the extension's read-only routing, refresh, navigation, and workspace contracts, then `npm run compile` to build and sync the shared browser assets.

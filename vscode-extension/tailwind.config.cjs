@@ -5,22 +5,22 @@ module.exports = {
     themes: [
       {
         tapl: {
-          primary: '#0066ff',
+          primary: '#0e639c',
           'primary-content': '#ffffff',
-          secondary: '#293145',
+          secondary: '#3c3c3c',
           'secondary-content': '#ffffff',
-          accent: '#00e5ff',
-          'accent-content': '#07111f',
+          accent: '#3794ff',
+          'accent-content': '#ffffff',
           neutral: '#1e1e1e',
-          'neutral-content': '#f8fafc',
+          'neutral-content': '#cccccc',
           'base-100': '#1e1e1e',
-          'base-200': '#242733',
-          'base-300': '#303544',
-          'base-content': '#f1f5f9',
-          info: '#38bdf8',
-          success: '#5fd38d',
-          warning: '#f4c95d',
-          error: '#ff6b7a'
+          'base-200': '#252526',
+          'base-300': '#333333',
+          'base-content': '#cccccc',
+          info: '#3794ff',
+          success: '#89d185',
+          warning: '#cca700',
+          error: '#f48771'
         }
       }
     ]

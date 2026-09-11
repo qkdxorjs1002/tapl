@@ -47,7 +47,7 @@ function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memori
       <p className="tapl-muted m-0">{t('memoryIntro')}</p>
       <form className="tapl-memory-search" role="search" aria-label={t('searchMemories')} onSubmit={submit}>
         <label htmlFor="memory-query">{t('searchMemories')}</label>
-        <div><input id="memory-query" type="search" className="input input-bordered" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchMemories')} />
+        <div><input id="memory-query" type="search" maxLength={500} className="input input-bordered" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchMemories')} />
           <button className="btn btn-primary" type="submit">{t('search')}</button></div>
       </form>
       <p className="tapl-muted text-sm m-0" role="status">{t('memoryRange', { start: view.memories.length ? view.offset + 1 : 0, end: view.offset + view.memories.length, total: view.total })}</p>
