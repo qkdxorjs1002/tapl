@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
+import json
 import tempfile
 import tomllib
 import unittest
@@ -86,6 +89,59 @@ class PublicCliBoundaryTests(unittest.TestCase):
 
 
 class HookEntrypointTests(unittest.TestCase):
+    def test_user_install_hooks_do_not_enroll_workspaces_without_version_marker(self) -> None:
+        for evidence in ("empty", "db", "config", "hook", "config_and_hook"):
+            with self.subTest(evidence=evidence), tempfile.TemporaryDirectory() as tmp:
+                user_root = Path(tmp) / "home" / "paragonnov"
+                workspace = user_root / "workspace" / "infra"
+                workspace.mkdir(parents=True)
+                with mock.patch.object(Path, "home", return_value=user_root):
+                    install.install_user(
+                        taplctl_command="/home/linuxbrew/.linuxbrew/bin/taplctl"
+                    )
+                    user_config = user_root / ".tapl" / "config.toml"
+                    user_config.write_text("[search]\nmax_results = 7\n", encoding="utf-8")
+                    if evidence != "empty":
+                        hook_cli.db.initialize_workspace(workspace)
+                    repo_config = workspace / ".tapl" / "config.toml"
+                    if evidence in ("config", "config_and_hook"):
+                        repo_config.write_text("[search]\nmax_results = 3\n", encoding="utf-8")
+                    if evidence in ("hook", "config_and_hook"):
+                        install.install_hooks(
+                            workspace / ".codex" / "hooks.json",
+                            taplctl_command="/home/linuxbrew/.linuxbrew/bin/taplctl",
+                            mode="observe",
+                            dry_run=False,
+                        )
+                    tracked = [
+                        scope / relative
+                        for scope in (user_root, workspace)
+                        for relative in (
+                            ".tapl/config.toml", ".tapl/version",
+                            ".codex/config.toml", ".codex/hooks.json",
+                        )
+                    ]
+                    before = {path: path.read_bytes() if path.exists() else None for path in tracked}
+
+                    for event in ("SessionStart", "UserPromptSubmit", "UserPromptSubmit"):
+                        payload = json.dumps({"cwd": str(workspace), "prompt": "Inspect the workspace"})
+                        with (
+                            mock.patch("sys.stdin", io.StringIO(payload)),
+                            contextlib.redirect_stdout(io.StringIO()),
+                        ):
+                            result = hook_cli.main(["--event", event, "--json"])
+                        self.assertEqual(result, 0)
+                        self.assertEqual(
+                            {path: path.read_bytes() if path.exists() else None for path in tracked},
+                            before,
+                        )
+
+                    self.assertTrue((workspace / hook_cli.db.DEFAULT_DB_RELATIVE).is_file())
+                    settings = hook_cli.tapl_config.load(start=workspace)
+                    has_config = evidence in ("config", "config_and_hook")
+                    self.assertEqual(settings.path, str(repo_config if has_config else user_config))
+                    self.assertEqual(settings.search.max_results, 3 if has_config else 7)
+
     def test_hook_cli_handles_event_without_management_cli_bridge(self) -> None:
         connection = mock.Mock()
         outcome = {"event": "PreToolUse", "block": True, "message": "blocked"}

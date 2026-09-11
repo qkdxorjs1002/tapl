@@ -125,6 +125,7 @@ def install_repo(
     force: bool = False,
     dry_run: bool = False,
     tapl_config_policy: str = TAPL_CONFIG_POLICY_PROMPT,
+    create_missing_config: bool = True,
 ) -> dict[str, Any]:
     root = db.find_repo_root(repo)
     command = resolved_taplctl_command(taplctl_command)
@@ -143,13 +144,17 @@ def install_repo(
             dry_run=dry_run,
         ),
         *remove_deprecated_codex_templates(root / ".codex", dry_run=dry_run),
-        write_tapl_config(
-            config_path,
-            default_config_text(),
-            force=force,
-            dry_run=dry_run,
-            previous_version=previous_version,
-            tapl_config_policy=tapl_config_policy,
+        (
+            write_tapl_config(
+                config_path,
+                default_config_text(),
+                force=force,
+                dry_run=dry_run,
+                previous_version=previous_version,
+                tapl_config_policy=tapl_config_policy,
+            )
+            if create_missing_config or config_path.exists()
+            else {"path": str(config_path), "action": "skipped_missing"}
         ),
         write_version_marker(version_path, dry_run=dry_run),
         initialize_db(db_path, dry_run=dry_run),
@@ -197,6 +202,8 @@ def auto_install_if_needed(
                 taplctl_command=taplctl_command,
                 mode=mode,
                 tapl_config_policy=tapl_config_policy,
+                # A missing local config intentionally inherits user settings.
+                create_missing_config=False,
             )
         )
 
@@ -227,11 +234,10 @@ def scope_has_user_install(home: Path) -> bool:
 
 
 def scope_has_repo_install(root: Path) -> bool:
-    return (
-        (root / VERSION_RELATIVE).exists()
-        or (root / config.CONFIG_RELATIVE).exists()
-        or hooks_file_has_tapl_command(root / ".codex" / "hooks.json")
-    )
+    # Config overrides and leftover hooks do not opt a workspace into repo
+    # installation. Only an existing install marker permits automatic refresh;
+    # recreating a missing marker requires an explicit `taplctl install repo`.
+    return (root / VERSION_RELATIVE).is_file()
 
 
 def installed_version(path: Path) -> str | None:
