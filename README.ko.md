@@ -206,6 +206,12 @@ taplctl install user --taplctl-command (Join-Path $taplInstall.venv "Scripts\tap
 위 명령은 Codex 계정 전체에 연결합니다. 현재 저장소에만 연결하려면 `user`를 `repo`로
 바꾸세요.
 
+사용자 설치에서는 Codex가 각 워크스페이스의 TAPL DB를 초기화하며, 로컬
+`.tapl/config.toml`과 `.tapl/version`은 생성하지 않습니다. 저장소 자동 갱신에는
+기존 DB와 `.tapl/version`이 필요하며, 남아 있는 훅이나 로컬 설정만으로 설치를
+시작하지 않습니다. 로컬 설정이 없으면 사용자 설정 또는 기본값을 계속 사용합니다.
+누락된 저장소 설치 파일을 복원하려면 `taplctl install repo`를 명시적으로 실행하세요.
+
 이 명령은 `tapl-mcp`를 위한 활성화된 `mcp_servers.tapl` entry와 `tapl-hook` Codex
 lifecycle hook을 추가합니다. 이후 Codex를 재시작하세요. Codex가 처음 확인을 요청하면
 설치된 hook을 신뢰합니다.

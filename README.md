@@ -212,6 +212,13 @@ taplctl install user --taplctl-command (Join-Path $taplInstall.venv "Scripts\tap
 
 These commands install for your Codex account. Replace `user` with `repo` to connect only the current repository.
 
+With a user installation, Codex initializes each workspace's TAPL database without
+creating local `.tapl/config.toml` or `.tapl/version` files. Automatic repository
+refresh requires an existing database and `.tapl/version`; leftover hooks or a
+config override alone do not trigger installation. A missing local config keeps
+inheriting user settings or defaults. Run `taplctl install repo` explicitly to
+restore missing repository installation files.
+
 This adds an enabled `mcp_servers.tapl` entry for `tapl-mcp` and Codex lifecycle hooks for `tapl-hook`. Restart Codex afterward. The first time Codex asks for confirmation, trust the installed hook.
 
 <p align="center">

@@ -2740,6 +2740,38 @@ keep = true
             self.assertNotIn("plan-task-execute", repo_config)
             self.assertNotIn("plan_task_execute", repo_config)
 
+    def test_auto_install_preserves_missing_repo_config(self) -> None:
+        for marker in ("0.0.0", __version__):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as tmp:
+                user_root = Path(tmp) / "home" / "paragonnov"
+                repo = user_root / "workspace" / "infra"
+                with mock.patch.object(Path, "home", return_value=user_root):
+                    tapl_install.install_user(taplctl_command="taplctl")
+                    tapl_install.install_repo(repo=repo, taplctl_command="taplctl")
+                    repo_config = repo / ".tapl" / "config.toml"
+                    repo_config.unlink()
+                    (repo / ".tapl" / "version").write_text(marker + "\n", encoding="utf-8")
+                    user_config = user_root / ".tapl" / "config.toml"
+                    user_config.write_text("[search]\nmax_results = 7\n", encoding="utf-8")
+                    before = user_config.read_bytes()
+
+                    results = tapl_install.auto_install_if_needed(start=repo, home=user_root)
+
+                    self.assertFalse(repo_config.exists())
+                    self.assertEqual(user_config.read_bytes(), before)
+                    settings = tapl_config.load(start=repo)
+                    self.assertEqual(settings.path, str(user_config))
+                    self.assertEqual(settings.search.max_results, 7)
+                    self.assertEqual(tapl_install.installed_version(repo / ".tapl" / "version"), __version__)
+                    if marker != __version__:
+                        config_result = next(entry for entry in results[0]["files"] if entry["path"] == str(repo_config))
+                        self.assertEqual(config_result["action"], "skipped_missing")
+                    else:
+                        self.assertEqual(results, [])
+
+                    tapl_install.install_repo(repo=repo, taplctl_command="taplctl")
+                    self.assertTrue(repo_config.is_file())
+
     def test_auto_install_skips_uninitialized_repo_but_refreshes_stale_user(self) -> None:
         def add_install_evidence(scope: Path, evidence: str) -> Path:
             if evidence == "version":
