@@ -101,6 +101,11 @@ def install_and_verify(runtime: Path, wheel: Path, expected: dict[str, str], tea
         raise ValueError("Homebrew installation checks must run in GitHub Actions")
     env = dict(os.environ, HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_INSTALL_CLEANUP="1",
                HOMEBREW_NO_ENV_HINTS="1")
+    # Intel runner images also contain python.org framework symlinks under
+    # /usr/local/bin. Provision Homebrew's interpreter without link conflicts,
+    # then use its links for the formula's Python dependency.
+    subprocess.run(["brew", "install", "--skip-link", "python@3.12"], check=True, env=env)
+    subprocess.run(["brew", "link", "--overwrite", "python@3.12"], check=True, env=env)
     subprocess.run(["brew", "tap-new", "--no-git", TAP], check=True, env=env)
     try:
         tap_path = Path(subprocess.check_output(["brew", "--repository", TAP], text=True, env=env).strip())
