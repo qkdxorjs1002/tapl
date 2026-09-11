@@ -68,6 +68,23 @@ Existing release assets are not changed by merging this workflow. New tags use
 the new signing path. Reverting the signing change restores the previous build
 pipeline; it does not alter already published assets.
 
+## Homebrew signature preservation
+
+Generated formulas use Homebrew's `preserve_rpath` directive. The signed native
+wheel libraries use `@rpath` dylib IDs; preserving those IDs prevents Homebrew
+from rewriting them to installation-specific paths and replacing Developer ID
+signatures with ad-hoc signatures. Installation still creates a Python virtual
+environment and installs the prebuilt wheels with `--no-index --no-deps
+--no-compile`; it does not compile or re-sign the native libraries locally.
+
+Both macOS architectures are checked with a real Homebrew installation before
+release publication. The check compares every installed runtime Mach-O file
+with its signed wheel bytes and verifies its Developer ID authority, Team ID,
+timestamp, and hardened runtime. It also repeats verification after reinstall
+and runs the installed MCP runtime. A valid ad-hoc signature is not sufficient.
+This protects the signed MCP runtime; separately fetched semantic dependencies
+remain outside that signing scope.
+
 ## Verification and boundaries
 
 Successful jobs print `Verified Developer ID signatures on N Mach-O files.`

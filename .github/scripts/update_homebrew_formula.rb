@@ -321,6 +321,12 @@ def update_formula(file, version, wheel_url, wheel_sha256, runtime_assets, formu
   raise "Could not find install block in #{file}" unless install_start
 
   indent = lines[install_start].match(/^(\s*)/)[1]
+  unless lines.any? { |line| line.match?(/^#{Regexp.escape(indent)}preserve_rpath\s*(?:#.*)?$/) }
+    lines.insert(install_start,
+                 "#{indent}# Preserve the Developer ID signatures on runtime wheel dylibs.\n",
+                 "#{indent}preserve_rpath\n", "\n")
+    install_start += 3
+  end
   runtime_lines = runtime_resource_block(indent, runtime_assets)
   upsert_marked_block(lines, RUNTIME_BEGIN, RUNTIME_END, runtime_lines, install_start)
 

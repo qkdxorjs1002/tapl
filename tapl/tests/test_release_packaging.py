@@ -182,6 +182,7 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
 
         for formula in (base_after_first, semantic_after_first):
             self.assertIn('version "1.5.1"', formula)
+            self.assertEqual(formula.count("  preserve_rpath\n"), 1)
             self.assertEqual(formula.count('resource "mcp-runtime" do'), 4)
             self.assertEqual(formula.count("# taplctl-mcp-runtime-begin"), 1)
             self.assertIn('resource("mcp-runtime").stage', formula)
@@ -308,7 +309,11 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("--sort=name", runtime_step)
 
         macos_job = workflow["jobs"]["macos-runtime"]
-        self.assertTrue(macos_job["runs-on"].startswith("macos-"))
+        self.assertEqual(macos_job["runs-on"], "${{ matrix.runner }}")
+        self.assertEqual(
+            {item["target"]: item["runner"] for item in macos_job["strategy"]["matrix"]["include"]},
+            {"macos-arm64": "macos-15", "macos-x86_64": "macos-15-intel"},
+        )
         self.assertEqual(
             {item["target"] for item in macos_job["strategy"]["matrix"]["include"]},
             {"macos-arm64", "macos-x86_64"},
@@ -325,6 +330,19 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             "${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}",
         )
         macos_names = list(macos_steps)
+        install_check = macos_steps["Verify signatures after Homebrew install and reinstall"]
+        self.assertNotIn("if", install_check)
+        self.assertNotIn("continue-on-error", install_check)
+        self.assertIn("verify_homebrew_macos.py", install_check["run"])
+        self.assertEqual(install_check["env"]["APPLE_TEAM_ID"], "${{ vars.APPLE_TEAM_ID }}")
+        self.assertLess(
+            macos_names.index("Archive signed macOS runtime"),
+            macos_names.index("Verify signatures after Homebrew install and reinstall"),
+        )
+        self.assertLess(
+            macos_names.index("Verify signatures after Homebrew install and reinstall"),
+            macos_names.index("Upload signed macOS runtime"),
+        )
         self.assertLess(
             macos_names.index("Sign and verify macOS runtime wheels"),
             macos_names.index("Archive signed macOS runtime"),

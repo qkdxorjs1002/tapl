@@ -75,6 +75,7 @@ class HomebrewPrereleaseFormulaUpdaterTests(unittest.TestCase):
         self.assertIn('bin.install_symlink libexec/"bin/tapl-mcp"', formula_after_first)
         self.assertIn('bin.install_symlink libexec/"bin/tapl-hook"', formula_after_first)
         self.assertIn('assert_path_exists bin/"tapl-hook"', formula_after_first)
+        self.assertEqual(formula_after_first.count("  preserve_rpath\n"), 1)
         self._assert_running_service_restart_contract(formula_after_first)
         self.assertTrue(self.pre_alias.is_symlink())
         self.assertEqual(self.pre_alias.readlink(), Path("../Formula/taplctl-pre.rb"))
