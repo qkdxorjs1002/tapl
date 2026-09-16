@@ -436,7 +436,7 @@ class TaplRuntimeTests(unittest.TestCase):
                         await client.call_tool("tapl_validate_state", {}),
                         await client.call_tool(
                             "tapl_finish_run",
-                            {"result": "MCP sequential lifecycle verified."},
+                            {"result": "MCP sequential lifecycle verified.", "expected_run_id": (await client.call_tool("tapl_get_status", {})).structured_content["active_run"]["id"], "memory_review": {"decision": "skip", "reason": "Synthetic lifecycle fixture only."}},
                         ),
                         await client.call_tool(
                             "tapl_finish_archive",
@@ -482,7 +482,7 @@ class TaplRuntimeTests(unittest.TestCase):
                     )
                     finished = await client.call_tool(
                         "tapl_finish_run",
-                        {"result": "Answered directly."},
+                        {"result": "Answered directly.", "expected_run_id": (await client.call_tool("tapl_get_status", {})).structured_content["active_run"]["id"], "memory_review": {"decision": "skip", "reason": "Synthetic lifecycle fixture only."}},
                     )
                     archived = await client.call_tool(
                         "tapl_finish_archive",

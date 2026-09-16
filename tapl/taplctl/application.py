@@ -89,6 +89,7 @@ class WorkflowApplication:
             "ok": True,
             "schema": state.get("schema") or {},
             "viewer_capabilities": {"associativeMemory": True},
+            "memory_review": state["memory_review"] if self._settings().recall.enabled else {"status": "disabled"},
             "active_run": state.get("active_run"),
             "task_counts": state.get("task_counts") or {},
             "incomplete_tasks": state.get("incomplete_tasks", 0),
@@ -124,6 +125,8 @@ class WorkflowApplication:
             state = db.status_payload(conn)
         check = validation.validate_workflow_state(state)
         settings = self._settings()
+        if not settings.recall.enabled:
+            state["memory_review"] = {"status": "disabled"}
         actions = recommendations.next_recommendations(state, check)
         if not settings.subagents.setup_complete and not state.get("active_batches"):
             actions.insert(0, {
@@ -160,6 +163,7 @@ class WorkflowApplication:
         payload = {
             "ok": True,
             "recommendations": actions,
+            "memory_review": state["memory_review"],
             "policy_revision": revision,
             **policy,
         }
@@ -385,10 +389,12 @@ class WorkflowApplication:
         self, result: str, *, expected_run_id: str | None = None,
         memory_candidates: list[dict[str, Any]] | None = None,
         memory_uses: list[dict[str, Any]] | None = None,
+        memory_review: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not result.strip():
             raise WorkflowApplicationError("result must not be empty")
-        has_memory = memory_candidates is not None or memory_uses is not None
+        memory_review = memory_store.validate_review(memory_review, memory_candidates)
+        has_memory = memory_candidates is not None or memory_uses is not None or memory_review is not None
         if has_memory and not expected_run_id:
             raise WorkflowApplicationError("expected_run_id is required with memory arguments")
         with self._connection() as conn:
@@ -399,22 +405,31 @@ class WorkflowApplication:
             if run is None or (expected_run_id is not None and str(run["id"]) != expected_run_id):
                 raise WorkflowApplicationError("stale_run: expected_run_id must match the active run")
             run_id = str(run["id"])
-            db.update_active_run_summary(conn, result_summary=result)
+            enabled = self._settings().recall.enabled
+            db.update_active_run_summary(conn, result_summary=result, commit=False)
+            if enabled:
+                checkpoint = memory_store.require_review(conn, run_id, candidates=memory_candidates, uses=memory_uses)
+            conn.commit()  # Result and pending review become visible together.
             run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
             payload = {"ok": True, "active_run": db.workflow_run_to_dict(run)}
-            if has_memory:
+            if not enabled:
+                payload["memory"] = {"status": "disabled"}
+            else:
                 try:
-                    if not self._settings().recall.enabled:
-                        payload["memory"] = {"status": "disabled"}
-                    elif (active := db.active_run(conn)) is None or str(active["id"]) != run_id:
-                        payload["memory"] = {"status": "stale_run", "retryable": False}
-                    else:
-                        details = memory_store.finish_memories(
-                            conn, run_id=run_id, candidates=memory_candidates, uses=memory_uses,
-                        )
-                        payload["memory"] = {"status": "partial" if details.get("errors") else "ok", **details}
-                except Exception as exc:
-                    payload["memory"] = self._memory_failure(exc)
+                    payload["memory"] = memory_store.finish_memories(
+                        conn, run_id=run_id, candidates=memory_candidates, uses=memory_uses, review=memory_review,
+                        expected_token=checkpoint["attempt_token"],
+                    )
+                except Exception:
+                    conn.rollback()
+                    try:
+                        review = memory_store.record_internal_failure(conn, run_id, expected_token=checkpoint["attempt_token"])
+                        payload["memory"] = {"status": review["status"], "errors": review["pending_errors"], "review": review}
+                    except Exception:
+                        conn.rollback()
+                        # The durable pre-capture checkpoint still prevents blind archive.
+                        payload["memory"] = {"status": "failed", "code": "memory_unavailable",
+                                             "message": "Result saved; inspect memory_review and retry or skip with a reason."}
         return payload
 
     def apply_plan(self, plan_id: str = "PLAN-001", **values: Any) -> dict[str, Any]:
@@ -554,7 +569,7 @@ class WorkflowApplication:
 
     def finish_archive(self, slug: str, *, summary: str = "") -> dict[str, Any]:
         with self._connection() as conn:
-            row = db.archive_active_run(conn, slug=slug, summary=summary)
+            row = db.archive_active_run(conn, slug=slug, summary=summary, memory_review_enabled=self._settings().recall.enabled)
             next_run = db.workflow_run_to_dict(db.active_run(conn))
             queued = db.queued_runs(conn)
         return {

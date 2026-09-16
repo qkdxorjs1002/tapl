@@ -317,7 +317,8 @@ def test_application_keeps_topic_plans_and_task_references_in_one_run() -> None:
         assert completed["active_run"]["id"] == run["id"]
         assert completed["plan_task_execute"]["ok"] is True
         assert completed["incomplete_tasks"] == 0
-        app.finish_run("모든 주제 완료")
+        app.finish_run("모든 주제 완료", expected_run_id=app.get_status()["active_run"]["id"],
+                       memory_review={"decision": "skip", "reason": "Synthetic lifecycle fixture only."})
         app.finish_archive("topic-plans")
         items = app.get_archive("topic-plans")["items"]
         assert [item["title"] for item in items if item["kind"] == "plan"] == list(topics)
@@ -346,7 +347,8 @@ def test_application_activates_dependent_run_only_after_finished_archive() -> No
             ]
         )
 
-        app.finish_run("Conversation title generation is complete.")
+        app.finish_run("Conversation title generation is complete.", expected_run_id=app.get_status()["active_run"]["id"],
+                       memory_review={"decision": "skip", "reason": "Synthetic lifecycle fixture only."})
         archived = app.finish_archive("conversation-title")
 
         assert archived["next_active_run"]["split_key"] == "suggestion-chips"
@@ -569,7 +571,8 @@ def test_lightweight_planning_run_requires_user_confirmation_before_archive() ->
         before_result = app.get_next()
         assert before_result["recommendations"][0]["name"] == "confirm-after-plan"
 
-        app.finish_run("The requested plan was reported.")
+        app.finish_run("The requested plan was reported.", expected_run_id=app.get_status()["active_run"]["id"],
+                       memory_review={"decision": "skip", "reason": "Synthetic lifecycle fixture only."})
         after_result = app.get_next()
         assert after_result["recommendations"][0]["name"] == "confirm-after-plan"
         assert mcp_server.mcp_next_recommendations(after_result)["recommendations"][0]["tool"] == "request_user_input"

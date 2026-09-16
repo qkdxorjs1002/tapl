@@ -5,6 +5,9 @@ const Module = require('node:module');
 test('extension uses the shared read-only Viewer protocol and reloads current routes', async () => {
   const calls = [], messages = [], commands = new Map();
   let receive, disposed, revision = 1, deleted = false, oldServer = false, delayed, foldersChanged, watcherCount = 0, unavailable = false, itemSource = false;
+  let diagnostics = { stored_count: 80, matched_count: 51, last_capture_error: {
+    run_id: 'r1', slot: 2, code: 'invalid_memory_note', message: '<script>capture failed</script>', created_at: '2026-09-16T00:00:00Z'
+  } };
   const disposable = { dispose() {} };
   const folder = (name) => ({ name, uri: { fsPath: `/work/${name}` } });
   const folders = [folder('first'), folder('second')];
@@ -37,7 +40,7 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
       if (name === 'tapl_list_archives') return { archives: [] };
       if (name === 'tapl_recall') {
         if (args.query === 'slow') await new Promise(resolve => { delayed = resolve; });
-        return { total: 51, memories: [memory()] };
+        return { total: 51, memories: [memory()], ...(diagnostics ? { diagnostics } : {}) };
       }
       if (name === 'tapl_get_memory') return { memory: deleted ? null : memory() };
       if (name === 'tapl_get_item') return { item: { id: args.item_id, stable_id: 'TASK-001', kind: 'task', archived: 1, title: `Item ${revision}` } };
@@ -69,6 +72,7 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
   assert.match(panel.webview.html, /webview-dist\/assets\/index.js/);
   const list = await send({ command: 'memories', query: 'sqlite', offset: 50 });
   assert.equal(list.view.type, 'memories');
+  assert.deepEqual(list.view.diagnostics, diagnostics);
   assert.deepEqual(calls.at(-1).args, { query: 'sqlite', offset: 50, limit: 50 });
   await send({ command: 'openMemory', memoryId: 'm1' });
   revision++;
@@ -95,6 +99,8 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
     if (expected === 'search') assert.equal(refreshed.search.results[0].title, `Search ${revision}`);
     if (expected === 'searchItem') assert.equal(refreshed.detail[field], `Item ${revision}`);
   }
+  diagnostics = undefined;
+  assert.equal((await send({ command: 'memories' })).view.diagnostics, undefined, 'older memory hosts omit diagnostics safely');
   receive({ command: 'memories', query: 'slow' });
   while (!delayed) await tick();
   await send({ command: 'debug' });

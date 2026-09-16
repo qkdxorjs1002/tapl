@@ -128,7 +128,7 @@ def test_mcp_split_run_queues_and_activates_dependent_request() -> None:
                 )
                 finished = await client.call_tool(
                     "tapl_finish_run",
-                    {"result": "Conversation title generation is complete."},
+                    {"result": "Conversation title generation is complete.", "expected_run_id": (await client.call_tool("tapl_get_status", {})).structured_content["active_run"]["id"], "memory_review": {"decision": "skip", "reason": "Synthetic lifecycle fixture only."}},
                 )
                 archived = await client.call_tool(
                     "tapl_finish_archive",
@@ -255,7 +255,7 @@ def test_mcp_native_sequential_lifecycle_never_spawns_cli() -> None:
                     await client.call_tool("tapl_validate_state", {}),
                     await client.call_tool(
                         "tapl_finish_run",
-                        {"result": "Native MCP lifecycle verified."},
+                        {"result": "Native MCP lifecycle verified.", "expected_run_id": (await client.call_tool("tapl_get_status", {})).structured_content["active_run"]["id"], "memory_review": {"decision": "skip", "reason": "Synthetic lifecycle fixture only."}},
                     ),
                     await client.call_tool(
                         "tapl_finish_archive",

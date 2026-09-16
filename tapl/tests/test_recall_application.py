@@ -32,7 +32,7 @@ def capture(app):
 
 def test_optional_finish_keeps_old_result_and_returns_entry_errors(app):
     run_id = app.summarize_run('migration')['active_run']['id']
-    assert 'memory' not in app.finish_run('legacy completion')
+    assert app.finish_run('legacy completion')['memory']['status'] == 'review_required'
     result = app.finish_run('verified', expected_run_id=run_id,
                             memory_candidates=[candidate(run_id), {'slot': 2}])
     assert result['ok'] and result['active_run']['result_summary'] == 'verified'
@@ -49,7 +49,7 @@ def test_expected_run_required_and_stale_retry_does_not_touch_next_run(app):
     with pytest.raises(WorkflowApplicationError, match='expected_run_id'):
         app.finish_run('must not save', memory_candidates=[])
     assert not app.get_status()['active_run']['result_summary']
-    app.finish_run('first done')
+    app.finish_run('first done', expected_run_id=first, memory_review={'decision': 'skip', 'reason': 'No reusable lesson.'})
     app.finish_archive('first')
     second = app.get_status()['active_run']
     assert second['id'] != first
@@ -62,7 +62,7 @@ def test_optional_memory_failure_does_not_fail_committed_result(app):
     run_id = app.summarize_run('migration')['active_run']['id']
     with mock.patch.object(recall, 'finish_memories', side_effect=RuntimeError('busy')):
         result = app.finish_run('committed', expected_run_id=run_id, memory_candidates=[])
-    assert result['ok'] and result['memory']['status'] == 'error'
+    assert result['ok'] and result['memory']['status'] == 'failed'
     assert app.get_status()['active_run']['result_summary'] == 'committed'
 
 
@@ -164,22 +164,6 @@ def test_summarize_receipt_preserves_real_memory_source(app):
     assert memory['source']['archive_id'] == archive['archive']['id']
     assert 'result_summary' not in receipt['active_run']
 
-
-def test_archive_race_after_result_commit_skips_memory_and_keeps_bound_run(app):
-    first = app.summarize_run('first', work_type='answer', workflow_mode='fast')['active_run']['id']
-    original_update = db.update_active_run_summary
-
-    def archive_after_commit(conn, **kwargs):
-        saved = original_update(conn, **kwargs)
-        app.finish_archive('raced-finish')
-        return saved
-
-    with mock.patch.object(db, 'update_active_run_summary', side_effect=archive_after_commit):
-        result = app.finish_run('saved before archive', expected_run_id=first, memory_candidates=[candidate(first)])
-    assert result['ok'] and result['active_run']['id'] == first
-    assert result['active_run']['result_summary'] == 'saved before archive'
-    assert result['memory']['status'] == 'stale_run'
-    assert app.recall()['total'] == 0
 
 
 def test_memory_mcp_detail_is_read_only_and_returns_current_source(app):

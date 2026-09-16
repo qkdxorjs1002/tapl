@@ -1100,6 +1100,8 @@ pre {
 .tapl-memory-header h1:focus { outline: none; }
 .tapl-memory-detail { display: grid; gap: 20px; }
 .tapl-memory-detail h3 { margin: 0; }
+.tapl-memory-diagnostics { display: grid; gap: 16px; min-width: 0; }
+.tapl-memory-capture-error { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--tapl-border-item); border-radius: 8px; overflow-wrap: anywhere; }
 .tapl-memory-search { display: grid; gap: 8px; }
 .tapl-memory-search label { font-size: .875rem; font-weight: 600; }
 .tapl-memory-search > div { display: flex; gap: 8px; }

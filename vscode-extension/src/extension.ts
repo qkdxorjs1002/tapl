@@ -13,7 +13,7 @@ import {
   type TaplMcpWorkspace
 } from './taplMcpClient';
 
-import type { DisplayLayout, AssociativeMemory, HostCapabilities, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
+import type { DisplayLayout, AssociativeMemory, MemoryDiagnostics, HostCapabilities, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
 
 type NodeKind = 'overview' | 'task' | 'archive' | 'empty';
 type DisplayLanguage = 'auto' | SupportedLocale;
@@ -383,7 +383,8 @@ class WorkflowWebviewManager {
       if (!result.ok) { return { type: 'error', message: result.error }; }
       const payload = result.value;
       return { type: 'memories', query: route.query, offset: route.offset, limit: 50,
-        total: Number(payload.total ?? 0), memories: (payload.memories ?? []) as AssociativeMemory[] };
+        total: Number(payload.total ?? 0), memories: (payload.memories ?? []) as AssociativeMemory[],
+        ...(payload.diagnostics ? { diagnostics: payload.diagnostics as unknown as MemoryDiagnostics } : {}) };
     }
     if (route.type === 'memory' || route.type === 'memorySource') {
       const result = await callTaplMcp('tapl_get_memory', { memory_id: route.memoryId });

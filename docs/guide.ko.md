@@ -335,26 +335,48 @@ Hook, status, next-action 조회에서는 기억을 검색하지 않습니다. �
 자동 주입은 전체 1,200 UTF-8 바이트 이내로 제한합니다. 같은 SQLite의 FTS를
 사용하므로 임베딩, 추가 모델 호출, 상주 프로세스가 필요하지 않습니다.
 
-`tapl_finish_run`의 선택 필드 `memory_candidates`, `memory_uses`로 기억을
-저장하거나 실제 사용을 기록합니다. 후보는 slot 1 또는 2, cue 3–5개,
-240자 이하 note, `source_run_id`와 선택적 `source_item_id`를 가집니다.
+`tapl_finish_run`의 선택 필드 `memory_candidates`, `memory_uses`,
+`memory_review={"decision":"capture"|"skip","reason":"..."}`로 기억 저장과
+검토 결정을 기록합니다. 후보는 slot 1 또는 2, cue 3–5개, 240자 이하 note,
+`source_run_id`와 선택적 `source_item_id`를 가집니다. 짧은 1–2문장은 권장사항이며
+검증 조건이 아닙니다. 약어·버전·소수·문장부호도 사용할 수 있습니다.
 검증한 함정이나 재사용할 결정처럼 원본 근거가 있는 교훈만 저장하고, 일반 완료 요약,
 비밀값, 원문 덤프, 추측은 제외합니다. 사용 기록에는 memory ID와 revision,
 `source_checked=true`, 구체적인 `usage`가 필요합니다. 단순 노출은 사용이 아닙니다.
 기억 인자를 하나라도 전달할 때 `expected_run_id`를 반드시 지정합니다.
 
-최종 결과를 먼저 저장한 뒤 선택적 기억 처리를 수행하므로 기억 오류가 완료 기록을
-되돌리지 않습니다. 반환된 후보/사용별 오류를 확인하고 동일 run과 slot으로 재시도하되,
-해당 run이 활성 상태일 때만 가능합니다. 보관된 run의 재시도가 다음 run을 수정하지
-못하도록 검사합니다. 내용 수정은 신선도를 초기화하며, 검증된 재사용은 내용 수정 시각을
-바꾸지 않고 반감기를 7일에서 최대 90일까지 늘릴 수 있습니다.
-같은 run에서는 한 번만 강화하며, 직전 내용 수정·강화 후 24시간이 지나야 합니다.
-오래된 기억도 관련성이 높으면 회상할 수 있고, 시간이 지났다는 이유로 삭제하지 않습니다.
+회상이 활성화된 run은 완료할 때 기억을 검토합니다. 후보를 전달하면 `capture` 결정으로
+간주합니다. 남길 교훈이 없다면 `memory_review={"decision":"skip",
+"reason":"완료 기록 외에 재사용할 교훈이 없음"}`을 전달합니다. skip에는 비어 있지 않은
+240자 이하 사유가 필요합니다. 후보와 결정을 모두 생략하면 `review_required`가 남습니다.
+작업 완료가 기억 저장 성공을 의미하지는 않습니다.
 
-Viewer는 기억 목록/검색, 상세, 원본 조회만 제공합니다. 기억 수정/삭제는 사용자에게서
-명시적 요청을 받은 Agent가 MCP `tapl_update_memory`, `tapl_delete_memory`와
-현재 `expected_revision`으로 수행합니다. 충돌 시 최신 revision을 확인합니다.
-삭제한 기억은 tombstone으로 남으며 회상에서 제외됩니다. `tapl_recall`은 수동 읽기 도구입니다.
+사용자에게 보여 줄 최종 결과는 기억 처리보다 먼저 저장되므로 기억 오류가 완료 기록을
+되돌리지 않습니다. 간결한 응답도 `active_run`만 추출하지 말고 `recall`, `memory`를
+포함한 전체 내용을 확인합니다. `tapl_finish_run` → 응답과
+`tapl_get_status`/`tapl_get_next` 확인 → `tapl_finish_archive` 순서로 실행합니다.
+status와 next-action의 `memory_review`에는 `status`, `decision`, `capture_count`,
+`pending_errors`가 담깁니다. 결정과 미해결 오류는 기존 run 이벤트에 남아 재시도와
+프로세스 재시작 후에도 유지됩니다. 실패한 후보를 수정해 같은 run/slot으로 한 번
+재시도하거나 사유와 함께 명시적으로 skip합니다. 성공한 slot을 다시 보내거나 잘못된
+입력을 그대로 반복하지 않습니다. 새 검토 기록이 생긴 run은 미해결 검토를 해소한 뒤
+보관합니다. 기억 검토 이벤트가 없는 이전 run은 계속 보관할 수 있고 회상이 비활성화된
+run은 검토 대상에서 제외됩니다. 보관된 run의 재시도가 다음 run을 수정하지 못하도록
+검사합니다.
+
+내용 수정은 신선도를 초기화하며, 검증된 재사용은 내용 수정 시각을 바꾸지 않고
+반감기를 7일에서 최대 90일까지 늘릴 수 있습니다. 같은 run에서는 한 번만 강화하며,
+직전 내용 수정·강화 후 24시간이 지나야 합니다. 오래된 기억도 관련성이 높으면 회상할 수
+있고, 시간이 지났다는 이유로 삭제하지 않습니다.
+
+웹·VS Code가 공유하는 Viewer는 기억 목록/검색, 상세, 원본을 읽기 전용으로 제공합니다.
+전체 저장 수와 현재 검색 일치 수를 구분하고 최근 기억 저장 실패가 있으면 표시합니다.
+실패는 명시적 skip 이후에도 남는 과거 진단 기록이므로, 미해결 여부는 해당 run의 현재
+검토 상태로 확인합니다. 진단 정보를 제공하지 않는 이전 host도 기존 기억 조회를 유지합니다.
+기억 수정/삭제는 사용자에게서 명시적 요청을 받은 Agent가 MCP `tapl_update_memory`,
+`tapl_delete_memory`와 현재 `expected_revision`으로 수행합니다. 충돌 시 최신 revision을
+확인합니다. 삭제한 기억은 tombstone으로 남으며 회상에서 제외됩니다. `tapl_recall`은
+수동 읽기 도구입니다. 추론 그래프, 추가 LLM 호출, 백그라운드 프로세스는 추가하지 않습니다.
 
 ```sh
 taplctl config set recall.enabled false

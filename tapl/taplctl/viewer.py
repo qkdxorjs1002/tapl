@@ -457,7 +457,7 @@ class ViewerApplication:
             if type(offset) is not int or not 0 <= offset <= 1000000:
                 raise ViewerError("Invalid memory offset.")
             result = self.json_runner(db_path, ["memory", "list", "--query", query, "--offset", str(offset)])
-            return {"type": "memories", **{key: result[key] for key in ("memories", "total", "query", "offset", "limit")}}
+            return {"type": "memories", **{key: result[key] for key in ("memories", "total", "query", "offset", "limit", "diagnostics") if key in result}}
         if command in {"openMemory", "openMemorySource"}:
             memory_id = self._required_string(payload, "memoryId")
             memory = self.json_runner(db_path, ["memory", "show", "--id", memory_id]).get("memory")

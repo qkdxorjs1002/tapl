@@ -96,3 +96,34 @@ def test_http_memory_protocol_cannot_mutate_or_reinforce(memory_workspace):
         server.server_close()
         thread.join()
         conn.close()
+
+
+def test_memory_diagnostics_distinguish_stored_from_matches_without_writes(memory_workspace):
+    workspace, path, _ = memory_workspace
+    app = viewer.ViewerApplication(default_workspace=workspace)
+    conn = db.connect(path)
+    events_before = conn.execute("SELECT count(*) FROM events").fetchone()[0]
+    view = app.handle_message({"command": "memories", "query": "sqlite"})["view"]
+    assert view["diagnostics"]["stored_count"] == 2
+    assert view["diagnostics"]["matched_count"] == view["total"] == 1
+    assert view["diagnostics"]["last_capture_error"] is None
+    assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == events_before
+    conn.close()
+
+
+@pytest.mark.parametrize("diagnostics", [None, {
+    "stored_count": 4, "matched_count": 0,
+    "last_capture_error": {"run_id": "r1", "slot": 2, "code": "invalid_memory_note",
+                           "message": "<script>failed</script>", "created_at": "2026-09-16T00:00:00Z"},
+}])
+def test_memory_diagnostics_pass_through_and_older_runner_compatibility(memory_workspace, diagnostics):
+    def runner(_path, _args):
+        result = {"memories": [], "total": 0, "query": "none", "offset": 0, "limit": 50}
+        if diagnostics is not None:
+            result["diagnostics"] = diagnostics
+        return result
+
+    app = viewer.ViewerApplication(default_workspace=memory_workspace[0], json_runner=runner)
+    view = app.handle_message({"command": "memories", "query": "none"})["view"]
+    assert view["type"] == "memories"
+    assert view.get("diagnostics") == diagnostics

@@ -164,8 +164,16 @@ export interface HostCapabilities {
   associativeMemory: boolean;
 }
 
+/** Read-only counts and the most recent persisted capture failure. */
+export interface MemoryDiagnostics {
+  stored_count: number;
+  matched_count: number;
+  injected_count?: number;
+  last_capture_error: { run_id: string; slot?: number; code: string; message: string; created_at: string } | null;
+}
+
 export type WebviewView =
-  | { type: 'memories'; query: string; offset: number; total: number; limit: number; memories: AssociativeMemory[] }
+  | { type: 'memories'; query: string; offset: number; total: number; limit: number; memories: AssociativeMemory[]; diagnostics?: MemoryDiagnostics }
   | { type: 'memory'; memoryId: string; memory: AssociativeMemory | null }
   | { type: 'memorySource'; memoryId: string; run: TaplWorkflowRun }
   | { type: 'workspace'; workspace: string; message?: string }

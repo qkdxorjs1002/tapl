@@ -44,7 +44,14 @@ existing SQLite database and full-text search, without a separate embedding mode
 or background service.
 
 The browser and VS Code Viewer offer read-only memory lists, search, details, and
-original sources. Ask the agent explicitly to edit or delete a memory.
+original sources. They also distinguish the total stored count from query matches
+and show recent capture failures. Ask the agent explicitly to edit or delete a memory.
+
+At completion, the agent records a capture decision or an explicit skip with a
+reason. It inspects the full finish receipt, resolves pending memory errors, and
+then archives the run. The work result is saved separately from memory processing.
+One or two short sentences are recommended; the 240-character limit, 3–5 cues,
+and source reference remain required.
 
 Automatic capture, recall, and reinforcement are enabled by default. To disable
 them while keeping manual inspection and management available:

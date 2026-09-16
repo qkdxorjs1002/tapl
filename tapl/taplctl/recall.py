@@ -41,7 +41,16 @@ def _stamp(now):
 @contextmanager
 def _transaction(conn, *, write=False):
     if conn.in_transaction:
-        raise MemoryError("memory service requires a connection without an open transaction", "conflict")
+        savepoint = "memory_" + uuid.uuid4().hex
+        conn.execute("SAVEPOINT " + savepoint)
+        try:
+            yield
+            conn.execute("RELEASE " + savepoint)
+        except BaseException:
+            conn.execute("ROLLBACK TO " + savepoint)
+            conn.execute("RELEASE " + savepoint)
+            raise
+        return
     conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
     try:
         yield
@@ -63,9 +72,6 @@ def _content(note, cue):
     if not isinstance(note, str) or not note.strip() or len(note.strip()) > 240:
         raise MemoryError("note must contain 1–240 characters")
     note = note.strip()
-    # Sentence boundaries require whitespace, so versions and abbreviations remain usable.
-    if len(re.split(r"[.!?。！？]+(?:\s+|$)", note.rstrip(".!?。！？"))) > 2:
-        raise MemoryError("note must contain one or two sentences")
     if not isinstance(cue, list) or not 3 <= len(cue) <= 5:
         raise MemoryError("cue must contain 3–5 strings")
     if any(not isinstance(c, str) or not c.strip() or len(c.strip()) > 80 for c in cue):
@@ -217,7 +223,8 @@ def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
         total = conn.execute("SELECT count(*) FROM memories m WHERE " + clause, params).fetchone()[0]
         rows = conn.execute("SELECT m.* FROM memories m WHERE " + clause + " ORDER BY m.content_updated_at DESC,m.id DESC LIMIT ? OFFSET ?", [*params, limit, offset]).fetchall()
         memories = [_dto(conn, row, now) for row in rows]
-    result = {"memories": memories, "total": total, "query": bounded_query, "offset": offset, "limit": limit}
+    result = {"memories": memories, "total": total, "query": bounded_query, "offset": offset, "limit": limit,
+              "diagnostics": diagnostics(conn, matched_count=total)}
     if automatic:
         # Injection needs a hint and its original pointer, not Viewer metadata.
         result["memories"] = [
@@ -233,12 +240,18 @@ def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
 def _budget(payload):
     # Budget the entire UTF-8 response, preserving each included source pointer.
     candidates, payload["memories"] = payload["memories"], []
+    # Keep full errors on manual reads; automatic hints prioritize original pointers.
+    if "diagnostics" in payload:
+        payload["diagnostics"].pop("last_capture_error", None)
+        payload["diagnostics"]["injected_count"] = 0
     if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 1200:
         payload["query"] = ""
     for memory in candidates:
         payload["memories"].append(memory)
         if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 1200:
             payload["memories"].pop()
+    if "diagnostics" in payload:
+        payload["diagnostics"]["injected_count"] = len(payload["memories"])
 
 
 def recall_memories(conn, *, query="", current_run_id=None, automatic=False, limit=3, offset=0, now=None):
@@ -367,18 +380,157 @@ def _reinforce(conn, run_id, use, now):
         return {"memory_id": row["memory_id"], "status": "reinforced", "half_life_days": half_life}
 
 
-def finish_memories(conn, *, run_id, candidates=None, uses=None, now=None):
-    now = _time(now)
-    result = {"captures": [], "reinforcements": [], "errors": []}
-    for kind, entries, maximum, function, output in (("candidate", candidates, 2, _capture, "captures"), ("use", uses, 50, _reinforce, "reinforcements")):
+def validate_review(review, candidates=None):
+    if review is None:
+        return None
+    if not isinstance(review, dict) or set(review) - {"decision", "reason"}:
+        raise MemoryError("memory_review must contain decision and optional reason")
+    decision, reason = review.get("decision"), review.get("reason")
+    if decision not in ("capture", "skip"):
+        raise MemoryError("memory_review.decision must be capture or skip")
+    if reason is not None and (not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 240):
+        raise MemoryError("memory_review.reason must contain 1–240 characters")
+    if decision == "skip" and not reason:
+        raise MemoryError("memory_review.skip requires a concise reason")
+    if decision == "skip" and candidates:
+        raise MemoryError("memory_candidates contradict memory_review.skip")
+    return {"decision": decision, **({"reason": reason.strip()} if reason else {})}
+
+
+def review_state(conn, run_id):
+    """Latest compact lifecycle checkpoint; legacy runs need no inferred review."""
+    row = conn.execute("SELECT payload_json FROM events WHERE run_id=? AND event_type='memory_review' ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
+    state = json.loads(row[0]) if row else {"status": "not_started", "decision": None, "pending_errors": []}
+    state["capture_count"] = conn.execute("SELECT count(*) FROM events WHERE run_id=? AND event_type='memory_capture'", (run_id,)).fetchone()[0]
+    return state
+
+
+def require_review(conn, run_id, *, candidates=None, uses=None, now=None):
+    """Call in the same transaction as the result, closing the archive race."""
+    state = review_state(conn, run_id)
+    state["attempt_token"] = uuid.uuid4().hex
+    state["attempt_operations"] = []
+    for kind, entries, maximum in (("candidate", candidates, 2), ("use", uses, 50)):
         if entries is None:
             continue
-        if not isinstance(entries, list) or len(entries) > maximum:
-            result["errors"].append({"kind": kind, "code": "invalid", "message": f"{kind}s must be a list with at most {maximum} entries"})
-            continue
+        entries = entries if isinstance(entries, list) and len(entries) <= maximum else [None]
         for index, entry in enumerate(entries):
-            try:
-                result[output].append(function(conn, run_id, entry, now))
-            except MemoryError as exc:
-                result["errors"].append({"kind": kind, "index": index, "code": exc.code, "message": str(exc)})
+            identity = _identity(kind, entry, index)
+            state["attempt_operations"].append(identity)
+            if not any(all(e.get(k) == v for k, v in identity.items()) for e in state["pending_errors"]):
+                state["pending_errors"].append({**identity, "code": "processing_pending",
+                    "message": "Submitted memory operation has not completed; retry it or skip with a reason.", "attempts": 0})
+    state["status"] = "review_required"
+    _event(conn, run_id, "memory_review", state, _time(now))
+    return state
+
+
+def diagnostics(conn, *, matched_count=0):
+    """Stored means nondeleted and source-available, irrespective of search/state."""
+    count = conn.execute("""SELECT count(*) FROM memories m WHERE m.state!='deleted'
+        AND EXISTS(SELECT 1 FROM workflow_runs r WHERE r.id=m.source_run_id AND
+          (m.source_item_id IS NOT NULL OR length(trim(r.result_summary))>0))
+        AND (m.source_item_id IS NULL OR EXISTS(SELECT 1 FROM items i
+          WHERE i.id=m.source_item_id AND i.run_id=m.source_run_id))""").fetchone()[0]
+    row = conn.execute("SELECT run_id,payload_json,created_at FROM events WHERE event_type='memory_finish_error' AND json_extract(payload_json,'$.kind') IN ('candidate','internal') ORDER BY id DESC LIMIT 1").fetchone()
+    error = None
+    if row:
+        data = json.loads(row["payload_json"])
+        error = {"run_id": row["run_id"], "code": data["code"], "message": data["message"], "created_at": row["created_at"]}
+        if "slot" in data:
+            error["slot"] = data["slot"]
+    return {"stored_count": count, "matched_count": matched_count, "last_capture_error": error}
+
+
+def record_internal_failure(conn, run_id, *, expected_token=None, now=None):
+    # Never persist raw exception text: database/SDK exceptions can contain secrets.
+    with _transaction(conn, write=True):
+        _current_run(conn, run_id)
+        state = review_state(conn, run_id)
+        if expected_token is not None and state.get("attempt_token") != expected_token:
+            raise MemoryError("Memory finish was superseded; inspect current review before retrying.", "stale_attempt")
+        operations = state.get("attempt_operations") or [{"kind": "internal"}]
+        pending = list(state["pending_errors"])
+        if not state.get("attempt_operations") and not any(e["kind"] == "internal" for e in pending):
+            pending.append({"kind": "internal", "attempts": 0})
+        state["pending_errors"] = []
+        for entry in pending:
+            if not any(all(entry.get(k) == v for k, v in identity.items()) for identity in operations):
+                state["pending_errors"].append(entry)
+                continue
+            error = {**entry, "code": "memory_unavailable",
+                     "message": "Memory processing failed; retry the same operation once or skip with a reason.",
+                     "attempts": min(entry.get("attempts", 0) + 1, 2)}
+            state["pending_errors"].append(error)
+            _event(conn, run_id, "memory_finish_error", error, _time(now))
+        state["status"] = "partial" if state["capture_count"] or state.get("had_success") else "failed"
+        _event(conn, run_id, "memory_review", state, _time(now))
+        return state
+
+
+def _identity(kind, entry, index):
+    identity = {"kind": kind}
+    if isinstance(entry, dict) and kind == "candidate" and type(entry.get("slot")) is int and entry["slot"] in (1, 2):
+        identity["slot"] = entry["slot"]
+    elif isinstance(entry, dict) and kind == "use" and isinstance(entry.get("memory_id"), str) and len(entry["memory_id"]) <= 100:
+        identity["memory_id"] = entry["memory_id"]
+    else:
+        identity["index"] = index
+    return identity
+
+
+def finish_memories(conn, *, run_id, candidates=None, uses=None, review=None, expected_token=None, now=None):
+    now = _time(now)
+    review = validate_review(review, candidates)
+    result = {"captures": [], "reinforcements": [], "errors": []}
+    with _transaction(conn, write=True):
+        try:
+            _current_run(conn, run_id)
+        except MemoryError as exc:
+            return {**result, "status": "failed", "errors": [{"kind": "internal", "code": exc.code, "message": str(exc)}]}
+        state = (require_review(conn, run_id, candidates=candidates, uses=uses, now=now)
+                 if expected_token is None else review_state(conn, run_id))
+        if expected_token is not None and state.get("attempt_token") != expected_token:
+            raise MemoryError("Memory finish was superseded; inspect current review before retrying.", "stale_attempt")
+        pending = state["pending_errors"]
+        if review and review["decision"] == "skip":
+            pending = []
+            state.update(review)
+        elif candidates:
+            state.update({"decision": "capture"})
+            state.pop("reason", None)
+        elif review:
+            state.update(review)
+        for kind, entries, maximum, function, output in (("candidate", candidates, 2, _capture, "captures"), ("use", uses, 50, _reinforce, "reinforcements")):
+            if entries is None:
+                continue
+            malformed = not isinstance(entries, list) or len(entries) > maximum
+            for index, entry in enumerate([None] if malformed else entries):
+                identity = _identity(kind, entry, index)
+                previous = next((e for e in pending if all(e.get(k) == v for k, v in identity.items())), None)
+                attempts = previous.get("attempts", 0) if previous else 0
+                try:
+                    saved_slot = kind == "candidate" and "slot" in identity and conn.execute(
+                        "SELECT 1 FROM events WHERE run_id=? AND event_type='memory_capture' AND json_extract(payload_json,'$.slot')=?",
+                        (run_id, identity["slot"]),
+                    ).fetchone()
+                    if attempts >= 2 and not saved_slot:
+                        raise MemoryError("Retry limit reached; use memory_review.skip with a reason to acknowledge this failure.", "retry_exhausted")
+                    if malformed:
+                        raise MemoryError(f"{kind}s must be a list with at most {maximum} entries")
+                    result[output].append(function(conn, run_id, entry, now))
+                    pending = [e for e in pending if not all(e.get(k) == v for k, v in identity.items())]
+                except Exception as exc:
+                    error = {**identity, "code": exc.code if isinstance(exc, MemoryError) else "memory_unavailable",
+                             "message": str(exc) if isinstance(exc, MemoryError) else "Memory processing failed; retry once or skip with a reason.",
+                             "attempts": min(attempts + 1, 2)}
+                    pending = [e for e in pending if not all(e.get(k) == v for k, v in identity.items())] + [error]
+                    _event(conn, run_id, "memory_finish_error", error, now)
+        state["had_success"] = bool(state.get("had_success") or result["captures"] or result["reinforcements"])
+        state["capture_count"] = review_state(conn, run_id)["capture_count"]
+        state["pending_errors"] = pending
+        state["status"] = (("partial" if state["capture_count"] or state["had_success"] else "failed") if pending else
+                           "ok" if state.get("decision") == "skip" or (state.get("decision") == "capture" and state["capture_count"]) else "review_required")
+        _event(conn, run_id, "memory_review", state, now)
+        result.update({"status": state["status"], "errors": pending, "review": state})
     return result

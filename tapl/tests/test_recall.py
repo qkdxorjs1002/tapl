@@ -65,7 +65,7 @@ def test_normalized_dedup_consumes_receipt_slot(conn):
     assert recall.finish_memories(conn, run_id="r2", candidates=[candidate(note="New content.")])["errors"][0]["code"] == "conflict"
 
 
-@pytest.mark.parametrize("change", [{"slot": True}, {"slot": 3}, {"cue": ["a", "b"]}, {"cue": ["a", "A", "b"]}, {"note": "x" * 241}, {"note": "One. Two. Three."}, {"source_item_id": True}, {"source_run_id": "missing"}])
+@pytest.mark.parametrize("change", [{"slot": True}, {"slot": 3}, {"cue": ["a", "b"]}, {"cue": ["a", "A", "b"]}, {"note": "x" * 241}, {"source_item_id": True}, {"source_run_id": "missing"}])
 def test_candidate_validation(conn, change):
     value = candidate()
     value.update(change)
@@ -89,6 +89,7 @@ def test_source_identity_and_original_unchanged(conn):
     result = recall.finish_memories(conn, run_id="r2", candidates=[candidate(source="r2", source_item_id=item_id)])
     assert result["errors"][0]["code"] == "not_found"
     assert recall.finish_memories(conn, run_id="r2", candidates=[candidate(source="r2")])["errors"]
+    recall.finish_memories(conn, run_id="r2", review={"decision": "skip", "reason": "Acknowledge failed source validation examples."})
     memory_id = capture(conn, current="r2", source_item_id=item_id)
     original = recall.get_memory(conn, memory_id)["source_record"]["item"]
     recall.update_memory(conn, memory_id, expected_revision=1, note="Updated memory.")
@@ -316,8 +317,9 @@ def test_transaction_rollback_preserves_original_on_capture_failure(conn):
     run(conn, "r2")
     conn.execute("CREATE TRIGGER fail_capture BEFORE INSERT ON events WHEN NEW.event_type='memory_capture' BEGIN SELECT RAISE(ABORT,'forced'); END")
     conn.commit()
-    with pytest.raises(sqlite3.IntegrityError):
-        capture(conn, current="r2", note="New note.", replaces_memory_id=memory_id)
+    result = recall.finish_memories(conn, run_id="r2", candidates=[candidate(note="New note.", replaces_memory_id=memory_id)])
+    assert result["status"] == "failed"
+    assert result["errors"][0]["code"] == "memory_unavailable"
     assert recall.get_memory(conn, memory_id)["state"] == "active"
     assert conn.execute("SELECT count(*) FROM memories").fetchone()[0] == 1
     assert not conn.in_transaction

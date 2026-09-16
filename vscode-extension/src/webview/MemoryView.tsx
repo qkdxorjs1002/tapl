@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import type { AssociativeMemory, WebviewCommand, WebviewView } from './types';
+import type { AssociativeMemory, MemoryDiagnostics, WebviewCommand, WebviewView } from './types';
 import { useI18n } from './i18n';
 
 type MemoryScreen = Extract<WebviewView, { type: 'memories' | 'memory' | 'memorySource' }>;
@@ -50,6 +50,7 @@ function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memori
         <div><input id="memory-query" type="search" maxLength={500} className="input input-bordered" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchMemories')} />
           <button className="btn btn-primary" type="submit">{t('search')}</button></div>
       </form>
+      {view.diagnostics && <MemoryDiagnosticRows diagnostics={view.diagnostics} />}
       <p className="tapl-muted text-sm m-0" role="status">{t('memoryRange', { start: view.memories.length ? view.offset + 1 : 0, end: view.offset + view.memories.length, total: view.total })}</p>
       {view.memories.length ? <ul className="tapl-memory-list">{view.memories.map((memory) => <li key={memory.id} className="tapl-memory-row">
         <button type="button" className="tapl-memory-open" onClick={() => send({ command: 'openMemory', memoryId: memory.id })}>
@@ -64,6 +65,24 @@ function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memori
         <button className="btn btn-secondary btn-sm" type="button" disabled={view.offset + view.memories.length >= view.total} onClick={() => send({ command: 'memories', query: view.query, offset: view.offset + limit })}>{t('nextPage')}</button>
       </nav>
     </div>
+  </section>;
+}
+
+function MemoryDiagnosticRows({ diagnostics }: { diagnostics: MemoryDiagnostics }): JSX.Element {
+  const { t, locale } = useI18n();
+  const error = diagnostics.last_capture_error;
+  return <section aria-label={t('memoryDiagnostics')} className="tapl-memory-diagnostics">
+    <dl className="tapl-memory-facts">
+      <div><dt>{t('memoryStoredCount')}</dt><dd>{diagnostics.stored_count}</dd></div>
+      <div><dt>{t('memoryMatchedCount')}</dt><dd>{diagnostics.matched_count}</dd></div>
+      {diagnostics.injected_count !== undefined && <div><dt>{t('memoryInjectedCount')}</dt><dd>{diagnostics.injected_count}</dd></div>}
+    </dl>
+    {error && <div className="tapl-memory-capture-error" role="status">
+      <h2 className="m-0 text-sm font-semibold">{t('memoryLastCaptureError')}</h2>
+      <p className="tapl-memory-note">{error.message}</p>
+      <p className="tapl-muted text-sm m-0">{t('memoryErrorRun', { run: error.run_id })}{error.slot !== undefined ? ` · ${t('memoryErrorSlot', { slot: error.slot })}` : ''} · {error.code} · <time dateTime={error.created_at}>{formatTime(error.created_at, locale)}</time></p>
+      <p className="tapl-muted text-sm m-0">{t('memoryCaptureErrorHelp')}</p>
+    </div>}
   </section>;
 }
 

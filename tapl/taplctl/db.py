@@ -874,6 +874,7 @@ def update_active_run_summary(
     result_summary: str | None = None,
     work_type: str | None = None,
     workflow_mode: str | None = None,
+    commit: bool = True,
 ) -> sqlite3.Row:
     run = active_run(conn)
     if not run:
@@ -919,7 +920,8 @@ def update_active_run_summary(
         f"UPDATE workflow_runs SET {', '.join(updates)} WHERE id = ?",
         tuple(params),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return active_run(conn)  # type: ignore[return-value]
 
 
@@ -2516,7 +2518,20 @@ def record_event(
     conn.commit()
 
 
-def archive_active_run(conn: sqlite3.Connection, *, slug: str, summary: str = "") -> sqlite3.Row:
+def archive_active_run(conn: sqlite3.Connection, *, slug: str, summary: str = "", memory_review_enabled: bool = True) -> sqlite3.Row:
+    # Hold the writer lock across eligibility and mutation, including queued activation.
+    owns_transaction = not conn.in_transaction
+    if owns_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        return _archive_active_run(conn, slug=slug, summary=summary, memory_review_enabled=memory_review_enabled)
+    except BaseException:
+        if owns_transaction:
+            conn.rollback()
+        raise
+
+
+def _archive_active_run(conn: sqlite3.Connection, *, slug: str, summary: str, memory_review_enabled: bool) -> sqlite3.Row:
     run = active_run(conn)
     if not run:
         raise ValueError("no active workflow run to archive")
@@ -2526,6 +2541,12 @@ def archive_active_run(conn: sqlite3.Connection, *, slug: str, summary: str = ""
             "cannot archive workflow run while an execution batch is active; "
             "settle every execution or recover/cancel the batch first"
         )
+
+    if memory_review_enabled:
+        from . import recall
+        review = recall.review_state(conn, str(run["id"]))
+        if review["status"] in ("review_required", "failed", "partial"):
+            raise ValueError("memory review pending: call tapl_finish_run with expected_run_id and corrected memory_candidates for the same slot (one retry), or memory_review={decision:'skip',reason:'concise reason'}; inspect memory before archiving")
 
     archive_id = utc_now().replace(":", "").replace("+0000", "Z") + "-" + slug
     now = utc_now()
@@ -2711,7 +2732,9 @@ def _status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
     for task in tasks:
         task["active_execution"] = executions_by_task.get(str(task.get("stable_id") or ""))
 
+    from . import recall
     return {
+        "memory_review": recall.review_state(conn, run_id),
         "schema": get_meta(conn),
         "active_run": workflow_run_to_dict(run),
         "queued_runs": queued,

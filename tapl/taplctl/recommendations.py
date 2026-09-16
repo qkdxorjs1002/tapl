@@ -43,6 +43,13 @@ def next_recommendations(
             )
         ]
 
+    review = state.get("memory_review") or {}
+    if review.get("status") in ("review_required", "failed", "partial"):
+        return [recommendation(
+            "review-memory",
+            "Before archiving inspect the memory block. Submit eligible verified memory_candidates, retry a failed candidate once in the same run and slot, or call tapl_finish_run with expected_run_id and memory_review={decision:'skip',reason:'concise reason'} to acknowledge pending failures."
+        )] + advisory_recommendations
+
     plans = state.get("plans") if isinstance(state.get("plans"), list) else []
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
     is_planning_scope = str(run.get("work_type") or "") == "planning"

@@ -57,11 +57,18 @@ class MemoryCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slot: int = Field(ge=1, le=2, strict=True)
-    cue: list[str] = Field(min_length=3, max_length=5)
-    note: str = Field(min_length=1, max_length=240)
+    cue: list[str] = Field(description="3–5 distinct, concrete cues likely to recur in future searches.", min_length=3, max_length=5)
+    note: str = Field(description="Reusable verified lesson that reduces future source exploration; at most 240 characters, with no sentence-count rule.", min_length=1, max_length=240)
     source_run_id: str = Field(min_length=1)
     source_item_id: int | None = Field(default=None, ge=1, strict=True)
     replaces_memory_id: str | None = None
+
+
+class MemoryReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["capture", "skip"] = Field(description="Candidates imply capture. Choose skip when no eligible lesson remains or to acknowledge an abandoned failure.")
+    reason: str | None = Field(default=None, min_length=1, max_length=240, description="Concise reason, required for skip; never include secrets.")
 
 
 class MemoryUse(BaseModel):
@@ -133,6 +140,7 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
         "review-advisory-selection-context": "tapl_get_status",
         "start-task": "tapl_start_task",
         "finish-run": "tapl_finish_run",
+        "review-memory": "tapl_finish_run",
         "archive-run": "tapl_finish_archive",
         "inspect-status": "tapl_get_status",
     }
@@ -810,8 +818,9 @@ def create_server(
     async def finish_run(
         result: Annotated[str, Field(description=tapl_prompt.field_help("run", "result"), min_length=1)],
         expected_run_id: Annotated[str | None, Field(description="Required with memory arguments; must identify the active run.", min_length=1)] = None,
-        memory_candidates: Annotated[list[MemoryCandidate] | None, Field(description="At most two reusable, verified lessons; omit for ordinary completions.", max_length=2)] = None,
+        memory_candidates: Annotated[list[MemoryCandidate] | None, Field(description="At most two lessons meeting all three checks: recurring cues, reduced future search, verified source; implies capture.", max_length=2)] = None,
         memory_uses: Annotated[list[MemoryUse] | None, Field(description="Only memories actually used after checking their original source.", max_length=50)] = None,
+        memory_review: Annotated[MemoryReview | None, Field(description="Explicit capture or skip review; skip requires a concise reason. Omission without candidates leaves review_required.")] = None,
     ) -> dict[str, Any]:
         """Record the verified final result after no actionable tasks remain and before archiving.
 
@@ -825,6 +834,7 @@ def create_server(
             expected_run_id=expected_run_id,
             memory_candidates=[entry.model_dump(exclude_none=True) for entry in memory_candidates] if memory_candidates is not None else None,
             memory_uses=[entry.model_dump() for entry in memory_uses] if memory_uses is not None else None,
+            memory_review=memory_review.model_dump(exclude_none=True) if memory_review is not None else None,
             operation="run_finish",
         )
 
