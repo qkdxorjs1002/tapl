@@ -372,7 +372,7 @@ def create_server(
         include_events: Annotated[bool, Field(description="Include recent hook event summaries.")] = False,
         events_limit: Annotated[int, Field(description="Maximum recent events to include.", ge=0, le=100)] = 12,
     ) -> dict[str, Any]:
-        """Inspect current run, plans, tasks, approval, batches, and validation state. Use before record updates."""
+        """Inspect run/task/approval/batch details missing from get_next's state_summary or a write receipt, especially for resume/recovery. Conditional detail lookup, not a mandatory entry or pre-write check; no follow-up get_next is needed solely because this read ran."""
 
         return await call_application(
             application.get_status,
@@ -383,10 +383,10 @@ def create_server(
 
     @server.tool(name="tapl_get_next", title="Get safest TAPL action", annotations=READ_ONLY)
     async def get_next(
-        available_models: Annotated[dict[str, list[str]] | None, Field(description="Current session delegation-tool model IDs and supported reasoning efforts. Supply on the first user request of a session or when this catalog changes to check for a reconfiguration suggestion. Omit if unavailable; never guess.")] = None,
+        available_models: Annotated[dict[str, list[str]] | None, Field(description="Current session delegation-tool model IDs and supported reasoning efforts. Include in the same first entry call of a session; resupply when the catalog changes. Omit if unavailable; never guess.")] = None,
         known_policy_revision: Annotated[str | None, Field(description="Only supply a returned revision when its complete workflow_policy, subagent_guidance and config remain in the current context. Omit after compaction, in a new session, or whenever uncertain; summaries are insufficient.")] = None,
     ) -> dict[str, Any]:
-        """Load the full authoritative workflow policy and current safe action. A retained matching revision omits unchanged policy/config; action and model checks remain fresh."""
+        """Single entry for authoritative policy, state_summary, safe actions and optional catalog check. Read status only for missing details; reuse fresh write recommendations instead of routinely calling again. A retained matching revision omits unchanged policy/config; state, action and model checks remain fresh. Revisions are not state caches or approval evidence."""
 
         return mcp_next_recommendations(await call_application(
             application.get_next,
@@ -407,7 +407,7 @@ def create_server(
     ) -> dict[str, Any]:
         """Save the user's setup answer atomically to the effective .tapl/config.toml.
 
-        Inspect tapl_get_next for its exact path. Ask about SubAgent use and preferences first;
+        Use the entry response's exact config path. Ask about SubAgent use and preferences first;
         the answer authorizes this config write without a separate workflow or approval prompt. Use only models and
         efforts exposed by the current delegation tool, never a provider API catalog or guesses.
         If that catalog is unavailable, keep setup pending and work on the root agent. Preserve

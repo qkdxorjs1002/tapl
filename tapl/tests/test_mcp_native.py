@@ -38,14 +38,17 @@ def test_mcp_bootstrap_loads_full_policy_and_supports_explicit_retention() -> No
 
         async def exercise() -> None:
             async with Client(server) as client:
-                full = (await client.call_tool("tapl_get_next", {})).structured_content
+                full = (await client.call_tool("tapl_get_next", {"available_models": {"model-a": ["high"]}})).structured_content
                 expected = prompt.mcp_server_instructions(subagents=config.load(start=root).subagents)
                 assert full["workflow_policy"] == expected
                 assert full["policy_unchanged"] is False
+                assert full["state_summary"]["active_run"] is None
+                assert "config" in full and "subagent_guidance" in full and "model_changes" in full
                 cached = (await client.call_tool("tapl_get_next", {"known_policy_revision": full["policy_revision"]})).structured_content
                 assert cached["policy_unchanged"] is True
                 assert "workflow_policy" not in cached
                 assert cached["recommendations"] == full["recommendations"]
+                assert cached["state_summary"] == full["state_summary"]
                 reloaded = (await client.call_tool("tapl_get_next", {})).structured_content
                 assert reloaded["workflow_policy"] == expected
             async with Client(server) as fresh_client:

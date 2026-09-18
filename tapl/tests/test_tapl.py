@@ -729,13 +729,17 @@ class TaplRuntimeTests(unittest.TestCase):
 
     def test_mcp_bootstrap_requires_complete_policy_before_work(self) -> None:
         bootstrap = tapl_prompt.mcp_bootstrap_instructions()
-        self.assertLess(len(bootstrap), 2_200)
+        self.assertLess(len(bootstrap), 3_200)
         self.assertIn("Separate explicit delegation requests retain their own authority.", bootstrap)
         for requirement in (
             "not the full workflow policy",
             "SessionStart is bootstrap only",
             "including read-only helpers",
-            "`tapl_get_status` and `tapl_get_next`",
+            "make one `tapl_get_next` entry call",
+            "in that same call",
+            "Use `tapl_get_status` only when",
+            "not routinely call `tapl_get_next`",
+            "never a state cache or proof of approval",
             "until the full policy is available",
             "complete `workflow_policy`, `subagent_guidance`, and config",
             "authoritative TAPL contract",
@@ -758,13 +762,26 @@ class TaplRuntimeTests(unittest.TestCase):
         ):
             self.assertIn(requirement, bootstrap)
 
+    def test_entry_and_stop_surfaces_reuse_current_recommendations(self) -> None:
+        entry = tapl_prompt.entry_guidance()
+        for surface in (
+            tapl_prompt.mcp_bootstrap_instructions(),
+            tapl_prompt.mcp_server_instructions(),
+            tapl_prompt.user_prompt_submit_guidance(),
+        ):
+            self.assertIn(entry, surface)
+            self.assertNotIn("`tapl_get_status` and `tapl_get_next`", surface)
+        self.assertIn(tapl_prompt.receipt_guidance(), tapl_prompt.stop_guidance())
+        self.assertIn("same entry", tapl_prompt.subagent_catalog_guidance())
+        self.assertIn("Do not make a second initialization call", tapl_prompt.subagent_catalog_guidance())
+
     def test_mcp_server_instructions_are_compact_and_keep_adaptive_policy(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions(
             subagents=tapl_config.SubagentsConfig(setup_complete=True)
         )
 
-        # Includes the bounded associative-memory policy; hook bootstrap stays unchanged.
-        self.assertLess(len(instructions), 11_300)
+        # Includes bounded associative-memory and shared single-entry guidance.
+        self.assertLess(len(instructions), 12_300)
         for guidance in (
             "Default to one RUN",
             "separate PLAN per independent topic",
@@ -786,7 +803,7 @@ class TaplRuntimeTests(unittest.TestCase):
                             subagents=tapl_config.SubagentsConfig(strategy=strategy, setup_complete=True)
                         )
                     ),
-                    11_300,
+                    12_300,
                 )
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",
@@ -1207,7 +1224,7 @@ class TaplRuntimeTests(unittest.TestCase):
         )
         self.assertIn("Follow MCP/current subagent_guidance for compact helper handoffs", enabled_hook)
         self.assertNotIn(tapl_prompt.subagent_exploration_guidance(), enabled_hook)
-        self.assertLess(len(enabled_hook), 2_000)
+        self.assertLess(len(enabled_hook), 2_800)
 
     def test_subagent_delegation_strategy_guidance(self) -> None:
         cases = (

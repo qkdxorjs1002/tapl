@@ -345,8 +345,10 @@ leaves `review_required`; completing the work does not mean capture succeeded.
 The user-visible result commits before memory processing, so a memory failure
 does not undo the work result. Read the complete compact receipt, including
 `recall` and `memory`, rather than extracting only `active_run`. Run
-`tapl_finish_run` → inspect its receipt and `tapl_get_status`/`tapl_get_next`
-→ `tapl_finish_archive` sequentially. Status and next-action responses expose
+`tapl_finish_run` → inspect its memory result and recommendations →
+`tapl_finish_archive` sequentially. Reuse the receipt; query status/next only if
+needed details are missing, the response failed or was truncated, context was
+lost, or workflow state may have changed elsewhere. Status and next-action responses expose
 `memory_review` with `status`, `decision`, `capture_count`, and `pending_errors`.
 Decisions and unresolved failures persist in existing run events across retries
 and process restarts. Correct a failed candidate and retry its same run/slot
@@ -423,7 +425,7 @@ Existing configurations with an explicit model allowlist or `enabled = false`
 remain complete and retain their choices; new model settings apply only when
 the user requests an update.
 
-After your answer, TAPL also records the full runtime catalog in `subagents.available_models`. On the first request in each session, the agent passes the current catalog to `tapl_get_next`. Added or removed models and changed reasoning efforts trigger an update-or-keep suggestion. Keeping your choices records the new catalog without changing your allowlist, so the same change is not proposed again. Existing configurations without a catalog keep working; the agent can offer to record a baseline once.
+After your answer, TAPL also records the full runtime catalog in `subagents.available_models`. On the first request in each session, the agent includes the current catalog in the same `tapl_get_next` call that loads policy and state; no second initialization call is needed. Added or removed models and changed reasoning efforts trigger an update-or-keep suggestion. Keeping your choices records the new catalog without changing your allowlist, so the same change is not proposed again. Existing configurations without a catalog keep working; the agent can offer to record a baseline once.
 
 The installed template includes these model-neutral advisory profiles, listed
 in safety-first order:

@@ -176,7 +176,7 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
             assert "bounded read-only exploration/research" in hook_guidance
             assert "compact helper handoffs, shared scout limits" in hook_guidance
             assert helper_contract not in hook_guidance
-            assert len(hook_guidance) < 2_000
+            assert len(hook_guidance) < 2_800
             next_actions = " ".join(hook.structured_content["next_actions"])
             assert prompt.summarize_request_next_action() in next_actions
             assert "prefer one eligible read-only helper under current subagent_guidance" in next_actions

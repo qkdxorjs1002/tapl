@@ -197,18 +197,30 @@ the complete, authoritative `workflow_policy`, `subagent_guidance`, and `config`
 from `tapl_get_next`. The workflow text and its approval, planning, task,
 delegation, verification, recovery, and archive rules remain intact.
 
+Use one entry call to load policy, `state_summary`, and recommendations. On the
+first concrete request of a session, pass the complete available delegation
+catalog in that same call. The summary includes the active run's identity and
+classification, task/queue/batch counts, and execution-approval state. Call
+`tapl_get_status` only for missing details needed to resume or recover work, or
+an explicit inspection recommendation; use `full=true` for record bodies.
+Bootstrap and hook instructions share this single entry, not separate calls.
+
 The response includes a `policy_revision` covering the exact policy, guidance,
 and config. A caller may send it as `known_policy_revision` only while **all of
 that content remains available in its current context**. A matching revision
-omits those unchanged fields; recommendations and model-catalog checks are
+omits those unchanged fields; state summaries, recommendations and model-catalog checks are
 always fresh. Unknown revisions, policy/config changes, and changed model
 catalogs return full content. Omit the revision on a new session, after
 compaction, or whenever retention is uncertain; a summary is insufficient.
 Calls without the optional revision always receive the full content.
+The revision only controls policy delivery; it is not a state cache or approval evidence.
 
 State inspection validates one transactionally consistent snapshot. Write
 receipts still return current next actions, without generating policy text that
-the receipt would discard. These optimizations do not change execution approval
+the receipt would discard. Follow those actions directly; writes, read-only
+status checks, and Stop hooks do not require another `get_next`. Refresh after
+errors or truncation, lost policy/context, catalog changes, or possible workflow
+changes by another actor. These optimizations do not change execution approval
 or the atomic dispatch/settlement checks.
 
 ```sh

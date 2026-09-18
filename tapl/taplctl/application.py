@@ -141,6 +141,24 @@ class WorkflowApplication:
         _, _, actions = self._next_context()
         return {"ok": True, "recommendations": actions}
 
+    @staticmethod
+    def _next_state_summary(state: dict[str, Any]) -> dict[str, Any]:
+        """Project the same fresh snapshot used by next-action recommendations."""
+        run = state.get("active_run")
+        approval = (state.get("approvals") or {}).get("execution") or {}
+        return {
+            "active_run": ({key: run.get(key) for key in (
+                "id", "status", "work_type", "workflow_mode", "record_mode",
+            )} | {"result_recorded": bool(run.get("result_summary"))}) if run else None,
+            "task_counts": state.get("task_counts") or {},
+            "incomplete_tasks": state.get("incomplete_tasks", 0),
+            "counts": {key: len(state.get(key) or []) for key in (
+                "plans", "tasks", "findings", "active_batches", "active_executions", "queued_runs",
+            )},
+            "execution_approval": {"state": approval.get("state", "missing"),
+                                   "approved": bool(approval.get("approved", False))},
+        }
+
     def get_next(
         self,
         *,
@@ -163,6 +181,7 @@ class WorkflowApplication:
         payload = {
             "ok": True,
             "recommendations": actions,
+            "state_summary": self._next_state_summary(state),
             "memory_review": state["memory_review"],
             "policy_revision": revision,
             **policy,

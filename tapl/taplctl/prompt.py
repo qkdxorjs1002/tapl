@@ -200,7 +200,9 @@ AGENT_ITEM_FIELDS = {
     "finding": ("body", "impact", "related_ids"),
 }
 
-MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is this workspace's workflow system. Its `tapl_*` MCP tools call the repo-local application. Call `tapl_get_status` and `tapl_get_next` before non-trivial or uncertain work. These instructions, tool descriptions, and JSON schemas are the authoritative workflow contract.
+MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is this workspace's workflow system. Its `tapl_*` MCP tools call the repo-local application. These instructions, tool descriptions, and JSON schemas are the authoritative workflow contract.
+
+${entry_guidance}
 
 # Workflow
 
@@ -262,7 +264,9 @@ Record the final result with `tapl_finish_run` before archiving with `tapl_finis
 
 CONTEXT_INJECTION_PROMPT_TEMPLATE = """# TAPL MCP
 
-Use the installed `tapl_*` MCP tools for workflow state. The MCP server instructions, tool descriptions, and input schemas contain the authoritative workflow policy and field contracts. Call `tapl_get_next` for the current safe action."""
+Use the installed `tapl_*` MCP tools for workflow state. The MCP server instructions, tool descriptions, and input schemas contain the authoritative workflow policy and field contracts.
+
+${entry_guidance}"""
 
 SESSION_START_GUIDANCE_TEMPLATE = """# TAPL MCP
 
@@ -270,7 +274,7 @@ SessionStart is bootstrap only; wait for a concrete user request before creating
 
 STOP_GUIDANCE_TEMPLATE = """# TAPL MCP
 
-Use `tapl_get_next` to settle remaining tasks or batches. When work is verified, record the result with `tapl_finish_run`, archive eligible work with `tapl_finish_archive`, and report changed behavior, verification, remaining risk, and archive status. A planning-only run stays active after the plan is reported; ask the user what to do next and do not finish or archive it before their choice."""
+${receipt_guidance} Settle remaining tasks or batches. When work is verified, record the result with `tapl_finish_run`, inspect its memory-review result and recommendations, archive eligible work with `tapl_finish_archive`, and report changed behavior, verification, remaining risk, and archive status. A planning-only run stays active after the plan is reported; ask the user what to do next and do not finish or archive it before their choice."""
 
 def render_template(template: str, **variables: Any) -> str:
     values = {key: str(value) for key, value in variables.items()}
@@ -283,6 +287,8 @@ def render(template: str, **overrides: Any) -> str:
 
 def template_variables(**overrides: Any) -> dict[str, str]:
     values = {
+        "entry_guidance": entry_guidance(),
+        "receipt_guidance": receipt_guidance(),
         "plan_labels": ", ".join(PLAN_KEY_LABELS),
         "task_statuses": "`, `".join(TASK_STATUSES),
         "plan_detail_guidance": plan_detail_guidance(),
@@ -798,22 +804,43 @@ def user_prompt_submit_guidance(*, subagents: tapl_config.SubagentsConfig | None
     ) if part)
 
 
+def receipt_guidance() -> str:
+    return (
+        "Reuse the latest successful write receipt's recommendations; do not routinely call `tapl_get_next` "
+        "after writes or read-only status checks. Refresh when the response failed or was truncated, needed "
+        "policy/context was lost, the catalog changed, or another actor may have changed workflow state."
+    )
+
+
+def entry_guidance() -> str:
+    return (
+        "Before non-trivial or uncertain work (including read-only helpers), make one `tapl_get_next` entry call "
+        "for policy, state_summary, and recommendations. On the first concrete request of a session, include "
+        "the available delegation catalog in that same call. This single call satisfies both bootstrap and hook "
+        "entry requirements; do not repeat it to satisfy another instruction. Use `tapl_get_status` only when "
+        "run/task/approval/batch or resume details needed for the next action are missing (full=true for bodies), "
+        "or when a recommendation explicitly requires inspection. "
+        + receipt_guidance()
+    )
+
+
 def mcp_bootstrap_instructions() -> str:
     """Load the complete policy before work without repeating it on every tool."""
 
     return (
         "TAPL is this workspace's workflow system. This is a mandatory bootstrap, not the full workflow policy. "
-        "SessionStart is bootstrap only; wait for a concrete request before creating records. Before starting non-trivial "
-        "or uncertain work (including read-only helpers), call `tapl_get_status` and `tapl_get_next`. "
+        "SessionStart is bootstrap only; wait for a concrete request before creating records. "
+        + entry_guidance() + "\n\n"
         "Do not start project work or make TAPL mutations until the full policy is available. "
         "Read and follow the complete `workflow_policy`, `subagent_guidance`, and config returned by this server. "
         "They, these instructions, tool descriptions and schemas are the authoritative TAPL contract. "
         "Recommendations never replace that policy.\n\n"
-        "On the first concrete request and catalog changes, pass `available_models` with all exposed delegation "
-        "model IDs and supported efforts; omit that argument if unavailable, never guess. Pass `known_policy_revision` only when the complete matching "
+        "Pass `available_models` with all exposed delegation model IDs and supported efforts; "
+        "omit that argument if unavailable, never guess. Pass `known_policy_revision` only when the complete matching "
         "policy, guidance and config remain in the current context. Omit it on a new session, after compaction, "
         "context loss or uncertainty; a summary is insufficient. Read any returned replacement before continuing. "
-        "The server returns full content for unknown revisions or changes.\n\n"
+        "The server returns full content for unknown revisions or changes. A policy revision only controls policy delivery; "
+        "it is never a state cache or proof of approval.\n\n"
         "Plan before implementation; durable edits and execution require approval. Explicit edit, test, "
         "implementation and verification requests count as approval. Preserve user changes. Helpers require "
         "completed/enabled setup and model/effort pairs allowed by both confirmed preferences and the live catalog. "
@@ -831,9 +858,9 @@ def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = N
     return render(
         MCP_SERVER_INSTRUCTIONS_TEMPLATE,
         subagent_delegation_guidance=(
-            "Startup snapshot; `tapl_get_next(available_models=...)` returns current settings and model changes.\n\n"
+            "Use the entry response's current settings and model changes.\n\n"
             + (subagent_delegation_guidance(settings, include_exploration=False) if settings.setup_complete else
-               "Setup pending: on the first concrete user request follow `tapl_get_next` to ask preferences, then "
+               "Setup pending: on the first concrete user request follow the entry response to ask preferences, then "
                "save the actual answer with `tapl_configure_subagents`. Until setup completes use the root agent.")
         ),
     )
@@ -956,7 +983,8 @@ def stable_id_guidance() -> str:
 
 def workflow_order_guidance() -> str:
     return (
-        "Lifecycle order: `tapl_get_status`/`tapl_get_next` -> resolve residual run direction with user approval -> "
+        "Lifecycle order: one `tapl_get_next` entry (conditional `tapl_get_status` for missing details) -> "
+        "resolve residual run direction with user approval -> "
         "identify independent topics -> bounded local scout when needed -> `tapl_summarize_run` with the whole request's "
         "work_type and evidence-based workflow_mode -> inspect emitted memory cues and their original sources, or search "
         "relevant history when insufficient -> `tapl_apply_plan` for each topic before task design. Lightweight records "
@@ -1079,7 +1107,7 @@ def subagent_setup_guidance() -> str:
     return (
         "SubAgent setup: while current `config.subagents.setup_complete` is false, ask once on the first "
         "concrete user request whether to use SubAgents and what to prioritize (quality, speed, cost, or model "
-        "preferences). Check `tapl_get_next` for the effective config path. Derive choices only from the current "
+        "preferences). Use the entry response's effective config path. Derive choices only from the current "
         "session's delegation tool model IDs and supported reasoning efforts; do not guess or use a provider API "
         "catalog. If unavailable, defer setup and continue on the root agent. Use request_user_input when available. "
         "Wait for the actual answer; no answer or timeout is not confirmation. Do not repeat a pending question. "
@@ -1092,8 +1120,9 @@ def subagent_setup_guidance() -> str:
 
 def subagent_catalog_guidance() -> str:
     return (
-        "On the first concrete request of each session, and when the delegation tool's catalog changes, call "
-        "`tapl_get_next(available_models=...)` with all currently exposed model IDs and their supported efforts. "
+        "On the first concrete request of each session, include `available_models` in the same entry "
+        "`tapl_get_next` call with all currently exposed model IDs and their supported efforts. "
+        "Do not make a second initialization call when that catalog was already supplied. Recheck when the catalog changes. "
         "Do not substitute the chosen allowlist for the full catalog or guess unavailable information. "
         "If model_changes.changed is true, briefly show what changed and offer to update or keep preferences. "
         "Wait for the actual answer; do not repeat an unanswered proposal. After either answer save the confirmed "

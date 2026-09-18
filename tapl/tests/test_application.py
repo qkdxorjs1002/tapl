@@ -82,11 +82,14 @@ def test_next_policy_revision_requires_explicit_retention_and_keeps_actions_fres
         assert cached["policy_unchanged"]
         assert cached["policy_revision"] == revision
         assert cached["recommendations"] == full["recommendations"]
+        assert cached["state_summary"] == full["state_summary"]
         assert not {"workflow_policy", "config", "subagent_guidance"} & cached.keys()
         app.apply_plan("PLAN-001", title="Plan")
         advanced = app.get_next(known_policy_revision=revision)
         assert advanced["policy_unchanged"]
         assert advanced["recommendations"] != cached["recommendations"]
+        assert cached["state_summary"]["counts"]["plans"] == 0
+        assert advanced["state_summary"]["counts"]["plans"] == 1
         assert advanced["recommendations"] == app.get_next_actions()["recommendations"]
         for known in (None, "", "unknown"):
             restored = app.get_next(known_policy_revision=known)
@@ -94,6 +97,32 @@ def test_next_policy_revision_requires_explicit_retention_and_keeps_actions_fres
             for key in ("workflow_policy", "config", "subagent_guidance"):
                 assert restored[key] == full[key]
         assert not WorkflowApplication(app.workspace_root).get_next()["policy_unchanged"]
+
+
+def test_next_summary_covers_entry_without_status_and_tracks_approval() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _, app = workspace(tmp)
+        with mock.patch.object(app, "get_status", side_effect=AssertionError("separate status lookup")):
+            empty = app.get_next()
+            assert empty["state_summary"]["active_run"] is None
+            app.summarize_run("Entry check", work_type="implementation", workflow_mode="standard")
+            initial = app.get_next(known_policy_revision=empty["policy_revision"])
+            summary = initial["state_summary"]
+            assert summary["active_run"]["work_type"] == "implementation"
+            assert summary["active_run"]["result_recorded"] is False
+            assert not any(summary["counts"].values())
+            assert summary["incomplete_tasks"] == 0
+            assert summary["execution_approval"] == {"state": "missing", "approved": False}
+            app.apply_plan("PLAN-001", title="Plan")
+            app.create_task("TASK-001", "Inspect", "PLAN-001", "Goal", "Action", "Check")
+            app.record_approval(decision="approved", prompt="Implement the approved request", source="explicit_user")
+            updated = app.get_next(known_policy_revision=empty["policy_revision"])
+            assert updated["policy_unchanged"]
+            assert updated["state_summary"]["counts"]["tasks"] == 1
+            assert updated["state_summary"]["task_counts"]["Pending"] == 1
+            assert updated["state_summary"]["incomplete_tasks"] == 1
+            assert updated["state_summary"]["execution_approval"] == {"state": "approved", "approved": True}
+            assert "tasks" not in updated["state_summary"]
 
 
 def test_next_policy_revision_invalidates_every_delivered_policy_component() -> None:
@@ -655,6 +684,8 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
         assert retained["policy_unchanged"]
         assert retained["recommendations"] == full_policy["recommendations"]
         assert retained["recommendations"][0]["name"] == "settle-parallel-task"
+        assert retained["state_summary"]["counts"]["active_batches"] == 1
+        assert retained["state_summary"]["counts"]["active_executions"] == 2
         # Catalog review must not displace an active batch's settlement/recovery.
         reviewed = app.get_next(
             available_models={**catalog, "new-runtime": ["high"]},

@@ -360,8 +360,10 @@ Hook, status, next-action 조회에서는 기억을 검색하지 않습니다. �
 
 사용자에게 보여 줄 최종 결과는 기억 처리보다 먼저 저장되므로 기억 오류가 완료 기록을
 되돌리지 않습니다. 간결한 응답도 `active_run`만 추출하지 말고 `recall`, `memory`를
-포함한 전체 내용을 확인합니다. `tapl_finish_run` → 응답과
-`tapl_get_status`/`tapl_get_next` 확인 → `tapl_finish_archive` 순서로 실행합니다.
+포함한 전체 내용을 확인합니다. `tapl_finish_run` → 응답의 기억 처리 결과·다음 행동 확인
+→ `tapl_finish_archive` 순서로 실행합니다. 반환된 권고를 재사용하며, 필요한 상세 정보가
+없거나 응답 오류·잘림, 컨텍스트 유실, 외부 상태 변경 가능성이 있을 때만 status/next를
+추가 조회합니다.
 status와 next-action의 `memory_review`에는 `status`, `decision`, `capture_count`,
 `pending_errors`가 담깁니다. 결정과 미해결 오류는 기존 run 이벤트에 남아 재시도와
 프로세스 재시작 후에도 유지됩니다. 실패한 후보를 수정해 같은 run/slot으로 한 번
@@ -427,7 +429,7 @@ root agent가 처리합니다. 답변을 받은 뒤 agent는 `tapl_configure_sub
 `enabled = false`인 기존 configuration은 완료 상태를 유지하고 user가 업데이트할 때까지
 선택을 보존합니다. 새 model 설정은 user가 요청할 때에만 적용됩니다.
 
-사용자 답변 뒤에는 전체 모델 목록도 `subagents.available_models`에 저장합니다. 각 세션의 첫 요청에서 에이전트가 현재 목록을 `tapl_get_next`에 전달하며, 모델 추가·제거 또는 추론 옵션 변경이 있으면 재설정 여부를 제안합니다. 기존 설정을 유지하겠다고 답하면 선택한 모델은 그대로 두고 확인한 목록만 갱신하므로 같은 변경을 반복해서 묻지 않습니다. 목록이 없는 기존 설정도 계속 사용할 수 있으며, 에이전트가 변화 감지 기준을 한 번 기록하도록 제안할 수 있습니다.
+사용자 답변 뒤에는 전체 모델 목록도 `subagents.available_models`에 저장합니다. 각 세션의 첫 요청에서 정책·상태를 받는 동일한 `tapl_get_next` 호출에 현재 목록을 넣으며, 별도의 두 번째 초기화 호출은 필요하지 않습니다. 모델 추가·제거 또는 추론 옵션 변경이 있으면 재설정 여부를 제안합니다. 기존 설정을 유지하겠다고 답하면 선택한 모델은 그대로 두고 확인한 목록만 갱신하므로 같은 변경을 반복해서 묻지 않습니다. 목록이 없는 기존 설정도 계속 사용할 수 있으며, 에이전트가 변화 감지 기준을 한 번 기록하도록 제안할 수 있습니다.
 
 설치 템플릿은 다음 model-neutral advisory profile을 안전 우선 순서로 포함합니다.
 
