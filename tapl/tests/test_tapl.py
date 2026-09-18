@@ -736,7 +736,7 @@ class TaplRuntimeTests(unittest.TestCase):
             "SessionStart is bootstrap only",
             "including read-only helpers",
             "make one `tapl_get_next` entry call",
-            "in that same call",
+            "Omit model-catalog arguments during ordinary entry",
             "Use `tapl_get_status` only when",
             "not routinely call `tapl_get_next`",
             "never a state cache or proof of approval",
@@ -744,8 +744,8 @@ class TaplRuntimeTests(unittest.TestCase):
             "complete `workflow_policy`, `subagent_guidance`, and config",
             "authoritative TAPL contract",
             "Recommendations never replace that policy",
-            "all exposed delegation model IDs and supported efforts",
-            "omit that argument if unavailable, never guess",
+            "Only for setup or a user-requested settings check",
+            "including fixed agent-role models",
             "complete matching policy, guidance and config remain in the current context",
             "Omit it on a new session, after compaction",
             "a summary is insufficient",
@@ -772,8 +772,11 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertIn(entry, surface)
             self.assertNotIn("`tapl_get_status` and `tapl_get_next`", surface)
         self.assertIn(tapl_prompt.receipt_guidance(), tapl_prompt.stop_guidance())
-        self.assertIn("same entry", tapl_prompt.subagent_catalog_guidance())
-        self.assertIn("Do not make a second initialization call", tapl_prompt.subagent_catalog_guidance())
+        catalog = tapl_prompt.subagent_catalog_guidance()
+        self.assertIn("Ordinary entry uses saved preferences without a catalog check", catalog)
+        self.assertIn("catalog_complete=true", catalog)
+        self.assertIn("Before each delegation verify the selected model/effort in the live tool", catalog)
+        self.assertIn("Never fill gaps from saved settings", catalog)
 
     def test_mcp_server_instructions_are_compact_and_keep_adaptive_policy(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions(

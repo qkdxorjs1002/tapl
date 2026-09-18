@@ -10,6 +10,12 @@ from taplctl import config, db, mcp_server, prompt
 from taplctl.application import WorkflowApplication, WorkflowApplicationError
 
 
+@pytest.fixture(autouse=True)
+def isolated_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Onboarding must never read or overwrite the developer's real preferences.
+    monkeypatch.setattr(config, "user_config_path", lambda home=None: tmp_path / "user/.tapl/config.toml")
+
+
 def fresh_workspace(tmp_path: Path) -> tuple[Path, WorkflowApplication]:
     root = tmp_path / "workspace"
     (root / ".git").mkdir(parents=True)
@@ -20,7 +26,7 @@ def fresh_workspace(tmp_path: Path) -> tuple[Path, WorkflowApplication]:
 def test_first_use_requires_an_answer_and_does_not_create_a_config(tmp_path: Path) -> None:
     root, app = fresh_workspace(tmp_path)
     path = root / ".tapl/config.toml"
-    next_action = app.get_next(available_models={"future-runtime": ["careful"]})
+    next_action = app.get_next(catalog_complete=True, available_models={"future-runtime": ["careful"]})
     assert next_action["recommendations"][0]["name"] == "configure-subagents"
     assert not path.exists()
     session = app.get_context(event="SessionStart")
@@ -50,26 +56,26 @@ def test_model_catalog_changes_are_read_only_and_keep_acknowledges_them(tmp_path
     assert "품질 우선" in saved["subagent_guidance"]
     path = root / ".tapl/config.toml"
     original = path.read_bytes()
-    same = app.get_next(available_models={"small-runtime": ["quick"], "future-runtime": ["quick", "careful"]})
+    same = app.get_next(catalog_complete=True, available_models={"small-runtime": ["quick"], "future-runtime": ["quick", "careful"]})
     assert not same["model_changes"]["changed"]
     current = {"future-runtime": ["careful", "deep"], "new-runtime": ["quick"]}
-    updated = app.get_next(available_models=current)
+    updated = app.get_next(catalog_complete=True, available_models=current)
     assert updated["model_changes"] == {
-        "baseline_recorded": True, "changed": True,
+        "baseline_recorded": True, "changed": True, "comparison_status": "compared",
         "added": ["new-runtime"], "removed": ["small-runtime"],
         "reasoning_efforts_changed": ["future-runtime"],
     }
     assert updated["recommendations"][0]["name"] == "review-subagent-models"
     assert path.read_bytes() == original
     app.configure_subagents(**selection, available_models=current)
-    assert not app.get_next(available_models=current)["model_changes"]["changed"]
+    assert not app.get_next(catalog_complete=True, available_models=current)["model_changes"]["changed"]
     assert app.get_status()["config"]["subagents"]["models"] == selection["models"]
     assert config.load(path).subagents.profiles == ()
     # Ordinary preference writes and setup updates without a new catalog keep
     # the last confirmed baseline, even across process restarts.
     app.configure_subagents(**selection)
     restarted = WorkflowApplication(root)
-    assert not restarted.get_next(available_models=current)["model_changes"]["changed"]
+    assert not restarted.get_next(catalog_complete=True, available_models=current)["model_changes"]["changed"]
 
 
 def test_catalog_empty_and_missing_are_distinct(tmp_path: Path) -> None:
@@ -80,9 +86,43 @@ def test_catalog_empty_and_missing_are_distinct(tmp_path: Path) -> None:
         available_models=catalog,
     )
     assert "model_changes" not in app.get_next()
-    empty = app.get_next(available_models={})
+    empty = app.get_next(catalog_complete=True, available_models={})
     assert empty["model_changes"]["removed"] == ["future-runtime"]
     assert empty["model_changes"]["changed"]
+
+
+def test_incomplete_observations_do_not_trigger_catalog_repair_or_change_prompts(tmp_path: Path) -> None:
+    root, app = fresh_workspace(tmp_path)
+    ordinary = {name: ["high"] for name in (
+        "gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-daybreak-blue-latest",
+    )}
+    catalog = {**ordinary, "gpt-5.4": ["high"], "gpt-5.3-codex-spark": ["medium"]}
+    app.configure_subagents(user_confirmed=True, enabled=True, strategy="balanced",
+                           models={"gpt-6-astra": ["high"]}, available_models=catalog)
+    path = root / ".tapl/config.toml"
+    original = path.read_bytes()
+    entry = app.get_next()
+    assert "model_changes" not in entry
+    for observation in (ordinary, {}, {"gpt-6-astra": ["low"]}, {"new-runtime": ["high"]}, catalog):
+        result = app.get_next(available_models=observation, known_policy_revision=entry["policy_revision"])
+        assert result["model_changes"] == {
+            "baseline_recorded": True, "comparison_status": "incomplete", "changed": False,
+            "added": [], "removed": [], "reasoning_efforts_changed": [],
+        }
+        assert result["recommendations"] == entry["recommendations"]
+        assert result["state_summary"] == entry["state_summary"]
+        assert result["policy_unchanged"]
+        assert "without repeating get_next" in result["model_catalog_note"]
+        assert path.read_bytes() == original
+    # Explicitly verified absence is distinguishable from a partial observation.
+    complete = app.get_next(available_models=ordinary, catalog_complete=True,
+                            known_policy_revision=entry["policy_revision"])
+    assert complete["model_changes"]["removed"] == ["gpt-5.3-codex-spark", "gpt-5.4"]
+    assert complete["model_changes"]["comparison_status"] == "compared"
+    assert not complete["policy_unchanged"]
+    assert path.read_bytes() == original
+    with pytest.raises(WorkflowApplicationError, match="requires an explicit available_models"):
+        app.get_next(catalog_complete=True)
 
 
 def test_new_selections_must_be_in_the_observed_catalog(tmp_path: Path) -> None:
@@ -103,13 +143,13 @@ def test_disabled_choice_is_complete_and_legacy_allowlists_are_preserved(tmp_pat
     )
     assert app.get_status()["config"]["subagents"]["setup_complete"]
     assert not any(item["name"] in {"configure-subagents", "review-subagent-models"}
-                   for item in app.get_next(available_models={"new": ["high"]})["recommendations"])
+                   for item in app.get_next(catalog_complete=True, available_models={"new": ["high"]})["recommendations"])
     with pytest.raises(WorkflowApplicationError, match="completed, enabled setup"):
         app.dispatch_tasks(["TASK-001", "TASK-002"])
     path = root / ".tapl/config.toml"
     legacy = '[subagents.models]\n"legacy-choice" = ["high"]\n'
     path.write_text(legacy, encoding="utf-8")
-    state = app.get_next(available_models={"current-runtime": ["careful"]})
+    state = app.get_next(catalog_complete=True, available_models={"current-runtime": ["careful"]})
     assert state["config"]["subagents"]["setup_complete"]
     assert not state["model_changes"]["baseline_recorded"]
     assert not state["model_changes"]["changed"]
@@ -161,7 +201,16 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
             helper_contract = prompt.subagent_exploration_guidance()
             assert helper_contract in saved.structured_content["subagent_guidance"]
             before_reads = await client.call_tool("tapl_get_status", {})
-            ready = await client.call_tool("tapl_get_next", {"available_models": args["available_models"]})
+            ready = await client.call_tool("tapl_get_next", {"available_models": args["available_models"], "catalog_complete": True})
+            incomplete = await client.call_tool("tapl_get_next", {
+                "available_models": {}, "known_policy_revision": ready.structured_content["policy_revision"],
+            })
+            assert incomplete.structured_content["model_changes"]["comparison_status"] == "incomplete"
+            assert not incomplete.structured_content["model_changes"]["changed"]
+            assert incomplete.structured_content["policy_unchanged"]
+            assert incomplete.structured_content["recommendations"] == ready.structured_content["recommendations"]
+            missing = await client.call_tool("tapl_get_next", {"catalog_complete": True})
+            assert missing.is_error
             assert helper_contract in ready.structured_content["subagent_guidance"]
             assert "model/effort pairs in both the allowlist and the live delegation-tool catalog" in ready.structured_content["subagent_guidance"]
             for routing_rule in (
@@ -188,7 +237,7 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
             assert after_reads.structured_content["counts"]["plans"] == 0
             assert after_reads.structured_content["counts"]["tasks"] == 0
             assert after_reads.structured_content["counts"]["active_batches"] == 0
-            next_action = await client.call_tool("tapl_get_next", {"available_models": {"runtime-b": ["deep"]}})
+            next_action = await client.call_tool("tapl_get_next", {"available_models": {"runtime-b": ["deep"]}, "catalog_complete": True})
             assert next_action.structured_content["recommendations"][0]["tool"] == "request_user_input"
             assert next_action.structured_content["model_changes"]["changed"]
             # Model discovery cannot silently widen the user's saved allowlist.

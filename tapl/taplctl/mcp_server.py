@@ -383,14 +383,16 @@ def create_server(
 
     @server.tool(name="tapl_get_next", title="Get safest TAPL action", annotations=READ_ONLY)
     async def get_next(
-        available_models: Annotated[dict[str, list[str]] | None, Field(description="Current session delegation-tool model IDs and supported reasoning efforts. Include in the same first entry call of a session; resupply when the catalog changes. Omit if unavailable; never guess.")] = None,
+        available_models: Annotated[dict[str, list[str]] | None, Field(description="Optional live delegation-tool catalog for setup or a user-requested settings check. Omit during ordinary workflow entry. Include every exposed model/effort, including fixed agent-role models, before asserting catalog_complete. Never guess or fill missing entries from saved settings.")] = None,
+        catalog_complete: Annotated[bool, Field(description="True only after verifying available_models covers the entire live delegation-tool catalog for an explicit settings check. Default false: supplied entries are incomplete observations and cause no change/removal inference or reconfiguration prompt. Requires available_models; a verified empty catalog is allowed.")] = False,
         known_policy_revision: Annotated[str | None, Field(description="Only supply a returned revision when its complete workflow_policy, subagent_guidance and config remain in the current context. Omit after compaction, in a new session, or whenever uncertain; summaries are insufficient.")] = None,
     ) -> dict[str, Any]:
-        """Single entry for authoritative policy, state_summary, safe actions and optional catalog check. Read status only for missing details; reuse fresh write recommendations instead of routinely calling again. A retained matching revision omits unchanged policy/config; state, action and model checks remain fresh. Revisions are not state caches or approval evidence."""
+        """Single entry for authoritative policy, state_summary and safe actions; omit model-catalog arguments for ordinary work. Complete catalog comparisons are optional settings checks, not session initialization. Read status only for missing details and reuse write recommendations. A retained revision omits unchanged policy/config; state and requested complete comparisons stay fresh. Revisions are not approval evidence."""
 
         return mcp_next_recommendations(await call_application(
             application.get_next,
             available_models=available_models,
+            catalog_complete=catalog_complete,
             known_policy_revision=known_policy_revision,
             workflow_policy=instructions,
         ))

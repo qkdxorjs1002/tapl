@@ -425,7 +425,24 @@ Existing configurations with an explicit model allowlist or `enabled = false`
 remain complete and retain their choices; new model settings apply only when
 the user requests an update.
 
-After your answer, TAPL also records the full runtime catalog in `subagents.available_models`. On the first request in each session, the agent includes the current catalog in the same `tapl_get_next` call that loads policy and state; no second initialization call is needed. Added or removed models and changed reasoning efforts trigger an update-or-keep suggestion. Keeping your choices records the new catalog without changing your allowlist, so the same change is not proposed again. Existing configurations without a catalog keep working; the agent can offer to record a baseline once.
+After your answer, TAPL also records the full runtime catalog in `subagents.available_models`.
+Ordinary `tapl_get_next` entry omits catalog arguments and uses saved preferences.
+It does not check for new models at the start of each session. Before delegating,
+verify the selected model/effort against the live tool and allowlist; skip
+unavailable pairs and use root if none remain. Saved catalog entries are not
+proof that a model is still available.
+
+Only during setup or a user-requested settings check, compare the entire live
+catalog with `tapl_get_next(available_models=..., catalog_complete=true)`, including
+models fixed by agent roles as well as selectable overrides. When a catalog is
+supplied without explicit completeness, the response reports `comparison_status="incomplete"` with no
+inferred changes or configuration prompt; continue work without a repair query.
+A complete comparison reports `"compared"`, or `"no_baseline"` for legacy settings.
+A complete empty catalog can establish removal, while a partial or omitted one
+cannot. Confirmed additions, removals and effort changes offer update or keep.
+Wait for the user's answer before saving through `tapl_configure_subagents`.
+Keeping records the confirmed catalog without changing the allowlist. Existing
+configurations without a catalog remain usable; record a baseline during settings review.
 
 The installed template includes these model-neutral advisory profiles, listed
 in safety-first order:

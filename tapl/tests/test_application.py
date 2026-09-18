@@ -149,11 +149,11 @@ def test_next_catalog_changes_resend_policy_even_with_matching_revision() -> Non
         _, app = workspace(tmp)
         catalog = {"model-a": ["high"]}
         app.configure_subagents(user_confirmed=True, enabled=True, strategy="balanced", models=catalog, available_models=catalog)
-        full = app.get_next(available_models=catalog)
-        same = app.get_next(available_models=catalog, known_policy_revision=full["policy_revision"])
+        full = app.get_next(catalog_complete=True, available_models=catalog)
+        same = app.get_next(catalog_complete=True, available_models=catalog, known_policy_revision=full["policy_revision"])
         assert same["policy_unchanged"]
         assert not same["model_changes"]["changed"]
-        changed = app.get_next(available_models={"model-a": ["high", "xhigh"]}, known_policy_revision=full["policy_revision"])
+        changed = app.get_next(catalog_complete=True, available_models={"model-a": ["high", "xhigh"]}, known_policy_revision=full["policy_revision"])
         assert not changed["policy_unchanged"]
         assert changed["model_changes"]["changed"]
         assert changed["workflow_policy"] == full["workflow_policy"]
@@ -689,6 +689,7 @@ def test_application_dispatches_and_settles_an_approved_parallel_batch() -> None
         # Catalog review must not displace an active batch's settlement/recovery.
         reviewed = app.get_next(
             available_models={**catalog, "new-runtime": ["high"]},
+            catalog_complete=True,
             known_policy_revision=full_policy["policy_revision"],
         )
         assert reviewed["model_changes"]["changed"]

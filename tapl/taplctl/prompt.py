@@ -808,15 +808,15 @@ def receipt_guidance() -> str:
     return (
         "Reuse the latest successful write receipt's recommendations; do not routinely call `tapl_get_next` "
         "after writes or read-only status checks. Refresh when the response failed or was truncated, needed "
-        "policy/context was lost, the catalog changed, or another actor may have changed workflow state."
+        "policy/context was lost, or another actor may have changed workflow state."
     )
 
 
 def entry_guidance() -> str:
     return (
         "Before non-trivial or uncertain work (including read-only helpers), make one `tapl_get_next` entry call "
-        "for policy, state_summary, and recommendations. On the first concrete request of a session, include "
-        "the available delegation catalog in that same call. This single call satisfies both bootstrap and hook "
+        "for policy, state_summary, and recommendations. Omit model-catalog arguments during ordinary entry; "
+        "do not enumerate or recheck the full catalog at session start. This single call satisfies both bootstrap and hook "
         "entry requirements; do not repeat it to satisfy another instruction. Use `tapl_get_status` only when "
         "run/task/approval/batch or resume details needed for the next action are missing (full=true for bodies), "
         "or when a recommendation explicitly requires inspection. "
@@ -835,8 +835,9 @@ def mcp_bootstrap_instructions() -> str:
         "Read and follow the complete `workflow_policy`, `subagent_guidance`, and config returned by this server. "
         "They, these instructions, tool descriptions and schemas are the authoritative TAPL contract. "
         "Recommendations never replace that policy.\n\n"
-        "Pass `available_models` with all exposed delegation model IDs and supported efforts; "
-        "omit that argument if unavailable, never guess. Pass `known_policy_revision` only when the complete matching "
+        "Only for setup or a user-requested settings check, supply `available_models` and `catalog_complete=true` "
+        "after verifying the entire live catalog, including fixed agent-role models. Otherwise omit them; never guess. "
+        "Pass `known_policy_revision` only when the complete matching "
         "policy, guidance and config remain in the current context. Omit it on a new session, after compaction, "
         "context loss or uncertainty; a summary is insufficient. Read any returned replacement before continuing. "
         "The server returns full content for unknown revisions or changes. A policy revision only controls policy delivery; "
@@ -858,7 +859,7 @@ def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = N
     return render(
         MCP_SERVER_INSTRUCTIONS_TEMPLATE,
         subagent_delegation_guidance=(
-            "Use the entry response's current settings and model changes.\n\n"
+            "Use the entry response's current settings. Ordinary entry requires no catalog comparison.\n\n"
             + (subagent_delegation_guidance(settings, include_exploration=False) if settings.setup_complete else
                "Setup pending: on the first concrete user request follow the entry response to ask preferences, then "
                "save the actual answer with `tapl_configure_subagents`. Until setup completes use the root agent.")
@@ -1120,14 +1121,14 @@ def subagent_setup_guidance() -> str:
 
 def subagent_catalog_guidance() -> str:
     return (
-        "On the first concrete request of each session, include `available_models` in the same entry "
-        "`tapl_get_next` call with all currently exposed model IDs and their supported efforts. "
-        "Do not make a second initialization call when that catalog was already supplied. Recheck when the catalog changes. "
-        "Do not substitute the chosen allowlist for the full catalog or guess unavailable information. "
-        "If model_changes.changed is true, briefly show what changed and offer to update or keep preferences. "
-        "Wait for the actual answer; do not repeat an unanswered proposal. After either answer save the confirmed "
-        "catalog through `tapl_configure_subagents`; keeping means passing the existing settings unchanged "
-        "(profiles=[] if absent). Skip unavailable model/effort pairs and use the root agent if none remain."
+        "Ordinary entry uses saved preferences without a catalog check. Only during setup or a user-requested "
+        "settings check, compare all live delegation-tool model IDs/efforts, including fixed agent-role models, "
+        "via `tapl_get_next(available_models=..., catalog_complete=true)`. An incomplete observation cannot "
+        "establish removal; do not repeat get_next merely to complete it. Never fill gaps from saved settings. "
+        "On a confirmed change, offer update or keep, wait for the actual answer, then save with "
+        "`tapl_configure_subagents`; keep uses unchanged preferences (profiles=[] if absent). "
+        "Before each delegation verify the selected model/effort in the live tool and saved allowlist, "
+        "without another catalog query. Skip unavailable model/effort pairs and use the root agent if none remain."
     )
 
 

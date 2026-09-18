@@ -163,9 +163,12 @@ class WorkflowApplication:
         self,
         *,
         available_models: dict[str, list[str]] | None = None,
+        catalog_complete: bool = False,
         known_policy_revision: str | None = None,
         workflow_policy: str | None = None,
     ) -> dict[str, Any]:
+        if catalog_complete and available_models is None:
+            raise WorkflowApplicationError("catalog_complete=true requires an explicit available_models catalog")
         state, settings, actions = self._next_context()
         policy = {
             "workflow_policy": (
@@ -193,17 +196,26 @@ class WorkflowApplication:
             observed = {model.name: set(model.reasoning_efforts) for model in current}
             changes = {
                 "baseline_recorded": baseline is not None,
-                "added": sorted(observed.keys() - previous.keys()),
-                "removed": sorted(previous.keys() - observed.keys()),
+                "comparison_status": "compared" if catalog_complete and baseline is not None else
+                                     "no_baseline" if catalog_complete else "incomplete",
+                "added": sorted(observed.keys() - previous.keys()) if catalog_complete else [],
+                "removed": sorted(previous.keys() - observed.keys()) if catalog_complete else [],
                 "reasoning_efforts_changed": sorted(
                     name for name in observed.keys() & previous.keys() if observed[name] != previous[name]
-                ),
+                ) if catalog_complete else [],
             }
             changes["changed"] = baseline is not None and any(
                 changes[key] for key in ("added", "removed", "reasoning_efforts_changed")
             )
             payload["model_changes"] = changes
-            if settings.subagents.setup_complete and settings.subagents.enabled and not state.get("active_batches"):
+            if not catalog_complete:
+                payload["model_catalog_note"] = (
+                    "Catalog completeness was not confirmed; no availability changes were inferred. "
+                    "Continue from the workflow recommendations without repeating get_next to fill this list. "
+                    "Compare a complete live catalog only during setup or a user-requested settings check. "
+                    "The saved catalog is not evidence of current availability."
+                )
+            elif settings.subagents.setup_complete and settings.subagents.enabled and not state.get("active_batches"):
                 if changes["changed"]:
                     actions.insert(0, {
                         "name": "review-subagent-models",
