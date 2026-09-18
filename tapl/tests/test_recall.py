@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
+import unicodedata
 
 import pytest
 
@@ -212,6 +213,106 @@ def test_korean_budget_and_malformed_fts(conn):
     assert recall.recall_memories(conn, query='" : * AND OR ()')["memories"] == []
 
 
+@pytest.mark.parametrize("cue,query", [
+    ("연상 기억", "연상기억"),
+    ("연상기억", "연상 기억"),
+    ("TAPL 연상 기억", "오늘 연상기억 회상 확인"),
+    ("연상 기억 회상", "연상기억 회상"),
+    ("연상기억회상", "연상 기억 회상"),
+    ("연상 기 억", "연 상기 억"),
+    ("연상\t기억", "연상기억"),
+    (unicodedata.normalize("NFD", "연상 기억"), "연상기억"),
+])
+def test_korean_spacing_recall_preserves_original_and_read_only(conn, cue, query):
+    memory_id = capture(conn, note="A verified spacing lesson.", cue=[cue, "memory index", "finish_run"])
+    run(conn, "reader")
+    before = recall.get_memory(conn, memory_id, now=T0)
+    changes = conn.total_changes
+    for automatic in (False, True):
+        result = recall.recall_memories(conn, query=query, automatic=automatic, current_run_id="reader", now=T0)
+        assert [m["id"] for m in result["memories"]] == [memory_id]
+        assert result["memories"][0]["matched_cues"] == ([] if cue.startswith("TAPL") else [cue])
+    assert conn.total_changes == changes
+    assert recall.get_memory(conn, memory_id, now=T0) == before
+
+
+@pytest.mark.parametrize("query", [
+    "기억", "연상", "연상기", "상기억", "비연상기억", "연상기억X",
+    "연상/기억", "연상_기억", "연상 a 기억",
+    "one two three four five six seven eight 연상기억",
+])
+def test_spacing_does_not_promote_short_partial_or_nonspace_matches(conn, query):
+    capture(conn, note="A verified spacing lesson.", cue=["연상기억", "memory index", "finish_run"])
+    assert not recall.recall_memories(conn, query=query, automatic=True)["memories"]
+
+
+@pytest.mark.parametrize("cues", [
+    ["연상/기억", "memory index", "finish_run"],
+    ["연상_기억", "memory index", "finish_run"],
+    ["연상 v2 기억", "memory index", "finish_run"],
+    ["연상", "기억", "finish_run"],
+])
+def test_spacing_aliases_do_not_cross_punctuation_identifiers_or_cues(conn, cues):
+    capture(conn, note="A verified spacing lesson.", cue=cues)
+    assert recall.recall_memories(conn, query="연상기억")["total"] == 0
+
+
+def test_spacing_is_cue_scoped_and_preserves_english_identifiers(conn):
+    memory_id = capture(conn, note="연상 기억 설명.", cue=["memory recall", "finish_run", "Developer ID"])
+    assert not recall.recall_memories(conn, query="연상기억")["memories"]
+    for query in ("memory recall", "finish_run", "Developer ID"):
+        assert recall.recall_memories(conn, query=query, automatic=True)["memories"][0]["id"] == memory_id
+    for query in ("memoryrecall", "finishrun", "DeveloperID"):
+        assert not recall.recall_memories(conn, query=query, automatic=True)["memories"]
+
+
+@pytest.mark.parametrize("cue,query", [
+    ("프로젝트 alpha", "프로젝트 beta"),
+    ("트랜잭션 경계", "트랜잭션 실패"),
+    ("프로젝트 배포", "프로젝트"),
+    ("프로젝트 finish_연상 기억", "프로젝트 finish_연상기억"),
+    ("프로젝트 v2연상 기억", "프로젝트 v2연상기억"),
+])
+def test_single_long_korean_word_does_not_bypass_automatic_gate(conn, cue, query):
+    capture(conn, note="A verified lesson.", cue=[cue, "memory index", "finish_run"])
+    assert recall.recall_memories(conn, query=query)["memories"]
+    assert not recall.recall_memories(conn, query=query, automatic=True)["memories"]
+
+
+def test_spacing_alias_precedes_broad_prefix_candidate_budget(conn):
+    for index in range(26):
+        run(conn, f"noise{index}")
+        capture(conn, current=f"noise{index}", source=f"noise{index}",
+                note=f"Unrelated case {index}.", cue=["연상안내", "기억안내", "noise entry"])
+    run(conn, "target")
+    memory_id = capture(conn, current="target", source="target", note="The exact compound.",
+                        cue=["연상기억", "memory index", "finish_run"])
+    run(conn, "reader")
+    result = recall.emit_recall_once(conn, run_id="reader", query="연상 기억")
+    assert [m["id"] for m in result["memories"]] == [memory_id]
+    assert len(json.dumps(result, ensure_ascii=False).encode()) <= 1200
+
+
+def test_spacing_manual_pagination_and_update_delete(conn):
+    ids = []
+    for index, cue in enumerate(("연상기억", "연상 기억", "연상기억", "연상 기억")):
+        run(conn, f"source{index}")
+        ids.append(capture(conn, current=f"source{index}", source=f"source{index}",
+                           note=f"Verified case {index}.", cue=[cue, "memory index", "finish_run"]))
+    for query in ("연상기억", "연상 기억"):
+        first = recall.recall_memories(conn, query=query, limit=2)
+        second = recall.recall_memories(conn, query=query, limit=2, offset=2)
+        assert first["total"] == second["total"] == 4
+        found = [m["id"] for m in first["memories"] + second["memories"]]
+        assert len(found) == len(set(found)) == 4
+        assert set(found) == set(ids)
+    recall.update_memory(conn, ids[1], expected_revision=1, cue=["배포 확인", "memory index", "finish_run"])
+    assert ids[1] not in {m["id"] for m in recall.recall_memories(conn, query="연상기억")["memories"]}
+    assert recall.recall_memories(conn, query="배포확인", automatic=True)["memories"][0]["id"] == ids[1]
+    recall.delete_memory(conn, ids[1], expected_revision=2)
+    assert recall.recall_memories(conn, query="배포확인")["total"] == 0
+
+
 def test_auto_full_response_budget_and_manual_pagination(conn):
     for index in range(5):
         if index:
@@ -263,6 +364,102 @@ def test_v10_migration_keeps_wal_source_and_one_backup(tmp_path):
     db.connect(path).close()
     assert backup.stat().st_mtime_ns == before
     conn.close()
+
+
+def prepare_v11_index(conn):
+    """Restore the previous release's derived index without changing memories."""
+    conn.execute("DELETE FROM memory_fts")
+    for row in conn.execute("SELECT id,cues_json,note FROM memories WHERE state!='deleted'"):
+        conn.execute("INSERT INTO memory_fts(rowid,cue,note) VALUES(?,?,?)",
+                     (row["id"], " ".join(json.loads(row["cues_json"])), row["note"]))
+    conn.execute("UPDATE meta SET value='11' WHERE key='schema_version'")
+    conn.commit()
+
+
+def test_v11_spacing_backfill_keeps_memories_events_and_backup(conn, tmp_path):
+    previous = capture(conn, cue=["연상 기억", "memory index", "finish_run"])
+    run(conn, "r2")
+    active = capture(conn, current="r2", source="r2", note="Updated lesson.",
+                     cue=["연상 기억", "memory index", "finish_run"], replaces_memory_id=previous)
+    deleted = capture(conn, current="r2", source="r2", slot=2, note="Remove this lesson.",
+                      cue=["배포 확인", "memory index", "finish_run"])
+    recall.delete_memory(conn, deleted, expected_revision=1)
+    prepare_v11_index(conn)
+    before_memories = [tuple(row) for row in conn.execute("SELECT * FROM memories ORDER BY id")]
+    before_events = [tuple(row) for row in conn.execute("SELECT * FROM events ORDER BY id")]
+    assert recall.recall_memories(conn, query="연상기억")["total"] == 0
+    path = tmp_path / "test.db"
+    migrated = db.connect(path)
+    try:
+        assert db.get_meta(migrated)["schema_version"] == str(db.SCHEMA_VERSION)
+        assert [tuple(row) for row in migrated.execute("SELECT * FROM memories ORDER BY id")] == before_memories
+        assert [tuple(row) for row in migrated.execute("SELECT * FROM events ORDER BY id")] == before_events
+        assert {m["id"] for m in recall.recall_memories(migrated, query="연상기억")["memories"]} == {previous, active}
+        assert [m["id"] for m in recall.recall_memories(migrated, query="연상기억", automatic=True)["memories"]] == [active]
+        assert recall.recall_memories(migrated, query="배포확인")["total"] == 0
+        assert migrated.execute("SELECT count(*) FROM memory_fts").fetchone()[0] == 2
+        statements = []
+        migrated.set_trace_callback(statements.append)
+        db.migrate(migrated)
+        assert not any(sql.lstrip().startswith("DELETE FROM memory_fts") for sql in statements)
+    finally:
+        migrated.close()
+    backup = path.with_name(path.name + ".pre-v12.bak")
+    before_mtime = backup.stat().st_mtime_ns
+    with sqlite3.connect(backup) as original:
+        assert original.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "11"
+        assert original.execute("SELECT count(*) FROM memory_fts WHERE memory_fts MATCH '연상기억'").fetchone()[0] == 0
+        assert original.execute("SELECT * FROM memories ORDER BY id").fetchall() == before_memories
+    db.connect(path).close()
+    assert backup.stat().st_mtime_ns == before_mtime
+
+
+def test_v11_spacing_backfill_failure_rolls_back_and_can_retry(conn, tmp_path, monkeypatch):
+    capture(conn, cue=["연상 기억", "memory index", "finish_run"])
+    capture(conn, slot=2, note="Another lesson.", cue=["배포 확인", "memory index", "finish_run"])
+    prepare_v11_index(conn)
+    before_index = [tuple(row) for row in conn.execute("SELECT rowid,* FROM memory_fts ORDER BY rowid")]
+    original_indexed_cues = db.memory_search.indexed_cues
+    calls = 0
+
+    def fail_after_one(cues):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("simulated indexing failure")
+        return original_indexed_cues(cues)
+
+    path = tmp_path / "test.db"
+    with monkeypatch.context() as patch:
+        patch.setattr(db.memory_search, "indexed_cues", fail_after_one)
+        with pytest.raises(RuntimeError, match="simulated indexing failure"):
+            db.connect(path)
+    assert db.get_meta(conn)["schema_version"] == "11"
+    assert [tuple(row) for row in conn.execute("SELECT rowid,* FROM memory_fts ORDER BY rowid")] == before_index
+    migrated = db.connect(path)
+    try:
+        assert db.get_meta(migrated)["schema_version"] == str(db.SCHEMA_VERSION)
+        assert recall.recall_memories(migrated, query="연상기억")["total"] == 1
+        assert recall.recall_memories(migrated, query="배포확인")["total"] == 1
+    finally:
+        migrated.close()
+
+
+def test_concurrent_v11_spacing_backfill_is_idempotent(conn, tmp_path):
+    memory_id = capture(conn, cue=["연상 기억", "memory index", "finish_run"])
+    prepare_v11_index(conn)
+    path = tmp_path / "test.db"
+
+    def migrate_and_read(_):
+        connection = db.connect(path)
+        try:
+            return [m["id"] for m in recall.recall_memories(connection, query="연상기억")["memories"]]
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(migrate_and_read, range(2))) == [[memory_id], [memory_id]]
+    assert conn.execute("SELECT count(*) FROM memory_fts").fetchone()[0] == 1
 
 
 def test_supersession_and_fts_cleanup(conn):

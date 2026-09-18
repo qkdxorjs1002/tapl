@@ -309,6 +309,13 @@ taplctl --config /path/to/config.toml config set search.mode bm25
 
 Automatic hints are capped at 1,200 UTF-8 bytes in total. They use the existing
 SQLite database and FTS, without embeddings, additional model calls, or a daemon.
+Korean cues support spacing variants such as `연상 기억` and `연상기억`.
+Search aliases join Hangul word spans of at least four syllables while preserving
+the original cues and notes. Queries still use only their first eight words.
+Aliases stay within each cue and never join across English, numbers, code
+identifiers, or punctuation. Automatic recall requires a whole-cue spacing match
+or the existing two-meaningful-word match; one word such as `기억` or `프로젝트`
+does not qualify as a match for an entire longer cue.
 Reinforcement occurs at most once per run and requires 24 hours since the last
 content edit or reinforcement. Age alone never deletes or excludes a relevant memory.
 
@@ -371,9 +378,15 @@ taplctl config unset recall.enabled  # restore default true
 Disabling recall stops automatic capture, recall, and reinforcement. Manual
 inspection, update, and deletion remain available. These use MCP; no workflow
 memory commands are added to the management CLI.
-The schema 11 migration first saves a one-time `.tapl/tapl.db.pre-v11.bak` backup
-and preserves original workflow records. To roll back, stop the servers before
-restoring that backup; preserve work recorded after the backup separately.
+Upgrading a schema 11 database to schema 12 first saves a one-time
+`.tapl/tapl.db.pre-v12.bak` backup, then rebuilds the memory search index.
+Original content, revisions, reinforcement state, and workflow records remain
+unchanged. A failed rebuild rolls back both the index and version change so it
+can be retried. Databases older than schema 11 retain the existing
+`.tapl/tapl.db.pre-v11.bak` backup procedure. Stop all running TAPL servers before
+upgrading and restart them with the new version. To roll back, stop the servers
+before restoring the corresponding backup; preserve work recorded after the
+backup separately.
 
 <a id="subagents"></a>
 

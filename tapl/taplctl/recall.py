@@ -11,7 +11,7 @@ import sqlite3
 import unicodedata
 import uuid
 
-from . import db
+from . import db, memory_search
 
 
 class MemoryError(ValueError):
@@ -164,17 +164,38 @@ def _query(query):
 _STOP = {"the", "and", "for", "with", "this", "that", "from", "into", "are", "was", "is", "to", "of", "in", "on", "a", "an", "및", "또는", "대한", "위한", "있는", "합니다"}
 
 
-def _matches(row, query):
+def _matches(row, query, spacing_aliases, spacing_phrases):
     cues = json.loads(row["cues_json"])
     query_tokens = query.split()
     meaningful = {t for t in query_tokens if len(t) > 1 and t not in _STOP}
-    matched = [c for c in cues if (" " + _query(c) + " ") in (" " + query + " ")]
+    matched = [c for c in cues if (" " + _query(c) + " ") in (" " + query + " ")
+               or (spacing_aliases & memory_search.korean_aliases(c)
+                   and memory_search.spacing_key(c) in spacing_phrases)]
     content_tokens = set(re.findall(r"[\w가-힣]+", _normal(row["note"] + " " + " ".join(cues))))
-    return matched, bool(matched or len(meaningful & content_tokens) >= 2)
+    # A joined query can stand for two original cue words, but a single long
+    # word (e.g. 트랜잭션) must not bypass the existing two-word approval gate.
+    spaced_words = any(alias in spacing_aliases and len({w for w in words if len(w) > 1 and w not in _STOP}) >= 2
+                       for cue in cues for alias, words in memory_search.joined_word_spans(cue))
+    return matched, bool(matched or len(meaningful & content_tokens) >= 2 or spaced_words)
+
+
+def _fts_queries(query, spacing_aliases):
+    queries = db.build_fts_queries(query)
+    if not queries or not spacing_aliases:
+        return queries
+    aliases = " OR ".join(f'"{alias}"' for alias in sorted(spacing_aliases))
+    # Exact aliases precede prefix/OR fallbacks so broad hits cannot exhaust the
+    # automatic candidate budget first. Manual pagination uses the final union.
+    exact_count = 2 if len(query.split()) > 1 else 1
+    expanded = [*queries[:exact_count], aliases, *queries[exact_count:-1],
+                f"({queries[-1]}) OR ({aliases})"]
+    return list(dict.fromkeys(expanded))
 
 
 def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
     bounded_query = _query(query)
+    spacing_aliases = memory_search.korean_aliases(query)
+    spacing_phrases = memory_search.query_phrases(query) if spacing_aliases else set()
     if type(limit) is not int or not 1 <= limit <= 50 or type(offset) is not int or offset < 0 or offset > 1000000:
         raise MemoryError("limit must be 1–50 and offset must be 0–1000000")
     if automatic:
@@ -191,7 +212,7 @@ def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
     total = 0
     if bounded_query:
         # Each fallback is bounded before materialization; OR never scans Python-side history.
-        queries = db.build_fts_queries(bounded_query)
+        queries = _fts_queries(bounded_query, spacing_aliases)
         seen = set()
         for priority, fts_query in enumerate(queries):
             sql = "FROM memory_fts JOIN memories m ON m.id=memory_fts.rowid WHERE memory_fts MATCH ? AND " + clause
@@ -206,7 +227,7 @@ def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
                 if row["id"] in seen:
                     continue
                 seen.add(row["id"])
-                matched, accepted = _matches(row, bounded_query)
+                matched, accepted = _matches(row, bounded_query, spacing_aliases, spacing_phrases)
                 if automatic and not accepted:
                     continue
                 memory = _dto(conn, row, now, matched=matched)
@@ -289,7 +310,7 @@ def _fingerprint_exists(conn, fingerprint, *, exclude=None):
 
 def _index(conn, row_id, cue, note):
     conn.execute("DELETE FROM memory_fts WHERE rowid=?", (row_id,))
-    conn.execute("INSERT INTO memory_fts(rowid,cue,note) VALUES(?,?,?)", (row_id, " ".join(cue), note))
+    conn.execute("INSERT INTO memory_fts(rowid,cue,note) VALUES(?,?,?)", (row_id, memory_search.indexed_cues(cue), note))
 
 
 def update_memory(conn, memory_id, *, expected_revision, note=None, cue=None, state=None, now=None):

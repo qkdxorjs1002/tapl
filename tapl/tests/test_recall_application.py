@@ -79,6 +79,21 @@ def test_recall_runs_once_and_only_on_summarize(app):
     assert result['active_run']['request_summary'] == 'saved despite recall error'
 
 
+@pytest.mark.parametrize('cue,query', [('연상 기억', '연상기억'), ('연상기억', '연상 기억')])
+def test_korean_spacing_in_automatic_run_recall_and_manual_api(app, cue, query):
+    run_id = app.summarize_run('검색 단서 저장', work_type='answer', workflow_mode='fast')['active_run']['id']
+    memory = candidate(run_id)
+    memory.update(cue=[cue, 'memory index', 'finish_run'], note='A verified spacing lesson.')
+    result = app.finish_run('Verified', expected_run_id=run_id, memory_candidates=[memory])
+    memory_id = result['memory']['captures'][0]['memory_id']
+    app.finish_archive('spacing-source')
+    result = app.summarize_run(query, work_type='answer', workflow_mode='fast')
+    assert result['recall']['status'] == 'recalled'
+    assert result['recall']['memories'][0]['id'] == memory_id
+    assert result['recall']['memories'][0]['matched_cues'] == [cue]
+    assert app.recall(query=query)['memories'][0]['id'] == memory_id
+
+
 def test_disable_automatic_memory_keeps_manual_management(app):
     memory_id = capture(app)
     path = app.workspace_root / '.tapl/config.toml'

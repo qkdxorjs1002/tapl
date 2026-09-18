@@ -13,8 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import memory_search
 
-SCHEMA_VERSION = 11
+
+SCHEMA_VERSION = 12
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -130,7 +132,11 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
-    migrate(conn)
+    try:
+        migrate(conn)
+    except BaseException:
+        conn.close()
+        raise
     return conn
 
 
@@ -158,6 +164,8 @@ def migrate(conn: sqlite3.Connection) -> None:
             )
         if stored_schema_version < 11:
             backup_before_memory_migration(conn)
+        elif stored_schema_version < 12:
+            backup_before_memory_migration(conn, target_version=12)
 
     migrated_legacy_record_mode = migrate_legacy_workflow_mode(conn)
 
@@ -433,14 +441,29 @@ def migrate(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_single_active_run ON workflow_runs(status) WHERE status = 'active'"
     )
-    set_schema_version(conn, SCHEMA_VERSION)
-    set_meta(conn, "embedding_model", DEFAULT_EMBEDDING_MODEL)
-    set_meta(conn, "embedding_dimension", str(DEFAULT_EMBEDDING_DIMENSION))
-    conn.commit()
+    try:
+        # Acquire a writer lock before rechecking: another connection may have
+        # migrated while this connection was executing the idempotent DDL.
+        conn.execute("UPDATE meta SET value=value WHERE key='schema_version'")
+        current = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        if current is not None and int(current["value"]) > SCHEMA_VERSION:
+            raise RuntimeError("database schema version is newer than supported")
+        if current is None or int(current["value"]) < 12:
+            conn.execute("DELETE FROM memory_fts")
+            for row in conn.execute("SELECT id,cues_json,note FROM memories WHERE state!='deleted'"):
+                conn.execute("INSERT INTO memory_fts(rowid,cue,note) VALUES(?,?,?)",
+                             (row["id"], memory_search.indexed_cues(json.loads(row["cues_json"])), row["note"]))
+        set_schema_version(conn, SCHEMA_VERSION)
+        set_meta(conn, "embedding_model", DEFAULT_EMBEDDING_MODEL)
+        set_meta(conn, "embedding_dimension", str(DEFAULT_EMBEDDING_DIMENSION))
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
 
 
-def backup_before_memory_migration(conn: sqlite3.Connection) -> Path | None:
-    """Keep one consistent pre-v11 backup, including committed WAL contents.
+def backup_before_memory_migration(conn: sqlite3.Connection, *, target_version: int = 11) -> Path | None:
+    """Keep one consistent pre-migration backup, including committed WAL contents.
 
     Use an independent read snapshot: migrate() may also be called by a client
     with uncommitted changes, which must not be committed just for a backup.
@@ -450,7 +473,7 @@ def backup_before_memory_migration(conn: sqlite3.Connection) -> Path | None:
     if main is None or not main["file"]:
         return None
     path = Path(main["file"])
-    backup_path = path.with_name(f"{path.name}.pre-v11.bak")
+    backup_path = path.with_name(f"{path.name}.pre-v{target_version}.bak")
     if backup_path.exists():
         return backup_path
     temporary = backup_path.with_name(f"{backup_path.name}.{uuid.uuid4().hex}.tmp")
@@ -458,7 +481,7 @@ def backup_before_memory_migration(conn: sqlite3.Connection) -> Path | None:
         with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as source:
             source.execute("BEGIN")
             version = source.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-            if version is None or int(version[0]) >= 11:
+            if version is None or int(version[0]) >= target_version:
                 return None
             with closing(sqlite3.connect(temporary)) as target:
                 source.backup(target)
