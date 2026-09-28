@@ -783,14 +783,14 @@ class TaplRuntimeTests(unittest.TestCase):
             subagents=tapl_config.SubagentsConfig(setup_complete=True)
         )
 
-        # Includes bounded associative-memory and shared single-entry guidance.
-        self.assertLess(len(instructions), 12_300)
+        # Includes memory, canonical metadata shapes, and outcome-based batching.
+        # This full policy loads once; repeated transport instructions stay <900.
+        self.assertLess(len(instructions), 12_500)
         for guidance in (
             "Default to one RUN",
-            "separate PLAN per independent topic",
-            "distinct plan_ids (PLAN-001, PLAN-002, ...)",
-            "Write all topic plans before task design",
-            "Never overwrite another topic's plan",
+            "For independent topics use separate plan_ids (PLAN-001, PLAN-002, ...)",
+            "Write all topic plans before tasks",
+            "never overwrite another topic's plan",
             "Keep steps, constraints, examples and acceptance criteria for one outcome together",
             "Use `tapl_split_run` only for explicitly requested separate run lifecycles",
             "earlier-key dependencies only for stated order",
@@ -806,7 +806,7 @@ class TaplRuntimeTests(unittest.TestCase):
                             subagents=tapl_config.SubagentsConfig(strategy=strategy, setup_complete=True)
                         )
                     ),
-                    12_300,
+                    12_500,
                 )
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",
@@ -816,7 +816,7 @@ class TaplRuntimeTests(unittest.TestCase):
             "Never overwrite user changes",
             "current-state snapshots, not logs",
             "Use `custom_fields` for durable searchable metadata",
-            "canonical fields `Task Profile`",
+            "canonical JSON objects: `Task Profile`",
             "`Task Characteristics`",
             "`Execution Decision`",
             "`사용자 참고사항`/`User Notes` only for durable user facts absent from standard fields",

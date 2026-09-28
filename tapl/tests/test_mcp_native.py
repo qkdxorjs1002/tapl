@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import tempfile
+import pytest
 from pathlib import Path
 from unittest import mock
 
@@ -34,7 +35,7 @@ def test_mcp_bootstrap_loads_full_policy_and_supports_explicit_retention() -> No
         root = _workspace(tmp)
         with mock.patch.object(mcp_server, "MCPServer", wraps=mcp_server.MCPServer) as factory:
             server = mcp_server.create_server(workspace_root=root)
-        assert factory.call_args.kwargs["instructions"] == prompt.mcp_bootstrap_instructions()
+        assert factory.call_args.kwargs["instructions"] == prompt.mcp_entry_instructions()
 
         async def exercise() -> None:
             async with Client(server) as client:
@@ -59,9 +60,9 @@ def test_mcp_bootstrap_loads_full_policy_and_supports_explicit_retention() -> No
         asyncio.run(exercise())
 
 
-def test_mcp_custom_instructions_remain_authoritative_in_full_policy() -> None:
+@pytest.mark.parametrize("custom", ["Custom host policy", ""])
+def test_mcp_custom_instructions_remain_authoritative_in_full_policy(custom: str) -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        custom = "Custom host policy"
         with mock.patch.object(mcp_server, "MCPServer", wraps=mcp_server.MCPServer) as factory:
             server = mcp_server.create_server(workspace_root=_workspace(tmp), instructions=custom)
         assert factory.call_args.kwargs["instructions"] == custom

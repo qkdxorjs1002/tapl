@@ -353,7 +353,7 @@ def create_server(
     application = WorkflowApplication(root)
     server_instructions = instructions
     if server_instructions is None:
-        server_instructions = tapl_prompt.mcp_bootstrap_instructions()
+        server_instructions = tapl_prompt.mcp_entry_instructions()
     server: MCPServer[None] = MCPServer(
         SERVER_NAME,
         title="TAPL workflow tools",
@@ -649,7 +649,7 @@ def create_server(
         failure_policy: Annotated[str, Field(description="Non-empty batch failure policy.", min_length=1)] = db.DEFAULT_FAILURE_POLICY,
         execution_metadata: Annotated[dict[str, dict[str, Any]] | None, Field(description="Per-task runtime selection metadata. Complete model/reasoning pairs record legacy SubAgent Model before callers spawn; advisory profile, characteristics, delegation/model rationale, and override fields are merged into canonical task custom fields before the manifest returns.")] = None,
     ) -> dict[str, Any]:
-        """Atomically dispatch tasks, recording compatible legacy plus advisory selection context before returning its spawn manifest."""
+        """Atomically dispatch tasks from the same plan and parallel_group, recording compatible legacy plus advisory selection context before returning its spawn manifest. Never batch tasks from different plans."""
 
         return await call_application_write(
             application,

@@ -197,6 +197,11 @@ the complete, authoritative `workflow_policy`, `subagent_guidance`, and `config`
 from `tapl_get_next`. The workflow text and its approval, planning, task,
 delegation, verification, recovery, and archive rules remain intact.
 
+Initialization carries only the policy-entry gate because some MCP hosts repeat
+server instructions with every tool. All workflow capabilities and tool schemas
+remain available; `tapl_get_next` still returns the complete policy on ordinary entry.
+Hook rendering evaluates only referenced guidance, without caching settings.
+
 Use one entry call to load policy, `state_summary`, and recommendations. Omit
 model-catalog arguments during ordinary entry, including a new session. Use
 saved preferences and check each selected model/effort against the live delegation

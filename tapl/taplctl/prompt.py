@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from string import Template
 from typing import Any
 
@@ -282,52 +283,65 @@ def render_template(template: str, **variables: Any) -> str:
 
 
 def render(template: str, **overrides: Any) -> str:
-    return render_template(template, **template_variables(**overrides))
+    # Hooks use only a small subset of the full policy. Resolve placeholders
+    # once, without constructing unused (or explicitly overridden) guidance.
+    providers = _template_variable_providers()
+    values = {key: str(value) for key, value in overrides.items()}
+    for key in Template(template).get_identifiers():
+        if key not in values and key in providers:
+            values[key] = providers[key]()
+    return render_template(template, **values)
 
 
 def template_variables(**overrides: Any) -> dict[str, str]:
-    values = {
-        "entry_guidance": entry_guidance(),
-        "receipt_guidance": receipt_guidance(),
-        "plan_labels": ", ".join(PLAN_KEY_LABELS),
-        "task_statuses": "`, `".join(TASK_STATUSES),
-        "plan_detail_guidance": plan_detail_guidance(),
-        "planning_approval_guidance": planning_approval_guidance(),
-        "task_granularity_guidance": task_granularity_guidance(),
-        "task_required_fields": task_required_fields(),
-        "task_fields_guidance": task_format_guidance(),
-        "task_required_field_summary": task_required_field_summary(),
-        "execution_approval_guidance": execution_approval_guidance(),
-        "taplctl_execution_guidance": taplctl_execution_guidance(),
-        "taplctl_command_guidance": taplctl_command_guidance(),
-        "lifecycle_recipe_guidance": lifecycle_recipe_guidance(),
-        "history_search_guidance": history_search_guidance(),
-        "memory_guidance": memory_guidance(),
-        "structured_record_guidance": structured_record_guidance(),
-        "structured_record_guidance_plan_task": structured_record_guidance("plan/task content"),
-        "structured_record_guidance_task": structured_record_guidance("task content"),
-        "custom_fields_guidance": custom_fields_guidance(),
-        "mcp_tool_result_display_guidance": mcp_tool_result_display_guidance(),
-        "stable_id_guidance": stable_id_guidance(),
-        "workflow_order_guidance": workflow_order_guidance(),
-        "workflow_mode_guidance": workflow_mode_guidance(),
-        "request_partition_guidance": request_partition_guidance(),
-        "workflow_stage_progression_guidance": workflow_stage_progression_guidance(),
-        "task_execution_order_guidance": task_execution_order_guidance(),
-        "subagent_delegation_guidance": subagent_delegation_guidance(),
-        "plan_key_label_guidance": plan_key_label_guidance(),
-        "plan_format_guidance": plan_format_guidance(),
-        "task_plan_dependency_guidance": task_plan_dependency_guidance(),
-        "context_execution_approval_guidance": context_execution_approval_guidance(),
-        "status_values": ", ".join(TASK_STATUSES),
-        "plan_field_contract": field_contract_section("plan"),
-        "task_field_contract": field_contract_section("task"),
-        "finding_field_contract": field_contract_section("finding"),
-        "approval_field_contract": field_contract_section("approval"),
-        "markdown_finding_guidance": markdown_record_guidance("finding details and impact"),
-    }
+    values = {key: provider() for key, provider in _template_variable_providers().items()}
     values.update({key: str(value) for key, value in overrides.items()})
     return values
+
+
+def _template_variable_providers() -> dict[str, Callable[[], str]]:
+    # Build on demand so patched providers and current configuration remain
+    # visible; no cached policy can survive a configuration change.
+    return {
+        "entry_guidance": entry_guidance,
+        "receipt_guidance": receipt_guidance,
+        "plan_labels": lambda: ", ".join(PLAN_KEY_LABELS),
+        "task_statuses": lambda: "`, `".join(TASK_STATUSES),
+        "plan_detail_guidance": plan_detail_guidance,
+        "planning_approval_guidance": planning_approval_guidance,
+        "task_granularity_guidance": task_granularity_guidance,
+        "task_required_fields": task_required_fields,
+        "task_fields_guidance": task_format_guidance,
+        "task_required_field_summary": task_required_field_summary,
+        "execution_approval_guidance": execution_approval_guidance,
+        "taplctl_execution_guidance": taplctl_execution_guidance,
+        "taplctl_command_guidance": taplctl_command_guidance,
+        "lifecycle_recipe_guidance": lifecycle_recipe_guidance,
+        "history_search_guidance": history_search_guidance,
+        "memory_guidance": memory_guidance,
+        "structured_record_guidance": structured_record_guidance,
+        "structured_record_guidance_plan_task": lambda: structured_record_guidance("plan/task content"),
+        "structured_record_guidance_task": lambda: structured_record_guidance("task content"),
+        "custom_fields_guidance": custom_fields_guidance,
+        "mcp_tool_result_display_guidance": mcp_tool_result_display_guidance,
+        "stable_id_guidance": stable_id_guidance,
+        "workflow_order_guidance": workflow_order_guidance,
+        "workflow_mode_guidance": workflow_mode_guidance,
+        "request_partition_guidance": request_partition_guidance,
+        "workflow_stage_progression_guidance": workflow_stage_progression_guidance,
+        "task_execution_order_guidance": task_execution_order_guidance,
+        "subagent_delegation_guidance": subagent_delegation_guidance,
+        "plan_key_label_guidance": plan_key_label_guidance,
+        "plan_format_guidance": plan_format_guidance,
+        "task_plan_dependency_guidance": task_plan_dependency_guidance,
+        "context_execution_approval_guidance": context_execution_approval_guidance,
+        "status_values": lambda: ", ".join(TASK_STATUSES),
+        "plan_field_contract": lambda: field_contract_section("plan"),
+        "task_field_contract": lambda: field_contract_section("task"),
+        "finding_field_contract": lambda: field_contract_section("finding"),
+        "approval_field_contract": lambda: field_contract_section("approval"),
+        "markdown_finding_guidance": lambda: markdown_record_guidance("finding details and impact"),
+    }
 
 
 def field_specs(record: str) -> tuple[FieldSpec, ...]:
@@ -824,6 +838,29 @@ def entry_guidance() -> str:
     )
 
 
+def mcp_entry_instructions() -> str:
+    """Small always-visible entry gate; the complete policy comes from get_next.
+
+    Some hosts repeat server instructions on every tool. Keep behavioral detail
+    in the authoritative entry response rather than multiplying it by 29 tools.
+    The standalone bootstrap renderer remains available for existing callers.
+    """
+
+    return (
+        "TAPL workflow: before non-trivial or uncertain work (including read-only helpers), "
+        "call `tapl_get_next` once and read its complete `workflow_policy`, `subagent_guidance`, and config. "
+        "Only tool discovery and required local-instruction discovery may precede policy loading. "
+        "No project work or TAPL mutations before that policy is available; recommendations do not replace it. "
+        "SessionStart is bootstrap only; wait for a concrete request. "
+        "Omit model-catalog arguments during ordinary entry. In a new session, after compaction or policy loss, "
+        "or when uncertain, reload with "
+        "no `known_policy_revision`; a summary is insufficient. Follow the loaded policy for approvals, "
+        "delegation, execution, verification, and archive. "
+        "In code mode, discover only needed tool declarations and print `result.structuredContent` "
+        "(or parsed text fallback), not both copies in the MCP envelope."
+    )
+
+
 def mcp_bootstrap_instructions() -> str:
     """Load the complete policy before work without repeating it on every tool."""
 
@@ -947,9 +984,11 @@ def structured_record_guidance(subject: str = "plan and task content") -> str:
 def custom_fields_guidance() -> str:
     return (
         "Use `custom_fields` for durable searchable metadata. Executable tasks maintain "
-        "canonical fields `Task Profile` (profile or none plus match reason), `Task Characteristics` (independence, "
-        "context, risk, coordination cost, parallel value), and `Execution Decision` (executor, model/effort, "
-        "rationale, override). Set at design and before dispatch; update after settlement if changed. Add "
+        "canonical JSON objects: `Task Profile` {name, match_reason} (profile or none), "
+        "`Task Characteristics` {independence, context, risk, coordination_cost, parallel_value}, and "
+        "`Execution Decision` {executor, model/effort, delegation_reason, override}; add `model_reason` "
+        "when selecting a model. Existing rationale aliases remain accepted. "
+        "Set at design and before dispatch; update after settlement if changed. Add "
         "`사용자 참고사항`/`User Notes` only for durable user facts absent from "
         "standard fields, using concise `종류`/`category`, `내용`/`content`, `영향`/`impact`. Put shared "
         "facts on plan and task-specific facts on task; preserve keys/types; omit duplicates or "
@@ -1020,10 +1059,13 @@ def workflow_mode_guidance() -> str:
 
 def request_partition_guidance() -> str:
     return (
-        "Default to one RUN with a separate PLAN per independent topic, using distinct plan_ids (PLAN-001, PLAN-002, ...) "
-        "in input order. Write all topic plans before task design with their own requirements, approach and validation. "
-        "Never overwrite another topic's plan. Keep steps, constraints, examples and acceptance criteria for one outcome "
-        "together. Use `tapl_split_run` only for explicitly requested separate run lifecycles: earlier-key dependencies "
+        "Group by requested outcome, not file or execution unit: independent edits for one change (e.g. two typo fixes) "
+        "are tasks in ONE PLAN, so they can share a parallel batch. Preserve explicitly requested parallel execution; "
+        "correct mistaken plan splitting instead of using it to justify sequential fallback. "
+        "Default to one RUN. For independent topics use separate plan_ids (PLAN-001, PLAN-002, ...) in input order. "
+        "Write all topic plans before tasks with their own requirements, approach and validation; never overwrite another topic's plan. "
+        "Keep steps, constraints, examples and acceptance criteria for one outcome together. "
+        "Use `tapl_split_run` only for explicitly requested separate run lifecycles: earlier-key dependencies "
         "only for stated order or consumed results; plan the active child, finish/archive, then plan the next ready child."
     )
 
@@ -1090,7 +1132,7 @@ def task_execution_order_guidance() -> str:
     return (
         "Execute planned tasks one at a time in task order when sequential: `tapl_start_task` immediately before work, then "
         "complete, block, or skip it before another. Parallel tasks with `execution_mode=parallel`, `executor_kind=subagent`, "
-        "same `parallel_group`, completed dependencies, and exclusive owned_paths run concurrently only after atomic "
+        "the same PLAN and `parallel_group`, completed dependencies, and exclusive owned_paths run concurrently only after atomic "
         "`tapl_dispatch_tasks`. Root agent is sole TAPL state writer: verify each `SubAgent Model` record, then spawn one "
         "SubAgent per manifest execution concurrently within its exclusive `owned_paths`; settle each with exact manifest "
         "execution_id via `tapl_complete_task`, `tapl_block_task`, or `tapl_skip_task`. If spawn fails or root is interrupted, "
