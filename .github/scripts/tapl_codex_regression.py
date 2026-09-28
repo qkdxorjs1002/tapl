@@ -150,6 +150,43 @@ def exact_byte_verification(command):
     return False
 
 
+def command_edit_paths(command):
+    """Conservative fixture paths per Python heredoc or remaining shell command.
+
+    Keep a following read-only diff out of the preceding Python write's paths.
+    This is not a general shell parser; ambiguous writes still require review.
+    """
+    try:
+        words = shlex.split(command)
+        if (len(words) == 3 and Path(words[0]).name in {"sh", "bash", "zsh", "dash", "ksh"}
+                and words[1] in {"-c", "-lc"}):
+            command = words[2]
+    except ValueError:
+        pass
+    segments = []
+    pattern = r"(?:^|\n|&&\s*)(?:[\w/.-]*/)?python[\d.]*\s+-\s*<<\s*['\"]?(\w+)['\"]?\s*\n(.*?)\n\1(?:\n|$)"
+    def extract(match):
+        segments.append(match.group(2))
+        return "\n"
+    segments.append(re.sub(pattern, extract, command, flags=re.S))
+    paths = set()
+    for segment in segments:
+        if re.search(r"write_(?:text|bytes)|apply_patch|\btee\b|\bsed\b[^\n]*\s-i|\bperl\b[^\n]*-[^\s]*i|(?<!>)>(?!>)|>>", segment):
+            paths.update(name for name in ("README.md", "alpha.txt", "beta.txt") if name in segment)
+    return sorted(paths)
+
+
+def export_evidence_db(source, destination):
+    """Include committed WAL pages even when another connection remains open."""
+    source_db = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+    target_db = sqlite3.connect(destination)
+    try:
+        source_db.backup(target_db)
+    finally:
+        target_db.close()
+        source_db.close()
+
+
 def project_edits(events):
     """Fixture-scoped modifying receipts with actual start/completion indices."""
     starts = {e.get("item", {}).get("id"): i for i, e in enumerate(events) if e.get("type") == "item.started"}
@@ -162,9 +199,7 @@ def project_edits(events):
         if item.get("type") == "file_change":
             paths = [change.get("path", "") for change in item.get("changes", [])]
         elif item.get("type") == "command_execution":
-            command = item.get("command", "")
-            if re.search(r"write_(?:text|bytes)|apply_patch|\btee\b|\bsed\b[^\n]*\s-i|\bperl\b[^\n]*-[^\s]*i|(?<!>)>(?!>)|>>", command):
-                paths = [name for name in ("README.md", "alpha.txt", "beta.txt") if name in command]
+            paths = command_edit_paths(item.get("command", ""))
         if paths:
             edits.append({"start": starts.get(item.get("id"), end), "end": end, "paths": paths,
                           "verified_start": item.get("id") is not None and item.get("id") in starts})
@@ -873,7 +908,7 @@ def main(args):
         if args.condition == "recall":
             check(bool(memory_reviews) and memory_reviews[-1].get("decision") == "skip"
                   and bool(memory_reviews[-1].get("reason")), "Trivial edit did not record a reasoned memory skip")
-    shutil.copy2(root / ".tapl/tapl.db", output / "tapl.db")
+    export_evidence_db(root / ".tapl/tapl.db", output / "tapl.db")
     audit = audit_records(output, args.condition)
     errors.extend(audit["errors"])
     result = {"condition": args.condition, "model": args.model, "codex_exit_code": exit_code,

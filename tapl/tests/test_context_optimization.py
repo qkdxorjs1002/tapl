@@ -42,6 +42,7 @@ def test_transport_entry_gate_keeps_policy_required_and_legacy_bootstrap():
     # policy response. Keep it visible in both transport and developer hooks.
     assert entry.index("`result.structuredContent`") < entry.index("call `tapl_get_next`")
     assert prompt.entry_guidance().startswith("Code mode: emit `result.structuredContent` only")
+    assert "never print the full tool catalog" in prompt.entry_guidance()
     for requirement in (
         "including read-only helpers", "`tapl_get_next` once", "complete `workflow_policy`",
         "`subagent_guidance`, and config", "No project work or TAPL mutations",
@@ -49,7 +50,7 @@ def test_transport_entry_gate_keeps_policy_required_and_legacy_bootstrap():
         "Omit model-catalog arguments", "after compaction or policy loss",
         "no `known_policy_revision`", "a summary is insufficient",
         "Only tool discovery and required local-instruction discovery may precede policy loading",
-        "discover only needed tool declarations", "`result.structuredContent`", "parsed text fallback",
+        "discover needed tools by exact name together", "`result.structuredContent`", "parsed text fallback",
     ):
         assert requirement in entry
     assert "Root alone writes TAPL state" in prompt.mcp_bootstrap_instructions()
@@ -62,14 +63,13 @@ def test_transport_entry_gate_keeps_policy_required_and_legacy_bootstrap():
     assert "the same PLAN and `parallel_group`" in prompt.task_execution_order_guidance()
 
 
-def test_code_mode_optimization_keeps_decision_and_recovery_gates():
+def test_compact_history_guidance_keeps_workflow_gates():
     policy = prompt.mcp_server_instructions()
     for contract in (
-        "unique description and full schema", "exact repeated server preamble already retained",
-        "reload after loss or change", "Sequentially await", "checking every result",
-        "Stop on errors or new decisions", "honor validation before execution",
-        "Preserve approval, source checks, verification and dispatch gates",
-        "never predict results", "Yield after finish to inspect memory before archive",
+        "never print the full tool catalog",
+        "Execution approval is required",
+        "inspect original sources", "atomic `tapl_dispatch_tasks`",
+        "Finish, inspect memory, then archive separately",
         "tapl_get_item(compact=true)", "full formatted bodies remain available",
     ):
         assert contract in policy

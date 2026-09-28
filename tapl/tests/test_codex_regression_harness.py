@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import shlex
 import sqlite3
 
 import pytest
@@ -23,6 +24,26 @@ def row(kind, **payload):
 
 def save(path, rows):
     path.write_text("\n".join(json.dumps(r) for r in rows))
+
+
+def test_evidence_backup_includes_committed_wal_with_open_connections(tmp_path):
+    source, destination = tmp_path / "source.db", tmp_path / "evidence.db"
+    conn = sqlite3.connect(source)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA wal_autocheckpoint=0")
+        conn.execute("CREATE TABLE archives(run_id TEXT)")
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("INSERT INTO archives VALUES('persisted-run')")
+        conn.commit()
+        assert source.with_name("source.db-wal").stat().st_size > 0
+        harness.export_evidence_db(source, destination)
+        with sqlite3.connect(destination) as backup:
+            assert backup.execute("SELECT run_id FROM archives").fetchall() == [("persisted-run",)]
+            assert backup.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    finally:
+        conn.close()
 
 
 @pytest.fixture
@@ -181,8 +202,7 @@ def workspace(tmp_path):
 
 
 def export_db(workspace):
-    import shutil
-    shutil.copy2(workspace / ".tapl/tapl.db", workspace / "tapl.db")
+    harness.export_evidence_db(workspace / ".tapl/tapl.db", workspace / "tapl.db")
 
 
 def test_original_eight_conditions_are_preserved():
@@ -234,7 +254,7 @@ def test_seeded_memory_requires_recall_original_source_and_actual_reuse(workspac
     assert result["passed"] is (fault in {None, "compact_source"}), result["errors"]
 
 
-@pytest.mark.parametrize("fault", [None, "wrong_batch", "false_completion", "replaced_id", "missing_recovery", "missing_ids", "early_start", "missing_transition", "early_edit", "overlap"])
+@pytest.mark.parametrize("fault", [None, "readonly_diff", "wrong_batch", "false_completion", "replaced_id", "missing_recovery", "missing_ids", "early_start", "missing_transition", "early_edit", "overlap"])
 def test_interrupted_batch_requires_exact_recovery_and_safe_sequential_completion(workspace, fault):
     from taplctl.application import WorkflowApplication
     seed = harness.seed_interrupted_batch(workspace, "example")
@@ -265,6 +285,11 @@ def test_interrupted_batch_requires_exact_recovery_and_safe_sequential_completio
         events.insert(2, events.pop(4))
     elif fault == "overlap":
         events[6], events[7] = events[7], events[6]
+    elif fault == "readonly_diff":
+        command = "python - <<'PY'\nfrom pathlib import Path\np = Path('beta.txt')\np.write_bytes(b'beta\\n')\nPY\ngit diff -- alpha.txt beta.txt"
+        for event in events:
+            if event.get("item", {}).get("id") == "beta-edit":
+                event["item"]["command"] = "/bin/bash -lc " + shlex.quote(command)
     export_db(workspace)
     with sqlite3.connect(workspace / "tapl.db") as conn:
         if fault == "false_completion":
@@ -276,7 +301,18 @@ def test_interrupted_batch_requires_exact_recovery_and_safe_sequential_completio
     (workspace / "scenario.json").write_text(json.dumps(seed))
     save(workspace / "events.jsonl", events)
     result = harness.audit_records(workspace, "batch_recovery")
-    assert result["passed"] is (fault is None), result["errors"]
+    assert result["passed"] is (fault in {None, "readonly_diff"}), result["errors"]
+
+
+@pytest.mark.parametrize("tail,expected", [
+    ("git diff -- alpha.txt beta.txt", ["beta.txt"]),
+    ("printf 'alpha\\n' > alpha.txt", ["alpha.txt", "beta.txt"]),
+    ("python - <<'OTHER'\nfrom pathlib import Path\nPath('alpha.txt').write_text('alpha\\n')\nOTHER\n", ["alpha.txt", "beta.txt"]),
+])
+def test_heredoc_edits_exclude_reads_but_keep_other_writes(tail, expected):
+    command = "python - <<'PY'\nfrom pathlib import Path\np = Path('beta.txt')\np.write_bytes(b'beta\\n')\nPY\n" + tail
+    assert harness.command_edit_paths(command) == expected
+    assert harness.command_edit_paths("/bin/bash -lc " + shlex.quote(command)) == expected
 
 
 @pytest.mark.parametrize("fault", [None, "same_session", "no_reentry", "retained_revision", "early_work", "missing_setup", "no_persisted_work", "missing_body", "empty_policy", "wrong_record", "late_body"])

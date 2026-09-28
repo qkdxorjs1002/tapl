@@ -205,8 +205,6 @@ MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is this workspace's workflow system. 
 
 ${entry_guidance}
 
-Code mode: discover the next needed tools together. Emit each tool's unique description and full schema once; omit only an exact repeated server preamble already retained. Reuse retained definitions; reload after loss or change. Sequentially await already-decided calls in one cell, checking every result. Stop on errors or new decisions; honor validation before execution. Preserve approval, source checks, verification and dispatch gates; never predict results. Yield after finish to inspect memory before archive.
-
 # Workflow
 
 Write workflow records and reports in the user's language unless asked otherwise. Keep them short and current. Do not add unstated requirements or expand scope without explicit approval.
@@ -831,6 +829,7 @@ def receipt_guidance() -> str:
 def entry_guidance() -> str:
     return (
         "Code mode: emit `result.structuredContent` only (parsed text fallback), never the whole MCP envelope. "
+        "Discover only needed tool names; never print the full tool catalog. "
         "Before non-trivial or uncertain work (including read-only helpers), call `tapl_get_next` once for policy, "
         "state_summary and recommendations. One call satisfies bootstrap and hook entry; do not repeat for each. "
         "Ordinary entry: omit model-catalog arguments; no full catalog enumeration/recheck at session start. "
@@ -849,7 +848,7 @@ def mcp_entry_instructions() -> str:
     """
 
     return (
-        "Code mode: discover only needed tool declarations once; print `result.structuredContent` "
+        "Code mode: discover needed tools by exact name together; emit `result.structuredContent` "
         "(parsed text fallback), never both envelope copies. "
         "TAPL workflow: before non-trivial or uncertain work (including read-only helpers), "
         "call `tapl_get_next` once and read its complete `workflow_policy`, `subagent_guidance`, and config. "

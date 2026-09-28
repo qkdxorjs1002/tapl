@@ -218,10 +218,10 @@ existing full response; findings, custom bodies and raw text are preserved.
 Compact validation receipts retain every blocking error and limit warnings,
 reporting omitted items with `omitted_issue_count`.
 
-In code mode, discover needed tool descriptions/schemas together and reuse
-retained definitions. Sequentially await already-decided calls and check every
-result without skipping approval, source, verification or dispatch gates.
-After finishing, inspect the memory review before archiving.
+In code mode, discover needed tools by exact name together, without printing the
+full tool catalog, and emit only one `structuredContent` result (parsed text fallback). Follow the loaded policy's
+approval, source, verification and dispatch gates, and inspect memory review
+before archiving.
 
 Catalog comparison is an explicit setup/settings operation:
 `tapl_get_next(available_models=..., catalog_complete=true)`. Verify the entire
