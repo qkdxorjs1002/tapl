@@ -38,6 +38,10 @@ def test_unused_overridden_and_repeated_providers_are_not_evaluated():
 def test_transport_entry_gate_keeps_policy_required_and_legacy_bootstrap():
     entry = prompt.mcp_entry_instructions()
     assert len(entry) < 900
+    # Formatting must be known before the first entry call can double a large
+    # policy response. Keep it visible in both transport and developer hooks.
+    assert entry.index("`result.structuredContent`") < entry.index("call `tapl_get_next`")
+    assert prompt.entry_guidance().startswith("Code mode: emit `result.structuredContent` only")
     for requirement in (
         "including read-only helpers", "`tapl_get_next` once", "complete `workflow_policy`",
         "`subagent_guidance`, and config", "No project work or TAPL mutations",

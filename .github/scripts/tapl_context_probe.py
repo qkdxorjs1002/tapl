@@ -80,6 +80,17 @@ async def main():
             "native_tool_json_chars": len(json.dumps(tools)),
             "per_tool_instructions_projection_chars": len(json.dumps(tools)) + len(tools) * len(bootstrap),
             "full_entry_chars": len(json.dumps(entry)), "retained_entry_chars": len(json.dumps(cached)),
+            "prompt_surface_chars": {name: len(function()) for name, function in {
+                "entry": prompt.entry_guidance,
+                "display": prompt.mcp_tool_result_display_guidance,
+                "mode": prompt.workflow_mode_guidance,
+                "metadata": prompt.custom_fields_guidance,
+                "memory": prompt.memory_guidance,
+                "helpers": prompt.subagent_exploration_guidance,
+                "policy": lambda: prompt.mcp_server_instructions(subagents=selected),
+                "guidance": lambda: prompt.subagent_current_guidance(selected),
+                "hook": lambda: prompt.user_prompt_submit_guidance(subagents=selected),
+            }.items()},
             "timings": {name: measure(function) for name, function in {
                 "session_start": prompt.session_start_guidance,
                 "user_prompt": prompt.user_prompt_submit_guidance,

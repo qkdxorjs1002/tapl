@@ -100,3 +100,55 @@ def test_topics_require_tasks_on_the_corresponding_plan(evidence, wrong_plan):
             conn.execute("INSERT INTO tasks VALUES(?,?,?,?,?,?)",
                          (i, f"TASK-{i}", "PLAN-0" if wrong_plan else f"PLAN-{i}", "[]", name, name))
     assert harness.audit_records(evidence, "topics")["passed"] is not wrong_plan
+
+
+@pytest.mark.parametrize("wrong_plan", [False, True])
+def test_topic_actions_can_name_the_replacement_without_repeating_the_filename(evidence, wrong_plan):
+    with sqlite3.connect(evidence / "tapl.db") as conn:
+        conn.execute("DELETE FROM tasks")
+        for i, (name, action) in enumerate((("README.md", "transactoin → transaction"), (".editorconfig", "indent_size = 4 → 2"))):
+            conn.execute("INSERT INTO plans VALUES(?,?)", (f"PLAN-{i}", name))
+            conn.execute("INSERT INTO tasks VALUES(?,?,?,?,?,?)",
+                         (i, f"TASK-{i}", "PLAN-0" if wrong_plan else f"PLAN-{i}", "[]", "수정", action))
+    assert harness.audit_records(evidence, "topics")["passed"] is not wrong_plan
+
+
+@pytest.mark.parametrize("fault", [None, "tapl_write", "test", "edit", "nested", "failed_read", "shell_edit", "npm_test"])
+def test_observation_helper_evidence_rejects_executable_actions(evidence, fault):
+    # Keep one actual linked child; observation does not require a task manifest.
+    root = evidence / "rollouts/root.jsonl"
+    save(root, [json.loads(line) for line in root.read_text().splitlines()][:3])
+    path = evidence / "rollouts/alpha.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[1]["payload"]["input"] = "cat /case/README.md"
+    if fault == "failed_read":
+        rows[2]["payload"]["output"][0]["text"] = json.dumps({"exit_code": 1})
+    elif fault:
+        name = {"tapl_write": "tapl_summarize_run", "test": "pytest", "edit": "apply_patch", "nested": "spawn_agent",
+                "shell_edit": "sed -i 's/a/b/' README.md", "npm_test": "npm test"}[fault]
+        rows.append(row("response_item", type="function_call", name=name, arguments="{}"))
+    save(path, rows)
+    assert harness.audit_records(evidence, "scout")["passed"] is (fault is None)
+
+
+@pytest.mark.parametrize("status,code", [("fulfilled", 0), ("fulfilled", 1), ("rejected", 0)])
+def test_exit_codes_accept_settled_receipts_without_parsing_command_output(status, code):
+    wrapped = {"i": 1, "result": {"status": status, "value": {"exit_code": code, "output": '{"exit_code":0}'}}}
+    assert harness.command_exit_codes([{"text": json.dumps(wrapped)}]) == ([code] if status == "fulfilled" else [-1])
+    assert harness.command_exit_codes({"output": json.dumps(wrapped)}) == []
+
+
+@pytest.mark.parametrize("failure", ["exit", "rejected", "unverified"])
+def test_one_successful_command_does_not_hide_a_failed_edit_in_the_same_call(evidence, failure):
+    path = evidence / "rollouts/alpha.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[2]["payload"]["output"] = [
+        {"text": json.dumps({"i": i, "result": {"status": "fulfilled", "value": {"exit_code": code}}})}
+        for i, code in enumerate((1, 0))
+    ]
+    if failure == "rejected":
+        rows[2]["payload"]["output"][0] = {"text": json.dumps({"i": 0, "result": {"status": "rejected", "reason": "failed"}})}
+    elif failure == "unverified":
+        rows[2]["payload"]["output"][0] = {"text": json.dumps({"i": 0, "result": {"status": "fulfilled", "value": {"output": "no receipt"}}})}
+    save(path, rows)
+    assert not harness.audit_records(evidence, "delegation")["passed"]

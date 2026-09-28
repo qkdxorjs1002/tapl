@@ -735,10 +735,10 @@ class TaplRuntimeTests(unittest.TestCase):
             "not the full workflow policy",
             "SessionStart is bootstrap only",
             "including read-only helpers",
-            "make one `tapl_get_next` entry call",
-            "Omit model-catalog arguments during ordinary entry",
-            "Use `tapl_get_status` only when",
-            "not routinely call `tapl_get_next`",
+            "call `tapl_get_next` once",
+            "Ordinary entry: omit model-catalog arguments",
+            "Use `tapl_get_status` only for missing run/task/approval/batch/resume details needed next",
+            "without routine `tapl_get_next` after writes or read-only status checks",
             "never a state cache or proof of approval",
             "until the full policy is available",
             "complete `workflow_policy`, `subagent_guidance`, and config",
@@ -823,24 +823,24 @@ class TaplRuntimeTests(unittest.TestCase):
             "`종류`/`category`, `내용`/`content`, `영향`/`impact`",
             "Put shared facts on plan and task-specific facts on task",
             "preserve keys/types; omit duplicates or transient progress",
-            "Classify requested outcome as Answer/Investigation/Analysis/Planning/Implementation/Mixed.",
+            "Root alone classifies outcome: Answer/Investigation/Analysis/Planning/Implementation/Mixed",
             "at most three targeted read-only local lookups",
             "Skip for self-contained requests or sufficient context",
             "Choose mode from surface/coupling/uncertainty/risk/validation",
-            "First choose Strict",
-            "Choose Fast only",
-            "Otherwise use Standard; unknowns never qualify for Fast",
-            "Mixed uses its highest child mode.",
-            "Pass final work_type and workflow_mode",
-            "record_mode=`lightweight` only for Fast non-durable Answer, Investigation, Analysis, or Planning work",
+            "- Strict:",
+            "Fast only if ALL dimensions are known low",
+            "Unknowns never qualify.\n- Standard otherwise",
+            "differing topic work types use Mixed with the highest topic mode",
+            "Pass work_type/workflow_mode",
+            "record_mode=`lightweight` only for Fast non-durable Answer/Investigation/Analysis/Planning",
             "`tapl_apply_plan` promotes only record_mode",
             "Planning must happen before implementation",
             "Finalize only after explicit user confirmation.",
             "use request_user_input Tool early",
             "continue with follow-ups until the plan is materially clear",
             "batch up to three short questions",
-            "during the scout do not edit/test, use external research/TAPL history, or create plan/tasks",
-            "store at most two reasons in needed records",
+            "Scout: no edits/tests, external research/TAPL history, or plan/tasks",
+            "record at most two reasons where needed",
             "Split every independent edit, migration, and verification step.",
             "Execute planned tasks one at a time in task order",
             "exclusive owned_paths",
@@ -869,7 +869,8 @@ class TaplRuntimeTests(unittest.TestCase):
             "decision-relevant findings with source and impact",
             "never store raw dumps, long candidate lists, or stale findings",
             "Archive when no actionable work remains",
-            "Planning-only: ask with request_user_input",
+            "Explicit planning-only: report the plan and keep active",
+            "If planning is requested without an execution decision, ask with request_user_input",
             "never finish/archive before the choice",
             "When the user asks to run, test, inspect, or show output",
             "lead with the observed result",
@@ -891,7 +892,7 @@ class TaplRuntimeTests(unittest.TestCase):
         next_action = tapl_prompt.summarize_request_next_action()
 
         self.assertLess(
-            guidance.index("Classify requested outcome"),
+            guidance.index("Root alone classifies outcome"),
             guidance.index("at most three targeted read-only local lookups"),
         )
         self.assertLess(
@@ -899,13 +900,13 @@ class TaplRuntimeTests(unittest.TestCase):
             guidance.index("Choose mode from surface/coupling/uncertainty/risk/validation"),
         )
         for contract in (
-            "workspace-dependent work",
+            "workspace-dependent unknowns",
             "lookups total across root and all helpers",
             "Skip for self-contained requests or sufficient context",
-            "during the scout do not edit/test, use external research/TAPL history, or create plan/tasks",
-            "First choose Strict",
-            "Choose Fast only when every dimension is known low",
-            "Otherwise use Standard; unknowns never qualify for Fast",
+            "Scout: no edits/tests, external research/TAPL history, or plan/tasks",
+            "- Strict:",
+            "Fast only if ALL dimensions are known low",
+            "Unknowns never qualify.\n- Standard otherwise",
             "Reclassify upward if scope, risk, or uncertainty grows",
         ):
             self.assertIn(contract, guidance)
@@ -933,6 +934,14 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertNotIn("merge the work into one plan", action)
             self.assertIn("preserving separate topic plans", action)
 
+    def test_planning_only_does_not_require_another_decision_after_explicit_limit(self) -> None:
+        # Startup policy and Stop must agree with lifecycle progression: the
+        # explicit stage limit already supplies the user's decision to wait.
+        for guidance in (tapl_prompt.mcp_server_instructions(), tapl_prompt.stop_guidance()):
+            self.assertIn("Explicit planning-only: report the plan and keep", guidance)
+            self.assertIn("If planning is requested without an execution decision, ask", guidance)
+        self.assertIn("report the plan and keep the run active", tapl_prompt.workflow_stage_progression_guidance())
+
     def test_preclassification_scout_routes_known_and_unclear_scope(self) -> None:
         # Both entry points must retain the same conditional routing before mode selection.
         for guidance in (
@@ -954,20 +963,20 @@ class TaplRuntimeTests(unittest.TestCase):
     def test_preclassification_scout_preserves_budget_after_helper_failure(self) -> None:
         contract = tapl_prompt.subagent_exploration_guidance()
         for safeguard in (
-            "allow at most one helper: no nested helpers, replacement or respawn",
-            "During the pre-classification scout, root allocates at most three",
-            "Pass only the remaining allocated quota",
-            "count targeted searches/reads, not tool calls",
-            "Stop when scope evidence is sufficient or quota is exhausted",
-            "Failure or incomplete results never reset the budget",
+            "at most one helper; no nested helpers, replacement or respawn",
+            "Shared scout budget: root allocates at most three",
+            "pass only remaining allocated quota",
+            "Count targeted searches/reads, not tool calls",
+            "Stop at sufficient evidence or exhausted quota",
+            "Failure/incomplete results never reset the budget",
             "unreported usage consumes the helper's allocated quota",
-            "follow up only on contradictions or unresolved essential questions within the remaining budget",
+            "follow up only on contradictions or unresolved essential questions within remaining budget",
             "incomplete evidence excludes Fast",
         ):
             with self.subTest(safeguard=safeguard):
                 self.assertIn(safeguard, contract)
         # The scout's cap must not become a blanket limit on later research.
-        self.assertIn("After classification, read-only research follows existing source/history rules", contract)
+        self.assertIn("Afterwards read-only research follows existing source/history rules", contract)
 
     def test_mcp_result_notice_guidance_stays_in_server_instructions(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions()
@@ -994,23 +1003,23 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "Do not report every `tapl_*` call or result",
-            "On TAPL stage changes, emit at most one notice",
+            "Never echo tool data or report each call",
+            "On TAPL stage changes, emit at most one localized notice",
             "`<emoji> **<tapl-kind>** · <current activity>`",
             "`🧪 **TASK** · 전체 테스트 실행 중`",
             "Use the TAPL workflow kind",
             "**RUN**, **PLAN**, **TASK**, **HISTORY**, **FINDING**, **APPROVAL**, or **ARCHIVE**",
-            "Normal notices: one clause, 60 characters, progressive, current activity only",
-            "After `tapl_summarize_run`, emit one localized classification notice",
+            "Normal notices: one clause, at most 60 characters, progressive, current activity only",
+            "after `tapl_summarize_run`, report only returned work_type",
             "`🔎 **RUN** · 분류: Implementation · Standard · Planned`",
-            "work_type, workflow_mode, and derived record_mode",
-            "do not repeat it unless the classification changes",
-            "Omit completed results, counts, rationale, lists, sequences, next steps, receipts, tables, IDs, statuses, payloads, and summaries",
-            "never echo returned data",
+            "work_type, workflow_mode and derived record_mode",
+            "repeat only on classification change",
+            "omit completed results, counts, rationale, lists, sequences, next steps, receipts, tables, IDs, statuses, payloads and summaries",
+            "Never echo tool data",
             "Icons: 🔎 inspect, 📝 plan, 🛠️ execute, 🧪 verify",
-            "Combine consecutive calls",
-            "Errors, blockers, approvals, or input requests may include reason and next action",
-            "Localize text",
+            "combine consecutive calls",
+            "Errors/blockers/approvals/input requests may include reason and next action",
+            "localized notice",
             "Final reports use prose",
         )
         self.assertLess(len(tapl_prompt.mcp_tool_result_display_guidance()), 1_100)
@@ -1154,30 +1163,30 @@ class TaplRuntimeTests(unittest.TestCase):
         contract = tapl_prompt.subagent_exploration_guidance()
         required = (
             "before or after planning, independently of executable batches",
-            "substantial raw code/search results can stay out of root context",
-            "savings justify coordination",
-            "keep trivial lookups on root",
-            "host delegation tool directly: no artificial task, batch or `owned_paths`",
-            "Never relabel a stored/executable task as a helper to bypass its lifecycle",
-            "self-contained question, read/search scope, constraints, stopping rule and response budget",
-            "`fork_turns=none` or the shortest necessary context",
-            "never inherit full history by default",
+            "keeping substantial raw code/search output out of root context",
+            "outweighs coordination",
+            "trivial lookups stay on root",
+            "host delegation tool directly, without artificial task/batch/owned_paths",
+            "Never relabel stored/executable tasks as helpers to bypass lifecycle",
+            "self-contained question, read/search scope, constraints, stopping rule, response budget",
+            "`fork_turns=none` or shortest necessary context",
+            "never full history by default",
             "compact answer, file:line/source evidence, immediate dependencies, validation boundaries, risks/unknowns and lookups used",
-            "include remaining lookup budget and prohibited actions",
+            "remaining lookup budget and prohibited actions",
             "source/config/tests first",
-            "exclude installed/vendored dependency trees and generated/minified output unless specifically relevant",
-            "This is a preference, not automatic dispatch",
-            "If ineligible, root uses the same bounded scout",
+            "exclude installed/vendored dependencies and generated/minified output unless specifically relevant",
+            "Preference is not automatic dispatch",
+            "If ineligible, root scouts under the same limits",
             "no file/tool dumps",
-            "Root trusts that evidence and avoids duplicate searches or full-file reloads",
+            "Root trusts evidence: avoid duplicate searches/full-file reloads",
             "reread only specific edit sites or unresolved contradictions",
-            "no file edits, tests, commands with side effects, external writes or TAPL mutations",
+            "no edits, tests, side-effect commands, external writes or TAPL mutations",
             "Return scope expansion to root",
-            "Root alone classifies, plans and writes TAPL state/findings",
+            "root alone classifies, plans and writes TAPL state/findings",
             "at most three targeted read-only local lookups total across root and all helpers, never three each",
-            "no external research, TAPL history, plan/task creation or tests in this scout",
-            "After classification, read-only research follows existing source/history rules",
-            "Executable delegates use the same compact handoff plus task scope, manifest identity, owned paths and verification",
+            "root also may not edit/write TAPL state, research externally, use TAPL history, create plan/tasks or test",
+            "Afterwards read-only research follows existing source/history rules",
+            "Executable delegates add task scope, manifest identity, owned paths and verification to the same compact handoff",
         )
         for phrase in required:
             with self.subTest(phrase=phrase):

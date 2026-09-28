@@ -25,6 +25,8 @@ from taplctl.application import WorkflowApplication
 
 
 PROMPTS = {
+    "scout": "저장소의 주 문서에 철자 오류가 있는지 조사해주세요. 읽기 전용 SubAgent 한 명에게 탐색을 맡기고, 근거와 확인한 범위를 받아 결과만 보고해주세요. 파일 수정이나 테스트 실행은 승인하지 않습니다. 확인 후 완료 처리해주세요.",
+    "inspection": "README.md에 철자 오류가 있는지만 확인하고 발견한 내용만 알려주세요. 파일 수정이나 구현 계획은 필요 없습니다. 읽기 전용 확인을 마치고 완료 처리해주세요.",
     "edit": "README.md의 transactoin 오타를 transaction으로 고쳐주세요. 다른 변경은 필요 없습니다. 수정하고 결과를 검증한 뒤 작업을 완료 처리해주세요.",
     "recall": "README.md의 transactoin 오타를 transaction으로 고쳐주세요. 다른 변경은 필요 없습니다. 수정하고 결과를 검증한 뒤 작업을 완료 처리해주세요.",
     "planning": "README.md 소개 문구를 개선하는 계획만 세워주세요. 파일 수정과 실행은 아직 승인하지 않습니다. 계획을 보고하고 다음 지시를 기다려주세요.",
@@ -129,6 +131,17 @@ def command_exit_codes(output):
                 for code in command_exit_codes(block.get("text"))]
     if isinstance(output, dict) and isinstance(output.get("exit_code"), int):
         return [output["exit_code"]]
+    # functions.exec may expose Promise.allSettled results. Traverse only
+    # these orchestration wrappers, never a shell command's output string.
+    if isinstance(output, dict):
+        settled = output.get("result", output)
+        if isinstance(settled, dict) and settled.get("status") == "rejected":
+            return [-1]
+        if isinstance(settled, dict) and settled.get("status") == "fulfilled":
+            value = settled.get("value")
+            if isinstance(value, dict) and isinstance(value.get("exit_code"), int):
+                return [value["exit_code"]]
+            return [-1]  # A fulfilled tool call without an exit receipt is unverified.
     return []
 
 
@@ -145,17 +158,38 @@ def audit_records(directory, condition):
             plans = list(conn.execute("SELECT * FROM plans"))
             tasks = list(conn.execute("SELECT * FROM tasks"))
             linked = []
-            for filename in ("README.md", ".editorconfig"):
+            # Typed task actions may identify the concrete replacement instead
+            # of repeating the plan's filename. Both identify this fixture's topic.
+            for filename, markers in (("README.md", ("README.md", "transactoin", "transaction")),
+                                      (".editorconfig", (".editorconfig", "indent_size"))):
                 matches = [p for p in plans if filename in p["affected_files"]]
                 if len(matches) != 1:
                     errors.append(f"Missing unique plan for {filename}")
                     continue
                 plan = matches[0]
-                if not any(t["spec_id"] == plan["plan_id"] and filename in t["goal"] + t["action"] for t in tasks):
+                if not any(t["spec_id"] == plan["plan_id"] and any(marker in t["goal"] + t["action"] for marker in markers)
+                           for t in tasks):
                     errors.append(f"Missing topic-specific task linked to {plan['plan_id']}")
                 linked.append(plan["plan_id"])
             if len(set(linked)) != 2:
                 errors.append("Independent topics share a plan")
+        if condition == "scout":
+            children = delegation_evidence(directory / "rollouts")
+            if len(children) != 1 or not children[0]["completed"]:
+                errors.append("Missing one completed observation helper")
+            for child in children:
+                text = "\n".join(child["commands"])
+                calls = re.findall(r"\btapl_([a-z_]+)\b", text.replace("mcp__tapl__", ""))
+                readonly = {"get_next", "get_status", "validate_state", "get_context", "search_history",
+                            "recall", "get_memory", "get_item", "list_archives", "get_archive"}
+                if any(name not in readonly for name in calls):
+                    errors.append("Observation helper wrote TAPL state")
+                if re.search(r"\b(spawn_agent|apply_patch|write_text|write_bytes|pytest|unittest|touch|mkdir|rm)\b"
+                             r"|\bsed\b[^\n]*\s-i\b|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b", text):
+                    errors.append("Observation helper attempted delegation, mutation or tests")
+                if not any("README.md" in c["command"] and command_exit_codes(c["output"])
+                           and all(code == 0 for code in command_exit_codes(c["output"])) for c in child["calls"]):
+                    errors.append("Missing successful helper document lookup")
         if condition == "delegation":
             children = delegation_evidence(directory / "rollouts")
             executions = list(conn.execute("SELECT te.*, t.task_id, t.owned_paths_json FROM task_executions te "
@@ -214,7 +248,7 @@ def main(args):
     run("git", "add", ".", cwd=root)
     run("git", "commit", "-qm", "Synthetic fixture", cwd=root)
     install.install_repo(repo=root, taplctl_command=shutil.which("taplctl"))
-    enabled = args.condition == "delegation"
+    enabled = args.condition in {"delegation", "scout"}
     recall = args.condition == "recall"
     (root / ".tapl/config.toml").write_text(
         '[search]\nmode="bm25"\n[recall]\nenabled=' + str(recall).lower() + '\n'
@@ -332,7 +366,24 @@ def main(args):
             "JOIN items i ON i.id=te.task_item_id")]
         memory_reviews = [json.loads(row[0]) for row in conn.execute(
             "SELECT payload_json FROM events WHERE event_type='memory_review' ORDER BY id")]
-    if args.condition == "planning":
+    if args.condition in {"inspection", "scout"}:
+        check((root / "README.md").read_text() == "# Example\n\nAn atomic transactoin.\n", "Read-only inspection edited README")
+        check((root / "alpha.txt").read_text() == "alhpa\n" and (root / "beta.txt").read_text() == "btea\n", "Inspection changed another artifact")
+        check({p.name for p in root.iterdir()} == {"README.md", "alpha.txt", "beta.txt", ".git", ".codex", ".tapl"}, "Inspection created an unrelated artifact")
+        check(plans == 0 and not tasks, "Read-only Fast inspection created unnecessary plans/tasks")
+        check(not {"tapl_approve_execution", "tapl_start_task", "tapl_dispatch_tasks"}.intersection(names), "Read-only request entered execution")
+        check(archives == 1 and "tapl_finish_run" in names and "tapl_finish_archive" in names, "Inspection did not complete lifecycle")
+        summaries = [c.get("arguments", {}) for c in calls if c["tool"] == "tapl_summarize_run"]
+        if args.condition == "inspection":
+            check(bool(summaries) and summaries[-1].get("workflow_mode", "").lower() == "fast", "Known read-only inspection was not Fast")
+        check("transactoin" in (output / "answer.txt").read_text(), "Inspection omitted the observed typo")
+        if args.condition == "scout":
+            children = delegation_evidence(output / "rollouts")
+            check(len(children) == 1 and children[0]["completed"], "Expected one completed read-only helper")
+            check(all(c["model"] == args.model and c["effort"] == "high" and c["fork_turns"] == "none" for c in children),
+                  "Helper did not use allowed model/effort and compact handoff")
+            check(not executions, "Read-only helper created an executable task batch")
+    elif args.condition == "planning":
         check((root / "README.md").read_text() == "# Example\n\nAn atomic transactoin.\n", "Planning-only request edited the file")
         check("tapl_apply_plan" in names, "Planning-only request did not record a plan")
         check(not {"tapl_approve_execution", "tapl_start_task", "tapl_dispatch_tasks"}.intersection(names), "Unapproved execution")
@@ -379,7 +430,7 @@ def main(args):
               "instruction_discovery": [item.get("command") for item in preceding],
               "usage": [e.get("usage") for e in events if e.get("type") == "turn.completed"],
               "record_audit": audit, "passed": not errors}
-    if args.condition == "delegation":
+    if args.condition in {"delegation", "scout"}:
         result["children"] = children
     (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
     print(json.dumps(result, ensure_ascii=False), flush=True)

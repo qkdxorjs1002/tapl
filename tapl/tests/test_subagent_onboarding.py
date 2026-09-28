@@ -215,8 +215,8 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
             assert "model/effort pairs in both the allowlist and the live delegation-tool catalog" in ready.structured_content["subagent_guidance"]
             for routing_rule in (
                 "prefer one eligible read-only helper",
-                "current setup, user preference, strategy, profile and allowlist/live-catalog gates",
-                "single bounded confirmation on root",
+                "current setup/preference/strategy/profile/allowlist/live-catalog gates",
+                "single bounded confirmation stays on root",
                 "unreported usage consumes the helper's allocated quota",
             ):
                 assert routing_rule in ready.structured_content["subagent_guidance"]
