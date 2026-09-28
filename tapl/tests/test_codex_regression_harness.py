@@ -152,3 +152,230 @@ def test_one_successful_command_does_not_hide_a_failed_edit_in_the_same_call(evi
         rows[2]["payload"]["output"][0] = {"text": json.dumps({"i": 0, "result": {"status": "fulfilled", "value": {"output": "no receipt"}}})}
     save(path, rows)
     assert not harness.audit_records(evidence, "delegation")["passed"]
+
+
+def call(tool, arguments=None, result=None):
+    if tool == "tapl_get_next" and result is None:
+        result = {"workflow_policy": "Complete test policy", "subagent_guidance": "Test guidance", "config": {},
+                  "policy_revision": "revision", "policy_unchanged": False}
+    return {"type": "item.completed", "item": {"type": "mcp_tool_call", "tool": tool,
+            "arguments": arguments or {}, "status": "completed",
+            "result": {"structured_content": {"ok": True, **(result or {})}}}}
+
+
+def command_events(identity, command, exit_code=0):
+    return [{"type": "item.started", "item": {"id": identity, "type": "command_execution", "command": command}},
+            {"type": "item.completed", "item": {"id": identity, "type": "command_execution", "command": command,
+                                                  "exit_code": exit_code, "status": "completed"}}]
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    from taplctl import db
+    (tmp_path / ".git").mkdir()
+    db.initialize_workspace(tmp_path)
+    (tmp_path / ".tapl/config.toml").write_text(
+        '[search]\nmode="bm25"\n[subagents]\nsetup_complete=true\nenabled=true\n'
+        'strategy="aggressive"\n[subagents.models]\nexample=["high"]\n')
+    return tmp_path
+
+
+def export_db(workspace):
+    import shutil
+    shutil.copy2(workspace / ".tapl/tapl.db", workspace / "tapl.db")
+
+
+def test_original_eight_conditions_are_preserved():
+    assert {"scout", "inspection", "edit", "recall", "planning", "resume", "delegation", "topics"} <= harness.PROMPTS.keys()
+
+
+@pytest.mark.parametrize("fault", [None, "compact_source", "no_source", "wrong_source", "get_memory_only", "failed_source", "no_recall", "no_use", "failed_verification", "late_source", "early_verification", "substring", "is_error"])
+def test_seeded_memory_requires_recall_original_source_and_actual_reuse(workspace, fault):
+    from taplctl.application import WorkflowApplication
+    from taplctl.mcp_server import compact_item_payload
+    seed = harness.seed_memory(workspace)
+    app = WorkflowApplication(workspace)
+    (workspace / "scenario.json").write_text(json.dumps(seed))
+    events = [call("tapl_get_next"),
+              call("tapl_summarize_run", result={"recall": {"memories": [{"id": seed["memory_id"]}]}}),
+              call("tapl_get_archive", {"archive_id": seed["source_archive_id"]}, result=app.get_archive(seed["source_archive_id"])),
+              *command_events("verify", "assert Path('README.md').read_bytes() == b'# Example\\n\\nAn atomic transaction.\\n'"),
+              call("tapl_finish_run", {"memory_uses": [{"memory_id": seed["memory_id"], "revision": seed["memory_revision"],
+                   "source_checked": True, "usage": "Applied original byte validation contract."}]})]
+    if fault == "compact_source":
+        events[2] = call("tapl_get_item", {"item_id": seed["source_item_id"], "compact": True},
+                         result=compact_item_payload(app.get_item(seed["source_item_id"])))
+    elif fault == "no_source":
+        del events[2]
+    elif fault == "wrong_source":
+        events[2]["item"]["arguments"]["archive_id"] = "unrelated-archive"
+    elif fault == "get_memory_only":
+        events[2] = call("tapl_get_memory", {"memory_id": seed["memory_id"]})
+    elif fault == "failed_source":
+        events[2]["item"]["result"]["structured_content"]["ok"] = False
+    elif fault == "no_recall":
+        events[1]["item"]["result"]["structured_content"]["recall"]["memories"] = []
+    elif fault == "no_use":
+        events[-1]["item"]["arguments"] = {}
+    elif fault == "failed_verification":
+        events[4]["item"]["exit_code"] = 1
+    elif fault == "late_source":
+        events.append(events.pop(2))
+    elif fault == "early_verification":
+        events[2], events[3] = events[3], events[2]
+    elif fault == "substring":
+        for event in events[3:5]:
+            event["item"]["command"] = "assert b'transaction' in Path('README.md').read_bytes()"
+    elif fault == "is_error":
+        events[2]["item"]["result"]["is_error"] = True
+    save(workspace / "events.jsonl", events)
+    export_db(workspace)
+    result = harness.audit_records(workspace, "memory_reuse")
+    assert result["passed"] is (fault in {None, "compact_source"}), result["errors"]
+
+
+@pytest.mark.parametrize("fault", [None, "wrong_batch", "false_completion", "replaced_id", "missing_recovery", "missing_ids", "early_start", "missing_transition", "early_edit", "overlap"])
+def test_interrupted_batch_requires_exact_recovery_and_safe_sequential_completion(workspace, fault):
+    from taplctl.application import WorkflowApplication
+    seed = harness.seed_interrupted_batch(workspace, "example")
+    app = WorkflowApplication(workspace)
+    assert seed["kind"].startswith("seeded interruption")
+    app.recover_batch(seed["batch_id"], reason="Previous process ended before spawning")
+    for i, name in enumerate(("alpha", "beta"), 1):
+        task = f"TASK-00{i}"
+        app.create_task(task, name, "PLAN-001", name, name, name,
+                        execution_mode="sequential", executor_kind="main")
+        app.start_task(task)
+        app.settle_task(task, status="Completed", verification="Exact contents asserted", result="Typo fixed")
+    events = [call("tapl_get_next"), call("tapl_get_status", {"full": True}, {"active_batches": [seed]}),
+              call("tapl_recover_batch", {"batch_id": seed["batch_id"]}), call("tapl_start_task", {"task_id": "TASK-001"}),
+              *command_events("alpha-edit", "Path('alpha.txt').write_text('alpha\\n')"),
+              call("tapl_complete_task", {"task_id": "TASK-001"}), call("tapl_start_task", {"task_id": "TASK-002"}),
+              *command_events("beta-edit", "Path('beta.txt').write_text('beta\\n')"),
+              call("tapl_complete_task", {"task_id": "TASK-002"})]
+    if fault == "wrong_batch":
+        events[2]["item"]["arguments"]["batch_id"] = "another-batch"
+    elif fault == "missing_recovery":
+        del events[2]
+    elif fault == "missing_ids":
+        events[1]["item"]["result"] = {}
+    elif fault == "early_start":
+        events[2], events[3] = events[3], events[2]
+    elif fault == "early_edit":
+        events.insert(2, events.pop(4))
+    elif fault == "overlap":
+        events[6], events[7] = events[7], events[6]
+    export_db(workspace)
+    with sqlite3.connect(workspace / "tapl.db") as conn:
+        if fault == "false_completion":
+            conn.execute("UPDATE task_executions SET state='completed'")
+        elif fault == "replaced_id":
+            conn.execute("UPDATE task_executions SET id='wrong-' || id")
+        elif fault == "missing_transition":
+            conn.execute("UPDATE tasks SET execution_mode='parallel',executor_kind='subagent'")
+    (workspace / "scenario.json").write_text(json.dumps(seed))
+    save(workspace / "events.jsonl", events)
+    result = harness.audit_records(workspace, "batch_recovery")
+    assert result["passed"] is (fault is None), result["errors"]
+
+
+@pytest.mark.parametrize("fault", [None, "same_session", "no_reentry", "retained_revision", "early_work", "missing_setup", "no_persisted_work", "missing_body", "empty_policy", "wrong_record", "late_body"])
+def test_context_loss_requires_two_real_sessions_and_full_reentry(workspace, fault):
+    from taplctl import db
+    from taplctl.application import WorkflowApplication
+    app = WorkflowApplication(workspace)
+    run_id = app.summarize_run("Stored plan", work_type="implementation", workflow_mode="standard")["active_run"]["id"]
+    plan = app.apply_plan("PLAN-001", title="README typo", objective="transactoin to transaction", status="Finalized")
+    task = app.create_task("TASK-001", "Typo", "PLAN-001", "README", "Fix typo", "Exact bytes")
+    stored = app.get_status(full=True)
+    persisted = [{"id": item["id"], "stable_id": item["stable_id"], "kind": item["kind"], "body": item["body"],
+                  "fields": {key: item[key] for _, key in db.markdown_body_fields(item["kind"])}}
+                 for item in stored["plans"] + stored["tasks"]]
+    app.record_approval(decision="approved", prompt="Second session approval", source="explicit_user")
+    app.start_task("TASK-001")
+    app.settle_task("TASK-001", status="Completed", verification="Exact bytes", result="Fixed")
+    app.finish_run("Done", expected_run_id=run_id, memory_review={"decision": "skip", "reason": "Test fixture"})
+    app.finish_archive("stored")
+    seed = {"run_id": run_id, "setup_unchanged": True, "setup_archives": 0, "setup_items": persisted}
+    setup = [{"type": "thread.started", "thread_id": "first"}, call("tapl_get_next"),
+             call("tapl_apply_plan", result=plan), call("tapl_create_task", result=task), {"type": "turn.completed"}]
+    events = [{"type": "thread.started", "thread_id": "second"}, call("tapl_get_next"),
+              call("tapl_get_status", {"full": True}, result=stored),
+              {"type": "item.started", "item": {"type": "mcp_tool_call", "tool": "tapl_start_task"}},
+              {"type": "turn.completed"}]
+    if fault == "same_session":
+        events[0]["thread_id"] = "first"
+    elif fault == "no_reentry":
+        del events[1]
+    elif fault == "retained_revision":
+        events[1]["item"]["arguments"] = {"known_policy_revision": "previous"}
+    elif fault == "early_work":
+        events.insert(1, {"type": "item.started", "item": {"type": "command_execution", "command": "cat README.md"}})
+    elif fault == "no_persisted_work":
+        del setup[3]
+    elif fault == "missing_body":
+        del events[2]
+    elif fault == "empty_policy":
+        events[1]["item"]["result"] = {"structured_content": {"ok": True}}
+    elif fault == "wrong_record":
+        events[2]["item"]["result"]["structured_content"]["tasks"][0]["id"] = -1
+    elif fault == "late_body":
+        events[2], events[3] = events[3], events[2]
+    if fault != "missing_setup":
+        save(workspace / "setup-events.jsonl", setup)
+    save(workspace / "events.jsonl", events)
+    (workspace / "scenario.json").write_text(json.dumps(seed))
+    export_db(workspace)
+    result = harness.audit_records(workspace, "context_loss")
+    assert result["passed"] is (fault is None), result["errors"]
+
+
+def test_root_metrics_deduplicate_usage_exclude_children_and_separate_cached_input(tmp_path):
+    def usage(total, last, cached=50):
+        return row("event_msg", type="token_count", info={
+            "total_token_usage": {"input_tokens": total, "cached_input_tokens": cached, "output_tokens": 10},
+            "last_token_usage": {"input_tokens": last}}, rate_limits={"unrelated_private_field": "must not be returned"})
+    rows = [row("session_meta", id="root"), usage(100, 100), usage(100, 100), usage(250, 150, 120),
+            row("response_item", type="custom_tool_call", name="exec", call_id="discovery", input="text(ALL_TOOLS)"),
+            row("response_item", type="custom_tool_call_output", call_id="discovery", output="한글"),
+            row("response_item", type="function_call", name="exec_command", call_id="shell", arguments="{}")]
+    save(tmp_path / "root.jsonl", rows)
+    save(tmp_path / "child.jsonl", [row("session_meta", id="child", parent_thread_id="root"), usage(99999, 99999)])
+    metrics = harness.rollout_metrics(tmp_path)
+    assert metrics["model_requests"] == 2
+    assert metrics["input_tokens"] == 250 and metrics["cached_input_tokens"] == 120
+    assert metrics["max_single_input_tokens"] == 150
+    assert metrics["exec_calls"] == 2 and metrics["tool_discovery_calls"] == 1
+    assert metrics["tool_discovery_output_bytes"] == len("한글".encode())
+    assert "unrelated_private_field" not in json.dumps(metrics)
+
+
+def test_unknown_cached_input_metrics_are_null(tmp_path):
+    save(tmp_path / "root.jsonl", [row("session_meta", id="root"), row("event_msg", type="token_count",
+         info={"total_token_usage": {"input_tokens": 100}, "last_token_usage": {"input_tokens": 100}})])
+    assert harness.rollout_metrics(tmp_path)["cached_input_tokens"] is None
+
+
+def test_usage_initialization_and_metadata_enrichment_are_not_model_requests(tmp_path):
+    def usage(values):
+        return row("event_msg", type="token_count", info={"total_token_usage": values})
+    save(tmp_path / "root.jsonl", [row("session_meta", id="root"), usage({"input_tokens": 0, "output_tokens": 0}),
+         usage({"input_tokens": 100, "output_tokens": 10}),
+         usage({"input_tokens": 100, "output_tokens": 10, "cached_input_tokens": 50}),
+         usage({"input_tokens": 200, "output_tokens": 20})])
+    metrics = harness.rollout_metrics(tmp_path)
+    assert metrics["model_requests"] == 2
+    assert metrics["cached_input_tokens"] is None
+
+
+@pytest.mark.parametrize("command,valid", [
+    ("python - <<'PY'\nfrom pathlib import Path\ndata = Path('README.md').read_bytes()\nexpected = b'# Example\\n\\nAn atomic transaction.\\n'\nassert data == expected\nPY", True),
+    ("assert b'transaction' in Path('README.md').read_bytes()", False),
+    ("echo \"assert Path('README.md').read_bytes() == b'transaction'\"", False),
+    ("python - <<'PY'\nprint(\"assert Path('README.md').read_bytes() == b'# Example\\\\n\\\\nAn atomic transaction.\\\\n'\")\nPY", False),
+    ("python - <<'PY'\ndef unused():\n    assert Path('README.md').read_bytes() == b'# Example\\n\\nAn atomic transaction.\\n'\nPY", False),
+    ('''echo python -c "assert Path('README.md').read_bytes() == b'# Example\\n\\nAn atomic transaction.\\n'"''', False),
+    ('''python -c "import pathlib; assert pathlib.Path('README.md').read_bytes() == b'# Example\\n\\nAn atomic transaction.\\n'"''', True),
+])
+def test_exact_bytes_audit_rejects_printed_or_weaker_claims(command, valid):
+    assert harness.exact_byte_verification(command) is valid

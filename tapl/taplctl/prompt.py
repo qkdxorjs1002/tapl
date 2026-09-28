@@ -205,6 +205,8 @@ MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is this workspace's workflow system. 
 
 ${entry_guidance}
 
+Code mode: discover the next needed tools together. Emit each tool's unique description and full schema once; omit only an exact repeated server preamble already retained. Reuse retained definitions; reload after loss or change. Sequentially await already-decided calls in one cell, checking every result. Stop on errors or new decisions; honor validation before execution. Preserve approval, source checks, verification and dispatch gates; never predict results. Yield after finish to inspect memory before archive.
+
 # Workflow
 
 Write workflow records and reports in the user's language unless asked otherwise. Keep them short and current. Do not add unstated requirements or expand scope without explicit approval.
@@ -847,8 +849,8 @@ def mcp_entry_instructions() -> str:
     """
 
     return (
-        "In code mode, discover only needed tool declarations and print `result.structuredContent` "
-        "(or parsed text fallback), not both copies in the MCP envelope. "
+        "Code mode: discover only needed tool declarations once; print `result.structuredContent` "
+        "(parsed text fallback), never both envelope copies. "
         "TAPL workflow: before non-trivial or uncertain work (including read-only helpers), "
         "call `tapl_get_next` once and read its complete `workflow_policy`, `subagent_guidance`, and config. "
         "Only tool discovery and required local-instruction discovery may precede policy loading. "
@@ -1079,6 +1081,7 @@ def history_search_guidance() -> str:
     return (
         "Before planning non-trivial work, use emitted memory cues as an initial exploration lead, "
         "then inspect original sources with `tapl_get_item` or `tapl_get_archive` before relying on them. "
+        "Prefer `tapl_get_item(compact=true)` for structured records; full formatted bodies remain available. "
         "When cues are absent or insufficient, search relevant prior TAPL history with `tapl_search_history` "
         "for decisions, implementation patterns, failures, or tradeoffs; ignore unrelated matches. "
         "During execution, search again as needed."

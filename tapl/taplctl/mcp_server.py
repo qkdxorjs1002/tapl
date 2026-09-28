@@ -113,6 +113,30 @@ def compact_payload(**values: Any) -> dict[str, Any]:
     return {name: value for name, value in values.items() if value is not None}
 
 
+def compact_item_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Omit only a generated body exactly reproducible from retained fields."""
+
+    item = payload.get("item")
+    if payload.get("ok") is not True or not isinstance(item, dict):
+        return payload
+    kind = item.get("kind")
+    if kind == "plan":
+        renderer = db.render_plan_body
+    elif kind == "task":
+        renderer = db.render_task_body
+    else:
+        # A finding's body is its primary content, not a generated duplicate.
+        return payload
+    fields = [name for _, name in db.markdown_body_fields(kind)]
+    if not isinstance(item.get("body"), str) or any(
+        not isinstance(item.get(name), str) for name in fields
+    ):
+        return payload
+    if item["body"] != renderer(**{name: item[name] for name in fields}):
+        return payload
+    return {**payload, "item": {key: value for key, value in item.items() if key != "body"}}
+
+
 async def call_application(method: Any, /, *args: Any, **kwargs: Any) -> dict[str, Any]:
     """Run one synchronous application use case without blocking the MCP loop."""
 
@@ -172,18 +196,25 @@ def compact_validation_receipt(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     issues = value.get("issues") if isinstance(value.get("issues"), list) else []
+    # Warnings can precede blockers in validation order. Never hide an error
+    # (or an unfamiliar issue) behind a short warning-only preview.
+    required = [issue for issue in issues if not isinstance(issue, dict) or issue.get("severity") != "warning"]
+    warnings = [issue for issue in issues if isinstance(issue, dict) and issue.get("severity") == "warning"]
+    selected = required + warnings[:max(0, 3 - len(required))]
     selected_issues = [
         select_receipt_fields(
             issue,
             ("severity", "code", "stable_id", "message", "remediation"),
         )
-        for issue in issues[:3]
+        for issue in selected
         if isinstance(issue, dict)
     ]
     receipt: dict[str, Any] = {"ok": bool(value.get("ok", not issues))}
     if issues:
         receipt["issue_count"] = len(issues)
         receipt["issues"] = selected_issues
+        if len(issues) > len(selected_issues):
+            receipt["omitted_issue_count"] = len(issues) - len(selected_issues)
     return receipt
 
 
@@ -486,10 +517,12 @@ def create_server(
     @server.tool(name="tapl_get_item", title="Read one TAPL item", annotations=READ_ONLY)
     async def get_item(
         item_id: Annotated[int, Field(description="Numeric item id returned by tapl_search_history.", ge=1)],
+        compact: Annotated[bool, Field(description="Omit generated body only when exactly reconstructible from retained canonical fields; preserve custom and raw content.")] = False,
     ) -> dict[str, Any]:
         """Read one complete plan, task, or finding when a search snippet is insufficient."""
 
-        return await call_application(application.get_item, item_id)
+        payload = await call_application(application.get_item, item_id)
+        return compact_item_payload(payload) if compact else payload
 
     @server.tool(name="tapl_list_archives", title="List TAPL archives", annotations=READ_ONLY)
     async def list_archives(

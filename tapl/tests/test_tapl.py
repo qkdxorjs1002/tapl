@@ -783,9 +783,9 @@ class TaplRuntimeTests(unittest.TestCase):
             subagents=tapl_config.SubagentsConfig(setup_complete=True)
         )
 
-        # Includes memory, canonical metadata shapes, and outcome-based batching.
+        # Includes memory, metadata, compact reads and guarded code-mode batching.
         # This full policy loads once; repeated transport instructions stay <900.
-        self.assertLess(len(instructions), 12_500)
+        self.assertLess(len(instructions), 13_000)
         for guidance in (
             "Default to one RUN",
             "For independent topics use separate plan_ids (PLAN-001, PLAN-002, ...)",
@@ -806,7 +806,7 @@ class TaplRuntimeTests(unittest.TestCase):
                             subagents=tapl_config.SubagentsConfig(strategy=strategy, setup_complete=True)
                         )
                     ),
-                    12_500,
+                    13_000,
                 )
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",

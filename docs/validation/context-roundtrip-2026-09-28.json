@@ -1,0 +1,235 @@
+{
+  "status": "implementation_and_automated_regression_complete; live_Codex_validation_awaiting_explicit_credential_transfer_authorization",
+  "baseline_commit": "ef40aaf",
+  "branch": "perf/context-roundtrip-regression",
+  "priority": [
+    "behavior/features",
+    "context",
+    "speed"
+  ],
+  "source_sha256": {
+    ".github/scripts/tapl_codex_regression.py": "663f4dd65738ed62f50c72bc701403e5ed25bd825ac8cd921757859d181bcf9e",
+    ".github/scripts/tapl_context_probe.py": "4dc275ef2884f8539968c65491e70cf9ec1a0addc9ae802ed1d53062fd246991",
+    "README.ko.md": "a0eb2f73c84851d802aa4b7e0b585f93ac69452920af3cc5c2b30f64f886a2eb",
+    "README.md": "e72d5bff7166021e55815ebc32896287d02d3c9e730eb845defe5065b1b79578",
+    "tapl/taplctl/mcp_server.py": "d41bc838a8a143efadbd00bd09b4dbf0a2e79e50b73cabb8e5c882058b3ab5d1",
+    "tapl/taplctl/prompt.py": "33c1ab8f6082ce18d5c37e499cb9214b3c316397f24b0b95f11f4c58e7fdf455",
+    "tapl/tests/test_codex_regression_harness.py": "ccccdb38db59991fd36bb37c4d97941c263794994647712d65092ea7affbf848",
+    "tapl/tests/test_context_optimization.py": "50d07df139342ef369ff52b10caa066316b95b158dba01f94912bf7677b61621",
+    "tapl/tests/test_tapl.py": "f10cdb380ada1810a0b4078e2368e8f9101d94665b50ea12e993ff5d84c103ef",
+    "tapl/tests/test_compact_item.py": "1aad72f9837e98654cb6fc82bb7b743ca8f7a829f313c1baad4717fb857cba45"
+  },
+  "linux": [
+    {
+      "round": 1,
+      "box_id": "cb3526da-06bb-42e6-8eeb-8631448f614b",
+      "session_id": "282f1c32-8d8a-48bf-8eb0-bee8932673b6",
+      "summary": "583 passed, 12 skipped, 221 subtests passed in 42.95s",
+      "log": "/private/tmp/tapl-roundtrip-linux-final-1.log",
+      "log_sha256": "8405af381232d726995b688f2b3e05108791e6ea12fa8397013fd8b7aead54e6",
+      "probe": "/private/tmp/tapl-roundtrip-linux-final-1-probe.json",
+      "probe_sha256": "4d69706cd9e323d2da406fb75eee9f1564b197e76edf51b546ec3778dd6118fa"
+    },
+    {
+      "round": 2,
+      "box_id": "d8ecb5d8-c6b8-48d6-a658-bc254ba3c58e",
+      "session_id": "16fbaf34-4dc8-41b4-95f6-31a538468f0e",
+      "summary": "583 passed, 12 skipped, 221 subtests passed in 43.65s",
+      "log": "/private/tmp/tapl-roundtrip-linux-final-2.log",
+      "log_sha256": "c7a58e8b1f2856de4388929b13b5c1323dcf76ff88b2557b91f573f46746cebd",
+      "probe": "/private/tmp/tapl-roundtrip-linux-final-2-probe.json",
+      "probe_sha256": "6fde61949edacfcc405d225e32dc64e8415c16b49a1e333f649ff2c86f596dca"
+    },
+    {
+      "round": 3,
+      "box_id": "a67ddd8b-853e-413f-977d-b0b0114281f1",
+      "session_id": "79ebbb82-b5b1-4e36-a2d1-e86a10f45b79",
+      "summary": "583 passed, 12 skipped, 221 subtests passed in 43.97s",
+      "log": "/private/tmp/tapl-roundtrip-linux-final-3.log",
+      "log_sha256": "4d68c2ab91f90dc9bbf1eab00984c329c769b58a87f469cdbaa5980005bf2c10",
+      "probe": "/private/tmp/tapl-roundtrip-linux-final-3-probe.json",
+      "probe_sha256": "53ac3f861e3e849d9363696840aafd10ef8919d1c791da27d33302b24b3113af"
+    }
+  ],
+  "macos": {
+    "summary": "584 passed, 11 skipped, 221 subtests passed in 60.00s (0:01:00)",
+    "log": "/private/tmp/tapl-roundtrip-host-v3.log"
+  },
+  "option_matrix": {
+    "cases": 120,
+    "repetitions": 3,
+    "isolation": "independent workspace/DB/config per option case; independent Linux VM per full repetition"
+  },
+  "probe": {
+    "baseline": {
+      "tool_count": 29,
+      "tool_contract_sha256": "cd9e7e09956babe2a77b595c91a9b76c79bc51039ec0f311c812e6a4b52b5de2",
+      "tool_schema_sha256": "6ce3393f1d6460052ddcf242e61d6a89f1e5eee77f605744a550b2a692a01ab3",
+      "legacy_tool_contract_sha256": "cd9e7e09956babe2a77b595c91a9b76c79bc51039ec0f311c812e6a4b52b5de2",
+      "legacy_tool_schema_sha256": "6ce3393f1d6460052ddcf242e61d6a89f1e5eee77f605744a550b2a692a01ab3",
+      "loaded_source_sha256": {
+        "taplctl.prompt": "a1ad7148a9dc1cb728a468c515ac649703dd2067701423ee2f364ed7d3ddf0a9",
+        "taplctl.mcp_server": "181ba658e1fa9b5a141d1d9a6feb9c9e1d80f18e8a853492cb0d05594f1ccfb5"
+      },
+      "standalone_renders_sha256": "eb58e7cdb2061ab1b0cfc643b81f07725e3e7d8cf4000875bfa55c77c9ffab3d",
+      "option_renders_sha256": "bba29d826613a468ead400028dd696bea0a40227e53daf9b2272976de43b76a4",
+      "option_render_cases": 27,
+      "bootstrap_chars": 867,
+      "native_tool_json_chars": 39206,
+      "per_tool_instructions_projection_chars": 64349,
+      "full_entry_chars": 20792,
+      "retained_entry_chars": 793,
+      "item_projection": {
+        "compact_available": false,
+        "full_chars": 2620,
+        "compact_chars": 2620,
+        "reconstructs_full": true,
+        "full_default_unchanged": true
+      },
+      "prompt_surface_chars": {
+        "entry": 806,
+        "display": 901,
+        "mode": 1441,
+        "metadata": 980,
+        "memory": 1373,
+        "helpers": 2703,
+        "policy": 12265,
+        "guidance": 5544,
+        "hook": 2527
+      },
+      "timings": {
+        "session_start": {
+          "median_us": 1.792,
+          "iterations": 300
+        },
+        "user_prompt": {
+          "median_us": 5.625,
+          "iterations": 300
+        },
+        "stop": {
+          "median_us": 3.208,
+          "iterations": 300
+        },
+        "full_policy": {
+          "median_us": 142.1455,
+          "iterations": 300
+        }
+      }
+    },
+    "candidate": {
+      "tool_count": 29,
+      "tool_contract_sha256": "9b9d430c563a1d276a40486b13dbb1eeabcb48158242880a9104a5f402a20d9e",
+      "tool_schema_sha256": "40f4585dc03481762c38fc4859aa356e53c974266e74ad4768296ac61f0b597b",
+      "legacy_tool_contract_sha256": "cd9e7e09956babe2a77b595c91a9b76c79bc51039ec0f311c812e6a4b52b5de2",
+      "legacy_tool_schema_sha256": "6ce3393f1d6460052ddcf242e61d6a89f1e5eee77f605744a550b2a692a01ab3",
+      "loaded_source_sha256": {
+        "taplctl.prompt": "33c1ab8f6082ce18d5c37e499cb9214b3c316397f24b0b95f11f4c58e7fdf455",
+        "taplctl.mcp_server": "d41bc838a8a143efadbd00bd09b4dbf0a2e79e50b73cabb8e5c882058b3ab5d1"
+      },
+      "standalone_renders_sha256": "4e02575b80e46a7c942bbb27937ce14071c884317432e622b0065191ba7e61fd",
+      "option_renders_sha256": "d2038848784c237f588943b6bd794d4c63741fb678b01276778fe7583a82aa54",
+      "option_render_cases": 27,
+      "bootstrap_chars": 854,
+      "native_tool_json_chars": 39413,
+      "per_tool_instructions_projection_chars": 64179,
+      "full_entry_chars": 21413,
+      "retained_entry_chars": 793,
+      "item_projection": {
+        "compact_available": true,
+        "full_chars": 2620,
+        "compact_chars": 1767,
+        "reconstructs_full": true,
+        "full_default_unchanged": true
+      },
+      "prompt_surface_chars": {
+        "entry": 806,
+        "display": 901,
+        "mode": 1441,
+        "metadata": 980,
+        "memory": 1373,
+        "helpers": 2703,
+        "policy": 12884,
+        "guidance": 5544,
+        "hook": 2527
+      },
+      "timings": {
+        "session_start": {
+          "median_us": 2.083,
+          "iterations": 300
+        },
+        "user_prompt": {
+          "median_us": 5.75,
+          "iterations": 300
+        },
+        "stop": {
+          "median_us": 3.083,
+          "iterations": 300
+        },
+        "full_policy": {
+          "median_us": 159.22899999999998,
+          "iterations": 300
+        }
+      }
+    },
+    "legacy_contract_preserved": true,
+    "legacy_schema_preserved": true
+  },
+  "live_validation": {
+    "executed": 0,
+    "planned_conditions": [
+      "inspection",
+      "planning",
+      "edit",
+      "recall",
+      "resume",
+      "delegation",
+      "topics",
+      "scout",
+      "memory_reuse",
+      "batch_recovery",
+      "context_loss"
+    ],
+    "repetitions_per_condition": 3,
+    "planned_baseline_comparisons": [
+      "edit",
+      "memory_reuse"
+    ],
+    "blocker": "Automatic approval review rejected copying host Codex credentials into a network-enabled disposable Box; explicit user authorization requested. No workaround attempted."
+  },
+  "environment": {
+    "backend": "morae-mcp/libkrun",
+    "python": "3.11.2",
+    "mcp": "2.0.0",
+    "pytest": "9.1.1",
+    "ruby": "3.1.2",
+    "codex_cli": "0.153.4"
+  },
+  "excluded_environment_attempts": [
+    "copy-in destination already existed; source-free dependency seed prepared",
+    "Ruby missing caused six packaging-test failures; dependency installed, three fresh environments all passed"
+  ],
+  "limits": [
+    "No live-model behavior/token/latency improvement claim yet",
+    "Context loss scenario is two fresh Codex sessions, not actual compaction",
+    "Windows-only 11 tests not run; macOS covers the extra Linux skip",
+    "Command audits are fixture-specific; unfamiliar forms require trace review"
+  ],
+  "cleanup": {
+    "status": "complete",
+    "deleted_test_box_ids": [
+      "32d8522a-b3a1-4fca-88fa-ab4e901bf6af",
+      "fd66b00c-fe62-4d99-805e-b511eb023e67",
+      "1d56cb7d-f150-400a-8adb-c8e4340705bf",
+      "72e93a85-dd04-476c-aabf-5b5e1d14de3a",
+      "09dc90a3-4448-4991-80d1-b2490b155d00",
+      "4629adc6-2f4f-41ff-aaeb-b4d840f47979",
+      "7b7d8ef4-c691-44bb-8322-c3f131a031aa",
+      "58738a8a-6d16-4052-99f4-a6bb9d484428",
+      "cb3526da-06bb-42e6-8eeb-8631448f614b",
+      "d8ecb5d8-c6b8-48d6-a658-bc254ba3c58e",
+      "a67ddd8b-853e-413f-977d-b0b0114281f1"
+    ],
+    "original_boxes_preserved": 6,
+    "remaining_box_count": 6
+  }
+}

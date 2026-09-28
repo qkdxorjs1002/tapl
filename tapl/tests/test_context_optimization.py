@@ -62,6 +62,19 @@ def test_transport_entry_gate_keeps_policy_required_and_legacy_bootstrap():
     assert "the same PLAN and `parallel_group`" in prompt.task_execution_order_guidance()
 
 
+def test_code_mode_optimization_keeps_decision_and_recovery_gates():
+    policy = prompt.mcp_server_instructions()
+    for contract in (
+        "unique description and full schema", "exact repeated server preamble already retained",
+        "reload after loss or change", "Sequentially await", "checking every result",
+        "Stop on errors or new decisions", "honor validation before execution",
+        "Preserve approval, source checks, verification and dispatch gates",
+        "never predict results", "Yield after finish to inspect memory before archive",
+        "tapl_get_item(compact=true)", "full formatted bodies remain available",
+    ):
+        assert contract in policy
+
+
 @pytest.mark.parametrize("search", ["bm25", "word", "semantic", "hybrid"])
 @pytest.mark.parametrize("recall", [False, True])
 @pytest.mark.parametrize("delegation", ["pending", "disabled", "conservative", "balanced", "aggressive"])

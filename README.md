@@ -212,6 +212,17 @@ classification, task/queue/batch counts, and execution-approval state. Call
 an explicit inspection recommendation; use `full=true` for record bodies.
 Bootstrap and hook instructions share this single entry, not separate calls.
 
+`tapl_get_item(compact=true)` omits a plan/task body only when the returned
+canonical fields reproduce it exactly. Omitting the option or using `compact=false` retains the
+existing full response; findings, custom bodies and raw text are preserved.
+Compact validation receipts retain every blocking error and limit warnings,
+reporting omitted items with `omitted_issue_count`.
+
+In code mode, discover needed tool descriptions/schemas together and reuse
+retained definitions. Sequentially await already-decided calls and check every
+result without skipping approval, source, verification or dispatch gates.
+After finishing, inspect the memory review before archiving.
+
 Catalog comparison is an explicit setup/settings operation:
 `tapl_get_next(available_models=..., catalog_complete=true)`. Verify the entire
 live catalog, including fixed agent-role models, before asserting completeness.
