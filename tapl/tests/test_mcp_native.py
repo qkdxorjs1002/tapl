@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import sqlite3
 import tempfile
 import pytest
 from pathlib import Path
@@ -28,6 +29,44 @@ def test_mcp_module_has_no_cli_subprocess_data_plane() -> None:
     assert "TaplCliError" not in source
     assert not hasattr(mcp_server, "run_taplctl")
     assert not hasattr(mcp_server, "run_taplctl_write")
+
+
+def test_mcp_pins_starting_cwd_and_explicit_root_to_distinct_databases() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        parent = Path(tmp) / "parent"
+        child = parent / "child"
+        sibling = parent / "sibling"
+        child.mkdir(parents=True)
+        sibling.mkdir()
+        (parent / ".git").mkdir()
+        (child / ".git").mkdir()
+        db.initialize_workspace(parent)
+        db.initialize_workspace(sibling)
+
+        with mock.patch.object(Path, "cwd", return_value=child):
+            implicit = mcp_server.create_server()
+        with mock.patch.object(Path, "cwd", return_value=parent):
+            explicit = mcp_server.create_server(workspace_root=sibling)
+
+        async def exercise() -> None:
+            for server, summary in ((implicit, "child session"), (explicit, "sibling session")):
+                async with Client(server) as client:
+                    result = await client.call_tool(
+                        "tapl_summarize_run",
+                        {"summary": summary, "work_type": "analysis", "workflow_mode": "standard"},
+                    )
+                    assert not result.is_error
+                    assert result.structured_content["operation"] == "run_summarize"
+
+        asyncio.run(exercise())
+
+        def summaries(root: Path) -> list[str]:
+            with sqlite3.connect(root / ".tapl" / "tapl.db") as conn:
+                return [row[0] for row in conn.execute("SELECT request_summary FROM workflow_runs")]
+
+        assert summaries(parent) == []
+        assert summaries(child) == ["child session"]
+        assert summaries(sibling) == ["sibling session"]
 
 
 def test_mcp_bootstrap_loads_full_policy_and_supports_explicit_retention() -> None:

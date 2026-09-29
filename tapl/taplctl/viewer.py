@@ -97,7 +97,7 @@ def parse_allowed_origin(value: str) -> str:
 
 
 def existing_workspace(start: Path | None = None) -> Path | None:
-    """Return the nearest initialized workspace without creating a database."""
+    """Return the selected folder if initialized, without searching parents."""
 
     return db.find_workspace_root(start)
 

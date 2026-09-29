@@ -47,6 +47,8 @@ DEPRECATED_CODEX_CONFIG_PATHS = (
     # upgrades cannot retain `taplctl mcp` beside the dedicated executable.
     ("mcp_servers", "tapl", "command"),
     ("mcp_servers", "tapl", "args"),
+    # Let Codex launch TAPL in the session folder instead of a stale fixed cwd.
+    ("mcp_servers", "tapl", "cwd"),
 )
 DEPRECATED_TAPL_CONFIG_KEYS = (
     "use_level_subagent",
@@ -734,6 +736,7 @@ def retarget_codex_mcp_config(template: str, *, taplctl_command: str) -> str:
         raise ValueError("tapl Codex config template must contain mcp_servers.tapl")
     tapl["command"] = sibling_tapl_command(taplctl_command, "tapl-mcp")
     tapl.pop("args", None)
+    tapl.pop("cwd", None)
     return dump_toml(data)
 
 

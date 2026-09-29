@@ -173,6 +173,19 @@ allowed_origins = [
             self.assertEqual(selected["view"]["type"], "overview")
             self.assertEqual(selected["workspace"], str(workspace.resolve()))
 
+            child = workspace / "child"
+            child.mkdir()
+            (child / ".git").mkdir()
+            rejected_child = app.handle_message({"command": "selectWorkspace", "workspace": str(child)})
+            self.assertEqual(rejected_child["view"]["type"], "workspace")
+            self.assertIn(str(child.resolve() / ".tapl" / "tapl.db"), rejected_child["view"]["message"])
+            self.assertIsNone(viewer.existing_workspace(child))
+
+            tapl_db.initialize_workspace(child)
+            selected_child = app.handle_message({"command": "selectWorkspace", "workspace": str(child)})
+            self.assertEqual(selected_child["view"]["type"], "overview")
+            self.assertEqual(selected_child["workspace"], str(child.resolve()))
+
     def test_database_revision_tracks_database_and_sqlite_sidecars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "tapl.db"

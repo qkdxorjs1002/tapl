@@ -72,7 +72,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Hook handling mode.",
     )
     parser.add_argument("--tool", default=None, help="Tool name for tool hook events.")
-    parser.add_argument("--db", type=Path, default=None, help="Path to tapl SQLite DB.")
+    parser.add_argument(
+        "--db", type=Path, default=None,
+        help="Optional DB path; must match the Codex session cwd/.tapl/tapl.db.",
+    )
     parser.add_argument("--config", type=Path, default=None, help="Path to tapl TOML config.")
     output = parser.add_mutually_exclusive_group()
     output.add_argument("--json", action="store_true", help=JSON_HELP)
@@ -92,13 +95,16 @@ def main(argv: list[str] | None = None) -> int:
 def _handle_hook(args: argparse.Namespace) -> int:
     payload = _read_stdin_payload()
     start = _payload_cwd(payload)
+    db_path = start / db.DEFAULT_DB_RELATIVE
+    if args.db is not None and args.db.expanduser().resolve() != db_path.resolve():
+        raise ValueError(f"Hook --db must match the Codex working directory database: {db_path}")
     workspace: dict[str, Any] | None = None
     if args.db is None and args.config is None:
         start, workspace = _initialize_workspace(start)
         tapl_install.auto_install_if_needed(start=start)
 
     settings = tapl_config.load(args.config, start=start)
-    conn = db.connect(args.db or db.default_db_path(start))
+    conn = db.connect(db_path)
     try:
         outcome = hooks.handle_event(
             conn,
@@ -128,16 +134,18 @@ def _read_stdin_payload() -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _payload_cwd(payload: dict[str, Any]) -> Path | None:
+def _payload_cwd(payload: dict[str, Any]) -> Path:
     value = payload.get("cwd")
-    return Path(value).expanduser() if isinstance(value, str) and value.strip() else None
+    if not isinstance(value, str) or not value.strip() or not Path(value).is_absolute():
+        raise ValueError("Codex hook payload must include an absolute working directory in cwd")
+    start = Path(value).resolve()
+    if not start.is_dir():
+        raise ValueError(f"Codex hook cwd must be an existing directory: {start}")
+    return start
 
 
-def _initialize_workspace(start: Path | None) -> tuple[Path | None, dict[str, Any] | None]:
-    if start is None:
-        return None, None
-    workspace_root = db.find_workspace_root(start) or start
-    initialized = db.initialize_workspace(workspace_root)
+def _initialize_workspace(start: Path) -> tuple[Path, dict[str, Any]]:
+    initialized = db.initialize_workspace(start)
     return Path(initialized["workspace_root"]), initialized
 
 

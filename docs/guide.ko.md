@@ -122,11 +122,13 @@ taplctl install user --taplctl-command (Join-Path $taplInstall.venv "Scripts\tap
 위 명령은 현재 사용자의 Codex 환경 전체에 연결합니다. 현재 저장소에만 연결하려면 `user`를 `repo`로
 바꾸세요.
 
-사용자 설치에서는 Codex가 각 워크스페이스의 TAPL DB를 초기화하며, 로컬
+사용자 설치에서는 Codex가 세션 작업 폴더의 TAPL DB를 초기화하며, 로컬
 `.tapl/config.toml`과 `.tapl/version`은 생성하지 않습니다. 저장소 자동 갱신에는
 기존 DB와 `.tapl/version`이 필요하며, 남아 있는 훅이나 로컬 설정만으로 설치를
 시작하지 않습니다. 로컬 설정이 없으면 사용자 설정 또는 기본값을 계속 사용합니다.
 누락된 저장소 설치 파일을 복원하려면 `taplctl install repo`를 명시적으로 실행하세요.
+설치 프로그램은 예전 TAPL MCP `cwd` 재정의도 제거하여 오래된 고정 작업 폴더가
+서버를 다른 작업 공간에 묶어 두지 않도록 합니다.
 
 이 명령은 `tapl-mcp`를 위한 활성화된 `mcp_servers.tapl` entry와 `tapl-hook` Codex
 lifecycle hook을 추가합니다. 이후 Codex를 재시작하세요. Codex가 처음 확인을 요청하면
@@ -150,8 +152,9 @@ taplctl viewer --port 9000  # 8000 포트가 사용 중일 때
 ```
 
 viewer는 `127.0.0.1`에서만 수신하고 브라우저를 자동으로 열지 않으며 `Ctrl+C`로
-종료합니다. 가장 가까운 `.tapl/tapl.db`가 선택됩니다. Homebrew 로그인 서비스처럼
-작업 공간 없이 시작하면 초기화된 작업 공간 폴더를 선택하는 화면이 나타납니다.
+종료합니다. `--workspace`를 지정하지 않으면 시작한 폴더의 `.tapl/tapl.db`만
+선택하고 상위 폴더는 검색하지 않습니다. Homebrew 로그인 서비스처럼 시작한
+폴더에 DB가 없으면 초기화된 작업 공간 폴더를 선택하는 화면이 나타납니다.
 브라우저는 마지막으로 연결에 성공한 폴더를 기억합니다.
 
 ### 리버스 프록시와 터널
@@ -238,7 +241,7 @@ history 규칙을 따릅니다. 저장되거나 실행 가능한 task에는 아�
 
 ## 워크플로와 관리 명령
 
-`tapl-mcp`는 워크플로 애플리케이션을 직접 호출합니다. `tapl-hook`은 Codex의 수명 주기 지점에서 현재 상태를 전달하고, 실행 승인 전에 지속되는 변경이 일어나지 않도록 확인합니다. 두 구성 요소와 viewer는 저장소의 `.tapl/tapl.db`를 공유합니다.
+`tapl-mcp`는 워크플로 애플리케이션을 직접 호출합니다. `tapl-hook`은 Codex의 수명 주기 지점에서 현재 상태를 전달하고, 실행 승인 전에 지속되는 변경이 일어나지 않도록 확인합니다. 두 구성 요소와 viewer는 선택한 작업 폴더의 `.tapl/tapl.db`를 사용합니다.
 
 실행 전 승인은 필요하지만 **수정·테스트·구현·검증을 직접 요청한 것 자체도 명시적인 실행 승인**입니다. 매 요청마다 별도 승인 질문이 필요한 것은 아닙니다. 작업의 범위와 위험에 따라 흐름을 분류하며, 간단한 읽기 전용 요청은 계획과 작업을 만들지 않는 가벼운 기록으로 끝날 수 있습니다.
 
@@ -248,7 +251,7 @@ history 규칙을 따릅니다. 저장되거나 실행 가능한 task에는 아�
 
 | 명령 | 용도 |
 | --- | --- |
-| `taplctl init --workspace-root /path/to/workspace` | workspace root 선택 또는 초기화 |
+| `taplctl init --workspace-root /path/to/workspace` | 지정한 폴더의 workspace를 명시적으로 초기화 |
 | `taplctl doctor` | 설치와 workspace 문제 진단 |
 | `taplctl install SCOPE` | Codex integration 설치 또는 갱신 |
 | `taplctl config set/unset` | 지원 runtime config 값 편집 |
@@ -277,11 +280,21 @@ updater는 release manifest와 wheel SHA-256을 검증합니다. Homebrew와 sou
 
 ## 작업 공간과 설정
 
-TAPL은 `.tapl/config.toml`을 `~/.tapl/config.toml`보다 먼저 읽습니다. database는
-workspace anchor 역할도 합니다. 상위 database가 없으면 첫 hook이 payload working
-directory를 초기화하고, nested Git repository는 가장 가까운 workspace database를
-재사용합니다. 의도적으로 독립된 nested repository에는 그 안에서
-`taplctl init --workspace-root PATH`를 실행해 별도 history를 만드세요.
+Codex 세션에서는 작업 폴더 자체가 `.tapl/tapl.db`를 소유합니다. hook은 Codex
+이벤트에 존재하는 절대 경로 `cwd`를 요구하고 정확히 그 폴더를 사용합니다. `cwd`가
+없거나 유효하지 않으면 다른 경로로 대체하지 않고 거부합니다. hook의 `--db`는 그
+폴더의 DB를 지정할 때만 허용합니다. MCP 서버는 시작할 때의 작업 폴더를 서버가
+살아 있는 동안 계속 사용합니다. 상위 DB, Git root, 저장소 표시 파일은 검색하지
+않습니다. 예를 들어 `repo/.tapl/tapl.db`가 있어도 `repo/packages/app` 세션은
+`repo/packages/app/.tapl/tapl.db`를 사용합니다.
+
+각 폴더의 이력은 독립적입니다. 기존 DB는 그대로 두며 이동하거나 합치지 않습니다.
+원하는 이력의 폴더에서 Codex를 여세요. 관리용 `taplctl` 명령은 명시적 `--db`,
+`--workspace-root` 옵션으로 지정한 경로를 계속 사용할 수 있습니다.
+
+TAPL은 작업 폴더의 `.tapl/config.toml`을 먼저 읽고, 없으면
+`~/.tapl/config.toml`을 읽습니다. 상위 폴더의 project config는 검색하지 않습니다.
+작업 폴더에 로컬 설정이 없어도 사용자 전체 설정은 계속 적용됩니다.
 
 installation은 관련 없는 Codex setting을 보존합니다. `hooks.json`은 managed merge되고,
 `.codex/config.toml`은 기존 user value를 우선하는 TOML merge입니다. runtime config는 첫
@@ -317,8 +330,8 @@ taplctl config unset search.mode
 reasoning-effort 문자열의 비어 있지 않은 TOML 배열), `subagents.profiles`(inline
 profile table의 TOML 배열)입니다.
 
-별도 지정이 없으면 위에서 설명한 repo-local, user-global 순서로 대상을 선택하고 두 파일이
-모두 없으면 repo-local 경로를 생성합니다. 다른 파일을 편집하려면 global option을 명령
+별도 지정이 없으면 위에서 설명한 작업 폴더, 사용자 전체 순서로 대상을 선택하고 두 파일이
+모두 없으면 작업 폴더의 로컬 경로를 생성합니다. 다른 파일을 편집하려면 global option을 명령
 앞에 놓으세요.
 
 ```sh

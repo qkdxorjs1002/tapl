@@ -74,40 +74,24 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def ancestor_paths(start: Path | None = None) -> list[Path]:
-    current = (start or Path.cwd()).resolve()
-    if current.is_file():
-        current = current.parent
-    return [current, *current.parents]
-
-
 def find_workspace_root(start: Path | None = None) -> Path | None:
-    for path in ancestor_paths(start):
-        if (path / DEFAULT_DB_RELATIVE).is_file():
-            return path
-    return None
+    """Return the selected folder only when it contains a TAPL database."""
+
+    root = find_repo_root(start)
+    return root if (root / DEFAULT_DB_RELATIVE).is_file() else None
 
 
 def find_repo_root(start: Path | None = None) -> Path:
-    candidates = ancestor_paths(start)
+    """Resolve the working folder itself, never a parent DB or repository."""
 
-    workspace_root = find_workspace_root(start)
-    if workspace_root is not None:
-        return workspace_root
-
-    for path in candidates:
-        if (path / ".git").exists():
-            return path
-
-    for path in candidates:
-        if (path / ".codex").exists() and (path / "README.md").exists():
-            return path
-
-    return candidates[0]
+    root = (start if start is not None else Path.cwd()).expanduser().resolve()
+    if root.exists() and not root.is_dir():
+        raise NotADirectoryError(f"TAPL working directory is not a directory: {root}")
+    return root
 
 
 def initialize_workspace(root: Path | str) -> dict[str, Any]:
-    workspace_root = Path(root).expanduser().resolve()
+    workspace_root = find_repo_root(Path(root))
     workspace_root.mkdir(parents=True, exist_ok=True)
     db_path = workspace_root / DEFAULT_DB_RELATIVE
     db_existed = db_path.exists()

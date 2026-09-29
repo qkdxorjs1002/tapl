@@ -143,12 +143,14 @@ connect only the current repository. Installation adds an enabled
 `mcp_servers.tapl` entry for `tapl-mcp` and lifecycle hooks for `tapl-hook`.
 Restart Codex afterward, then trust the installed hook when first prompted.
 
-With a user installation, Codex initializes each workspace's TAPL database without
-creating local `.tapl/config.toml` or `.tapl/version` files. Automatic repository
+With a user installation, Codex initializes the session working folder's TAPL
+database without creating local `.tapl/config.toml` or `.tapl/version` files. Automatic repository
 refresh requires an existing database and `.tapl/version`; leftover hooks or a
 config override alone do not trigger installation. A missing local config keeps
 inheriting user settings or defaults. Run `taplctl install repo` explicitly to
-restore missing repository installation files.
+restore missing repository installation files. The installer also removes an old
+TAPL MCP `cwd` override, so a stale fixed folder does not pin the server to a
+different workspace.
 
 <p align="center">
   <img src="../assets/tapl-trust-hook.png" alt="Codex trust prompt for the installed TAPL hook" />
@@ -168,10 +170,11 @@ taplctl viewer --port 9000  # when port 8000 is busy
 ```
 
 The viewer listens only on `127.0.0.1`, does not open a browser automatically,
-and stops with `Ctrl+C`. The nearest `.tapl/tapl.db` is selected. If no workspace
-is available—for example, when started as a Homebrew login service—the page asks
-for an initialized workspace folder and remembers the last successful choice in
-that browser.
+and stops with `Ctrl+C`. Without `--workspace`, it selects `.tapl/tapl.db` only
+in the folder where you start it. It does not search parent folders. If that
+folder has no database—for example, when started as a Homebrew login service—the
+page asks for an initialized workspace folder and remembers the last successful
+choice in that browser.
 
 When a trusted reverse proxy or tunnel publishes the viewer at another origin,
 allow that exact browser origin explicitly:
@@ -227,7 +230,7 @@ search, and inspect workflow records; the CLI manages the installation.
 
 | Command | Purpose |
 | --- | --- |
-| `taplctl init --workspace-root /path/to/workspace` | Select or initialize a workspace root |
+| `taplctl init --workspace-root /path/to/workspace` | Explicitly initialize that folder's workspace |
 | `taplctl doctor` | Diagnose installation and workspace problems |
 | `taplctl install SCOPE` | Install or refresh Codex integration |
 | `taplctl config set/unset` | Edit supported runtime configuration values |
@@ -256,11 +259,22 @@ Homebrew or source checkouts. For Homebrew, use `brew update` followed by
 
 ## Workspace and configuration
 
-TAPL loads repo-local `.tapl/config.toml` before `~/.tapl/config.toml`. A database
-also acts as the workspace anchor: the first hook initializes the payload working
-directory if no ancestor database exists, and nested Git repositories reuse the
-nearest workspace database. Run `taplctl init --workspace-root PATH` inside a
-deliberately independent nested repository to give it separate history.
+For a Codex session, the working folder itself owns `.tapl/tapl.db`. The hook
+requires an existing absolute `cwd` in the Codex event and uses that exact
+folder; a missing or invalid `cwd` is rejected. A hook `--db` override is
+accepted only when it names that folder's database. The MCP server binds to its
+startup working folder for its lifetime. TAPL does not search parent databases,
+Git roots, or repository markers. For example, a session in `repo/packages/app`
+uses `repo/packages/app/.tapl/tapl.db` even if `repo/.tapl/tapl.db` exists.
+
+Each folder has independent history. Existing databases stay where they are;
+TAPL does not move or merge them. Open Codex in the folder whose history you
+want. Administrative `taplctl` commands retain explicit `--db` and
+`--workspace-root` options to operate on a chosen path.
+
+TAPL reads the working folder's `.tapl/config.toml` first, then
+`~/.tapl/config.toml`. It does not search ancestor folders for a project config.
+User-wide settings still apply when the working folder has no local config.
 
 Installation preserves unrelated Codex settings. `hooks.json` is managed-merged,
 and `.codex/config.toml` is TOML-merged with existing user values taking
@@ -297,8 +311,8 @@ The supported keys are `search.mode` (`semantic`, `bm25`, `word`, or `hybrid`),
 non-empty TOML array of unique reasoning-effort strings), or
 `subagents.profiles` (a TOML array of inline profile tables).
 
-Without an override, the command uses the same repo-local-then-user lookup order
-described above and creates the repo-local path when neither file exists. To edit
+Without an override, the command uses the same working-folder-then-user lookup order
+described above and creates the working folder's local path when neither file exists. To edit
 another file, place the global option before the command:
 
 ```sh

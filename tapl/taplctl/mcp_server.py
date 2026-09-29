@@ -101,10 +101,9 @@ class SplitRunRequest(BaseModel):
 
 
 def resolve_workspace_root(start: Path | None = None) -> Path:
-    """Anchor one MCP process to the workspace selected when it starts."""
+    """Bind one MCP process to its exact starting folder, without discovery."""
 
-    candidate = (start or Path.cwd()).expanduser().resolve()
-    return (db.find_workspace_root(candidate) or db.find_repo_root(candidate)).resolve()
+    return db.find_repo_root(start)
 
 
 def compact_payload(**values: Any) -> dict[str, Any]:

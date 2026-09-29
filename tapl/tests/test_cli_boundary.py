@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from taplctl import cli, hook_cli, install
+from taplctl import cli, config, hook_cli, install
 
 
 MANAGEMENT_COMMANDS = {
@@ -139,39 +139,127 @@ class HookEntrypointTests(unittest.TestCase):
                     self.assertTrue((workspace / hook_cli.db.DEFAULT_DB_RELATIVE).is_file())
                     settings = hook_cli.tapl_config.load(start=workspace)
                     has_config = evidence in ("config", "config_and_hook")
-                    self.assertEqual(settings.path, str(repo_config if has_config else user_config))
+                    self.assertEqual(Path(settings.path).resolve(), (repo_config if has_config else user_config).resolve())
                     self.assertEqual(settings.search.max_results, 3 if has_config else 7)
 
     def test_hook_cli_handles_event_without_management_cli_bridge(self) -> None:
         connection = mock.Mock()
         outcome = {"event": "PreToolUse", "block": True, "message": "blocked"}
-        with (
-            mock.patch.object(hook_cli, "_read_stdin_payload", return_value={"cwd": "/workspace"}),
-            mock.patch.object(hook_cli.tapl_config, "load", return_value=mock.sentinel.settings),
-            mock.patch.object(hook_cli.db, "connect", return_value=connection),
-            mock.patch.object(hook_cli.hooks, "handle_event", return_value=outcome) as handler,
-        ):
-            result = hook_cli.main(
-                [
-                    "--event",
-                    "PreToolUse",
-                    "--mode",
-                    "enforce",
-                    "--tool",
-                    "Bash",
-                    "--db",
-                    "/tmp/tapl.db",
-                    "--json",
-                ]
-            )
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            workspace.mkdir()
+            db_path = workspace / ".tapl" / "tapl.db"
+            with (
+                mock.patch.object(hook_cli, "_read_stdin_payload", return_value={"cwd": str(workspace)}),
+                mock.patch.object(hook_cli.tapl_config, "load", return_value=mock.sentinel.settings),
+                mock.patch.object(hook_cli.db, "connect", return_value=connection) as connect,
+                mock.patch.object(hook_cli.hooks, "handle_event", return_value=outcome) as handler,
+            ):
+                result = hook_cli.main(
+                    [
+                        "--event",
+                        "PreToolUse",
+                        "--mode",
+                        "enforce",
+                        "--tool",
+                        "Bash",
+                        "--db",
+                        str(db_path),
+                        "--json",
+                    ]
+                )
+            connect.assert_called_once_with(workspace.resolve() / ".tapl" / "tapl.db")
 
         self.assertEqual(result, 2)
         self.assertEqual(handler.call_args.kwargs["event"], "PreToolUse")
         self.assertEqual(handler.call_args.kwargs["mode"], "enforce")
         self.assertEqual(handler.call_args.kwargs["tool"], "Bash")
-        self.assertEqual(handler.call_args.kwargs["payload"], {"cwd": "/workspace"})
+        self.assertEqual(handler.call_args.kwargs["payload"], {"cwd": str(workspace)})
         self.assertIs(handler.call_args.kwargs["tapl_settings"], mock.sentinel.settings)
         connection.close.assert_called_once_with()
+
+    def test_hook_rejects_absent_or_invalid_cwd_before_touching_a_database(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            file_path = root / "file.txt"
+            file_path.write_text("data", encoding="utf-8")
+            cases = ({}, {"cwd": None}, {"cwd": ""}, {"cwd": "relative"},
+                     {"cwd": str(root / "missing")}, {"cwd": str(file_path)})
+            for payload in cases:
+                with self.subTest(payload=payload):
+                    with (
+                        mock.patch.object(hook_cli, "_read_stdin_payload", return_value=payload),
+                        mock.patch.object(hook_cli.db, "connect") as connect,
+                        mock.patch.object(hook_cli.db, "initialize_workspace") as initialize,
+                        mock.patch.object(install, "auto_install_if_needed") as auto_install,
+                        contextlib.redirect_stdout(io.StringIO()) as output,
+                    ):
+                        result = hook_cli.main(["--event", "UserPromptSubmit", "--json"])
+                        self.assertEqual(result, 1)
+                        self.assertFalse(json.loads(output.getvalue())["ok"])
+                        connect.assert_not_called()
+                        initialize.assert_not_called()
+                        auto_install.assert_not_called()
+            self.assertFalse((root / ".tapl").exists())
+
+    def test_hook_uses_exact_child_cwd_and_rejects_conflicting_db_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "parent"
+            child = root / "child"
+            sibling = root / "sibling"
+            child.mkdir(parents=True)
+            sibling.mkdir()
+            (root / ".git").mkdir()
+            (child / ".codex").mkdir()
+            (child / "README.md").write_text("not a workspace marker", encoding="utf-8")
+            parent_db = Path(hook_cli.db.initialize_workspace(root)["db"])
+            sibling_db = Path(hook_cli.db.initialize_workspace(sibling)["db"])
+            before = {path: path.read_bytes() for path in (parent_db, sibling_db)}
+            payload = {"cwd": str(child), "prompt": "Inspect this folder"}
+
+            with (
+                mock.patch.object(hook_cli, "_read_stdin_payload", return_value=payload),
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
+                conflict = hook_cli.main(["--event", "UserPromptSubmit", "--db", str(parent_db), "--json"])
+            self.assertEqual(conflict, 1)
+            self.assertIn("must match", json.loads(output.getvalue())["error"])
+            self.assertFalse((child / ".tapl").exists())
+
+            with (
+                mock.patch.object(hook_cli, "_read_stdin_payload", return_value=payload),
+                mock.patch.object(install, "auto_install_if_needed"),
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
+                accepted = hook_cli.main(["--event", "UserPromptSubmit", "--json"])
+            self.assertEqual(accepted, 0, output.getvalue())
+            self.assertEqual(json.loads(output.getvalue())["workspace"]["workspace_root"], str(child.resolve()))
+            self.assertTrue((child / ".tapl" / "tapl.db").is_file())
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_default_config_uses_selected_folder_or_user_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            parent = root / "parent"
+            child = parent / "child"
+            home = root / "home"
+            child.mkdir(parents=True)
+            (parent / ".tapl").mkdir()
+            (home / ".tapl").mkdir(parents=True)
+            parent_config = parent / ".tapl" / "config.toml"
+            parent_config.write_text("[search]\nmax_results = 3\n", encoding="utf-8")
+            user_config = home / ".tapl" / "config.toml"
+            user_config.write_text("[search]\nmax_results = 7\n", encoding="utf-8")
+
+            inherited = config.load(start=child, home=home)
+            self.assertEqual(Path(inherited.path).resolve(), user_config.resolve())
+            self.assertEqual(inherited.search.max_results, 7)
+            child_config = child / ".tapl" / "config.toml"
+            child_config.parent.mkdir()
+            child_config.write_text("[search]\nmax_results = 5\n", encoding="utf-8")
+            selected = config.load(start=child, home=home)
+            self.assertEqual(Path(selected.path).resolve(), child_config.resolve())
+            self.assertEqual(selected.search.max_results, 5)
 
 
 class InstallerBoundaryTests(unittest.TestCase):
@@ -217,6 +305,7 @@ class InstallerBoundaryTests(unittest.TestCase):
 [mcp_servers.tapl]
 command = "taplctl"
 args = ["mcp"]
+cwd = "/stale/workspace"
 enabled = true
 """.lstrip()
 
@@ -228,6 +317,7 @@ enabled = true
 
         self.assertEqual(tapl["command"], "/opt/tapl/bin/tapl-mcp")
         self.assertNotIn("args", tapl)
+        self.assertNotIn("cwd", tapl)
 
     def test_existing_legacy_mcp_config_is_migrated(self) -> None:
         template = """
@@ -239,19 +329,27 @@ enabled = true
 [mcp_servers.tapl]
 command = "/opt/tapl/bin/taplctl"
 args = ["mcp"]
+cwd = "/stale/workspace"
 enabled = true
 user_setting = "keep"
+
+[mcp_servers.other]
+command = "other-mcp"
+cwd = "/other/workspace"
 """.lstrip()
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
             path.write_text(existing, encoding="utf-8")
             install.merge_codex_config(path, template, force=False, dry_run=False)
-            tapl = tomllib.loads(path.read_text(encoding="utf-8"))["mcp_servers"]["tapl"]
+            servers = tomllib.loads(path.read_text(encoding="utf-8"))["mcp_servers"]
+            tapl = servers["tapl"]
 
         self.assertEqual(tapl["command"], "/opt/tapl/bin/tapl-mcp")
         self.assertNotIn("args", tapl)
+        self.assertNotIn("cwd", tapl)
         self.assertEqual(tapl["user_setting"], "keep")
+        self.assertEqual(servers["other"]["cwd"], "/other/workspace")
 
     def test_pyproject_registers_dedicated_hook_script(self) -> None:
         pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"

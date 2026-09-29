@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">tapl</h1>
 <p align="center"><strong>Give your coding agent a memory.</strong></p>
-<p align="center">TAPL keeps your Codex plans, approvals, tasks, findings, and history in a repository-local SQLite database.</p>
+<p align="center">TAPL keeps your Codex plans, approvals, tasks, findings, and history in a SQLite database in the session working folder.</p>
 <p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a></p>
 <p align="center">
   <a href="https://github.com/qkdxorjs1002/tapl/releases"><img src="https://img.shields.io/github/v/release/qkdxorjs1002/tapl" alt="Latest stable release" /></a>
@@ -18,7 +18,7 @@ Keep asking Codex to work normally. TAPL makes that work visible while it happen
 and recoverable when the conversation ends.
 
 - **Resume with context.** Recover the plan, completed tasks, and remaining work in a later session.
-- **Keep decisions close to the code.** Each workspace owns its history in `.tapl/tapl.db`.
+- **Keep decisions close to the code.** Each Codex session working folder owns its history in `.tapl/tapl.db`.
 - **See what happened.** Inspect approvals, findings, validation, and lifecycle events.
 - **Search previous work.** Full-text search is included; semantic search is optional.
 - **Recall relevant experience.** Short memory cues point back to earlier work when it becomes useful.
@@ -116,10 +116,12 @@ taplctl install user
 
 1. **Restart Codex** to load the TAPL MCP server and lifecycle hooks.
 2. **Trust the installed hook** when Codex first asks.
-3. **Open a repository and ask normally.** Codex records the work through TAPL.
+3. **Open your intended working folder and ask normally.** Codex records the work through TAPL.
 
-TAPL creates `.tapl/tapl.db` for the workspace. You do not need to write workflow
-records by hand or learn another set of task-management commands.
+TAPL creates `.tapl/tapl.db` in the Codex session working folder. A nested folder
+gets its own history even when a parent folder already has a TAPL database. You do
+not need to write workflow records by hand or learn another set of task-management
+commands.
 
 Using Linux, Windows, or another release channel? Choose an option below and
 follow its [Codex connection command](docs/guide.md#connect).
@@ -143,7 +145,7 @@ Standalone installers default to the latest stable release. See the guide for
 
 The browser and VS Code extension share the same Viewer screens, features, and message types. The browser uses the extension’s neutral default colors; VS Code’s selected theme takes precedence inside the extension.
 
-From your workspace, start the local viewer:
+From the same working folder, start the local viewer:
 
 ```sh
 taplctl viewer

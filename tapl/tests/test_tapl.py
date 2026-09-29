@@ -516,7 +516,7 @@ class TaplRuntimeTests(unittest.TestCase):
                 self.assertFalse(call.is_error)
                 self.assertIn("recommendations", call.structured_content)
 
-    def test_workspace_db_takes_priority_over_nested_git(self) -> None:
+    def test_nested_git_and_parent_database_do_not_redirect_working_folder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
             child_repo = workspace / "services" / "child"
@@ -525,17 +525,25 @@ class TaplRuntimeTests(unittest.TestCase):
             (child_repo / ".git").mkdir(parents=True)
             nested_dir.mkdir()
 
-            self.assertEqual(tapl_db.find_repo_root(nested_dir), child_repo.resolve())
+            self.assertEqual(tapl_db.find_repo_root(nested_dir), nested_dir.resolve())
 
             initialized = tapl_db.initialize_workspace(workspace)
 
             self.assertEqual(initialized["workspace_root"], str(workspace.resolve()))
             self.assertEqual(initialized["db_action"], "created")
-            self.assertEqual(tapl_db.find_workspace_root(nested_dir), workspace.resolve())
-            self.assertEqual(tapl_db.find_repo_root(nested_dir), workspace.resolve())
+            self.assertIsNone(tapl_db.find_workspace_root(nested_dir))
+            self.assertEqual(tapl_db.find_repo_root(nested_dir), nested_dir.resolve())
+            self.assertEqual(
+                tapl_db.default_db_path(nested_dir),
+                nested_dir.resolve() / tapl_db.DEFAULT_DB_RELATIVE,
+            )
             self.assertTrue((workspace / tapl_db.DEFAULT_DB_RELATIVE).is_file())
 
-    def test_nearest_workspace_db_takes_priority(self) -> None:
+            child = tapl_db.initialize_workspace(nested_dir)
+            self.assertEqual(child["workspace_root"], str(nested_dir.resolve()))
+            self.assertEqual(tapl_db.find_workspace_root(nested_dir), nested_dir.resolve())
+
+    def test_selected_folder_database_takes_priority_over_parent_and_sibling(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
             child_repo = workspace / "child"
@@ -545,10 +553,16 @@ class TaplRuntimeTests(unittest.TestCase):
             tapl_db.initialize_workspace(workspace)
             tapl_db.initialize_workspace(child_repo)
 
+            sibling = workspace / "sibling"
+            sibling.mkdir()
+            tapl_db.initialize_workspace(sibling)
+
             self.assertEqual(
                 tapl_db.default_db_path(child_repo),
                 child_repo.resolve() / tapl_db.DEFAULT_DB_RELATIVE,
             )
+            self.assertEqual(tapl_db.find_workspace_root(child_repo), child_repo.resolve())
+            self.assertEqual(tapl_db.find_workspace_root(sibling), sibling.resolve())
 
     def test_init_workspace_root_is_explicit_and_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2795,7 +2809,12 @@ keep = true
                     self.assertEqual(settings.search.max_results, 7)
                     self.assertEqual(tapl_install.installed_version(repo / ".tapl" / "version"), __version__)
                     if marker != __version__:
-                        config_result = next(entry for entry in results[0]["files"] if entry["path"] == str(repo_config))
+                        config_result = next(
+                            entry
+                            for result in results
+                            for entry in result["files"]
+                            if Path(entry["path"]).resolve() == repo_config.resolve()
+                        )
                         self.assertEqual(config_result["action"], "skipped_missing")
                     else:
                         self.assertEqual(results, [])
