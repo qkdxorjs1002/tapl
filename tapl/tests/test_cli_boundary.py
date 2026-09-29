@@ -19,6 +19,7 @@ MANAGEMENT_COMMANDS = {
     "doctor",
     "update",
     "install",
+    "uninstall",
     "viewer",
     "reindex",
     "searchd",
@@ -53,6 +54,74 @@ class PublicCliBoundaryTests(unittest.TestCase):
 
         self.assertEqual(args.command, "config")
         self.assertTrue(cli.should_skip_auto_install(args))
+
+    def test_uninstall_requires_an_explicit_scope(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            cli.build_parser().parse_args(["uninstall"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_uninstall_cli_preserves_data_then_purges_with_all_output_formats(self) -> None:
+        for scope in ("user", "repo"):
+            with self.subTest(scope=scope), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                if scope == "user":
+                    install.install_user(codex_home=root / ".codex", taplctl_command="taplctl")
+                    target_args = ["--codex-home", str(root / ".codex")]
+                else:
+                    install.install_repo(repo=root, taplctl_command="taplctl")
+                    target_args = ["--repo", str(root)]
+                db_path = root / ".tapl" / "tapl.db"
+                if not db_path.exists():
+                    db_path.write_bytes(b"preserve user database")
+                before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+                arguments = ["uninstall", scope, *target_args]
+                with mock.patch.object(install, "auto_install_if_needed") as auto_install:
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        result = cli.main([*arguments, "--purge", "--dry-run", "--json"])
+                    self.assertEqual(result, 0)
+                    payload = json.loads(output.getvalue())
+                    self.assertEqual(payload["uninstall"], scope)
+                    self.assertTrue(payload["purge"])
+                    self.assertTrue(payload["dry_run"])
+                    self.assertIn("would_removed", {item["action"] for item in payload["files"]})
+                    self.assertEqual(
+                        {path: path.read_bytes() for path in root.rglob("*") if path.is_file()},
+                        before,
+                    )
+
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        result = cli.main([*arguments, "--agent"])
+                    self.assertEqual(result, 0)
+                    self.assertIn(f"<uninstall>{scope}</uninstall>", output.getvalue())
+                    self.assertFalse((root / ".tapl" / "version").exists())
+                    self.assertEqual(db_path.read_bytes(), before[db_path])
+                    config_path = root / ".tapl" / "config.toml"
+                    self.assertEqual(config_path.read_bytes(), before[config_path])
+
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        result = cli.main([*arguments, "--purge"])
+                    self.assertEqual(result, 0)
+                    self.assertIn(f"tapl uninstall {scope}:", output.getvalue())
+                    self.assertIn(f"removed: {db_path}", output.getvalue())
+                    self.assertFalse(db_path.exists())
+                    self.assertFalse(config_path.exists())
+                    auto_install.assert_not_called()
+
+    def test_uninstall_cli_reports_invalid_configuration_without_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_home = Path(tmp) / ".codex"
+            codex_home.mkdir()
+            hooks_path = codex_home / "hooks.json"
+            hooks_path.write_text("{invalid", encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = cli.main(["uninstall", "user", "--codex-home", str(codex_home), "--json"])
+            self.assertEqual(result, 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+            self.assertEqual(hooks_path.read_text(encoding="utf-8"), "{invalid")
 
     def test_config_help_lists_keys_value_formats_allowed_values_and_examples(self) -> None:
         parser = cli.build_parser()

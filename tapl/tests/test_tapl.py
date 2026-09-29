@@ -2867,15 +2867,22 @@ keep = true
                 repo.mkdir()
                 user_evidence = add_install_evidence(home, evidence)
                 repo_evidence = add_install_evidence(repo, evidence)
+                user_evidence_before = user_evidence.read_bytes()
                 repo_evidence_before = repo_evidence.read_bytes()
 
                 results = tapl_install.auto_install_if_needed(start=repo, home=home)
 
-                self.assertEqual([result["install"] for result in results], ["user"])
                 self.assertEqual(
-                    (home / ".tapl" / "version").read_text(encoding="utf-8").strip(),
-                    __version__,
+                    [result["install"] for result in results],
+                    ["user"] if evidence == "version" else [],
                 )
+                if evidence == "version":
+                    self.assertEqual(
+                        (home / ".tapl" / "version").read_text(encoding="utf-8").strip(),
+                        __version__,
+                    )
+                else:
+                    self.assertEqual(user_evidence.read_bytes(), user_evidence_before)
                 self.assertTrue(user_evidence.exists())
                 self.assertEqual(repo_evidence.read_bytes(), repo_evidence_before)
                 self.assertFalse((repo / tapl_db.DEFAULT_DB_RELATIVE).exists())

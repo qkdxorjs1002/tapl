@@ -145,7 +145,8 @@ Restart Codex afterward, then trust the installed hook when first prompted.
 
 With a user installation, Codex initializes the session working folder's TAPL
 database without creating local `.tapl/config.toml` or `.tapl/version` files. Automatic repository
-refresh requires an existing database and `.tapl/version`; leftover hooks or a
+refresh requires an existing database and `.tapl/version`; automatic user refresh
+also requires `~/.tapl/version`. Leftover hooks or a
 config override alone do not trigger installation. A missing local config keeps
 inheriting user settings or defaults. Run `taplctl install repo` explicitly to
 restore missing repository installation files. The installer also removes an old
@@ -285,6 +286,36 @@ runtime config policy explicitly. Explicit `merge` and `overwrite` apply even
 when reinstalling the same version. The default `prompt` policy preserves an
 existing same-version config without prompting. `merge` keeps existing values
 and adds missing defaults; `overwrite` replaces the runtime config with defaults.
+
+Remove TAPL's Codex integration with the matching scope:
+
+```sh
+taplctl uninstall user
+taplctl uninstall repo --repo /path/to/repository
+```
+
+Uninstall removes TAPL's MCP entry, recognized TAPL hooks, and the scope's
+installation version marker. It keeps other Codex settings and hooks, TAPL
+configuration, and workflow data. Preserved settings do not trigger automatic
+reinstallation; run `taplctl install user` or `taplctl install repo` to reconnect.
+Restart Codex after changing its integration. These commands leave the installed
+program and background services in place; manage those through your package manager.
+
+Add `--purge` to also delete the selected scope's `.tapl/config.toml`,
+`.tapl/tapl.db`, and SQLite `-wal`, `-shm`, and `-journal` files. Close sessions
+using that scope before purging. Backups, other files, and other workspaces are
+preserved. `user` targets the home directory containing `--codex-home` (default
+`~/.codex`); `repo` targets `--repo` or the current directory.
+
+```sh
+taplctl uninstall user --purge --dry-run
+taplctl uninstall user --purge
+```
+
+`--dry-run` previews changes without writing or deleting files. Both scopes also
+support `--json` and `--agent` output. Malformed configuration files, a symlinked
+repository root, and symlinks inside the selected installation scope are rejected
+before changes begin.
 
 Edit runtime values without hand-editing TOML:
 

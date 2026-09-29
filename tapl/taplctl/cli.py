@@ -27,6 +27,7 @@ from . import (
     viewer,
 )
 from . import install as tapl_install
+from . import uninstall as tapl_uninstall
 
 
 JSON_HELP = "Print JSON output."
@@ -91,7 +92,7 @@ def should_skip_auto_install(args: argparse.Namespace) -> bool:
     command = getattr(args, "command", None)
     if args.db is not None or args.config is not None:
         return True
-    if command in {None, "config", "init", "install", "update", "viewer"}:
+    if command in {None, "config", "init", "install", "uninstall", "update", "viewer"}:
         return True
     return command == "searchd" and getattr(args, "searchd_command", None) == "run"
 
@@ -150,6 +151,19 @@ def build_parser() -> argparse.ArgumentParser:
     install_repo.add_argument("--repo", type=Path, default=None)
     add_install_common_args(install_repo)
     install_repo.set_defaults(handler=cmd_install_repo)
+
+    uninstall = sub.add_parser(
+        "uninstall", help="Remove TAPL's Codex integration, keeping settings and data by default."
+    )
+    uninstall_sub = uninstall.add_subparsers(dest="uninstall_command", required=True)
+    uninstall_user = uninstall_sub.add_parser("user", help="Remove user-global TAPL integration.")
+    uninstall_user.add_argument("--codex-home", type=Path, default=None)
+    add_uninstall_common_args(uninstall_user)
+    uninstall_user.set_defaults(handler=cmd_uninstall_user)
+    uninstall_repo = uninstall_sub.add_parser("repo", help="Remove TAPL integration in one repository.")
+    uninstall_repo.add_argument("--repo", type=Path, default=None)
+    add_uninstall_common_args(uninstall_repo)
+    uninstall_repo.set_defaults(handler=cmd_uninstall_repo)
 
     config_cmd = sub.add_parser(
         "config",
@@ -334,6 +348,15 @@ def add_install_common_args(parser: argparse.ArgumentParser) -> None:
     add_agent_output_args(parser)
 
 
+def add_uninstall_common_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--purge", action="store_true",
+        help="Also delete this scope's TAPL config and database, including SQLite sidecar files.",
+    )
+    add_dry_run_arg(parser)
+    add_agent_output_args(parser)
+
+
 def positive_int_arg(value: str) -> int:
     try:
         parsed = int(value)
@@ -471,6 +494,22 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
         force=args.force,
         dry_run=args.dry_run,
         tapl_config_policy=args.tapl_config_policy,
+    )
+    emit(payload, args.json, args.agent)
+    return 0
+
+
+def cmd_uninstall_user(args: argparse.Namespace) -> int:
+    payload = tapl_uninstall.uninstall_user(
+        codex_home=args.codex_home, purge=args.purge, dry_run=args.dry_run,
+    )
+    emit(payload, args.json, args.agent)
+    return 0
+
+
+def cmd_uninstall_repo(args: argparse.Namespace) -> int:
+    payload = tapl_uninstall.uninstall_repo(
+        repo=args.repo, purge=args.purge, dry_run=args.dry_run,
     )
     emit(payload, args.json, args.agent)
     return 0
@@ -618,6 +657,10 @@ def humanize(payload: dict[str, Any]) -> str:
         return f"tapl db: {payload['db']}"
     if "install" in payload:
         lines = [f"tapl install {payload['install']}: {payload.get('repo') or payload.get('codex_home')}"]
+        lines.extend(f"{item['action']}: {item['path']}" for item in payload.get("files", []))
+        return "\n".join(lines)
+    if "uninstall" in payload:
+        lines = [f"tapl uninstall {payload['uninstall']}: {payload.get('repo') or payload.get('codex_home')}"]
         lines.extend(f"{item['action']}: {item['path']}" for item in payload.get("files", []))
         return "\n".join(lines)
     if "config_action" in payload:

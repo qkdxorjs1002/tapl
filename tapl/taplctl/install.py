@@ -228,11 +228,9 @@ def repo_scope_needs_install(root: Path) -> bool:
 
 
 def scope_has_user_install(home: Path) -> bool:
-    return (
-        (home / VERSION_RELATIVE).exists()
-        or config.user_config_path(home).exists()
-        or hooks_file_has_tapl_command(home / ".codex" / "hooks.json")
-    )
+    # Preserved settings after uninstall must not reactivate the integration.
+    # Only explicit installation creates the marker used for automatic refresh.
+    return (home / VERSION_RELATIVE).is_file()
 
 
 def scope_has_repo_install(root: Path) -> bool:
