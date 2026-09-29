@@ -281,7 +281,10 @@ and `.codex/config.toml` is TOML-merged with existing user values taking
 precedence. Runtime config is created on first install; upgrades can prompt to
 overwrite defaults or merge missing keys. Use `--force` for TAPL-managed template
 values to win, or `--tapl-config-policy {prompt,overwrite,merge}` to select the
-runtime config policy explicitly.
+runtime config policy explicitly. Explicit `merge` and `overwrite` apply even
+when reinstalling the same version. The default `prompt` policy preserves an
+existing same-version config without prompting. `merge` keeps existing values
+and adds missing defaults; `overwrite` replaces the runtime config with defaults.
 
 Edit runtime values without hand-editing TOML:
 

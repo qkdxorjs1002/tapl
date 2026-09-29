@@ -324,7 +324,10 @@ def add_install_common_args(parser: argparse.ArgumentParser) -> None:
         "--tapl-config-policy",
         choices=tapl_install.TAPL_CONFIG_POLICIES,
         default=tapl_install.TAPL_CONFIG_POLICY_PROMPT,
-        help="How to handle existing TAPL config when the installed version changes.",
+        help=(
+            "How to handle existing TAPL config. Explicit merge/overwrite applies "
+            "even at the same version; prompt asks only when the version changes."
+        ),
     )
     parser.add_argument("--force", action="store_true", help="Overwrite managed templates and config.")
     add_dry_run_arg(parser)

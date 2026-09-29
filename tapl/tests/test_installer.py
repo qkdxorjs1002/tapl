@@ -12,6 +12,7 @@ import tomllib
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +27,83 @@ from taplctl import install as tapl_install
 
 
 class TaplConfigMergeTests(unittest.TestCase):
+    def test_same_version_install_honors_explicit_config_policy(self) -> None:
+        original = (
+            "# user settings\n[search]\nmax_results = 3\n\n"
+            '[subagents]\nsetup_complete = true\nstrategy = "balanced"\n'
+            'preference = "quality"\n\n[subagents.models]\n'
+            '"user-model" = ["high"]\n\n[user]\nkeep = true\n'
+        )
+        template = tapl_install.default_config_text()
+        for scope in ("user", "repo"):
+            for policy in ("merge", "overwrite"):
+                for dry_run in (False, True):
+                    with self.subTest(scope=scope, policy=policy, dry_run=dry_run):
+                        with tempfile.TemporaryDirectory() as tmp:
+                            root = Path(tmp).resolve()
+                            config_path = root / ".tapl" / "config.toml"
+                            config_path.parent.mkdir()
+                            config_path.write_text(original, encoding="utf-8")
+                            version_path = config_path.parent / "version"
+                            version_path.write_text(tapl_install.__version__ + "\n")
+                            install = getattr(tapl_install, f"install_{scope}")
+                            target = (
+                                {"codex_home": root / ".codex"}
+                                if scope == "user" else {"repo": root}
+                            )
+                            with mock.patch.object(
+                                tapl_install, "prompt_tapl_config_policy"
+                            ) as prompt:
+                                result = install(
+                                    **target,
+                                    taplctl_command="taplctl",
+                                    tapl_config_policy=policy,
+                                    dry_run=dry_run,
+                                )
+                            prompt.assert_not_called()
+                            entry = next(
+                                item for item in result["files"]
+                                if item["path"] == str(config_path)
+                            )
+                            action = "merged" if policy == "merge" else "updated"
+                            self.assertEqual(
+                                entry["action"], f"would_{action}" if dry_run else action
+                            )
+                            self.assertEqual(entry["policy"], policy)
+                            text = config_path.read_text(encoding="utf-8")
+                            if dry_run:
+                                self.assertEqual(text, original)
+                                self.assertFalse((root / ".codex").exists())
+                                self.assertFalse((root / ".tapl" / "tapl.db").exists())
+                            elif policy == "overwrite":
+                                self.assertEqual(text, template)
+                            else:
+                                parsed = tomllib.loads(text)
+                                self.assertEqual(parsed["search"]["max_results"], 3)
+                                for key, value in tomllib.loads(original)["subagents"].items():
+                                    self.assertEqual(parsed["subagents"][key], value)
+                                self.assertTrue(parsed["user"]["keep"])
+                                self.assertTrue(parsed["recall"]["enabled"])
+                                self.assertIn("# user settings", text)
+
+    def test_same_version_default_policy_preserves_existing_config(self) -> None:
+        original = "[search]\nmax_results = 3\n"
+        for scope in ("user", "repo"):
+            with self.subTest(scope=scope), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                config_path = root / ".tapl" / "config.toml"
+                config_path.parent.mkdir()
+                config_path.write_text(original, encoding="utf-8")
+                (config_path.parent / "version").write_text(tapl_install.__version__ + "\n")
+                install = getattr(tapl_install, f"install_{scope}")
+                target = {"codex_home": root / ".codex"} if scope == "user" else {"repo": root}
+                with mock.patch.object(tapl_install, "prompt_tapl_config_policy") as prompt:
+                    result = install(**target, taplctl_command="taplctl")
+                prompt.assert_not_called()
+                entry = next(item for item in result["files"] if item["path"] == str(config_path))
+                self.assertEqual(entry["action"], "skipped")
+                self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+
     def test_legacy_subagent_choices_do_not_receive_incomplete_setup(self) -> None:
         cases = (
             "[subagents]\nenabled = false\n",

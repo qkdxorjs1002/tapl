@@ -488,7 +488,7 @@ def write_tapl_config(
     if existing_text == template:
         return {"path": str(path), "action": "unchanged"}
 
-    if previous_version == __version__:
+    if previous_version == __version__ and tapl_config_policy == TAPL_CONFIG_POLICY_PROMPT:
         if remove_toml_assignments(existing_text, DEPRECATED_TAPL_CONFIG_PATHS) != existing_text:
             result = merge_tapl_config(path, template, dry_run=dry_run)
             result["policy"] = TAPL_CONFIG_POLICY_MERGE
