@@ -301,21 +301,44 @@ reinstallation; run `taplctl install user` or `taplctl install repo` to reconnec
 Restart Codex after changing its integration. These commands leave the installed
 program and background services in place; manage those through your package manager.
 
-Add `--purge` to also delete the selected scope's `.tapl/config.toml`,
-`.tapl/tapl.db`, and SQLite `-wal`, `-shm`, and `-journal` files. Close sessions
-using that scope before purging. Backups, other files, and other workspaces are
+Add `--purge-config` to also delete the selected scope's `.tapl/config.toml`.
+Use `--purge-db` to delete `.tapl/tapl.db` and its SQLite `-wal`, `-shm`, and
+`-journal` files. Each option preserves the other category; combine them to delete
+both. Close sessions using that scope before deleting its database.
+Backups, other files, and other workspaces are
 preserved. `user` targets the home directory containing `--codex-home` (default
 `~/.codex`); `repo` targets `--repo` or the current directory.
 
 ```sh
-taplctl uninstall user --purge --dry-run
-taplctl uninstall user --purge
+taplctl uninstall user --purge-config
+taplctl uninstall user --purge-db
+taplctl uninstall user --purge-config --purge-db --dry-run
 ```
 
 `--dry-run` previews changes without writing or deleting files. Both scopes also
 support `--json` and `--agent` output. Malformed configuration files, a symlinked
 repository root, and symlinks inside the selected installation scope are rejected
 before changes begin.
+
+Read effective settings, including defaults, without changing any files:
+
+```sh
+taplctl config get
+taplctl config get search
+taplctl config get search.mode
+taplctl config get subagents.models.gpt-5.6-sol
+taplctl --config /path/to/config.toml config get search.mode --json
+```
+
+`get` follows the same file precedence as `set` and `unset`: an explicit
+`--config` path, then the current folder's config, then the user config.
+If the selected file does not exist, it returns runtime defaults without creating
+it. Omitting `KEY` returns all effective settings; a section or individual key
+returns that value. Strings print directly; other values use JSON. `--json`
+includes the source path, whether the file exists, the key, and its value.
+`--agent` retains the value as JSON in its `<value format="json">` element,
+including empty values and `null` for an unset model catalog. Unknown keys and
+invalid configuration files fail with a nonzero exit code.
 
 Edit runtime values without hand-editing TOML:
 

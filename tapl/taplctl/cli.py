@@ -167,15 +167,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     config_cmd = sub.add_parser(
         "config",
-        help="Edit TAPL's TOML configuration.",
+        help="Read or edit TAPL's configuration.",
         description=(
-            "Set or unset supported .tapl/config.toml values without rewriting "
-            "comments or unrelated settings."
+            "Read effective settings, or set and unset supported .tapl/config.toml "
+            "values without rewriting comments or unrelated settings."
         ),
         epilog=config_key_help(),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
+    config_get = config_sub.add_parser(
+        "get",
+        help="Read effective settings, including runtime defaults.",
+        description=(
+            "Read one effective setting or section, or all settings when KEY is omitted. "
+            "Uses the same file precedence as config set; never writes files."
+        ),
+    )
+    config_get.add_argument("key", metavar="KEY", nargs="?", help="Optional dot-separated setting or section.")
+    add_agent_output_args(config_get)
+    config_get.set_defaults(handler=cmd_config_get)
     config_set = config_sub.add_parser(
         "set",
         help="Set a supported configuration value.",
@@ -308,6 +319,8 @@ def config_key_help(*, include_examples: bool = False) -> str:
             (
                 "",
                 "Examples:",
+                "  taplctl config get",
+                "  taplctl config get search.mode",
                 "  taplctl config set search.mode hybrid",
                 "  taplctl config set viewer.allowed_origins '[\"https://tapl.example.com\"]'",
                 "  taplctl config set subagents.models.chosen-model '[\"high\", \"xhigh\"]'",
@@ -350,8 +363,12 @@ def add_install_common_args(parser: argparse.ArgumentParser) -> None:
 
 def add_uninstall_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--purge", action="store_true",
-        help="Also delete this scope's TAPL config and database, including SQLite sidecar files.",
+        "--purge-config", action="store_true",
+        help="Also delete this scope's TAPL config.toml.",
+    )
+    parser.add_argument(
+        "--purge-db", action="store_true",
+        help="Also delete this scope's TAPL database and SQLite sidecar files.",
     )
     add_dry_run_arg(parser)
     add_agent_output_args(parser)
@@ -501,7 +518,8 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
 
 def cmd_uninstall_user(args: argparse.Namespace) -> int:
     payload = tapl_uninstall.uninstall_user(
-        codex_home=args.codex_home, purge=args.purge, dry_run=args.dry_run,
+        codex_home=args.codex_home,
+        purge_config=args.purge_config, purge_db=args.purge_db, dry_run=args.dry_run,
     )
     emit(payload, args.json, args.agent)
     return 0
@@ -509,9 +527,45 @@ def cmd_uninstall_user(args: argparse.Namespace) -> int:
 
 def cmd_uninstall_repo(args: argparse.Namespace) -> int:
     payload = tapl_uninstall.uninstall_repo(
-        repo=args.repo, purge=args.purge, dry_run=args.dry_run,
+        repo=args.repo, purge_config=args.purge_config, purge_db=args.purge_db, dry_run=args.dry_run,
     )
     emit(payload, args.json, args.agent)
+    return 0
+
+
+def cmd_config_get(args: argparse.Namespace) -> int:
+    settings = load_config(args)
+    values = settings.as_dict()
+    path = values.pop("path")
+    exists = values.pop("exists")
+    # Shared runtime summaries omit these optional empty fields; a value lookup
+    # must distinguish an empty setting from an unknown key.
+    values["subagents"].setdefault("profiles", [])
+    values["subagents"].setdefault("available_models", None)
+    value: Any = values
+    if args.key is not None:
+        if not args.key or args.key != args.key.strip():
+            raise ValueError("config key must be a non-empty dot-separated key")
+        remaining = args.key
+        while isinstance(value, dict):
+            # Model IDs can contain dots, so prefer an exact remaining key.
+            if remaining in value:
+                value = value[remaining]
+                break
+            head, separator, remaining = remaining.partition(".")
+            if not separator or head not in value:
+                raise ValueError(f"unknown config key: {args.key}")
+            value = value[head]
+        else:
+            raise ValueError(f"unknown config key: {args.key}")
+    emit(
+        {
+            "ok": True, "config_action": "get", "path": path, "exists": exists,
+            "key": args.key, "value": value,
+        },
+        args.json,
+        args.agent,
+    )
     return 0
 
 
@@ -664,6 +718,9 @@ def humanize(payload: dict[str, Any]) -> str:
         lines.extend(f"{item['action']}: {item['path']}" for item in payload.get("files", []))
         return "\n".join(lines)
     if "config_action" in payload:
+        if payload["config_action"] == "get":
+            value = payload["value"]
+            return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
         state = "updated" if payload.get("changed") else "unchanged"
         return (
             f"config {payload['config_action']} {payload.get('key')}: {state} "
@@ -684,7 +741,12 @@ def agent_error(message: str) -> str:
 def agent_output(payload: dict[str, Any], root_tag: str = "tapl_output") -> str:
     lines = [f"<{root_tag}>"]
     for key, value in payload.items():
-        append_agent_node(lines, 1, key, value)
+        if payload.get("config_action") == "get" and key == "value":
+            # Keep empty/null values and exact model keys losslessly in get output.
+            rendered = agent_escape(json.dumps(value, ensure_ascii=False))
+            lines.append(f'  <value format="json">{rendered}</value>')
+        else:
+            append_agent_node(lines, 1, key, value)
     lines.append(f"</{root_tag}>")
     return "\n".join(lines)
 

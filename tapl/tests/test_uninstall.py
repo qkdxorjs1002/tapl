@@ -115,7 +115,8 @@ class UninstallTests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["uninstall"], "user")
             self.assertEqual(Path(payload["codex_home"]), codex_home.resolve())
-            self.assertFalse(payload["purge"])
+            self.assertFalse(payload["purge_config"])
+            self.assertFalse(payload["purge_db"])
             self.assertFalse(payload["dry_run"])
             self.assertEqual(file_result(payload, codex_home / "hooks.json")["action"], "updated")
             self.assertEqual(file_result(payload, codex_home / "config.toml")["action"], "updated")
@@ -255,14 +256,15 @@ other = { value = 3 }
 
                 if scope_name == "user":
                     payload = uninstall.uninstall_user(
-                        codex_home=codex_home, purge=True, dry_run=True
+                        codex_home=codex_home, purge_config=True, purge_db=True, dry_run=True
                     )
                 else:
                     payload = uninstall.uninstall_repo(
-                        repo=scope, purge=True, dry_run=True
+                        repo=scope, purge_config=True, purge_db=True, dry_run=True
                     )
 
-                self.assertTrue(payload["purge"])
+                self.assertTrue(payload["purge_config"])
+                self.assertTrue(payload["purge_db"])
                 self.assertTrue(payload["dry_run"])
                 self.assertEqual(file_state(scope), before)
                 self.assertEqual(
@@ -300,11 +302,12 @@ other = { value = 3 }
                 other_before = file_state(other_scope)
 
                 if scope_name == "user":
-                    payload = uninstall.uninstall_user(codex_home=codex_home, purge=True)
+                    payload = uninstall.uninstall_user(codex_home=codex_home, purge_config=True, purge_db=True)
                 else:
-                    payload = uninstall.uninstall_repo(repo=scope, purge=True)
+                    payload = uninstall.uninstall_repo(repo=scope, purge_config=True, purge_db=True)
 
-                self.assertTrue(payload["purge"])
+                self.assertTrue(payload["purge_config"])
+                self.assertTrue(payload["purge_db"])
                 for name in (
                     "version",
                     "config.toml",
@@ -324,9 +327,9 @@ other = { value = 3 }
             home = Path(tmp) / "home"
             codex_home, tapl_home = install_fixture(home)
 
-            uninstall.uninstall_user(codex_home=codex_home, purge=True)
+            uninstall.uninstall_user(codex_home=codex_home, purge_config=True, purge_db=True)
             after_first = file_state(home)
-            second = uninstall.uninstall_user(codex_home=codex_home, purge=True)
+            second = uninstall.uninstall_user(codex_home=codex_home, purge_config=True, purge_db=True)
 
             self.assertTrue(second["ok"])
             self.assertEqual(file_state(home), after_first)
@@ -434,7 +437,7 @@ other = { value = 3 }
                 before = file_state(base)
 
                 with self.assertRaises(ValueError):
-                    uninstall.uninstall_repo(repo=selected, purge=True, dry_run=dry_run)
+                    uninstall.uninstall_repo(repo=selected, purge_config=True, purge_db=True, dry_run=dry_run)
 
                 self.assertEqual(file_state(base), before)
 

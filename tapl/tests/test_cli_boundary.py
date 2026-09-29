@@ -78,11 +78,12 @@ class PublicCliBoundaryTests(unittest.TestCase):
                 with mock.patch.object(install, "auto_install_if_needed") as auto_install:
                     output = io.StringIO()
                     with contextlib.redirect_stdout(output):
-                        result = cli.main([*arguments, "--purge", "--dry-run", "--json"])
+                        result = cli.main([*arguments, "--purge-config", "--purge-db", "--dry-run", "--json"])
                     self.assertEqual(result, 0)
                     payload = json.loads(output.getvalue())
                     self.assertEqual(payload["uninstall"], scope)
-                    self.assertTrue(payload["purge"])
+                    self.assertTrue(payload["purge_config"])
+                    self.assertTrue(payload["purge_db"])
                     self.assertTrue(payload["dry_run"])
                     self.assertIn("would_removed", {item["action"] for item in payload["files"]})
                     self.assertEqual(
@@ -102,7 +103,7 @@ class PublicCliBoundaryTests(unittest.TestCase):
 
                     output = io.StringIO()
                     with contextlib.redirect_stdout(output):
-                        result = cli.main([*arguments, "--purge"])
+                        result = cli.main([*arguments, "--purge-config", "--purge-db"])
                     self.assertEqual(result, 0)
                     self.assertIn(f"tapl uninstall {scope}:", output.getvalue())
                     self.assertIn(f"removed: {db_path}", output.getvalue())
@@ -122,6 +123,59 @@ class PublicCliBoundaryTests(unittest.TestCase):
             self.assertEqual(result, 1)
             self.assertFalse(json.loads(output.getvalue())["ok"])
             self.assertEqual(hooks_path.read_text(encoding="utf-8"), "{invalid")
+
+    def test_uninstall_cli_deletes_config_and_database_independently(self) -> None:
+        for scope in ("user", "repo"):
+            for purge_config, purge_db in ((False, False), (True, False), (False, True), (True, True)):
+                for dry_run in (False, True):
+                    with self.subTest(scope=scope, config=purge_config, db=purge_db, dry_run=dry_run):
+                        with tempfile.TemporaryDirectory() as tmp:
+                            root = Path(tmp).resolve()
+                            state = root / ".tapl"
+                            state.mkdir()
+                            config_path = state / "config.toml"
+                            config_path.write_text('[search]\nmode = "word"\n')
+                            db_paths = [state / name for name in (
+                                "tapl.db", "tapl.db-wal", "tapl.db-shm", "tapl.db-journal",
+                            )]
+                            for path in db_paths:
+                                path.write_bytes(b"keep unless database selected")
+                            version = state / "version"
+                            version.write_text("0.0.0\n")
+                            arguments = ["uninstall", scope, "--json"]
+                            arguments.extend(
+                                ["--codex-home", str(root / ".codex")]
+                                if scope == "user" else ["--repo", str(root)]
+                            )
+                            if purge_config:
+                                arguments.append("--purge-config")
+                            if purge_db:
+                                arguments.append("--purge-db")
+                            if dry_run:
+                                arguments.append("--dry-run")
+                            before = {path: path.read_bytes() for path in state.iterdir()}
+                            output = io.StringIO()
+                            with contextlib.redirect_stdout(output):
+                                result = cli.main(arguments)
+                            self.assertEqual(result, 0)
+                            payload = json.loads(output.getvalue())
+                            self.assertEqual(payload["purge_config"], purge_config)
+                            self.assertEqual(payload["purge_db"], purge_db)
+                            self.assertNotIn("purge", payload)
+                            for path, content in before.items():
+                                deleted = not dry_run and (
+                                    path == version
+                                    or (purge_config and path == config_path)
+                                    or (purge_db and path in db_paths)
+                                )
+                                self.assertEqual(path.exists(), not deleted, str(path))
+                                if not deleted:
+                                    self.assertEqual(path.read_bytes(), content)
+
+    def test_uninstall_rejects_old_combined_purge_option(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            cli.build_parser().parse_args(["uninstall", "user", "--purge"])
+        self.assertEqual(raised.exception.code, 2)
 
     def test_config_help_lists_keys_value_formats_allowed_values_and_examples(self) -> None:
         parser = cli.build_parser()

@@ -15,11 +15,12 @@ from typing import Any
 from . import config_editor, install
 
 
-_PURGE_NAMES = ("config.toml", "tapl.db", "tapl.db-wal", "tapl.db-shm", "tapl.db-journal")
+_DB_NAMES = ("tapl.db", "tapl.db-wal", "tapl.db-shm", "tapl.db-journal")
 
 
 def uninstall_user(
-    *, codex_home: Path | None = None, purge: bool = False, dry_run: bool = False,
+    *, codex_home: Path | None = None, purge_config: bool = False,
+    purge_db: bool = False, dry_run: bool = False,
 ) -> dict[str, Any]:
     """Disable user integration, retaining settings and data unless purged."""
     selected = Path(os.path.abspath((codex_home or Path.home() / ".codex").expanduser()))
@@ -27,18 +28,24 @@ def uninstall_user(
     # .codex directory itself: a linked installation must not redirect edits.
     root = selected.parent.resolve()
     target = root / selected.name
-    return _uninstall(root, target, scope="user", purge=purge, dry_run=dry_run)
+    return _uninstall(
+        root, target, scope="user", purge_config=purge_config, purge_db=purge_db, dry_run=dry_run,
+    )
 
 
 def uninstall_repo(
-    *, repo: Path | None = None, purge: bool = False, dry_run: bool = False,
+    *, repo: Path | None = None, purge_config: bool = False,
+    purge_db: bool = False, dry_run: bool = False,
 ) -> dict[str, Any]:
     """Disable integration in this folder without searching parent workspaces."""
     selected = Path(os.path.abspath((repo if repo is not None else Path.cwd()).expanduser()))
     if selected.is_symlink():
         raise ValueError(f"refusing symlink in uninstall scope: {selected}")
     root = selected.resolve()
-    return _uninstall(root, root / ".codex", scope="repo", purge=purge, dry_run=dry_run)
+    return _uninstall(
+        root, root / ".codex", scope="repo",
+        purge_config=purge_config, purge_db=purge_db, dry_run=dry_run,
+    )
 
 
 def _validate_paths(root: Path, codex: Path, tapl: Path, paths: list[Path]) -> None:
@@ -72,14 +79,15 @@ def _parse_toml(text: str, path: Path) -> dict[str, Any]:
 
 
 def _uninstall(
-    root: Path, codex: Path, *, scope: str, purge: bool, dry_run: bool,
+    root: Path, codex: Path, *, scope: str, purge_config: bool, purge_db: bool, dry_run: bool,
 ) -> dict[str, Any]:
     tapl = root / ".tapl"
     hooks_path = codex / "hooks.json"
     codex_config = codex / "config.toml"
     version_path = tapl / "version"
-    purge_paths = [tapl / name for name in _PURGE_NAMES]
-    all_paths = [hooks_path, codex_config, version_path, *purge_paths]
+    config_path = tapl / "config.toml"
+    db_paths = [tapl / name for name in _DB_NAMES]
+    all_paths = [hooks_path, codex_config, version_path, config_path, *db_paths]
     _validate_paths(root, codex, tapl, all_paths)
 
     # Finish every read, parse and rendering check before the first mutation.
@@ -96,7 +104,11 @@ def _uninstall(
         _remove_hooks(original_hooks, hooks_path) if original_hooks is not None else None
     )
     updates = [(codex_config, original_config, updated_config), (hooks_path, original_hooks, updated_hooks)]
-    removals = [version_path, *(purge_paths if purge else [])]
+    removals = [version_path]
+    if purge_config:
+        removals.append(config_path)
+    if purge_db:
+        removals.extend(db_paths)
     files: list[dict[str, str]] = []
     for path, original, updated in updates:
         action = "missing" if original is None else "unchanged" if updated == original else "updated"
@@ -114,7 +126,8 @@ def _uninstall(
     return {
         "ok": True, "uninstall": scope,
         "codex_home" if scope == "user" else "repo": str(codex if scope == "user" else root),
-        "purge": purge, "dry_run": dry_run, "files": files,
+        "purge_config": purge_config, "purge_db": purge_db,
+        "dry_run": dry_run, "files": files,
     }
 
 
