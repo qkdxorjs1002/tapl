@@ -123,6 +123,16 @@ gets its own history even when a parent folder already has a TAPL database. You 
 not need to write workflow records by hand or learn another set of task-management
 commands.
 
+After the first installation, TAPL refreshes existing user/repo integrations at
+MCP startup and hook entry. It detects version and shipped-template changes,
+preserves your settings, adds new defaults, and migrates known obsolete keys.
+You do not need to repeat `taplctl install user` or `taplctl install repo` after
+updates. Uninstalled scopes stay disabled, and a missing repo config continues
+to inherit user settings. Restart Codex when changed host settings need reloading.
+
+During work, TAPL reports planning, execution, and verification with concise
+PLAN/TASK notices alongside the RUN classification.
+
 Using Linux, Windows, or another release channel? Choose an option below and
 follow its [Codex connection command](docs/guide.md#connect).
 

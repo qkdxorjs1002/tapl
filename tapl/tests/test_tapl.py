@@ -799,7 +799,7 @@ class TaplRuntimeTests(unittest.TestCase):
 
         # Includes memory, metadata and lossless compact reads.
         # This full policy loads once; repeated transport instructions stay <900.
-        self.assertLess(len(instructions), 12_500)
+        self.assertLess(len(instructions), 12_600)
         for guidance in (
             "Default to one RUN",
             "For independent topics use separate plan_ids (PLAN-001, PLAN-002, ...)",
@@ -820,7 +820,7 @@ class TaplRuntimeTests(unittest.TestCase):
                             subagents=tapl_config.SubagentsConfig(strategy=strategy, setup_complete=True)
                         )
                     ),
-                    12_500,
+                    12_600,
                 )
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",
@@ -1017,6 +1017,7 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
+            "Emit one commentary notice when entering PLAN planning, TASK execution, and TASK verification",
             "Never echo tool data or report each call",
             "On TAPL stage changes, emit at most one localized notice",
             "`<emoji> **<tapl-kind>** · <current activity>`",
@@ -2738,7 +2739,9 @@ keep = true
             self.assertEqual(config_result["policy"], "merge")
             self.assertEqual(config_result["reason"], "invalid_toml")
             self.assertEqual(config_path.read_text(encoding="utf-8"), "[search\n")
-            self.assertEqual((tapl_dir / "version").read_text(encoding="utf-8").strip(), __version__)
+            self.assertFalse(payload["ok"])
+            self.assertEqual((tapl_dir / "version").read_text(encoding="utf-8").strip(), "0.0.0")
+            self.assertFalse((tapl_dir / "install-state.json").exists())
 
     def test_auto_install_refreshes_stale_user_and_repo_scopes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

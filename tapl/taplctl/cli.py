@@ -62,8 +62,20 @@ _AGENT_LIST_ITEM_TAGS = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    # Old installed launchers must reach the native startup migration before
+    # their config can be rewritten to tapl-mcp/tapl-hook.
+    if arguments == ["mcp"]:
+        from . import mcp_server
+
+        mcp_server.main()
+        return 0
+    if arguments and arguments[0] == "hook-event":
+        from . import hook_cli
+
+        return hook_cli.main(arguments[1:])
     parser = build_parser()
-    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(arguments)
     if not hasattr(args, "handler"):
         parser.print_help()
         return 2
@@ -500,7 +512,7 @@ def cmd_install_user(args: argparse.Namespace) -> int:
         tapl_config_policy=args.tapl_config_policy,
     )
     emit(payload, args.json, args.agent)
-    return 0
+    return 0 if payload.get("ok", True) else 1
 
 
 def cmd_install_repo(args: argparse.Namespace) -> int:
@@ -513,7 +525,7 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
         tapl_config_policy=args.tapl_config_policy,
     )
     emit(payload, args.json, args.agent)
-    return 0
+    return 0 if payload.get("ok", True) else 1
 
 
 def cmd_uninstall_user(args: argparse.Namespace) -> int:
@@ -711,7 +723,10 @@ def humanize(payload: dict[str, Any]) -> str:
         return f"tapl db: {payload['db']}"
     if "install" in payload:
         lines = [f"tapl install {payload['install']}: {payload.get('repo') or payload.get('codex_home')}"]
-        lines.extend(f"{item['action']}: {item['path']}" for item in payload.get("files", []))
+        lines.extend(
+            f"{item['action']}: {item['path']}" + (f" ({item['error']})" if item.get("error") else "")
+            for item in payload.get("files", [])
+        )
         return "\n".join(lines)
     if "uninstall" in payload:
         lines = [f"tapl uninstall {payload['uninstall']}: {payload.get('repo') or payload.get('codex_home')}"]

@@ -129,6 +129,14 @@ TAPL이 Codex 세션 작업 폴더에 `.tapl/tapl.db`를 만들고, Codex가 MCP
 관리합니다. 상위 폴더에 TAPL DB가 있어도 하위 폴더는 자체 이력을 사용합니다.
 작업을 기록하기 위한 CLI 명령을 따로 익힐 필요는 없습니다.
 
+최초 설치 후에는 MCP 시작과 hook 진입 시 기존 user/repo 설치를 자동 갱신합니다.
+버전과 배포 템플릿의 변경을 감지해 사용자 설정값을 보존하면서 새 기본값을 추가하고,
+알려진 구형 설정을 마이그레이션합니다. 업데이트마다 `taplctl install user/repo`를
+다시 실행할 필요는 없습니다. 제거한 설치는 다시 활성화하지 않으며, repo 설정이 없으면
+사용자 설정 상속을 유지합니다. Codex가 변경된 연동 설정을 읽어야 할 때는 재시작합니다.
+
+작업 중에는 RUN 분류와 함께 계획·실행·검증 단계 진입을 짧은 PLAN/TASK 안내로 표시합니다.
+
 [Linux 설치](docs/guide.ko.md#linux)와 [Windows 설치](docs/guide.ko.md#windows)는 가이드를 참고하세요.
 설치 후 [운영체제별 Codex 연결 명령](docs/guide.ko.md#connect)을 실행합니다.
 

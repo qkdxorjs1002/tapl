@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from taplctl import cli, config, hook_cli, install
+from taplctl import cli, config, hook_cli, install, mcp_server
 
 
 MANAGEMENT_COMMANDS = {
@@ -47,6 +47,15 @@ class PublicCliBoundaryTests(unittest.TestCase):
         commands = root_commands(cli.build_parser())
         self.assertTrue({"status", "mcp", "hook-event", "recall", "update-memory", "delete-memory"}.isdisjoint(commands))
 
+    def test_legacy_launchers_delegate_to_native_startup_for_migration(self) -> None:
+        with mock.patch.object(mcp_server, "main") as native_mcp:
+            self.assertEqual(cli.main(["mcp"]), 0)
+        native_mcp.assert_called_once_with()
+        arguments = ["--event", "UserPromptSubmit", "--mode", "enforce"]
+        with mock.patch.object(hook_cli, "main", return_value=2) as native_hook:
+            self.assertEqual(cli.main(["hook-event", *arguments]), 2)
+        native_hook.assert_called_once_with(arguments)
+
     def test_config_command_is_management_only_and_skips_auto_install(self) -> None:
         args = cli.build_parser().parse_args(
             ["config", "set", "search.mode", "hybrid"]
@@ -54,6 +63,21 @@ class PublicCliBoundaryTests(unittest.TestCase):
 
         self.assertEqual(args.command, "config")
         self.assertTrue(cli.should_skip_auto_install(args))
+
+    def test_install_cli_reports_incomplete_migration_as_failure(self) -> None:
+        for scope in ("user", "repo"):
+            with self.subTest(scope=scope), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / ".tapl").mkdir()
+                (root / ".tapl/config.toml").write_text("[broken\n", encoding="utf-8")
+                (root / ".tapl/version").write_text("old\n", encoding="utf-8")
+                target = ["--codex-home", str(root / ".codex")] if scope == "user" else ["--repo", str(root)]
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    result = cli.main(["install", scope, *target, "--tapl-config-policy", "merge", "--json"])
+                self.assertEqual(result, 1)
+                self.assertFalse(json.loads(output.getvalue())["ok"])
+                self.assertEqual((root / ".tapl/version").read_text(encoding="utf-8"), "old\n")
 
     def test_uninstall_requires_an_explicit_scope(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:

@@ -1001,6 +1001,7 @@ def custom_fields_guidance() -> str:
 
 def mcp_tool_result_display_guidance() -> str:
     return (
+        "Emit one commentary notice when entering PLAN planning, TASK execution, and TASK verification. "
         "On TAPL stage changes, emit at most one localized notice (combine consecutive calls): "
         "`<emoji> **<tapl-kind>** · <current activity>`, e.g. `🧪 **TASK** · 전체 테스트 실행 중`. Use the TAPL workflow "
         "kind: **RUN**, **PLAN**, **TASK**, **HISTORY**, **FINDING**, **APPROVAL**, or **ARCHIVE**. Normal notices: one "

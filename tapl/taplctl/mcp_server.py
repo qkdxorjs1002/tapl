@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -11,7 +12,7 @@ from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import __version__, db, prompt as tapl_prompt
+from . import __version__, db, install as tapl_install, prompt as tapl_prompt
 from .application import WorkflowApplication
 
 
@@ -376,10 +377,13 @@ def create_server(
     *,
     workspace_root: Path | None = None,
     instructions: str | None = None,
+    refresh_install: bool = False,
 ) -> MCPServer[None]:
     """Create a workspace-bound stdio MCP server."""
 
     root = resolve_workspace_root(workspace_root)
+    if refresh_install:
+        tapl_install.auto_install_if_needed(start=root)
     application = WorkflowApplication(root)
     server_instructions = instructions
     if server_instructions is None:
@@ -896,7 +900,11 @@ def create_server(
 def main() -> None:
     """Run the local TAPL MCP server over stdio."""
 
-    create_server().run()
+    try:
+        create_server(refresh_install=True).run()
+    except Exception as exc:
+        print(f"tapl-mcp startup failed: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

@@ -101,7 +101,7 @@ def _handle_hook(args: argparse.Namespace) -> int:
     workspace: dict[str, Any] | None = None
     if args.db is None and args.config is None:
         start, workspace = _initialize_workspace(start)
-        tapl_install.auto_install_if_needed(start=start)
+        tapl_install.auto_install_if_needed(start=start, mode=args.mode)
 
     settings = tapl_config.load(args.config, start=start)
     conn = db.connect(db_path)

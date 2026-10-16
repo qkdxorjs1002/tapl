@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import re
 import shlex
@@ -13,11 +15,14 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from . import __version__, config, db
+from . import __version__, config, config_editor, db
 
 
 DEFAULT_HOOK_MODE = "observe"
 VERSION_RELATIVE = Path(".tapl") / "version"
+INSTALL_STATE_RELATIVE = Path(".tapl") / "install-state.json"
+# Bump when migration behavior changes without a template change.
+INSTALL_MIGRATION_REVISION = 1
 TAPL_CONFIG_POLICY_PROMPT = "prompt"
 TAPL_CONFIG_POLICY_OVERWRITE = "overwrite"
 TAPL_CONFIG_POLICY_MERGE = "merge"
@@ -103,10 +108,10 @@ def install_user(
             previous_version=previous_version,
             tapl_config_policy=tapl_config_policy,
         ),
-        write_version_marker(version_path, dry_run=dry_run),
     ]
+    completed = finish_install(version_path, files, dry_run=dry_run)
     return {
-        "ok": True,
+        "ok": completed,
         "install": "user",
         "codex_home": str(target),
         "tapl_config": str(tapl_config_path),
@@ -158,11 +163,11 @@ def install_repo(
             if create_missing_config or config_path.exists()
             else {"path": str(config_path), "action": "skipped_missing"}
         ),
-        write_version_marker(version_path, dry_run=dry_run),
         initialize_db(db_path, dry_run=dry_run),
     ]
+    completed = finish_install(version_path, files, dry_run=dry_run)
     return {
-        "ok": True,
+        "ok": completed,
         "install": "repo",
         "repo": str(root),
         "taplctl_command": command,
@@ -182,28 +187,34 @@ def auto_install_if_needed(
     home: Path | None = None,
     tapl_config_policy: str = TAPL_CONFIG_POLICY_PROMPT,
 ) -> list[dict[str, Any]]:
-    """Refresh existing tapl installs whose version marker is stale."""
+    """Noninteractively migrate opted-in scopes when managed defaults change.
+
+    ``tapl_config_policy`` remains accepted for caller compatibility; automatic
+    refresh always merges, regardless of the explicit installation preference.
+    """
     results: list[dict[str, Any]] = []
     home_path = (home or Path.home()).expanduser()
 
     if user_scope_needs_install(home_path):
+        validate_refresh_configs(home_path)
         results.append(
             install_user(
                 codex_home=home_path / ".codex",
                 taplctl_command=taplctl_command,
-                mode=mode,
-                tapl_config_policy=tapl_config_policy,
+                mode=installed_hook_mode(home_path / ".codex" / "hooks.json", mode),
+                tapl_config_policy=TAPL_CONFIG_POLICY_MERGE,
             )
         )
 
     root = db.find_repo_root(start)
     if repo_scope_needs_install(root):
+        validate_refresh_configs(root)
         results.append(
             install_repo(
                 repo=root,
                 taplctl_command=taplctl_command,
-                mode=mode,
-                tapl_config_policy=tapl_config_policy,
+                mode=installed_hook_mode(root / ".codex" / "hooks.json", mode),
+                tapl_config_policy=TAPL_CONFIG_POLICY_MERGE,
                 # A missing local config intentionally inherits user settings.
                 create_missing_config=False,
             )
@@ -214,7 +225,7 @@ def auto_install_if_needed(
 
 def user_scope_needs_install(home: Path) -> bool:
     version_path = home / VERSION_RELATIVE
-    return scope_has_user_install(home) and installed_version(version_path) != __version__
+    return scope_has_user_install(home) and managed_install_is_stale(version_path)
 
 
 def repo_scope_needs_install(root: Path) -> bool:
@@ -223,8 +234,94 @@ def repo_scope_needs_install(root: Path) -> bool:
     return (
         db_path.is_file()
         and scope_has_repo_install(root)
-        and installed_version(version_path) != __version__
+        and managed_install_is_stale(version_path)
     )
+
+
+def managed_install_state() -> dict[str, Any]:
+    """Hash shipped inputs only; local preferences never cause refresh loops."""
+    inputs = {
+        "migration_revision": INSTALL_MIGRATION_REVISION,
+        "tapl_config": default_config_text(),
+        "codex_templates": {
+            str(path): codex_template_text(*path.parts)
+            for path in CODEX_STATIC_TEMPLATE_FILES
+        },
+        "hooks": build_hooks_config(taplctl_command="taplctl", mode=DEFAULT_HOOK_MODE),
+        "deprecated_codex_files": [str(path) for path in DEPRECATED_CODEX_TEMPLATE_FILES],
+        "deprecated_codex_paths": DEPRECATED_CODEX_CONFIG_PATHS,
+        "deprecated_tapl_paths": DEPRECATED_TAPL_CONFIG_PATHS,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return {"schema_version": 1, "version": __version__, "fingerprint": fingerprint}
+
+
+def managed_install_is_stale(version_path: Path) -> bool:
+    if installed_version(version_path) != __version__:
+        return True
+    try:
+        state = read_json(version_path.parent / INSTALL_STATE_RELATIVE.name)
+    except (ValueError, UnicodeError):
+        return True
+    return state != managed_install_state()
+
+
+def finish_install(
+    version_path: Path, files: list[dict[str, str]], *, dry_run: bool,
+) -> bool:
+    """Commit completion markers only after all installation steps succeed."""
+    failed = [item for item in files if item.get("reason") == "invalid_toml"]
+    if failed:
+        for item in failed:
+            item["error"] = f"Repair invalid TOML in {item['path']} and retry TAPL installation."
+        return False
+    files.append(write_version_marker(version_path, dry_run=dry_run))
+    files.append(write_text_if_needed(
+        version_path.parent / INSTALL_STATE_RELATIVE.name,
+        json.dumps(managed_install_state(), sort_keys=True, indent=2) + "\n",
+        force=True, dry_run=dry_run,
+    ))
+    return True
+
+
+def validate_refresh_configs(root: Path) -> None:
+    # Parse every existing config before any automatic migration can write.
+    for path in (root / config.CONFIG_RELATIVE, root / ".codex" / "config.toml"):
+        if path.exists():
+            try:
+                tomllib.loads(path.read_text(encoding="utf-8"))
+            except (tomllib.TOMLDecodeError, UnicodeError) as exc:
+                raise ValueError(f"Cannot refresh TAPL: repair invalid TOML in {path}: {exc}") from exc
+    read_json(root / ".codex" / "hooks.json")
+
+
+def installed_hook_mode(path: Path, fallback: str) -> str:
+    """Keep an existing installation's enforce/observe choice on refresh."""
+    def find(value: Any) -> str | None:
+        if isinstance(value, dict):
+            if is_tapl_hook_command_entry(value):
+                try:
+                    args = shlex.split(value["command"])
+                except ValueError:
+                    args = []
+                for index, token in enumerate(args):
+                    candidate = (
+                        args[index + 1] if token == "--mode" and index + 1 < len(args)
+                        else token.removeprefix("--mode=") if token.startswith("--mode=")
+                        else None
+                    )
+                    if candidate in {"enforce", "observe"}:
+                        return candidate
+            values = value.values()
+        elif isinstance(value, list):
+            values = value
+        else:
+            return None
+        return next((mode for child in values if (mode := find(child)) is not None), None)
+
+    return find(read_json(path)) or fallback
 
 
 def scope_has_user_install(home: Path) -> bool:
@@ -368,7 +465,11 @@ def retarget_hooks_config(template: dict[str, Any], *, taplctl_command: str, mod
 
 
 def is_tapl_hook_command(command: str) -> bool:
-    return "tapl-hook" in command or ("taplctl" in command and "hook-event" in command)
+    # Share the uninstall ownership check so references in unrelated commands
+    # (for example, echo "tapl-hook") are never removed during refresh.
+    from .uninstall import is_tapl_hook_command as is_owned_command
+
+    return is_owned_command(command)
 
 
 def merge_hooks(existing: dict[str, Any], managed: dict[str, Any]) -> dict[str, Any]:
@@ -422,11 +523,7 @@ def is_tapl_hook_command_entry(hook: Any) -> bool:
     if not isinstance(hook, dict):
         return False
     command = hook.get("command")
-    return isinstance(command, str) and (
-        "tapl_hook.py" in command
-        or "tapl-hook" in command
-        or ("taplctl" in command and "hook-event" in command)
-    )
+    return isinstance(command, str) and is_tapl_hook_command(command)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -450,8 +547,7 @@ def write_text_if_needed(path: Path, content: str, *, force: bool, dry_run: bool
     if dry_run:
         action = f"would_{action}" if action != "unchanged" else "unchanged"
     elif action in {"created", "updated"}:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        config_editor._atomic_write(path, content)
 
     return {"path": str(path), "action": action}
 
@@ -487,6 +583,10 @@ def write_tapl_config(
         return {"path": str(path), "action": "unchanged"}
 
     if previous_version == __version__ and tapl_config_policy == TAPL_CONFIG_POLICY_PROMPT:
+        try:
+            tomllib.loads(existing_text)
+        except tomllib.TOMLDecodeError:
+            return {"path": str(path), "action": "skipped", "reason": "invalid_toml"}
         if remove_toml_assignments(existing_text, DEPRECATED_TAPL_CONFIG_PATHS) != existing_text:
             result = merge_tapl_config(path, template, dry_run=dry_run)
             result["policy"] = TAPL_CONFIG_POLICY_MERGE
@@ -574,8 +674,7 @@ def merge_tapl_config(path: Path, template: str, *, dry_run: bool) -> dict[str, 
     if dry_run:
         action = f"would_{action}" if action != "unchanged" else "unchanged"
     elif action == "merged":
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(merged_text, encoding="utf-8")
+        config_editor._atomic_write(path, merged_text)
 
     return {"path": str(path), "action": action}
 
@@ -769,7 +868,7 @@ def merge_codex_config(path: Path, template: str, *, force: bool, dry_run: bool)
         managed = tomllib.loads(template)
     except tomllib.TOMLDecodeError:
         if not force:
-            return {"path": str(path), "action": "skipped"}
+            return {"path": str(path), "action": "skipped", "reason": "invalid_toml"}
         return write_text_if_needed(path, template, force=True, dry_run=dry_run)
 
     if force:
@@ -787,8 +886,7 @@ def merge_codex_config(path: Path, template: str, *, force: bool, dry_run: bool)
     if dry_run:
         action = f"would_{action}" if action != "unchanged" else "unchanged"
     elif action in {"merged", "updated"}:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(merged_text, encoding="utf-8")
+        config_editor._atomic_write(path, merged_text)
 
     return {"path": str(path), "action": action}
 
@@ -885,7 +983,23 @@ def insert_missing_toml_values(
             lines.append(f"[{format_toml_dotted_key(table_path)}]\n")
             lines.extend(assignments)
 
-    return "".join(lines)
+    candidate = "".join(lines)
+    expected = copy.deepcopy(existing)
+    for path, value in missing:
+        table = expected
+        for part in path[:-1]:
+            table = table.setdefault(part, {})
+        table[path[-1]] = value
+    try:
+        if tomllib.loads(candidate) == expected:
+            return candidate
+    except tomllib.TOMLDecodeError:
+        pass
+    # Inline tables and arrays of tables may not permit textual insertion.
+    # Preserve their values with a validated serialization in that case.
+    candidate = dump_toml(expected)
+    tomllib.loads(candidate)
+    return candidate
 
 
 def toml_table_ranges(lines: list[str]) -> list[tuple[tuple[str, ...], int, int]]:
@@ -929,7 +1043,27 @@ def remove_toml_assignments(text: str, paths: tuple[tuple[str, ...], ...]) -> st
         if match and (*table, match.group(1)) in deprecated:
             continue
         kept.append(line)
-    return "".join(kept)
+    candidate = "".join(kept)
+    try:
+        expected = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return candidate
+    changed = False
+    for path in paths:
+        table = expected
+        for part in path[:-1]:
+            table = table.get(part, {}) if isinstance(table, dict) else {}
+        if isinstance(table, dict) and path[-1] in table:
+            del table[path[-1]]
+            changed = True
+    if not changed:
+        return text
+    try:
+        if tomllib.loads(candidate) == expected:
+            return candidate
+    except tomllib.TOMLDecodeError:
+        pass
+    return dump_toml(expected)
 
 
 def find_toml_marker_path(data: dict[str, Any], prefix: tuple[str, ...] = ()) -> tuple[str, ...] | None:

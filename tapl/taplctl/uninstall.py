@@ -85,9 +85,10 @@ def _uninstall(
     hooks_path = codex / "hooks.json"
     codex_config = codex / "config.toml"
     version_path = tapl / "version"
+    state_path = root / install.INSTALL_STATE_RELATIVE
     config_path = tapl / "config.toml"
     db_paths = [tapl / name for name in _DB_NAMES]
-    all_paths = [hooks_path, codex_config, version_path, config_path, *db_paths]
+    all_paths = [hooks_path, codex_config, version_path, state_path, config_path, *db_paths]
     _validate_paths(root, codex, tapl, all_paths)
 
     # Finish every read, parse and rendering check before the first mutation.
@@ -104,7 +105,7 @@ def _uninstall(
         _remove_hooks(original_hooks, hooks_path) if original_hooks is not None else None
     )
     updates = [(codex_config, original_config, updated_config), (hooks_path, original_hooks, updated_hooks)]
-    removals = [version_path]
+    removals = [version_path, state_path]
     if purge_config:
         removals.append(config_path)
     if purge_db:
