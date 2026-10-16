@@ -2,6 +2,8 @@ import {
   CSSProperties,
   FormEvent,
   ReactNode,
+  createContext,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -16,6 +18,7 @@ import type {
   TaplArchiveDetail,
   TaplEvent,
   TaplExecutionBatch,
+  TaplExecutionTiming,
   TaplItem,
   TaplItemDetail,
   TaplJsonValue,
@@ -30,6 +33,22 @@ import { vscodeApi } from './vscodeApi';
 import { I18nProvider, useI18n } from './i18n';
 import { HoverPopover } from './HoverPopover';
 import { MemoryView } from './MemoryView';
+import { formatExecutionTiming, isRunningExecutionTiming, type FormattedExecutionTiming } from './executionTiming';
+
+const ExecutionClockContext = createContext(0);
+
+function viewHasRunningTiming(view: WebviewView | undefined): boolean {
+  if (view?.type === 'overview') {
+    return view.status.tasks.some((item) => isRunningExecutionTiming(item.execution_timing, item.status));
+  }
+  if (view?.type === 'archive') {
+    return view.detail?.items.some((item) => isRunningExecutionTiming(item.execution_timing, item.status)) ?? false;
+  }
+  if (view?.type === 'searchItem') {
+    return isRunningExecutionTiming(view.detail?.execution_timing, view.detail?.status);
+  }
+  return false;
+}
 
 const TASK_STATUSES = ['Pending', 'In Progress', 'Blocked', 'Completed', 'Skipped'];
 const JOURNEY_MIN_COLUMNS = 2;
@@ -69,6 +88,15 @@ export function App(): JSX.Element {
     restored?.locale ?? document.documentElement.lang ?? navigator.language
   ));
   const [layout, setLayout] = useState<DisplayLayout>(() => resolveDisplayLayout(restored?.layout));
+  const [nowMs, setNowMs] = useState(Date.now);
+  const hasRunningTiming = viewHasRunningTiming(view);
+
+  useEffect(() => {
+    if (!hasRunningTiming) return;
+    setNowMs(Date.now());
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [hasRunningTiming]);
 
   useEffect(() => {
     const listener = (event: MessageEvent<HostMessage>) => {
@@ -120,11 +148,25 @@ export function App(): JSX.Element {
 
   return (
     <I18nProvider locale={locale}>
-      <main className="tapl-shell" data-theme="tapl" data-layout={layout}>
-        <ViewRenderer view={view} layout={layout} memorySupported={memorySupported} send={(message) => api.postMessage(message)} />
-      </main>
+      <ExecutionClockContext.Provider value={nowMs}>
+        <main className="tapl-shell" data-theme="tapl" data-layout={layout}>
+          <ViewRenderer view={view} layout={layout} memorySupported={memorySupported} send={(message) => api.postMessage(message)} />
+        </main>
+      </ExecutionClockContext.Provider>
     </I18nProvider>
   );
+}
+
+function useExecutionTiming(timing: TaplExecutionTiming | null | undefined, status?: string): FormattedExecutionTiming | null {
+  const { locale } = useI18n();
+  const nowMs = useContext(ExecutionClockContext);
+  return formatExecutionTiming(timing, status, locale, nowMs);
+}
+
+function TaskDuration({ item }: { item: TaplItem }): JSX.Element | null {
+  const { t } = useI18n();
+  const timing = useExecutionTiming(item.execution_timing, item.status);
+  return timing ? <span className="tapl-muted mt-1 block text-xs tabular-nums">{t(timing.running ? 'elapsedTime' : 'duration')} <span className="inline-block whitespace-nowrap">{timing.duration}</span></span> : null;
 }
 
 function LoadingView({ layout }: { layout: DisplayLayout }): JSX.Element {
@@ -807,6 +849,7 @@ function TaskStep({
         </div>
         <h4 className="tapl-step-title">{task.title}</h4>
         <CustomFieldSummary fields={task.custom_fields} />
+        <TaskDuration item={task} />
         {metadata ? <p className="tapl-step-detail">{metadata}</p> : null}
       </article>
     </li>
@@ -837,6 +880,7 @@ function ItemCard({ item }: { item: TaplItem }): JSX.Element {
         ) : null}
       </div>
       <h3 className="m-0 text-sm font-semibold">{item.title}</h3>
+      {item.kind === 'task' ? <TaskDuration item={item} /> : null}
       {item.body ? <ReadableBlock content={item.body} /> : null}
       <CustomFieldsBlock fields={item.custom_fields} />
     </article>
@@ -1024,6 +1068,7 @@ function SearchResult({ result, send }: { result: TaplSearchResult; send: (messa
 function ItemMetadata({ item }: { item: TaplItemDetail }): JSX.Element {
   const { t } = useI18n();
   const activeExecution = item.active_execution;
+  const timing = useExecutionTiming(item.execution_timing, item.status);
   const executionFields: Array<[string, unknown]> = [
     [t('spec'), item.spec_id],
     [t('goal'), item.goal],
@@ -1038,7 +1083,8 @@ function ItemMetadata({ item }: { item: TaplItemDetail }): JSX.Element {
     [t('ownedPaths'), item.owned_paths?.join(', ')],
     [t('dependencies'), item.depends_on?.join(', ')],
     [t('executionId'), activeExecution?.execution_id],
-    [t('executionState'), activeExecution?.execution_state]
+    [t('executionState'), activeExecution?.execution_state],
+    [t(timing?.running ? 'elapsedTime' : 'duration'), item.kind === 'task' ? timing?.duration ?? t('notMeasured') : undefined]
   ];
   const auditFields: Array<[string, unknown]> = [
     [t('relatedIds'), item.related_ids],

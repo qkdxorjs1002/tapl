@@ -80,7 +80,7 @@ class WorkflowApplication:
         check = validation.validate_workflow_state(state)
         fields = (
             "id", "stable_id", "kind", "title", "status", "source",
-            "archived", "created_at", "updated_at", "custom_fields",
+            "archived", "created_at", "updated_at", "custom_fields", "execution_timing",
         )
         project = lambda items: items if full else [
             {key: item[key] for key in fields if key in item} for item in items
@@ -538,7 +538,8 @@ class WorkflowApplication:
                 depends_on=None if values.get("depends_on", UNSET) is UNSET else values["depends_on"],
             )
             check = validation.validate_plan_task_execute(conn)
-        return {"ok": True, "item": db.row_to_dict(item), "plan_task_execute": check}
+            task_item = db.item_detail(conn, int(item["id"]))
+        return {"ok": True, "item": task_item, "plan_task_execute": check}
 
     def dispatch_tasks(self, task_ids: list[str], *, batch_id: str | None = None, failure_policy: str = db.DEFAULT_FAILURE_POLICY, execution_metadata: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         subagents = self._settings().subagents

@@ -601,7 +601,8 @@ async function enrichTaskDetail(detail: TaplItemDetail): Promise<TaplItemDetail>
     parallel_group: detail.parallel_group ?? task.parallel_group,
     owned_paths: detail.owned_paths ?? task.owned_paths,
     depends_on: detail.depends_on ?? task.depends_on,
-    active_execution: task.active_execution
+    active_execution: task.active_execution,
+    execution_timing: detail.execution_timing ?? task.execution_timing
   };
 }
 

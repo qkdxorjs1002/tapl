@@ -76,6 +76,16 @@ export interface TaplItem {
   owned_paths?: string[];
   depends_on?: string[];
   active_execution?: TaplExecution;
+  execution_timing?: TaplExecutionTiming | null;
+}
+
+/** Accumulated In Progress time as of the server snapshot. */
+export interface TaplExecutionTiming {
+  started_at: string;
+  finished_at: string | null;
+  elapsed_seconds: number;
+  running_since: string | null;
+  as_of: string;
 }
 
 export interface TaplArchive {

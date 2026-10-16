@@ -16,7 +16,7 @@ from typing import Any, Iterable
 from . import memory_search
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -208,6 +208,14 @@ def migrate(conn: sqlite3.Connection) -> None:
             CHECK (executor_kind IN ('main', 'subagent')),
           parallel_group TEXT NOT NULL DEFAULT '',
           owned_paths_json TEXT NOT NULL DEFAULT '[]'
+        );
+
+        CREATE TABLE IF NOT EXISTS task_timing (
+          task_item_id INTEGER PRIMARY KEY REFERENCES tasks(item_id) ON DELETE CASCADE,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          elapsed_seconds REAL NOT NULL DEFAULT 0,
+          running_since TEXT
         );
 
         CREATE TABLE IF NOT EXISTS plans (
@@ -419,6 +427,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     )
     ensure_column(conn, "tasks", "parallel_group", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "tasks", "owned_paths_json", "TEXT NOT NULL DEFAULT '[]'")
+    backfill_task_timing_from_executions(conn)
     drop_column(conn, "tasks", "required_subagent")
     backfill_plan_rows(conn)
     dedupe_active_runs(conn)
@@ -945,6 +954,7 @@ def upsert_item(
     source: str | None = None,
     run_id: str | None = None,
     archived: bool = False,
+    commit: bool = True,
 ) -> sqlite3.Row:
     run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() if run_id else ensure_active_run(conn)
     existing = conn.execute(
@@ -993,7 +1003,8 @@ def upsert_item(
         (run["id"], kind, stable_id),
     ).fetchone()
     refresh_item_fts(conn, item)
-    conn.commit()
+    if commit:
+        conn.commit()
     return item
 
 
@@ -1354,6 +1365,7 @@ def upsert_task(
         body=body,
         custom_fields=custom_fields,
         status=status,
+        commit=False,
     )
     conn.execute(
         """
@@ -1391,10 +1403,96 @@ def upsert_task(
             serialize_owned_paths(resolved_owned_paths),
         ),
     )
+    update_task_timing(conn, int(item["id"]), existing_task["status"] if existing_task else None, status)
     conn.commit()
     if depends_on is not None:
         replace_task_dependencies(conn, task_id, depends_on)
     return item
+
+
+def _elapsed_seconds(started_at: str, finished_at: str) -> float:
+    return max(0.0, (datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)).total_seconds())
+
+
+def backfill_task_timing_from_executions(conn: sqlite3.Connection) -> None:
+    """Recover only intervals documented by existing parallel executions."""
+    for item in conn.execute(
+        "SELECT DISTINCT task_item_id FROM task_executions WHERE task_item_id NOT IN "
+        "(SELECT task_item_id FROM task_timing)"
+    ):
+        executions = conn.execute(
+            "SELECT state, started_at, finished_at FROM task_executions WHERE task_item_id = ? ORDER BY started_at, id",
+            (item["task_item_id"],),
+        ).fetchall()
+        task = conn.execute("SELECT status FROM items WHERE id = ?", (item["task_item_id"],)).fetchone()
+        if not task or not executions:
+            continue
+        closed = [row for row in executions if row["finished_at"]]
+        active = [row for row in executions if not row["finished_at"] and row["state"] in ACTIVE_EXECUTION_STATES]
+        if not closed and not (task["status"] == "In Progress" and active):
+            continue
+        elapsed = sum(_elapsed_seconds(row["started_at"], row["finished_at"]) for row in closed)
+        running_since = active[-1]["started_at"] if task["status"] == "In Progress" and active else None
+        finished_at = closed[-1]["finished_at"] if not running_since and closed else None
+        conn.execute(
+            "INSERT INTO task_timing(task_item_id, started_at, finished_at, elapsed_seconds, running_since) "
+            "VALUES(?, ?, ?, ?, ?)",
+            (item["task_item_id"], executions[0]["started_at"], finished_at, elapsed, running_since),
+        )
+
+
+def task_execution_timing(conn: sqlite3.Connection, item_id: int, *, as_of: str) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM task_timing WHERE task_item_id = ?", (item_id,)).fetchone()
+    if row is None:
+        return None
+    running_since = row["running_since"]
+    elapsed = float(row["elapsed_seconds"]) + (
+        _elapsed_seconds(str(running_since), as_of) if running_since else 0.0
+    )
+    return {
+        "started_at": row["started_at"],
+        "finished_at": row["finished_at"],
+        "elapsed_seconds": elapsed,
+        "running_since": running_since,
+        "as_of": as_of,
+    }
+
+
+def update_task_timing(
+    conn: sqlite3.Connection, item_id: int, previous_status: str | None,
+    status: str, *, now: str | None = None,
+) -> None:
+    """Account only for transitions into or out of active execution."""
+    if previous_status == status:
+        return
+    now = now or utc_now()
+    timing = conn.execute(
+        "SELECT * FROM task_timing WHERE task_item_id = ?", (item_id,)
+    ).fetchone()
+    if status == "In Progress":
+        if timing is None:
+            conn.execute(
+                "INSERT INTO task_timing(task_item_id, started_at, running_since) VALUES(?, ?, ?)",
+                (item_id, now, now),
+            )
+        else:
+            conn.execute(
+                "UPDATE task_timing SET running_since = ?, finished_at = NULL WHERE task_item_id = ?",
+                (now, item_id),
+            )
+    elif previous_status == "In Progress" and timing is not None:
+        stop_task_timing(conn, item_id, now=now)
+
+
+def stop_task_timing(conn: sqlite3.Connection, item_id: int, *, now: str) -> None:
+    timing = conn.execute("SELECT * FROM task_timing WHERE task_item_id = ?", (item_id,)).fetchone()
+    if timing is None or not timing["running_since"]:
+        return
+    elapsed = float(timing["elapsed_seconds"]) + _elapsed_seconds(str(timing["running_since"]), now)
+    conn.execute(
+        "UPDATE task_timing SET elapsed_seconds = ?, running_since = NULL, finished_at = ? WHERE task_item_id = ?",
+        (elapsed, now, item_id),
+    )
 
 
 def _begin_immediate(conn: sqlite3.Connection) -> None:
@@ -1948,6 +2046,7 @@ def dispatch_tasks(
                 )
             if updated.rowcount != 1:
                 raise RuntimeError(f"task status changed during dispatch: {row['task_id']}")
+            update_task_timing(conn, int(row["item_id"]), "Pending", "In Progress", now=now)
             if custom_fields_changed:
                 refreshed_item = conn.execute(
                     "SELECT * FROM items WHERE id = ?",
@@ -2141,6 +2240,7 @@ def settle_task_execution(
         )
         if task_update.rowcount != 1:
             raise RuntimeError(f"task changed during settlement: {row['task_id']}")
+        update_task_timing(conn, int(row["task_item_id"]), "In Progress", task_status, now=now)
         refreshed_item = conn.execute(
             "SELECT * FROM items WHERE id = ?",
             (row["task_item_id"],),
@@ -2270,6 +2370,7 @@ def cancel_execution_batch(
             )
             if task_update.rowcount != 1:
                 raise RuntimeError(f"task changed during batch cancellation: {row['task_id']}")
+            update_task_timing(conn, int(row["task_item_id"]), "In Progress", task_status, now=now)
             refreshed_item = conn.execute(
                 "SELECT * FROM items WHERE id = ?",
                 (row["task_item_id"],),
@@ -2557,6 +2658,12 @@ def _archive_active_run(conn: sqlite3.Connection, *, slug: str, summary: str, me
 
     archive_id = utc_now().replace(":", "").replace("+0000", "Z") + "-" + slug
     now = utc_now()
+    for timing in conn.execute(
+        "SELECT tt.task_item_id FROM task_timing tt JOIN items i ON i.id = tt.task_item_id "
+        "WHERE i.run_id = ? AND tt.running_since IS NOT NULL",
+        (run["id"],),
+    ).fetchall():
+        stop_task_timing(conn, int(timing["task_item_id"]), now=now)
     conn.execute(
         "UPDATE workflow_runs SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?",
         (now, now, run["id"]),
@@ -2639,6 +2746,7 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
 
 def _status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
     run = active_run(conn)
+    as_of = utc_now()
     run_id = run["id"] if run else None
     task_counts = {status: 0 for status in TASK_STATUSES}
     tasks: list[dict[str, Any]] = []
@@ -2686,6 +2794,7 @@ def _status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
             task_counts[row["status"]] = task_counts.get(row["status"], 0) + 1
             task = row_to_dict(row)
             task["depends_on"] = dependency_ids.get(int(row["id"]), [])
+            task["execution_timing"] = task_execution_timing(conn, int(row["id"]), as_of=as_of)
             tasks.append(task)
 
         plans = [
@@ -2848,6 +2957,10 @@ def archive_detail(conn: sqlite3.Connection, archive_id_or_slug: str) -> dict[st
             (run_id,),
         )
     ]
+    as_of = utc_now()
+    for item in items:
+        if item["kind"] == "task":
+            item["execution_timing"] = task_execution_timing(conn, int(item["id"]), as_of=as_of)
     events = [
         row_to_dict(row)
         for row in conn.execute(
@@ -2913,7 +3026,10 @@ def item_detail(conn: sqlite3.Connection, item_id: int) -> dict[str, Any] | None
         """,
         (item_id,),
     ).fetchone()
-    return row_to_dict(row)
+    item = row_to_dict(row)
+    if item is not None and item["kind"] == "task":
+        item["execution_timing"] = task_execution_timing(conn, int(item_id), as_of=utc_now())
+    return item
 
 
 def incomplete_task_count(conn: sqlite3.Connection) -> int:
