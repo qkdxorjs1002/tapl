@@ -198,7 +198,11 @@ def test_compact_reads_real_stored_records_without_losing_content(tmp_path: Path
         app.finish_run("Synthetic fixture complete")
         app.finish_archive("compact-source")
     ids = [r["item"]["id"] for r in (plan, task, finding)]
-    originals = [app.get_item(item_id) for item_id in ids]
+    # Every read reports its observation time, even for completed tasks.
+    # Compare compact/full content at the same instant across second boundaries.
+    read_time = db.utc_now()
+    with mock.patch.object(db, "utc_now", return_value=read_time):
+        originals = [app.get_item(item_id) for item_id in ids]
 
     async def exercise():
         async with Client(mcp_server.create_server(workspace_root=tmp_path)) as client:
@@ -217,7 +221,8 @@ def test_compact_reads_real_stored_records_without_losing_content(tmp_path: Path
             assert custom == app.get_item(ids[1])
             assert custom["item"]["body"] == "User-authored extra content"
 
-    asyncio.run(exercise())
+    with mock.patch.object(db, "utc_now", return_value=read_time):
+        asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("error_count", [1, 4])
