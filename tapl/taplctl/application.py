@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterator
 
-from . import config, config_editor, context as tapl_context, db, embeddings, prompt, recall as memory_store, recommendations, validation
+from . import config, config_editor, context as tapl_context, db, embeddings, prompt, recall as memory_store, recommendations, sessions, validation
 
 
 UNSET = object()
@@ -26,13 +26,14 @@ class WorkflowApplicationError(RuntimeError):
 class WorkflowApplication:
     """Typed, synchronous workflow use cases bound to one workspace."""
 
-    def __init__(self, workspace_root: Path) -> None:
+    def __init__(self, workspace_root: Path, session_id: str | None = None) -> None:
         self.workspace_root = workspace_root.expanduser().resolve()
         self.db_path = self.workspace_root / db.DEFAULT_DB_RELATIVE
+        self.session_id = sessions.normalize_session_id(session_id) if session_id is not None else None
 
     @contextmanager
     def _connection(self) -> Iterator[Any]:
-        conn = db.connect(self.db_path)
+        conn = db.connect(self.db_path, session_id=self.session_id)
         try:
             yield conn
         finally:
@@ -77,6 +78,7 @@ class WorkflowApplication:
     ) -> dict[str, Any]:
         with self._connection() as conn:
             state = db.status_payload(conn)
+            state["session_id"] = db.connection_session_id(conn)
         check = validation.validate_workflow_state(state)
         fields = (
             "id", "stable_id", "kind", "title", "status", "source",
@@ -87,7 +89,9 @@ class WorkflowApplication:
         ]
         payload = {
             "ok": True,
+            "session_id": state.get("session_id", ""),
             "schema": state.get("schema") or {},
+            "active_runs": state.get("active_runs") or [],
             "viewer_capabilities": {"associativeMemory": True},
             "memory_review": state["memory_review"] if self._settings().recall.enabled else {"status": "disabled"},
             "active_run": state.get("active_run"),
@@ -113,7 +117,7 @@ class WorkflowApplication:
             "plan_task_execute": check,
         }
         if include_events:
-            event_fields = ("id", "run_id", "event_type", "tool_name", "mode", "message", "created_at")
+            event_fields = ("id", "run_id", "session_id", "event_type", "tool_name", "mode", "message", "created_at")
             payload["recent_events"] = [
                 {key: event[key] for key in event_fields if key in event}
                 for event in state.get("recent_events", [])[: max(events_limit, 0)]
@@ -123,6 +127,7 @@ class WorkflowApplication:
     def _next_context(self) -> tuple[dict[str, Any], config.TaplConfig, list[dict[str, str]]]:
         with self._connection() as conn:
             state = db.status_payload(conn)
+            state["session_id"] = db.connection_session_id(conn)
         check = validation.validate_workflow_state(state)
         settings = self._settings()
         if not settings.recall.enabled:
@@ -138,8 +143,8 @@ class WorkflowApplication:
     def get_next_actions(self) -> dict[str, Any]:
         """Compute fresh receipt recommendations without rendering policy/config."""
 
-        _, _, actions = self._next_context()
-        return {"ok": True, "recommendations": actions}
+        state, _, actions = self._next_context()
+        return {"ok": True, "session_id": state.get("session_id", ""), "recommendations": actions}
 
     @staticmethod
     def _next_state_summary(state: dict[str, Any]) -> dict[str, Any]:
@@ -147,8 +152,9 @@ class WorkflowApplication:
         run = state.get("active_run")
         approval = (state.get("approvals") or {}).get("execution") or {}
         return {
+            "session_id": state.get("session_id", ""),
             "active_run": ({key: run.get(key) for key in (
-                "id", "status", "work_type", "workflow_mode", "record_mode",
+                "id", "session_id", "status", "work_type", "workflow_mode", "record_mode",
             )} | {"result_recorded": bool(run.get("result_summary"))}) if run else None,
             "task_counts": state.get("task_counts") or {},
             "incomplete_tasks": state.get("incomplete_tasks", 0),
@@ -183,6 +189,7 @@ class WorkflowApplication:
         ).hexdigest()
         payload = {
             "ok": True,
+            "session_id": state.get("session_id", ""),
             "recommendations": actions,
             "state_summary": self._next_state_summary(state),
             "memory_review": state["memory_review"],
@@ -283,6 +290,7 @@ class WorkflowApplication:
             check = validation.validate_plan_task_execute(conn)
             return {
                 "ok": meta.get("schema_version") == str(db.SCHEMA_VERSION) and check["ok"],
+                "session_id": db.connection_session_id(conn),
                 "schema_version": meta.get("schema_version"),
                 "active_run": db.workflow_run_to_dict(db.active_run(conn)),
                 "queued_runs": db.queued_runs(conn),

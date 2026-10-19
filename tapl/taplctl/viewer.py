@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 from urllib.parse import unquote, urlsplit
 
-from . import config, db, embeddings, recall, validation
+from . import config, db, embeddings, recall, sessions, validation
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -197,6 +197,11 @@ class NativeJsonRunner:
         conn = self._connection(db_path)
         try:
             state = db.status_payload(conn)
+            # This is a read-only viewer selection, never a workflow default.
+            # Keep the DB/application write paths strictly owner-scoped.
+            if not state["active_run"] and not db.connection_session_id(conn) and state["active_runs"]:
+                db.bind_session(conn, state["active_runs"][0]["session_id"])
+                state = db.status_payload(conn)
             state["plan_task_execute"] = validation.validate_workflow_state(state)
         finally:
             conn.close()
@@ -236,6 +241,8 @@ class NativeJsonRunner:
 
         payload: dict[str, Any] = {
             "schema": state.get("schema") or {},
+            "session_id": state.get("session_id", ""),
+            "active_runs": state.get("active_runs") or [],
             "active_run": state.get("active_run"),
             "task_counts": state.get("task_counts") or {},
             "incomplete_tasks": state.get("incomplete_tasks", 0),
@@ -371,6 +378,17 @@ class ViewerApplication:
         raise WorkspaceRequired("Choose a workspace that contains .tapl/tapl.db.")
 
     def handle_message(self, payload: object) -> dict[str, Any]:
+        identity = payload.get("sessionId") if isinstance(payload, dict) else None
+        try:
+            if isinstance(payload, dict) and payload.get("command") == "selectRun" and not isinstance(identity, str):
+                raise ValueError("Missing sessionId.")
+            with sessions.session_scope(identity):
+                return self._handle_message(payload)
+        except ValueError as exc:
+            locale = "ko" if isinstance(payload, dict) and str(payload.get("locale", "")).startswith("ko") else "en"
+            return self._error_message(str(exc), locale=locale, layout="auto")
+
+    def _handle_message(self, payload: object) -> dict[str, Any]:
         locale = "en"
         layout = "auto"
         if isinstance(payload, dict):
@@ -423,7 +441,7 @@ class ViewerApplication:
 
     def _build_view(self, payload: dict[str, Any], db_path: Path) -> dict[str, Any]:
         command = str(payload["command"])
-        if command in {"ready", "selectWorkspace"}:
+        if command in {"ready", "selectWorkspace", "selectRun"}:
             return self._overview(db_path, search_query="")
         if command == "refresh":
             return self._refresh_view(payload, db_path)
@@ -485,7 +503,7 @@ class ViewerApplication:
                 matching = next(
                     (
                         item for item in status.get("tasks", [])
-                        if isinstance(item, dict) and item.get("stable_id") == detail.get("stable_id")
+                        if isinstance(item, dict) and item.get("id") == detail.get("id")
                     ),
                     None,
                 )

@@ -21,6 +21,7 @@ type PersistedState = {
   layout?: DisplayLayout;
   capabilities?: HostCapabilities;
   workspace?: string;
+  selectedSessionId?: string;
 };
 
 declare const acquireVsCodeApi: (() => VsCodeApi) | undefined;
@@ -72,9 +73,13 @@ class BrowserApi implements VsCodeApi {
       this.requestGeneration += 1;
     }
     if (message.command === 'selectWorkspace' || message.command === 'chooseWorkspace') {
+      this.state.selectedSessionId = undefined;
       this.workspaceGeneration += 1;
       this.autoRefreshPending = false;
       this.refreshDirty = false;
+    }
+    if (message.command === 'selectRun') {
+      this.state.selectedSessionId = message.sessionId;
     }
     if (message.command === 'back') {
       this.goBack();
@@ -108,7 +113,9 @@ class BrowserApi implements VsCodeApi {
   }
 
   setState(state: unknown): void {
-    this.state = isRecord(state) ? state as PersistedState : {};
+    const next = isRecord(state) ? state as PersistedState : {};
+    const status = next.view?.type === 'overview' || next.view?.type === 'debug' ? next.view.status : undefined;
+    this.state = { ...next, selectedSessionId: status?.session_id ?? this.state.selectedSessionId };
     writeStorage(sessionStorage, SESSION_STATE_KEY, this.state);
     this.scheduleRevisionCheck();
   }
@@ -143,6 +150,7 @@ class BrowserApi implements VsCodeApi {
         : this.activeWorkspace ?? recentWorkspace;
     const request = {
       ...message,
+      ...(this.state.selectedSessionId !== undefined ? { sessionId: this.state.selectedSessionId } : {}),
       workspace: requestWorkspace,
       locale: navigator.language,
       layout: this.state.layout ?? 'auto',

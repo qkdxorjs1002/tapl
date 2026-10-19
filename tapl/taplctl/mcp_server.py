@@ -12,7 +12,7 @@ from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import __version__, db, install as tapl_install, prompt as tapl_prompt
+from . import __version__, db, install as tapl_install, prompt as tapl_prompt, sessions
 from .application import WorkflowApplication
 
 
@@ -48,6 +48,10 @@ TaskId = Annotated[
 CustomFields = Annotated[
     dict[str, Any] | None,
     Field(description=tapl_prompt.field_help("task", "custom_fields")),
+]
+SessionId = Annotated[
+    str | None,
+    Field(description="Current Codex hook session_id. Pass the same identity on EVERY call, including reads. Omission selects only the isolated legacy namespace.", max_length=256),
 ]
 ApprovalSource = Literal["explicit_user", "request_user_input"]
 WorkType = Literal["answer", "investigation", "analysis", "planning", "implementation", "mixed"]
@@ -137,10 +141,31 @@ def compact_item_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "item": {key: value for key, value in item.items() if key != "body"}}
 
 
-async def call_application(method: Any, /, *args: Any, **kwargs: Any) -> dict[str, Any]:
+async def call_application(
+    method: Any, /, *args: Any, session_id: str | None = None,
+    require_session: bool = False, **kwargs: Any,
+) -> dict[str, Any]:
     """Run one synchronous application use case without blocking the MCP loop."""
 
-    return await asyncio.to_thread(method, *args, **kwargs)
+    def invoke() -> dict[str, Any]:
+        application = getattr(method, "__self__", None)
+        if require_session and isinstance(application, WorkflowApplication) and not sessions.current_session_id():
+            with application._connection() as conn:
+                identified = conn.execute(
+                    "SELECT EXISTS(SELECT 1 FROM workflow_runs WHERE session_id <> '') "
+                    "OR EXISTS(SELECT 1 FROM events WHERE session_id <> '')"
+                ).fetchone()[0]
+            if identified:
+                raise ValueError(
+                    "session_id is required for writes in this session-aware workspace; "
+                    "pass the current Codex hook session_id on every TAPL call"
+                )
+        return method(*args, **kwargs)
+
+    with sessions.session_scope(session_id):
+        result = await asyncio.to_thread(invoke)
+        owner = sessions.current_session_id()
+        return {**result, "session_id": owner} if owner else result
 
 
 def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
@@ -281,6 +306,8 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
         "ok": bool(payload.get("ok", True)),
         "operation": str(payload.get("operation") or operation),
     }
+    if payload.get("session_id"):
+        receipt["session_id"] = payload["session_id"]
     if receipt["operation"] == "subagents_configure":
         for key in ("path", "changed", "subagents", "subagent_guidance"):
             if key in payload:
@@ -293,14 +320,14 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
         (
             "active_run",
             (
-                "id", "slug", "status", "work_type", "workflow_mode", "record_mode",
+                "id", "session_id", "slug", "status", "work_type", "workflow_mode", "record_mode",
                 "split_group_id", "split_key", "split_position",
             ),
         ),
         (
             "next_active_run",
             (
-                "id", "slug", "status", "work_type", "workflow_mode", "record_mode",
+                "id", "session_id", "slug", "status", "work_type", "workflow_mode", "record_mode",
                 "split_group_id", "split_key", "split_position",
             ),
         ),
@@ -320,7 +347,7 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
         selected = select_receipt_fields(
             queued,
             (
-                "id", "status", "work_type", "workflow_mode", "record_mode",
+                "id", "session_id", "status", "work_type", "workflow_mode", "record_mode",
                 "split_group_id", "split_key", "split_position", "depends_on",
                 "waiting_on", "ready",
             ),
@@ -350,14 +377,15 @@ async def call_application_write(
     /,
     *args: Any,
     operation: str,
+    session_id: str | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Execute an application write and attach its latest safe MCP action."""
 
-    result = await call_application(method, *args, **kwargs)
+    result = await call_application(method, *args, session_id=session_id, require_session=True, **kwargs)
     receipt = mcp_write_receipt(result, operation=operation)
     try:
-        next_payload = await call_application(application.get_next_actions)
+        next_payload = await call_application(application.get_next_actions, session_id=session_id)
         receipt["recommendations"] = mcp_next_recommendations(next_payload).get(
             "recommendations", []
         )
@@ -405,11 +433,12 @@ def create_server(
         full: Annotated[bool, Field(description="Include full plan, task, and finding bodies.")] = False,
         include_events: Annotated[bool, Field(description="Include recent hook event summaries.")] = False,
         events_limit: Annotated[int, Field(description="Maximum recent events to include.", ge=0, le=100)] = 12,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Inspect run/task/approval/batch details missing from get_next's state_summary or a write receipt, especially for resume/recovery. Conditional detail lookup, not a mandatory entry or pre-write check; no follow-up get_next is needed solely because this read ran."""
 
         return await call_application(
-            application.get_status,
+            application.get_status, session_id=session_id,
             full=full,
             include_events=include_events,
             events_limit=events_limit,
@@ -420,11 +449,12 @@ def create_server(
         available_models: Annotated[dict[str, list[str]] | None, Field(description="Optional live delegation-tool catalog for setup or a user-requested settings check. Omit during ordinary workflow entry. Include every exposed model/effort, including fixed agent-role models, before asserting catalog_complete. Never guess or fill missing entries from saved settings.")] = None,
         catalog_complete: Annotated[bool, Field(description="True only after verifying available_models covers the entire live delegation-tool catalog for an explicit settings check. Default false: supplied entries are incomplete observations and cause no change/removal inference or reconfiguration prompt. Requires available_models; a verified empty catalog is allowed.")] = False,
         known_policy_revision: Annotated[str | None, Field(description="Only supply a returned revision when its complete workflow_policy, subagent_guidance and config remain in the current context. Omit after compaction, in a new session, or whenever uncertain; summaries are insufficient.")] = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Single entry for authoritative policy, state_summary and safe actions; omit model-catalog arguments for ordinary work. Complete catalog comparisons are optional settings checks, not session initialization. Read status only for missing details and reuse write recommendations. A retained revision omits unchanged policy/config; state and requested complete comparisons stay fresh. Revisions are not approval evidence."""
 
         return mcp_next_recommendations(await call_application(
-            application.get_next,
+            application.get_next, session_id=session_id,
             available_models=available_models,
             catalog_complete=catalog_complete,
             known_policy_revision=known_policy_revision,
@@ -440,6 +470,7 @@ def create_server(
         available_models: Annotated[dict[str, list[str]], Field(description="Full current delegation-tool catalog, including unselected models, saved as the last user-confirmed snapshot for change detection.")],
         preference: Annotated[str, Field(description="Concise user preference, such as quality, speed, cost, or specific model constraints.")] = "",
         profiles: Annotated[list[dict[str, Any]] | None, Field(description="Optional ordered task profiles with allowlisted model/effort candidates. Omit for model-neutral profiles; [] disables profiles.")] = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Save the user's setup answer atomically to the effective .tapl/config.toml.
 
@@ -452,50 +483,54 @@ def create_server(
         """
 
         return await call_application_write(
-            application, application.configure_subagents, operation="subagents_configure",
+            application, application.configure_subagents, session_id=session_id, operation="subagents_configure",
             user_confirmed=user_confirmed, enabled=enabled, strategy=strategy,
             models=models, preference=preference, profiles=profiles,
             available_models=available_models,
         )
 
     @server.tool(name="tapl_validate_state", title="Validate TAPL state", annotations=READ_ONLY)
-    async def validate_state() -> dict[str, Any]:
+    async def validate_state(session_id: SessionId = None) -> dict[str, Any]:
         """Validate plan detail, task contracts, dependencies, execution order, and approval state after updates."""
 
-        return await call_application(application.validate_state)
+        return await call_application(application.validate_state, session_id=session_id)
 
     @server.tool(name="tapl_get_context", title="Get TAPL lifecycle context", annotations=READ_ONLY)
     async def get_context(
         event: Annotated[str, Field(description="Lifecycle event name used to select contextual workflow guidance.")] = "Manual",
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Return the current lifecycle context, guidance, next actions, and validation issues."""
 
-        return await call_application(application.get_context, event=event)
+        return await call_application(application.get_context, session_id=session_id, event=event)
 
     @server.tool(name="tapl_search_history", title="Search TAPL history", annotations=READ_ONLY)
     async def search_history(
         query: Annotated[str, Field(description="Compact task-specific query with likely files, features, or errors.", min_length=1, max_length=500)],
         limit: Annotated[int | None, Field(description="Maximum summarized matches.", ge=1, le=50)] = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Search original active and archived records when emitted memory cues are insufficient or prior evidence is needed."""
 
-        return await call_application(application.search_history, query, limit=limit)
+        return await call_application(application.search_history, query, session_id=session_id, limit=limit)
 
     @server.tool(name="tapl_recall", title="Recall TAPL memories", annotations=READ_ONLY)
     async def recall(
         query: Annotated[str, Field(description="Cue query; empty lists memories for manual inspection.", max_length=500)] = "",
         limit: Annotated[int, Field(ge=1, le=50)] = 3,
         offset: Annotated[int, Field(ge=0)] = 0,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Read associative hints without capture or reinforcement. Verify original sources before relying on a hint."""
-        return await call_application(application.recall, query, limit=limit, offset=offset)
+        return await call_application(application.recall, query, session_id=session_id, limit=limit, offset=offset)
 
     @server.tool(name="tapl_get_memory", title="Read one TAPL memory", annotations=READ_ONLY)
     async def get_memory(
         memory_id: Annotated[str, Field(description="Memory id returned by tapl_recall.", min_length=1)],
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Read a memory and its original source without capture or reinforcement. Deleted or missing memories return null."""
-        return await call_application(application.get_memory, memory_id)
+        return await call_application(application.get_memory, memory_id, session_id=session_id)
 
     @server.tool(name="tapl_update_memory", title="Update TAPL memory", annotations=MEMORY_WRITE)
     async def update_memory(
@@ -504,44 +539,49 @@ def create_server(
         note: Annotated[str | None, Field(min_length=1, max_length=240)] = None,
         cue: Annotated[list[str] | None, Field(min_length=3, max_length=5)] = None,
         state: Literal["active", "superseded"] | None = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Edit a memory only on an explicit user request. Use its current revision; surface conflicts for fresh review."""
-        return await call_application(application.update_memory, memory_id, expected_revision=expected_revision,
+        return await call_application(application.update_memory, memory_id, session_id=session_id, require_session=True, expected_revision=expected_revision,
                                       note=note, cue=cue, state=state)
 
     @server.tool(name="tapl_delete_memory", title="Delete TAPL memory", annotations=MEMORY_WRITE)
     async def delete_memory(
         memory_id: str,
         expected_revision: Annotated[int, Field(ge=1, strict=True)],
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Tombstone a memory only on an explicit user request. Deleted memories cannot be recalled or reinforced."""
-        return await call_application(application.delete_memory, memory_id, expected_revision=expected_revision)
+        return await call_application(application.delete_memory, memory_id, session_id=session_id, require_session=True, expected_revision=expected_revision)
 
     @server.tool(name="tapl_get_item", title="Read one TAPL item", annotations=READ_ONLY)
     async def get_item(
         item_id: Annotated[int, Field(description="Numeric item id returned by tapl_search_history.", ge=1)],
         compact: Annotated[bool, Field(description="Omit generated body only when exactly reconstructible from retained canonical fields; preserve custom and raw content.")] = False,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Read one complete plan, task, or finding when a search snippet is insufficient."""
 
-        payload = await call_application(application.get_item, item_id)
+        payload = await call_application(application.get_item, item_id, session_id=session_id)
         return compact_item_payload(payload) if compact else payload
 
     @server.tool(name="tapl_list_archives", title="List TAPL archives", annotations=READ_ONLY)
     async def list_archives(
         limit: Annotated[int | None, Field(description="Maximum recent archives to return.", ge=1, le=100)] = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """List recent archived workflow runs for native clients and viewers."""
 
-        return await call_application(application.list_archives, limit=limit)
+        return await call_application(application.list_archives, session_id=session_id, limit=limit)
 
     @server.tool(name="tapl_get_archive", title="Read one TAPL archive", annotations=READ_ONLY)
     async def get_archive(
         archive_id: Annotated[str, Field(description="Archive numeric id or stable slug.", min_length=1)],
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Read an archive with its workflow items and events."""
 
-        return await call_application(application.get_archive, archive_id)
+        return await call_application(application.get_archive, archive_id, session_id=session_id)
 
     @server.tool(name="tapl_summarize_run", title="Summarize active TAPL run", annotations=WRITE)
     async def summarize_run(
@@ -555,13 +595,14 @@ def create_server(
             Field(description=tapl_prompt.field_help("run", "workflow_mode")),
         ],
         recall_query: Annotated[str | None, Field(description="Optional compact cues for one automatic recall per run.", max_length=500)] = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Summarize the request and explicitly classify its work type and workflow mode."""
 
         return await call_application_write(
             application,
             application.summarize_run,
-            summary,
+            summary, session_id=session_id,
             work_type=work_type,
             workflow_mode=workflow_mode,
             recall_query=recall_query,
@@ -578,13 +619,14 @@ def create_server(
                 max_length=20,
             ),
         ],
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Split explicitly requested separate run lifecycles before planning. For multiple topics, prefer distinct PLANs in one run."""
 
         return await call_application_write(
             application,
             application.split_run,
-            [request.model_dump() for request in requests],
+            [request.model_dump() for request in requests], session_id=session_id,
             operation="run_split",
         )
 
@@ -604,13 +646,14 @@ def create_server(
         notes: Annotated[str | None, Field(description=tapl_prompt.field_help("plan", "notes"))] = None,
         custom_fields: CustomFields = None,
         status: Annotated[str | None, Field(description=tapl_prompt.field_help("plan", "status"))] = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Create or update one topic's plan. Use a distinct plan_id per topic in the same run before task design; reuse it only to update that topic. Omitted fields are preserved."""
 
         return await call_application_write(
             application,
             application.apply_plan,
-            plan_id,
+            plan_id, session_id=session_id,
             **compact_payload(
                 title=title,
                 summary=summary,
@@ -643,13 +686,14 @@ def create_server(
         owned_paths: Annotated[list[str] | None, Field(description="Exclusive file or directory paths owned by this task.")] = None,
         depends_on: Annotated[list[str] | None, Field(description="Task ids that must be Completed before this task starts.")] = None,
         custom_fields: CustomFields = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Create one Pending executable task derived from an existing plan. Split independent edit and verification work."""
 
         return await call_application_write(
             application,
             application.create_task,
-            task_id,
+            task_id, session_id=session_id,
             title=title,
             spec_id=spec_id,
             goal=goal,
@@ -667,13 +711,13 @@ def create_server(
         )
 
     @server.tool(name="tapl_start_task", title="Start TAPL task", annotations=WRITE)
-    async def start_task(task_id: TaskId, custom_fields: CustomFields = None) -> dict[str, Any]:
+    async def start_task(task_id: TaskId, custom_fields: CustomFields = None, session_id: SessionId = None) -> dict[str, Any]:
         """Mark one dependency-ready sequential task In Progress immediately before its implementation begins."""
 
         return await call_application_write(
             application,
             application.start_task,
-            task_id,
+            task_id, session_id=session_id,
             **compact_payload(custom_fields=custom_fields),
             operation="task_start",
         )
@@ -684,13 +728,14 @@ def create_server(
         batch_id: Annotated[str | None, Field(description="Optional stable batch id for idempotent retry.")] = None,
         failure_policy: Annotated[str, Field(description="Non-empty batch failure policy.", min_length=1)] = db.DEFAULT_FAILURE_POLICY,
         execution_metadata: Annotated[dict[str, dict[str, Any]] | None, Field(description="Per-task runtime selection metadata. Complete model/reasoning pairs record legacy SubAgent Model before callers spawn; advisory profile, characteristics, delegation/model rationale, and override fields are merged into canonical task custom fields before the manifest returns.")] = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Atomically dispatch tasks from the same plan and parallel_group, recording compatible legacy plus advisory selection context before returning its spawn manifest. Never batch tasks from different plans."""
 
         return await call_application_write(
             application,
             application.dispatch_tasks,
-            task_ids,
+            task_ids, session_id=session_id,
             **compact_payload(
                 batch_id=batch_id,
                 failure_policy=failure_policy,
@@ -706,13 +751,14 @@ def create_server(
         result: Annotated[str, Field(description=tapl_prompt.field_help("task", "result"), min_length=1)],
         execution_id: Annotated[str | None, Field(description="Exact execution id required for a dispatched parallel task.")] = None,
         custom_fields: CustomFields = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Mark a task Completed only after implementation and verification; settle parallel work with its exact execution id."""
 
         return await call_application_write(
             application,
             application.settle_task,
-            task_id,
+            task_id, session_id=session_id,
             status="Completed",
             **compact_payload(
                 verification=verification,
@@ -731,13 +777,14 @@ def create_server(
         execution_id: Annotated[str | None, Field(description="Exact execution id required for a dispatched parallel task.")] = None,
         verification: Annotated[str | None, Field(description="Current verification evidence, if changed.")] = None,
         custom_fields: CustomFields = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Mark a task Blocked with a concrete blocker and next action; use instead of leaving inactive work In Progress."""
 
         return await call_application_write(
             application,
             application.settle_task,
-            task_id,
+            task_id, session_id=session_id,
             status="Blocked",
             **compact_payload(
                 blocker=blocker,
@@ -755,13 +802,14 @@ def create_server(
         result: Annotated[str, Field(description="Reason the task is intentionally skipped.", min_length=1)],
         execution_id: Annotated[str | None, Field(description="Exact execution id required for a dispatched parallel task.")] = None,
         custom_fields: CustomFields = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Mark work Skipped when it is intentionally out of scope or superseded, preserving the reason."""
 
         return await call_application_write(
             application,
             application.settle_task,
-            task_id,
+            task_id, session_id=session_id,
             status="Skipped",
             **compact_payload(result=result, execution_id=execution_id, custom_fields=custom_fields),
             operation="task_skip",
@@ -772,13 +820,14 @@ def create_server(
         batch_id: Annotated[str, Field(description="Active execution batch id.", min_length=1)],
         reason: Annotated[str, Field(description="Why the batch is being cancelled.", min_length=1)],
         block_tasks: Annotated[bool, Field(description="Block tasks instead of returning them to Pending.")] = True,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Cancel an active batch after spawn failure or intentional stop and settle every active execution."""
 
         return await call_application_write(
             application,
             application.cancel_batch,
-            batch_id,
+            batch_id, session_id=session_id,
             reason=reason,
             block_tasks=block_tasks,
             operation="batch_cancel",
@@ -788,13 +837,14 @@ def create_server(
     async def recover_batch(
         batch_id: Annotated[str, Field(description="Interrupted execution batch id.", min_length=1)],
         reason: Annotated[str, Field(description="Why recovery is required.", min_length=1)],
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Recover an interrupted batch and return its active tasks to Pending before a safe retry."""
 
         return await call_application_write(
             application,
             application.recover_batch,
-            batch_id,
+            batch_id, session_id=session_id,
             reason=reason,
             operation="batch_recover",
         )
@@ -806,13 +856,14 @@ def create_server(
         finding: Annotated[str, Field(description=tapl_prompt.field_help("finding", "finding"))] = "",
         impact: Annotated[str, Field(description=tapl_prompt.field_help("finding", "impact"))] = "",
         related_ids: Annotated[str, Field(description=tapl_prompt.field_help("finding", "related_ids"))] = "",
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Record only a decision-relevant external or implementation finding with its source and impact."""
 
         return await call_application_write(
             application,
             application.add_finding,
-            title,
+            title, session_id=session_id,
             source=source,
             finding=finding,
             impact=impact,
@@ -824,12 +875,13 @@ def create_server(
     async def approve_execution(
         prompt: Annotated[str, Field(description=tapl_prompt.field_help("approval", "prompt"), min_length=1)],
         source: Annotated[ApprovalSource, Field(description=tapl_prompt.field_help("approval", "source"))] = "explicit_user",
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Record execution approval only after the user explicitly requested execution or confirmed it through request_user_input."""
 
         return await call_application_write(
             application,
-            application.record_approval,
+            application.record_approval, session_id=session_id,
             decision="approved",
             prompt=prompt,
             source=source,
@@ -840,12 +892,13 @@ def create_server(
     async def reject_execution(
         prompt: Annotated[str, Field(description="Rejected execution scope.", min_length=1)],
         source: Annotated[ApprovalSource, Field(description=tapl_prompt.field_help("approval", "source"))] = "explicit_user",
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Record an explicit execution rejection and keep executable work pending or blocked."""
 
         return await call_application_write(
             application,
-            application.record_approval,
+            application.record_approval, session_id=session_id,
             decision="rejected",
             prompt=prompt,
             source=source,
@@ -859,6 +912,7 @@ def create_server(
         memory_candidates: Annotated[list[MemoryCandidate] | None, Field(description="At most two lessons meeting all three checks: recurring cues, reduced future search, verified source; implies capture.", max_length=2)] = None,
         memory_uses: Annotated[list[MemoryUse] | None, Field(description="Only memories actually used after checking their original source.", max_length=50)] = None,
         memory_review: Annotated[MemoryReview | None, Field(description="Explicit capture or skip review; skip requires a concise reason. Omission without candidates leaves review_required.")] = None,
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Record the verified final result after no actionable tasks remain and before archiving.
 
@@ -868,7 +922,7 @@ def create_server(
         return await call_application_write(
             application,
             application.finish_run,
-            result,
+            result, session_id=session_id,
             expected_run_id=expected_run_id,
             memory_candidates=[entry.model_dump(exclude_none=True) for entry in memory_candidates] if memory_candidates is not None else None,
             memory_uses=[entry.model_dump() for entry in memory_uses] if memory_uses is not None else None,
@@ -880,6 +934,7 @@ def create_server(
     async def finish_archive(
         slug: Annotated[str, Field(description="Stable timestamped archive slug.", min_length=1, max_length=120)],
         summary: Annotated[str, Field(description="Concise archive summary.", max_length=2000)] = "",
+        session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Archive a completed, superseded, or intentionally deferred run after every task and batch is settled.
 
@@ -889,7 +944,7 @@ def create_server(
         return await call_application_write(
             application,
             application.finish_archive,
-            slug,
+            slug, session_id=session_id,
             summary=summary,
             operation="archive_finish",
         )

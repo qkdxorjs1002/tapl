@@ -4,7 +4,7 @@ const Module = require('node:module');
 
 test('extension uses the shared read-only Viewer protocol and reloads current routes', async () => {
   const calls = [], messages = [], commands = new Map();
-  let receive, disposed, revision = 1, deleted = false, oldServer = false, delayed, foldersChanged, watcherCount = 0, unavailable = false, itemSource = false;
+  let receive, disposed, revision = 1, deleted = false, oldServer = false, delayed, foldersChanged, watcherCount = 0, unavailable = false, itemSource = false, multiRun = false;
   let diagnostics = { stored_count: 80, matched_count: 51, last_capture_error: {
     run_id: 'r1', slot: 2, code: 'invalid_memory_note', message: '<script>capture failed</script>', created_at: '2026-09-16T00:00:00Z'
   } };
@@ -35,6 +35,12 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
     async callTool(workspace, name, args) {
       calls.push({ root: workspace.cwd, name, args });
       if (name === 'tapl_get_status' && unavailable) throw new Error('No TAPL database');
+      if (name === 'tapl_get_status' && multiRun) return {
+        active_runs: [{ id: 'ra', session_id: 'session-a' }, { id: 'rb', session_id: 'session-b' }],
+        active_run: args.session_id ? { id: args.session_id === 'session-a' ? 'ra' : 'rb', session_id: args.session_id } : null,
+        session_id: args.session_id ?? '', tasks: [{ id: 11, stable_id: 'TASK-001', active_execution: { execution_id: 'execution-a' }, depends_on: ['TASK-002'] }], findings: [],
+        plans: args.session_id ? [{ stable_id: 'PLAN-001', title: args.session_id }] : []
+      };
       if (name === 'tapl_get_status') return { active_run: null, tasks: [], plans: [], findings: [],
         viewer_capabilities: oldServer ? undefined : { associativeMemory: true } };
       if (name === 'tapl_list_archives') return { archives: [] };
@@ -43,7 +49,7 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
         return { total: 51, memories: [memory()], ...(diagnostics ? { diagnostics } : {}) };
       }
       if (name === 'tapl_get_memory') return { memory: deleted ? null : memory() };
-      if (name === 'tapl_get_item') return { item: { id: args.item_id, stable_id: 'TASK-001', kind: 'task', archived: 1, title: `Item ${revision}` } };
+      if (name === 'tapl_get_item') return { item: { id: args.item_id, stable_id: 'TASK-001', kind: 'task', archived: multiRun ? 0 : 1, title: `Item ${revision}` } };
       if (name === 'tapl_get_archive') return { archive: { id: args.archive_id, summary: `Archive ${revision}` }, items: [], events: [] };
       if (name === 'tapl_search_history') return { query: args.query, mode: 'bm25', results: [{ id: 1, title: `Search ${revision}` }] };
       throw new Error(`Unexpected tool: ${name}`);
@@ -122,6 +128,19 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
   folders.splice(1, 1); foldersChanged(); await tick();
   assert.equal(messages.at(-1).workspace, '/work/first');
   assert.equal(panel.title, 'first tapl');
+  multiRun = true;
+  await commands.get('taplWorkflow.openOverview')();
+  assert.equal(messages.at(-1).view.status.session_id, 'session-a');
+  const foreignTask = (await send({ command: 'openSearchResult', itemId: 22 })).view.detail;
+  assert.equal(foreignTask.active_execution, undefined, 'Run-local TASK-001 must not match another numeric item id');
+  assert.equal(foreignTask.depends_on, undefined);
+  await send({ command: 'selectRun', sessionId: 'session-b' });
+  await tick();
+  assert.equal(messages.at(-1).view.status.active_run.id, 'rb');
+  assert.equal(messages.at(-1).view.status.plans[0].title, 'session-b');
+  assert.ok(calls.some(call => call.name === 'tapl_get_status' && call.args.session_id === 'session-b'));
+  assert.ok(calls.every(call => !['tapl_start_task', 'tapl_approve_execution', 'tapl_finish_archive'].includes(call.name)), 'Viewer selection must stay read-only');
+  multiRun = false;
   oldServer = true;
   await commands.get('taplWorkflow.openOverview')();
   assert.equal(messages.at(-1).capabilities.associativeMemory, false);

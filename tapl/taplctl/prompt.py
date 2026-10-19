@@ -818,6 +818,16 @@ def user_prompt_submit_guidance(*, subagents: tapl_config.SubagentsConfig | None
     ) if part)
 
 
+def session_routing_guidance() -> str:
+    return (
+        "Pass the current Codex hook `session_id` on EVERY TAPL MCP call, including reads and receipts' next actions. "
+        "Subagents use the parent hook identity; do not substitute CODEX_THREAD_ID or another run's owner. "
+        "Omitted identity selects only the isolated legacy namespace; session-aware workspaces reject unidentified writes. "
+        "Each session owns its active RUN and split queue. Other sessions' RUNs are read-only history/inventory, "
+        "never implicit resume, mutation, Stop, or archive targets."
+    )
+
+
 def receipt_guidance() -> str:
     return (
         "Reuse the latest successful write receipt's recommendations, without routine `tapl_get_next` after writes "
@@ -835,6 +845,7 @@ def entry_guidance() -> str:
         "Ordinary entry: omit model-catalog arguments; no full catalog enumeration/recheck at session start. "
         "Use `tapl_get_status` only for missing run/task/approval/batch/resume details needed next, or explicitly "
         "recommended inspection (full=true for bodies). "
+        "Pass hook session_id on EVERY TAPL call (omitted=legacy). "
         + receipt_guidance()
     )
 
@@ -857,8 +868,9 @@ def mcp_entry_instructions() -> str:
         "SessionStart is bootstrap only; wait for a concrete request. "
         "Omit model-catalog arguments during ordinary entry. In a new session, after compaction or policy loss, "
         "or when uncertain, reload with "
-        "no `known_policy_revision`; a summary is insufficient. Follow the loaded policy for approvals, "
-        "delegation, execution, verification, and archive."
+        "no `known_policy_revision`; a summary is insufficient. Follow policy for approvals, "
+        "delegation, execution, verification, and archive. "
+        "EVERY call: pass hook session_id; omitted=legacy."
     )
 
 

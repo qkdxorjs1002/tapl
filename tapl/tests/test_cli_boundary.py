@@ -315,7 +315,7 @@ class HookEntrypointTests(unittest.TestCase):
                         "--json",
                     ]
                 )
-            connect.assert_called_once_with(workspace.resolve() / ".tapl" / "tapl.db")
+            connect.assert_called_once_with(workspace.resolve() / ".tapl" / "tapl.db", session_id="")
 
         self.assertEqual(result, 2)
         self.assertEqual(handler.call_args.kwargs["event"], "PreToolUse")

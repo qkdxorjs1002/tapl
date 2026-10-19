@@ -93,6 +93,8 @@ def _run(conn, run_id):
 
 def _current_run(conn, run_id):
     row = _run(conn, run_id)
+    if str(row["session_id"]) != db.connection_session_id(conn):
+        raise MemoryError("current run belongs to another session", "conflict")
     if row["status"] != "active":
         raise MemoryError("current run changed or was archived", "conflict")
     return row
@@ -129,8 +131,10 @@ def _revision(row, revision):
 
 
 def _event(conn, run_id, event_type, payload, now):
-    conn.execute("INSERT INTO events(run_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-                 (run_id, event_type, json.dumps(payload, ensure_ascii=False), _stamp(now)))
+    # Shared memory edits may reference an older run owned by another session;
+    # attribute the event to its current caller without changing source access.
+    conn.execute("INSERT INTO events(run_id,session_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?)",
+                 (run_id, db.connection_session_id(conn), event_type, json.dumps(payload, ensure_ascii=False), _stamp(now)))
 
 
 def _dto(conn, row, now, *, matched=None, original=False):
@@ -428,6 +432,7 @@ def review_state(conn, run_id):
 
 def require_review(conn, run_id, *, candidates=None, uses=None, now=None):
     """Call in the same transaction as the result, closing the archive race."""
+    _current_run(conn, run_id)
     state = review_state(conn, run_id)
     state["attempt_token"] = uuid.uuid4().hex
     state["attempt_operations"] = []

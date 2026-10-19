@@ -8,6 +8,7 @@ export type TaplJsonValue = string | number | boolean | null | TaplJsonValue[] |
 
 export interface TaplWorkflowRun {
   id?: string;
+  session_id?: string;
   slug?: string;
   status?: string;
   request_summary?: string;
@@ -19,6 +20,8 @@ export interface TaplWorkflowRun {
 
 export interface TaplStatus {
   active_run: TaplWorkflowRun | null;
+  session_id?: string;
+  active_runs?: TaplWorkflowRun[];
   task_counts: Record<string, number>;
   incomplete_tasks: number;
   plans: TaplItem[];
@@ -62,6 +65,7 @@ export interface TaplExecutionBatch {
 }
 
 export interface TaplItem {
+  id?: number;
   stable_id: string;
   kind: string;
   title: string;
@@ -216,6 +220,7 @@ export type WebviewCommand =
   | { command: 'ready' }
   | { command: 'chooseWorkspace' }
   | { command: 'selectWorkspace'; workspace: string }
+  | { command: 'selectRun'; sessionId: string }
   | { command: 'refresh' }
   | { command: 'back' }
   | { command: 'debug' }

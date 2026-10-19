@@ -13,10 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from . import memory_search
+from . import memory_search, sessions
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -44,6 +44,7 @@ DEFAULT_RECORD_MODE = "planned"
 LIGHTWEIGHT_WORK_TYPES = ("answer", "investigation", "analysis", "planning")
 WORKFLOW_RUN_OUTPUT_FIELDS = (
     "id",
+    "session_id",
     "slug",
     "status",
     "request_summary",
@@ -108,10 +109,41 @@ def default_db_path(start: Path | None = None) -> Path:
     return find_repo_root(start) / DEFAULT_DB_RELATIVE
 
 
-def connect(path: Path | str | None = None) -> sqlite3.Connection:
+class WorkflowConnection(sqlite3.Connection):
+    """Connection-local owner scope; never shared between MCP calls."""
+
+    tapl_session_id: str = ""
+
+
+def connection_session_id(conn: sqlite3.Connection) -> str:
+    return getattr(conn, "tapl_session_id", "")
+
+
+def bind_session(conn: sqlite3.Connection, session_id: str | None) -> None:
+    owner = sessions.normalize_session_id(session_id)
+    existing = connection_session_id(conn)
+    if existing and existing != owner:
+        raise ValueError("connection belongs to another session")
+    if not isinstance(conn, WorkflowConnection):
+        raise ValueError("session scope requires a TAPL database connection")
+    conn.tapl_session_id = owner
+
+
+def require_run_owner(conn: sqlite3.Connection, run_id: str) -> sqlite3.Row:
+    run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
+    if run is None:
+        raise ValueError(f"workflow run not found: {run_id}")
+    if str(run["session_id"]) != connection_session_id(conn):
+        raise ValueError("workflow run belongs to another session")
+    return run
+
+
+def connect(path: Path | str | None = None, *, session_id: str | None = None) -> sqlite3.Connection:
+    owner = sessions.normalize_session_id(session_id) if session_id is not None else sessions.current_session_id()
     db_path = Path(path) if path else default_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1_000)
+    conn = sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1_000, factory=WorkflowConnection)
+    conn.tapl_session_id = owner
     conn.row_factory = sqlite3.Row
     conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys = ON")
@@ -150,6 +182,8 @@ def migrate(conn: sqlite3.Connection) -> None:
             backup_before_memory_migration(conn)
         elif stored_schema_version < 12:
             backup_before_memory_migration(conn, target_version=12)
+        if stored_schema_version < 14:
+            backup_before_memory_migration(conn, target_version=14)
 
     migrated_legacy_record_mode = migrate_legacy_workflow_mode(conn)
 
@@ -157,6 +191,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS workflow_runs (
           id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL DEFAULT '',
           slug TEXT NOT NULL,
           status TEXT NOT NULL,
           request_summary TEXT NOT NULL DEFAULT '',
@@ -430,9 +465,12 @@ def migrate(conn: sqlite3.Connection) -> None:
     backfill_task_timing_from_executions(conn)
     drop_column(conn, "tasks", "required_subagent")
     backfill_plan_rows(conn)
+    ensure_column(conn, "workflow_runs", "session_id", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(conn, "events", "session_id", "TEXT NOT NULL DEFAULT ''")
     dedupe_active_runs(conn)
+    conn.execute("DROP INDEX IF EXISTS idx_single_active_run")
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_single_active_run ON workflow_runs(status) WHERE status = 'active'"
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_session_active_run ON workflow_runs(session_id) WHERE status = 'active'"
     )
     try:
         # Acquire a writer lock before rechecking: another connection may have
@@ -564,11 +602,19 @@ def active_run(conn: sqlite3.Connection) -> sqlite3.Row | None:
     return conn.execute(
         """
         SELECT * FROM workflow_runs
-        WHERE status = 'active'
+        WHERE status = 'active' AND session_id = ?
         ORDER BY updated_at DESC, created_at DESC
         LIMIT 1
-        """
+        """,
+        (connection_session_id(conn),),
     ).fetchone()
+
+
+def active_runs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Read-only workspace inventory; mutations still require owner scope."""
+    return [workflow_run_to_dict(row) for row in conn.execute(
+        "SELECT * FROM workflow_runs WHERE status = 'active' ORDER BY created_at, id"
+    )]
 
 
 def queued_runs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -579,9 +625,10 @@ def queued_runs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         """
         SELECT *
         FROM workflow_runs
-        WHERE status = 'queued'
+        WHERE status = 'queued' AND session_id = ?
         ORDER BY created_at, split_group_id, split_position, id
-        """
+        """,
+        (connection_session_id(conn),),
     ).fetchall()
     for row in rows:
         dependencies = conn.execute(
@@ -624,7 +671,7 @@ def activate_next_queued_run(
         """
         SELECT queued.*
         FROM workflow_runs queued
-        WHERE queued.status = 'queued'
+        WHERE queued.status = 'queued' AND queued.session_id = ?
           AND NOT EXISTS (
             SELECT 1
             FROM workflow_run_dependencies rd
@@ -643,7 +690,7 @@ def activate_next_queued_run(
           queued.id
         LIMIT 1
         """,
-        (preferred_group_id, preferred_group_id),
+        (connection_session_id(conn), preferred_group_id, preferred_group_id),
     ).fetchone()
     if candidate is None:
         return None
@@ -765,13 +812,14 @@ def split_active_run(
             conn.execute(
                 """
                 INSERT INTO workflow_runs(
-                  id, slug, status, request_summary, work_type, workflow_mode, record_mode,
+                  id, session_id, slug, status, request_summary, work_type, workflow_mode, record_mode,
                   split_group_id, split_key, split_position, created_at, updated_at
                 )
-                VALUES(?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
+                    connection_session_id(conn),
                     request["key"],
                     request["summary"],
                     request["work_type"],
@@ -821,11 +869,13 @@ def dedupe_active_runs(conn: sqlite3.Connection) -> None:
         ORDER BY item_count DESC, r.updated_at DESC, r.created_at DESC
         """
     ).fetchall()
-    if len(rows) <= 1:
-        return
-
+    seen: set[str] = set()
     now = utc_now()
-    for row in rows[1:]:
+    for row in rows:
+        owner = str(row["session_id"])
+        if owner not in seen:
+            seen.add(owner)
+            continue
         conn.execute(
             "UPDATE workflow_runs SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?",
             (now, now, row["id"]),
@@ -840,6 +890,33 @@ def ensure_active_run(
     work_type: str = DEFAULT_WORK_TYPE,
     workflow_mode: str = DEFAULT_WORKFLOW_MODE,
 ) -> sqlite3.Row:
+    # Queue activation and fresh creation must share one writer lock: two
+    # reconnects for the same owner must not activate/create competing runs.
+    owns_transaction = not conn.in_transaction
+    if owns_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        run = _ensure_active_run(
+            conn, slug=slug, request_summary=request_summary,
+            work_type=work_type, workflow_mode=workflow_mode,
+        )
+        if owns_transaction:
+            conn.commit()
+        return run
+    except BaseException:
+        if owns_transaction:
+            conn.rollback()
+        raise
+
+
+def _ensure_active_run(
+    conn: sqlite3.Connection,
+    *,
+    slug: str,
+    request_summary: str,
+    work_type: str,
+    workflow_mode: str,
+) -> sqlite3.Row:
     if work_type not in WORK_TYPES:
         raise ValueError(f"invalid work_type: {work_type}")
     if workflow_mode not in WORKFLOW_MODES:
@@ -852,13 +929,11 @@ def ensure_active_run(
                 "UPDATE workflow_runs SET request_summary = ?, updated_at = ? WHERE id = ?",
                 (request_summary, utc_now(), existing["id"]),
             )
-            conn.commit()
             return active_run(conn)  # type: ignore[return-value]
         return existing
 
     queued = activate_next_queued_run(conn)
     if queued is not None:
-        conn.commit()
         return queued
 
     now = utc_now()
@@ -867,19 +942,18 @@ def ensure_active_run(
         conn.execute(
             """
             INSERT INTO workflow_runs(
-              id, slug, status, request_summary, work_type, workflow_mode, record_mode,
+              id, session_id, slug, status, request_summary, work_type, workflow_mode, record_mode,
               created_at, updated_at
             )
-            VALUES(?, ?, 'active', ?, ?, ?, ?, ?, ?)
+            VALUES(?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, slug, request_summary, work_type, workflow_mode, record_mode, now, now),
+            (run_id, connection_session_id(conn), slug, request_summary, work_type, workflow_mode, record_mode, now, now),
         )
     except sqlite3.IntegrityError:
         existing = active_run(conn)
         if existing:
             return existing
         raise
-    conn.commit()
     return active_run(conn)  # type: ignore[return-value]
 
 
@@ -956,7 +1030,7 @@ def upsert_item(
     archived: bool = False,
     commit: bool = True,
 ) -> sqlite3.Row:
-    run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() if run_id else ensure_active_run(conn)
+    run = require_run_owner(conn, run_id) if run_id else ensure_active_run(conn)
     existing = conn.execute(
         "SELECT custom_fields_json FROM items WHERE run_id = ? AND kind = ? AND stable_id = ?",
         (run["id"], kind, stable_id),
@@ -2458,7 +2532,7 @@ def record_approval(
     if source not in APPROVAL_SOURCES:
         raise ValueError(f"invalid approval source: {source}")
 
-    run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() if run_id else active_run(conn)
+    run = require_run_owner(conn, run_id) if run_id else active_run(conn)
     if not run:
         raise ValueError("no active workflow run for approval")
 
@@ -2607,14 +2681,15 @@ def record_event(
     message: str = "",
     run_id: str | None = None,
 ) -> None:
-    run = active_run(conn)
+    run = require_run_owner(conn, run_id) if run_id else active_run(conn)
     conn.execute(
         """
-        INSERT INTO events(run_id, event_type, tool_name, mode, payload_json, message, created_at)
-        VALUES(?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO events(run_id, session_id, event_type, tool_name, mode, payload_json, message, created_at)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run_id or (run["id"] if run else None),
+            connection_session_id(conn),
             event_type,
             tool_name,
             mode,
@@ -2656,7 +2731,7 @@ def _archive_active_run(conn: sqlite3.Connection, *, slug: str, summary: str, me
         if review["status"] in ("review_required", "failed", "partial"):
             raise ValueError("memory review pending: call tapl_finish_run with expected_run_id and corrected memory_candidates for the same slot (one retry), or memory_review={decision:'skip',reason:'concise reason'}; inspect memory before archiving")
 
-    archive_id = utc_now().replace(":", "").replace("+0000", "Z") + "-" + slug
+    archive_id = utc_now().replace(":", "").replace("+0000", "Z") + "-" + slug + "-" + str(run["id"])
     now = utc_now()
     for timing in conn.execute(
         "SELECT tt.task_item_id FROM task_timing tt JOIN items i ON i.id = tt.task_item_id "
@@ -2836,7 +2911,8 @@ def _status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
     recent_events = [
         row_to_dict(row)
         for row in conn.execute(
-            "SELECT * FROM events ORDER BY id DESC LIMIT 12",
+            "SELECT * FROM events WHERE session_id = ? ORDER BY id DESC LIMIT 12",
+            (connection_session_id(conn),),
         )
     ]
     incomplete = sum(task_counts[status] for status in ("Pending", "In Progress", "Blocked"))
@@ -2850,9 +2926,11 @@ def _status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
 
     from . import recall
     return {
+        "session_id": connection_session_id(conn),
         "memory_review": recall.review_state(conn, run_id),
         "schema": get_meta(conn),
         "active_run": workflow_run_to_dict(run),
+        "active_runs": active_runs(conn),
         "queued_runs": queued,
         "approvals": {
             DEFAULT_APPROVAL_KIND: approval_status(conn, kind=DEFAULT_APPROVAL_KIND, run_id=run_id),

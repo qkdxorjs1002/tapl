@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -23,6 +24,7 @@ from . import (
     db,
     embeddings,
     searchd,
+    sessions,
     updater,
     viewer,
 )
@@ -80,8 +82,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
     try:
-        auto_install_before_handler(args)
-        return int(args.handler(args) or 0)
+        with sessions.session_scope(args.session_id):
+            auto_install_before_handler(args)
+            return int(args.handler(args) or 0)
     except updater.UpdateError as exc:
         emit_update_error(args, exc)
         return 1
@@ -117,6 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog="Agent workflow operations are available through the dedicated `tapl-mcp` server.",
     )
+    parser.add_argument("--session-id", default=os.environ.get("TAPL_SESSION_ID", ""),
+                        help="Explicit Codex session identity (default: TAPL_SESSION_ID or isolated legacy scope).")
     parser.add_argument("--db", type=Path, default=None, help="Path to TAPL SQLite DB.")
     parser.add_argument("--config", type=Path, default=None, help="Path to TAPL TOML config.")
     parser.add_argument(
@@ -421,7 +426,7 @@ def viewer_origin_arg(value: str) -> str:
 
 
 def open_conn(args: argparse.Namespace, *, start: Path | None = None) -> sqlite3.Connection:
-    return db.connect(args.db or db.default_db_path(start))
+    return db.connect(args.db or db.default_db_path(start), session_id=getattr(args, "session_id", None))
 
 
 def load_config(args: argparse.Namespace, *, start: Path | None = None) -> tapl_config.TaplConfig:

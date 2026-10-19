@@ -33,6 +33,7 @@ const LANGUAGE_SETTING = "language";
 const LAYOUT_SETTING = "layout";
 let taplMcpClients: TaplMcpClientPool | undefined;
 let selectedWorkspacePath: string | undefined;
+const selectedRunSessions = new Map<string, string>();
 
 function localize(key: TranslationKey, params?: TranslationParams): string {
   return translate(displayLocale(), key, params);
@@ -425,6 +426,15 @@ class WorkflowWebviewManager {
     switch (message.command) {
       case 'ready': await this.postCurrentView('hydrate'); return;
       case 'refresh': await this.refresh(); return;
+      case 'selectRun': {
+        const root = getWorkspaceRoot();
+        if (root && typeof message.sessionId === 'string' && message.sessionId.length <= 256) {
+          selectedRunSessions.set(root.uri.fsPath, message.sessionId);
+          await this.openOverview();
+          await vscode.commands.executeCommand(`${COMMAND_PREFIX}.refresh`);
+        }
+        return;
+      }
       case 'back': await this.navigate(this.backStack.pop() ?? { type: 'overview' }); return;
       case 'chooseWorkspace': {
         const root = await vscode.window.showWorkspaceFolderPick();
@@ -510,13 +520,25 @@ async function safeStatus(
   options: { full?: boolean; includeEvents?: boolean; eventsLimit?: number } = {},
   root = getWorkspaceRoot()
 ): Promise<{ ok: true; value: TaplStatus } | { ok: false; error: string }> {
-  const result = await callTaplMcp('tapl_get_status', {
+  const selectedSession = root ? selectedRunSessions.get(root.uri.fsPath) : undefined;
+  const args = {
     full: options.full ?? false,
     include_events: options.includeEvents ?? false,
-    events_limit: options.eventsLimit ?? 12
-  }, root);
+    events_limit: options.eventsLimit ?? 12,
+    ...(selectedSession ? { session_id: selectedSession } : {})
+  };
+  let result = await callTaplMcp('tapl_get_status', args, root);
   if (!result.ok) {
     return result;
+  }
+  const initial = result.value as unknown as TaplStatus;
+  if (!initial.active_run && initial.active_runs?.length && root) {
+    const owner = initial.active_runs[0].session_id;
+    if (owner) {
+      selectedRunSessions.set(root.uri.fsPath, owner);
+      result = await callTaplMcp('tapl_get_status', { ...args, session_id: owner }, root);
+      if (!result.ok) { return result; }
+    }
   }
   return {
     ok: true,
@@ -590,7 +612,7 @@ async function enrichTaskDetail(detail: TaplItemDetail): Promise<TaplItemDetail>
   if (!status.ok) {
     return detail;
   }
-  const task = status.value.tasks.find((candidate) => candidate.stable_id === detail.stable_id);
+  const task = status.value.tasks.find((candidate) => candidate.id === detail.id);
   if (!task) {
     return detail;
   }

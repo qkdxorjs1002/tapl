@@ -20,12 +20,14 @@ def build_context(
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     state = db.status_payload(conn)
+    state["session_id"] = db.connection_session_id(conn)
     plan_task = validation.validate_workflow_state(state)
     prompt = prompt_summary(payload or {})
     covered_issue_codes = covered_validation_issue_codes(state, plan_task)
     return {
         "ok": True,
         "event": event,
+        "session_id": db.connection_session_id(conn),
         "active_run": active_run_summary(state),
         "queued_runs": state.get("queued_runs", []),
         "counts": {
@@ -40,7 +42,7 @@ def build_context(
         "active_executions": state.get("active_executions", []),
         "config": settings.as_dict(),
         "plan_task_execute": plan_task,
-        "instructions": instructions(event=event),
+        "instructions": [tapl_prompt.session_routing_guidance()] + instructions(event=event),
         "workflow_guidance": workflow_guidance(
             event=event,
             state=state,
@@ -62,6 +64,7 @@ def format_context(packet: dict[str, Any]) -> str:
     counts = packet["counts"]
     lines = [
         "tapl context:",
+        f"- session_id: {packet.get('session_id', '')!r}; pass this exact value on every TAPL tool call.",
     ]
     if run["present"]:
         summary = f"active run: {run['request_summary']}" if run["request_summary"] else "active run present"
@@ -122,6 +125,7 @@ def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
     if not run:
         return {
             "present": False,
+            "session_id": state.get("session_id", ""),
             "request_summary": "",
             "result_summary": "",
             "work_type": "",
@@ -134,6 +138,8 @@ def active_run_summary(state: dict[str, Any]) -> dict[str, Any]:
         }
     return {
         "present": True,
+        "id": run.get("id"),
+        "session_id": run.get("session_id", ""),
         "request_summary": run.get("request_summary") or "",
         "result_summary": run.get("result_summary") or "",
         "work_type": run.get("work_type") or db.DEFAULT_WORK_TYPE,

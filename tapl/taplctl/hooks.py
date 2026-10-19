@@ -48,6 +48,30 @@ def handle_event(
     payload: dict[str, Any],
     tapl_settings: tapl_config.TaplConfig | None = None,
 ) -> dict[str, Any]:
+    # A direct API caller may reuse an initially unscoped connection for
+    # several hook payloads. Restore that caller's binding after each event.
+    previous_session_id = db.connection_session_id(conn)
+    if "session_id" in payload:
+        db.bind_session(conn, payload["session_id"])
+    try:
+        return _handle_event(
+            conn, event=event, mode=mode, tool=tool, payload=payload,
+            tapl_settings=tapl_settings,
+        )
+    finally:
+        if isinstance(conn, db.WorkflowConnection):
+            conn.tapl_session_id = previous_session_id
+
+
+def _handle_event(
+    conn: sqlite3.Connection,
+    *,
+    event: str,
+    mode: str,
+    tool: str | None,
+    payload: dict[str, Any],
+    tapl_settings: tapl_config.TaplConfig | None = None,
+) -> dict[str, Any]:
     tool_name = tool or infer_tool_name(payload)
     message = ""
     block = False
@@ -138,6 +162,7 @@ def handle_event(
         "ok": not block,
         "block": block,
         "event": event,
+        "session_id": db.connection_session_id(conn),
         "mode": mode,
         "tool": tool_name,
         "message": message,

@@ -268,6 +268,24 @@ function OverviewView({
             </div>
           </div>
           <div className="tapl-command-panel">
+            {((status.active_runs?.length ?? 0) > 1 || (!status.active_run && status.active_runs?.length)) ? (
+              <label className="form-control mb-3">
+                <span className="label-text mb-1">{t('activeRun')}</span>
+                <select className="select select-bordered select-sm" value={status.active_run?.id ?? ''}
+                  onChange={(event) => {
+                    const run = status.active_runs?.find((item) => item.id === event.target.value);
+                    if (run) send({ command: 'selectRun', sessionId: run.session_id ?? '' });
+                  }}>
+                  {!status.active_run ? <option value="" disabled>{t('noActiveRunTitle')}</option> : null}
+                  {status.active_runs?.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {conciseText(run.request_summary || run.slug || run.id || t('active'), 60)}
+                      {run.session_id ? ` · ${run.session_id.slice(0, 8)}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className="tapl-command-actions">
               {memorySupported ? <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'memories' })}>{t('memories')}</button> : null}
               {view.workspace ? (

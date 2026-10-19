@@ -104,7 +104,7 @@ def _handle_hook(args: argparse.Namespace) -> int:
         tapl_install.auto_install_if_needed(start=start, mode=args.mode)
 
     settings = tapl_config.load(args.config, start=start)
-    conn = db.connect(db_path)
+    conn = db.connect(db_path, session_id=payload.get("session_id", ""))
     try:
         outcome = hooks.handle_event(
             conn,

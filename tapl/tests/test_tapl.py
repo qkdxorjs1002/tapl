@@ -315,7 +315,13 @@ class TaplRuntimeTests(unittest.TestCase):
             )
             params = StdioServerParameters(
                 command=sys.executable,
-                args=["-m", "taplctl.mcp_server"],
+                # Exercise the real module entrypoint without refreshing the
+                # developer's user-global installation during a unit test.
+                args=["-c", (
+                    "import runpy\nfrom pathlib import Path\nfrom unittest.mock import patch\n"
+                    f"with patch.object(Path, 'home', return_value=Path({str(Path(tmp) / 'isolated-user')!r})):\n"
+                    "    runpy.run_module('taplctl.mcp_server', run_name='__main__', alter_sys=True)\n"
+                )],
                 cwd=workspace,
             )
 
