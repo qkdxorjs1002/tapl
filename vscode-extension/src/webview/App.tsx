@@ -248,104 +248,141 @@ function OverviewView({
   const currentPlan = status.plans[0];
   const activeBatches = Array.isArray(status.active_batches) ? status.active_batches : [];
   const activeExecutions = Array.isArray(status.active_executions) ? status.active_executions : [];
+  const runs = [...(status.active_runs ?? [])];
+  if (status.active_run && !runs.some((run) => run.id === status.active_run?.id)) {
+    runs.push(status.active_run);
+  }
 
   return (
     <>
-      <header className="tapl-hero">
-        <div className="tapl-hero-main">
-          <div className="tapl-hero-copy">
-            <div className="tapl-hero-meta">
-              <span className="tapl-eyebrow">{t('workspace')}</span>
-              <Badge label={activeRunSlug} tone={status.active_run ? 'in-progress' : undefined} />
+      <RunTabs runs={runs} selectedId={status.active_run?.id} send={send} />
+      <div className="tapl-run-panel" id="tapl-run-panel" role="tabpanel"
+        aria-labelledby={status.active_run ? `tapl-run-tab-${status.active_run.id}` : undefined}
+        aria-label={!status.active_run ? t('noActiveRunTitle') : undefined}>
+        <header className="tapl-hero">
+          <div className="tapl-hero-main">
+            <div className="tapl-hero-copy">
+              <div className="tapl-hero-meta">
+                <span className="tapl-eyebrow">{t('workspace')}</span>
+                <Badge label={activeRunSlug} tone={status.active_run ? 'in-progress' : undefined} />
+              </div>
+              <h1 className="m-0 text-3xl font-semibold">{t('appTitle')}</h1>
+              <p className="tapl-hero-summary">{conciseText(activeSummary, 220)}</p>
+              <RunClassification run={status.active_run} />
+              <div className="tapl-hero-pills">
+                <Pill label="Pending" value={pendingCount} />
+                <Pill label="In Progress" value={activeCount} />
+                <Pill label="Blocked" value={blockedCount} />
+              </div>
             </div>
-            <h1 className="m-0 text-3xl font-semibold">{t('appTitle')}</h1>
-            <p className="tapl-hero-summary">{conciseText(activeSummary, 220)}</p>
-            <RunClassification run={status.active_run} />
-            <div className="tapl-hero-pills">
-              <Pill label="Pending" value={pendingCount} />
-              <Pill label="In Progress" value={activeCount} />
-              <Pill label="Blocked" value={blockedCount} />
-            </div>
-          </div>
-          <div className="tapl-command-panel">
-            {((status.active_runs?.length ?? 0) > 1 || (!status.active_run && status.active_runs?.length)) ? (
-              <label className="form-control mb-3">
-                <span className="label-text mb-1">{t('activeRun')}</span>
-                <select className="select select-bordered select-sm" value={status.active_run?.id ?? ''}
-                  onChange={(event) => {
-                    const run = status.active_runs?.find((item) => item.id === event.target.value);
-                    if (run) send({ command: 'selectRun', sessionId: run.session_id ?? '' });
-                  }}>
-                  {!status.active_run ? <option value="" disabled>{t('noActiveRunTitle')}</option> : null}
-                  {status.active_runs?.map((run) => (
-                    <option key={run.id} value={run.id}>
-                      {conciseText(run.request_summary || run.slug || run.id || t('active'), 60)}
-                      {run.session_id ? ` · ${run.session_id.slice(0, 8)}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            <div className="tapl-command-actions">
-              {memorySupported ? <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'memories' })}>{t('memories')}</button> : null}
-              {view.workspace ? (
-                <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'chooseWorkspace' })}>
-                  {t('changeWorkspace')}
+            <div className="tapl-command-panel">
+              <div className="tapl-command-actions">
+                {memorySupported ? <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'memories' })}>{t('memories')}</button> : null}
+                {view.workspace ? (
+                  <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'chooseWorkspace' })}>
+                    {t('changeWorkspace')}
+                  </button>
+                ) : null}
+                <button className="btn btn-primary btn-sm" type="button" onClick={() => send({ command: 'refresh' })}>
+                  {t('refresh')}
                 </button>
-              ) : null}
-              <button className="btn btn-primary btn-sm" type="button" onClick={() => send({ command: 'refresh' })}>
-                {t('refresh')}
-              </button>
-              <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'debug' })}>
-                {t('debug')}
-              </button>
+                <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'debug' })}>
+                  {t('debug')}
+                </button>
+              </div>
+              {view.workspace ? <p className="tapl-workspace-path" title={view.workspace}>{view.workspace}</p> : null}
+              <SearchForm defaultQuery={searchQuery} send={send} />
+              <ProgressMeter
+                label={t('runProgress')}
+                value={completionPercent}
+                detail={t('completedOfTotal', { completed: completedTasks, total: totalTasks })}
+              />
             </div>
-            {view.workspace ? <p className="tapl-workspace-path" title={view.workspace}>{view.workspace}</p> : null}
-            <SearchForm defaultQuery={searchQuery} send={send} />
-            <ProgressMeter
-              label={t('runProgress')}
-              value={completionPercent}
-              detail={t('completedOfTotal', { completed: completedTasks, total: totalTasks })}
-            />
           </div>
-        </div>
-      </header>
-      <section className="tapl-metric-grid">
-        <Stat label={t('openWork')} value={String(openTasks)} detail={t('activeAndBlocked', { active: activeCount, blocked: blockedCount })} tone={blockedCount ? 'blocked' : 'in-progress'} />
-        <Stat label={t('currentPlan')} value={String(status.plans.length)} detail={currentPlan ? conciseText(currentPlan.title, 48) : t('noExecutionSpec')} tone="info" />
-        <Stat label={t('nextTask')} value={nextTask ? nextTask.stable_id : t('none')} detail={nextTask ? conciseText(nextTask.title, 48) : t('queueIsClear')} tone="pending" />
-        <Stat label={t('activeBatches')} value={String(activeBatches.length)} detail={t('activeExecutions')} tone={activeBatches.length ? 'in-progress' : undefined} />
-        <Stat label={t('activeExecutions')} value={String(activeExecutions.length)} detail={t('activeBatches')} tone={activeExecutions.length ? 'in-progress' : undefined} />
-        <Stat label={t('archives')} value={String(archives.length)} detail={t('recentSavedRuns')} tone="completed" />
-      </section>
-      <section className="tapl-grid">
-        <div className="tapl-main">
-          <Card
-            title={t('activeBoard')}
-            eyebrow={t('workItems')}
-            aside={<span className="tapl-muted text-sm">{t('incompleteCount', { count: status.incomplete_tasks })}</span>}
-          >
-            <TaskBoard tasks={status.tasks} layout={layout} />
-          </Card>
-          <ActiveBatches batches={activeBatches} />
-          <Card title={t('workflowRecords')} eyebrow={t('views')}>
-            <RecordTabs
-              tabs={[
-                { id: 'plan', label: t('plan'), count: status.plans.length, content: <ItemList items={status.plans} empty={t('noPlanRecords')} /> },
-                { id: 'tasks', label: t('tasks'), count: status.tasks.length, content: <ItemList items={status.tasks} empty={t('noTaskRecords')} /> },
-                { id: 'findings', label: t('findings'), count: status.findings.length, content: <ItemList items={status.findings} empty={t('noFindingRecords')} /> }
-              ]}
-            />
-          </Card>
-        </div>
-        <aside className="tapl-rail">
-          <RunFocus status={status} counts={counts} />
-          <Card title={t('recentArchives')} eyebrow={t('activity')}>
-            <ArchiveList archives={archives} send={send} />
-          </Card>
-        </aside>
-      </section>
+        </header>
+        <section className="tapl-metric-grid">
+          <Stat label={t('openWork')} value={String(openTasks)} detail={t('activeAndBlocked', { active: activeCount, blocked: blockedCount })} tone={blockedCount ? 'blocked' : 'in-progress'} />
+          <Stat label={t('currentPlan')} value={String(status.plans.length)} detail={currentPlan ? conciseText(currentPlan.title, 48) : t('noExecutionSpec')} tone="info" />
+          <Stat label={t('nextTask')} value={nextTask ? nextTask.stable_id : t('none')} detail={nextTask ? conciseText(nextTask.title, 48) : t('queueIsClear')} tone="pending" />
+          <Stat label={t('activeBatches')} value={String(activeBatches.length)} detail={t('activeExecutions')} tone={activeBatches.length ? 'in-progress' : undefined} />
+          <Stat label={t('activeExecutions')} value={String(activeExecutions.length)} detail={t('activeBatches')} tone={activeExecutions.length ? 'in-progress' : undefined} />
+          <Stat label={t('archives')} value={String(archives.length)} detail={t('recentSavedRuns')} tone="completed" />
+        </section>
+        <section className="tapl-grid">
+          <div className="tapl-main">
+            <Card
+              title={t('activeBoard')}
+              eyebrow={t('workItems')}
+              aside={<span className="tapl-muted text-sm">{t('incompleteCount', { count: status.incomplete_tasks })}</span>}
+            >
+              <TaskBoard tasks={status.tasks} layout={layout} />
+            </Card>
+            <ActiveBatches batches={activeBatches} />
+            <Card title={t('workflowRecords')} eyebrow={t('views')}>
+              <RecordTabs
+                tabs={[
+                  { id: 'plan', label: t('plan'), count: status.plans.length, content: <ItemList items={status.plans} empty={t('noPlanRecords')} /> },
+                  { id: 'tasks', label: t('tasks'), count: status.tasks.length, content: <ItemList items={status.tasks} empty={t('noTaskRecords')} /> },
+                  { id: 'findings', label: t('findings'), count: status.findings.length, content: <ItemList items={status.findings} empty={t('noFindingRecords')} /> }
+                ]}
+              />
+            </Card>
+          </div>
+          <aside className="tapl-rail">
+            <RunFocus status={status} counts={counts} />
+            <Card title={t('recentArchives')} eyebrow={t('activity')}>
+              <ArchiveList archives={archives} send={send} />
+            </Card>
+          </aside>
+        </section>
+      </div>
     </>
+  );
+}
+
+function RunTabs({ runs, selectedId, send }: {
+  runs: TaplWorkflowRun[];
+  selectedId?: string;
+  send: (message: WebviewCommand) => void;
+}): JSX.Element {
+  const { t } = useI18n();
+  const tabListRef = useRef<HTMLDivElement>(null);
+  const focusIndex = Math.max(0, runs.findIndex((run) => run.id === selectedId));
+  const selectRun = (run: TaplWorkflowRun) => {
+    if (run.id !== selectedId) send({ command: 'selectRun', sessionId: run.session_id ?? '' });
+  };
+
+  return (
+    <div className="tapl-run-tabs" role="tablist" aria-label={t('activeRun')} ref={tabListRef}>
+      {runs.length ? runs.map((run, index) => {
+        const title = String(run.request_summary || run.slug || run.id || t('active'));
+        return (
+          <button key={run.id} id={`tapl-run-tab-${run.id}`} className="tapl-run-tab"
+            type="button" role="tab" aria-selected={run.id === selectedId}
+            aria-controls="tapl-run-panel" tabIndex={index === focusIndex ? 0 : -1}
+            title={run.session_id ? `${title}\n${run.session_id}` : title}
+            onClick={() => selectRun(run)}
+            onKeyDown={(event) => {
+              let nextIndex: number;
+              switch (event.key) {
+                case 'ArrowRight': nextIndex = (index + 1) % runs.length; break;
+                case 'ArrowLeft': nextIndex = (index - 1 + runs.length) % runs.length; break;
+                case 'Home': nextIndex = 0; break;
+                case 'End': nextIndex = runs.length - 1; break;
+                default: return;
+              }
+              event.preventDefault();
+              tabListRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus();
+              selectRun(runs[nextIndex]);
+            }}>
+            <span className="tapl-run-tab-title">{title}</span>
+            <span className="tapl-run-tab-session">{run.session_id?.slice(0, 8) || t('active')}</span>
+          </button>
+        );
+      }) : <button className="tapl-run-tab" type="button" role="tab" aria-selected={false} disabled>
+        <span className="tapl-run-tab-title">{t('noActiveRunTitle')}</span>
+      </button>}
+    </div>
   );
 }
 
