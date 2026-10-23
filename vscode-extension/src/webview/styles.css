@@ -133,9 +133,7 @@ pre {
 }
 
 .tapl-run-tabs {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
+  display: flex;
   width: 100%;
   min-width: 0;
   gap: 4px;
@@ -147,6 +145,8 @@ pre {
 
 .tapl-run-tab {
   display: flex;
+  flex: 1 1 0;
+  max-width: calc((100% - 8px) / 3);
   min-width: 0;
   height: 54px;
   flex-direction: column;
@@ -157,7 +157,7 @@ pre {
   border-radius: 8px;
   color: var(--tapl-muted);
   background: transparent;
-  text-align: center;
+  text-align: left;
   cursor: pointer;
 }
 
