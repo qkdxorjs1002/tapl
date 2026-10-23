@@ -224,6 +224,27 @@ SQLite full-text search works in every installation. Install the semantic extra
 or the `taplctl-semantic` formula for embedding and vector search. Use
 `taplctl reindex` when an existing workspace needs its index rebuilt.
 
+## Writing workflow records
+
+Natural-language values in MCP fields are text for people to read, including
+plan/task descriptions and custom-field descriptions. Write them with normal
+grammar and spacing for the user's language; preserve natural Korean word
+spacing. Keep records concise by removing repetition rather than joining words.
+When reusing an older record, write readable descriptions instead of copying its
+compressed wording. Preserve literal identifiers, paths, commands, and direct
+quotations.
+
+Examples of text style, not additional workflow requirements:
+
+- `objective`: 개발 앱 설정을 준비한 뒤 Task 1개를 실행하고 결과를 확인한다.
+- `action`: APP_CONFIG_YML 경로를 확인하고 검증 결과를 기록한다.
+
+The full MCP policy includes these examples and the typed-field, Markdown, and
+plan-format guidance. Natural-language field descriptions repeat a short
+readability reminder. This is agent writing guidance: it adds no spacing-based
+runtime warnings, input rejection, or automatic rewriting, and does not
+automatically restyle historical records.
+
 ## Management commands
 
 `taplctl` has eight public commands. Agents use MCP to create, dispatch, settle,

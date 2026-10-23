@@ -775,7 +775,7 @@ def create_server(
         blocker: Annotated[str, Field(description=tapl_prompt.field_help("task", "blocker"), min_length=1)],
         next_action: Annotated[str, Field(description=tapl_prompt.field_help("task", "next_action"), min_length=1)],
         execution_id: Annotated[str | None, Field(description="Exact execution id required for a dispatched parallel task.")] = None,
-        verification: Annotated[str | None, Field(description="Current verification evidence, if changed.")] = None,
+        verification: Annotated[str | None, Field(description=f"Current verification evidence, if changed. {tapl_prompt.RECORD_TEXT_HELP}")] = None,
         custom_fields: CustomFields = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
@@ -799,7 +799,7 @@ def create_server(
     @server.tool(name="tapl_skip_task", title="Skip TAPL task", annotations=WRITE)
     async def skip_task(
         task_id: TaskId,
-        result: Annotated[str, Field(description="Reason the task is intentionally skipped.", min_length=1)],
+        result: Annotated[str, Field(description=f"Reason the task is intentionally skipped. {tapl_prompt.RECORD_TEXT_HELP}", min_length=1)],
         execution_id: Annotated[str | None, Field(description="Exact execution id required for a dispatched parallel task.")] = None,
         custom_fields: CustomFields = None,
         session_id: SessionId = None,

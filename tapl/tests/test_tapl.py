@@ -803,9 +803,9 @@ class TaplRuntimeTests(unittest.TestCase):
             subagents=tapl_config.SubagentsConfig(setup_complete=True)
         )
 
-        # Includes memory, metadata and lossless compact reads.
+        # Includes readable record examples, memory and lossless compact reads.
         # This full policy loads once; repeated transport instructions stay <900.
-        self.assertLess(len(instructions), 12_600)
+        self.assertLess(len(instructions), 13_750)
         for guidance in (
             "Default to one RUN",
             "For independent topics use separate plan_ids (PLAN-001, PLAN-002, ...)",
@@ -826,7 +826,7 @@ class TaplRuntimeTests(unittest.TestCase):
                             subagents=tapl_config.SubagentsConfig(strategy=strategy, setup_complete=True)
                         )
                     ),
-                    12_600,
+                    13_750,
                 )
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",

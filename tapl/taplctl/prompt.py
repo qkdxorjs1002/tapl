@@ -201,6 +201,15 @@ AGENT_ITEM_FIELDS = {
     "finding": ("body", "impact", "related_ids"),
 }
 
+NATURAL_LANGUAGE_FIELDS = {
+    "run": ("summary", "result"),
+    "plan": ("title", *PLAN_BODY_FIELDS),
+    "task": ("title", *TASK_BODY_FIELDS),
+    "finding": ("title", "source", "finding", "impact"),
+    "approval": ("prompt",),
+}
+RECORD_TEXT_HELP = "Human-readable text; preserve natural word spacing and literal identifiers."
+
 MCP_SERVER_INSTRUCTIONS_TEMPLATE = """TAPL is this workspace's workflow system. Its `tapl_*` MCP tools call the repo-local application. These instructions, tool descriptions, and JSON schemas are the authoritative workflow contract.
 
 ${entry_guidance}
@@ -208,6 +217,11 @@ ${entry_guidance}
 # Workflow
 
 Write workflow records and reports in the user's language unless asked otherwise. Keep them short and current. Do not add unstated requirements or expand scope without explicit approval.
+
+${record_writing_guidance}
+
+${structured_record_guidance}
+${markdown_record_guidance}
 
 ## Role Boundaries
 
@@ -230,6 +244,7 @@ ${workflow_mode_guidance}
 Planning must happen before implementation; keep requirements in the plan, not a separate artifact.
 
 ${plan_detail_guidance}
+${plan_format_guidance}
 ${planning_approval_guidance}
 
 ## Tasks And Execution
@@ -319,6 +334,8 @@ def _template_variable_providers() -> dict[str, Callable[[], str]]:
         "lifecycle_recipe_guidance": lifecycle_recipe_guidance,
         "history_search_guidance": history_search_guidance,
         "memory_guidance": memory_guidance,
+        "record_writing_guidance": record_writing_guidance,
+        "markdown_record_guidance": markdown_record_guidance,
         "structured_record_guidance": structured_record_guidance,
         "structured_record_guidance_plan_task": lambda: structured_record_guidance("plan/task content"),
         "structured_record_guidance_task": lambda: structured_record_guidance("task content"),
@@ -357,6 +374,8 @@ def field_spec(record: str, name: str) -> FieldSpec:
 
 def field_help(record: str, name: str) -> str:
     spec = field_spec(record, name)
+    if name in NATURAL_LANGUAGE_FIELDS.get(record, ()):
+        return f"{spec.help} {RECORD_TEXT_HELP}"
     return spec.help
 
 
@@ -381,7 +400,7 @@ def field_contract_lines(record: str) -> list[str]:
     for spec in field_specs(record):
         note = field_required_note(record, spec)
         required = f" ({note})" if note else ""
-        lines.append(f"{spec.flag}{required}: {spec.help}")
+        lines.append(f"{spec.flag}{required}: {field_help(record, spec.name)}")
     return lines
 
 
@@ -962,6 +981,18 @@ def planning_approval_guidance() -> str:
         "request_user_input call. Set autoResolutionMs=240000 whenever the tool contract allows auto-resolution; "
         "omit it only when explicit user input is required before continuing; if unavailable, state assumptions "
         "or ask one concise plain-text question only when blocked."
+    )
+
+
+def record_writing_guidance() -> str:
+    return (
+        "Natural-language values are for people to read, including tool arguments and custom-field descriptions. "
+        "Use normal grammar and spacing for the user's language; preserve Korean word spacing. "
+        "Be concise by removing repetition, never by joining words or minifying prose. "
+        "When reusing old records, write readable descriptions instead of copying compressed wording. "
+        "Keep identifiers, paths, commands, and direct quotations verbatim.\n"
+        "Style examples only: objective=\"개발 앱 설정을 준비한 뒤 Task 1개를 실행하고 결과를 확인한다.\"; "
+        "action=\"APP_CONFIG_YML 경로를 확인하고 검증 결과를 기록한다.\""
     )
 
 
