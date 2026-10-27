@@ -83,10 +83,14 @@ per user without administrator access; no WinGet package registration is require
 Run these commands from a writable folder. Review downloaded scripts if your
 organization requires it.
 
+The scripts below come from this beta so its lifecycle switches are available.
+With no version argument they install the stable package; use the prerelease
+section below to include the Windows runtime fixes.
+
 PowerShell — install the latest stable release, then manage it:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 # Restart your terminal after installation, then:
 taplctl --version
@@ -102,8 +106,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 Command Prompt (CMD) — keep both downloaded scripts in the same folder:
 
 ```bat
-curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -o install.ps1
-curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.cmd -o install.cmd
+curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
+curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
 install.cmd
 rem Restart CMD after installation, then:
 taplctl --version

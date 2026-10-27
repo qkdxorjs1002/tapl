@@ -73,10 +73,14 @@ Windows 10/11, `venv`가 포함된 Python 3.11 이상, Windows PowerShell 5.1 �
 쓰기 가능한 폴더에서 실행하세요. 별도 신뢰 절차가 필요하면 내려받은 스크립트를
 먼저 검토하세요.
 
+아래 스크립트는 수명 주기 옵션을 지원하는 이번 베타의 자산입니다.
+버전 인자가 없으면 안정판 패키지를 설치합니다. Windows 런타임 수정까지
+테스트하려면 아래 프리릴리즈 설치 명령을 사용하세요.
+
 PowerShell에서 최신 안정판 설치와 관리:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 # 설치 뒤 터미널을 다시 열고 실행합니다.
 taplctl --version
@@ -92,8 +96,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 명령 프롬프트(CMD)에서는 두 스크립트를 같은 폴더에 둡니다.
 
 ```bat
-curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -o install.ps1
-curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.cmd -o install.cmd
+curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
+curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
 install.cmd
 rem 설치 뒤 CMD를 다시 열고 실행합니다.
 taplctl --version
