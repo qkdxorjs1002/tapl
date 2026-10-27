@@ -140,6 +140,10 @@ install.cmd -Version 2.14.0-beta1 -Reinstall
 `-Version`과 저장된 manifest보다 우선합니다. `-Version`을 명시하면 더 최신인
 프리릴리즈에서 안정판으로도 전환할 수 있으며, 생략하면 설치된 버전을 낮추지 않습니다.
 
+Codex 연결은 버전별 가상 환경의 실행 파일을 참조합니다. 업데이트 또는 강제 재설치
+후에는 사용 중인 범위에 대해 아래 연결 명령을 다시 실행하고, 기존 `observe`/`enforce`
+모드를 유지한 뒤 Codex를 재시작하세요.
+
 기본 설치 경로는 `%LOCALAPPDATA%\tapl`, launcher는
 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다. `TAPL_INSTALL_ROOT`와 `TAPL_BIN_DIR`로
 바꿀 수 있습니다. 사용자 `PATH`만 갱신하므로 설치 뒤 터미널을 다시 열어야 다른

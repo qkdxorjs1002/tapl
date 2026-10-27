@@ -151,6 +151,10 @@ rerun the installer with `-Version TAG` to select another release. Explicit
 An explicit `-Version` also permits switching from a newer prerelease back to a
 stable release; without it, the installer does not downgrade a newer version.
 
+Codex connections reference executables inside a versioned environment. After an
+update or forced reinstall, repeat the connection instructions below for the
+scopes you use, keep your existing `observe`/`enforce` mode, and restart Codex.
+
 The default root is `%LOCALAPPDATA%\tapl`, with the command launcher at
 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`. `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR`
 override those paths. The installer updates only user `PATH`; restart your
