@@ -8,7 +8,7 @@ import re
 import sys
 
 
-_PREFIX = "powershell.exe -NoProfile -NonInteractive -EncodedCommand "
+_PREFIX = "powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand "
 _STDIO = (
     "$OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = "
     "[System.Text.UTF8Encoding]::new($false); [Console]::In.ReadToEnd() | "
@@ -32,7 +32,8 @@ def configure_stdio() -> None:
 def windows_hook_command(executable: str, event: str, mode: str) -> str:
     # The outer Codex shell can be either cmd or PowerShell. An encoded script
     # keeps executable paths (including spaces, apostrophes and shell syntax)
-    # literal in both, and explicitly propagates enforce-mode exit code 2.
+    # literal in both. Blocking uses the hook JSON protocol because an outer
+    # PowerShell -Command coerces a native nonzero exit code to 1.
     def literal(value: str) -> str:
         return "'" + value.replace("'", "''") + "'"
 

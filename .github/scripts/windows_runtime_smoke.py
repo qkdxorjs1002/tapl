@@ -156,7 +156,11 @@ def main():
             payload = json.dumps({"cwd": str(repo), "session_id": "native-smoke-한글", "prompt": "유니코드 입력",
                                   "tool_name": "Write", "tool_input": {"file_path": str(repo / "new.txt")}}, ensure_ascii=False)
             for shell in shell_commands(command, env):
-                run(shell, cwd=repo, env=env, input=payload, expected=expected)
+                output = run(shell, cwd=repo, env=env, input=payload,
+                             expected=0 if os.name == "nt" else expected)
+                if event == "PreToolUse" and os.name == "nt":
+                    decision = json.loads(output)
+                    assert decision["decision"] == "block" and decision["reason"], decision
         # Inspect only the disposable DB, after all processes have released it.
         connection = sqlite3.connect(repo / ".tapl/tapl.db")
         try:

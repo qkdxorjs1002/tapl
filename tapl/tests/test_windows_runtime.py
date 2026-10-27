@@ -117,7 +117,7 @@ def test_updated_windows_venv_inventory_matches_installer_path_format(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires native Windows shells")
-def test_encoded_hook_preserves_utf8_stdin_stdout_and_exit_code(tmp_path):
+def test_encoded_hook_preserves_block_decision_through_windows_shells(tmp_path):
     # Use the real installed hook entry point, not a mocked subprocess. A clean
     # workspace must deny a durable edit in enforce mode through both shells.
     executable = Path(sysconfig.get_path("scripts")) / "tapl-hook.exe"
@@ -135,5 +135,7 @@ def test_encoded_hook_preserves_utf8_stdin_stdout_and_exit_code(tmp_path):
     for shell in shells:
         result = subprocess.run(shell, env=env, cwd=repo, input=payload,
                                 encoding="utf-8", capture_output=True, timeout=60)
-        assert result.returncode == 2, (result.stdout, result.stderr)
-        assert result.stderr
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        decision = json.loads(result.stdout)
+        assert decision["decision"] == "block"
+        assert decision["reason"]

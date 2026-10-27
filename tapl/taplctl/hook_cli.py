@@ -122,6 +122,11 @@ def _handle_hook(args: argparse.Namespace) -> int:
     if workspace is not None:
         outcome["workspace"] = workspace
     _emit_outcome(outcome, as_json=args.json, as_agent=args.agent)
+    # Codex may launch hooks through PowerShell -Command, which converts native
+    # exit code 2 to 1. Windows command hooks use Codex's supported JSON block
+    # protocol with exit 0 instead. Explicit diagnostic output keeps its CLI API.
+    if sys.platform == "win32" and not (args.json or args.agent):
+        return 0
     return 2 if outcome.get("block") else 0
 
 
@@ -157,6 +162,9 @@ def _emit_outcome(outcome: dict[str, Any], *, as_json: bool, as_agent: bool) -> 
         return
     if as_agent:
         print(_agent_output(outcome, "tapl_hook_event"))
+        return
+    if sys.platform == "win32" and outcome.get("block"):
+        _print_json({"decision": "block", "reason": outcome.get("message") or "tapl blocked this hook."})
         return
     if outcome.get("event") == "Stop":
         if outcome.get("block"):
