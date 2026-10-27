@@ -570,7 +570,7 @@ function Set-TestUserPath {
 
         def run_cmd(*arguments: str) -> subprocess.CompletedProcess[str]:
             return subprocess.run(
-                ["cmd.exe", "/d", "/s", "/c", f'""{wrapper}" {subprocess.list2cmdline(arguments)}"'],
+                f'cmd.exe /d /s /c ""{wrapper}" {subprocess.list2cmdline(arguments)}"',
                 capture_output=True, text=True, check=False, env=self.installer_environment(), timeout=120,
             )
 

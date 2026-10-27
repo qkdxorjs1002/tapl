@@ -281,7 +281,7 @@ function Assert-FileRemovalAccess {
         $stream.Dispose()
     }
     catch {
-        Stop-Installer "a managed file is read-only, in use or inaccessible; clear read-only attributes and close taplctl/Codex processes before retrying -Uninstall. No files were removed."
+        Stop-Installer "a managed file is read-only, in use or inaccessible: $Path ($($_.Exception.Message)); clear read-only attributes and close taplctl/Codex processes before retrying -Uninstall. No files were removed."
     }
 }
 
