@@ -46,9 +46,6 @@ jobs:
             }
           }
 
-      - name: Run Windows installer tests (stdlib-only fixtures)
-        run: python -m unittest -v tapl.tests.test_installer_windows --failfast
-
       - name: Test Windows runtime regressions
         run: |
           python -m pip install "./tapl[test]"
@@ -62,3 +59,6 @@ jobs:
         run: |
           $wheel = (Get-ChildItem -LiteralPath dist -Filter 'taplctl-*.whl').FullName
           ./.github/scripts/windows_install_smoke.ps1 -Wheel $wheel -Python (Get-Command python).Source
+
+      - name: Run Windows installer tests (stdlib-only fixtures)
+        run: python -m unittest -v tapl.tests.test_installer_windows --failfast

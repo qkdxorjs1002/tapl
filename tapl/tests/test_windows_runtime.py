@@ -9,6 +9,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import sysconfig
 from unittest import mock
 
 import pytest
@@ -119,7 +120,7 @@ def test_updated_windows_venv_inventory_matches_installer_path_format(tmp_path):
 def test_encoded_hook_preserves_utf8_stdin_stdout_and_exit_code(tmp_path):
     # Use the real installed hook entry point, not a mocked subprocess. A clean
     # workspace must deny a durable edit in enforce mode through both shells.
-    executable = Path(sys.executable).parent / "tapl-hook.exe"
+    executable = Path(sysconfig.get_path("scripts")) / "tapl-hook.exe"
     assert executable.is_file()
     repo = tmp_path / "native repo 한글 & O'Neil"
     home = tmp_path / "isolated home"
