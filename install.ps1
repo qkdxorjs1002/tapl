@@ -236,9 +236,9 @@ function Get-VerifiedVenvRemoval {
         $expectedDirectories = @((Get-PropertyValue $expected "directories") | Where-Object { [System.IO.Path]::GetFileName($_) -ne '__pycache__' } | Sort-Object)
         $actualDirectories = @($actual.directories | Where-Object { [System.IO.Path]::GetFileName($_) -ne '__pycache__' } | Sort-Object)
         if (($expectedDirectories -join "`n") -cne ($actualDirectories -join "`n")) { throw "directories" }
-        foreach ($directory in $actual.directories) {
-            if ([System.IO.Path]::GetFileName($directory) -eq '__pycache__') {
-                $parent = [System.IO.Path]::GetDirectoryName($directory)
+        foreach ($relativeDirectory in $actual.directories) {
+            if ([System.IO.Path]::GetFileName($relativeDirectory) -eq '__pycache__') {
+                $parent = [System.IO.Path]::GetDirectoryName($relativeDirectory)
                 if (-not [string]::IsNullOrEmpty($parent) -and $expectedDirectories -notcontains $parent) { throw "bytecode directory" }
             }
         }
