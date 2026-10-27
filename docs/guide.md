@@ -77,22 +77,88 @@ The standalone installer defaults to the latest stable release.
 
 ## Windows
 
+Windows 10/11 requires Python 3.11+ with `venv` and Windows PowerShell 5.1+
+(or PowerShell 7). Native CI exercises Python 3.11 and 3.12. The scripts install
+per user without administrator access; no WinGet package registration is required.
+Run these commands from a writable folder. Review downloaded scripts if your
+organization requires it.
+
+PowerShell — install the latest stable release, then manage it:
+
 ```powershell
-irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -OutFile install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+# Restart your terminal after installation, then:
+taplctl --version
+taplctl update --check
+taplctl update
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Reinstall
+# Disconnect integrations before removing the executable:
+taplctl uninstall user
+taplctl uninstall repo  # run in each repository you connected
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 ```
 
-The installer supports Windows 10 and 11 with Windows PowerShell 5.1+ or
-PowerShell 7, Python 3.11+ with `venv`, and per-user writable directories. It
-defaults to `%LOCALAPPDATA%\tapl` with a launcher at
-`%LOCALAPPDATA%\tapl\bin\taplctl.cmd`. Override the paths or manifest with
-`TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`, or `TAPL_INSTALL_MANIFEST_URL`.
+Command Prompt (CMD) — keep both downloaded scripts in the same folder:
 
-It updates only the user `PATH`, requires no administrator privileges, validates
-the release manifest, and verifies the wheel SHA-256 before activation. It does
-not install Codex hooks. Review the script first if your environment requires a
-different trust process.
+```bat
+curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -o install.ps1
+curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.cmd -o install.cmd
+install.cmd
+rem Restart CMD after installation, then:
+taplctl --version
+taplctl update --check
+taplctl update
+install.cmd -Reinstall
+taplctl uninstall user
+taplctl uninstall repo
+install.cmd -Uninstall
+```
 
-The standalone installer defaults to the latest stable release.
+### Test prerelease 2.14.0-beta1
+
+Use the fixed release assets to test this version. GitHub's `latest/download`
+endpoint selects stable releases and does not select this prerelease.
+
+PowerShell:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1
+# Force a fresh environment for the selected release when needed:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1 -Reinstall
+```
+
+CMD:
+
+```bat
+curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
+curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
+install.cmd -Version 2.14.0-beta1
+install.cmd -Version 2.14.0-beta1 -Reinstall
+```
+
+The tag `2.14.0-beta1` uses Python wheel version `2.14.0b1` and the fixed
+`releases/download/2.14.0-beta1/taplctl-install-manifest.json` manifest. The
+installer validates that manifest and the wheel SHA-256 before activation.
+`taplctl update` and `-Reinstall` reuse the installation's selected manifest;
+rerun the installer with `-Version TAG` to select another release. Explicit
+`TAPL_INSTALL_MANIFEST_URL` overrides `-Version` and the remembered manifest.
+An explicit `-Version` also permits switching from a newer prerelease back to a
+stable release; without it, the installer does not downgrade a newer version.
+
+The default root is `%LOCALAPPDATA%\tapl`, with the command launcher at
+`%LOCALAPPDATA%\tapl\bin\taplctl.cmd`. `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR`
+override those paths. The installer updates only user `PATH`; restart your
+terminal to make it visible in other sessions. Hooks are connected separately
+below, followed by a Codex restart and hook trust prompt.
+
+`-Uninstall` removes verified installer-managed executables, environments and
+its user `PATH` entry. It preserves settings, workflow databases and unrelated
+files. It does not disconnect Codex: `taplctl uninstall user` / `repo` remove
+those integrations and preserve data by default. Legacy installs without a
+file inventory need `-Reinstall` before `-Uninstall`; modified managed files
+cause removal to stop for inspection.
 
 <a id="connect"></a>
 
@@ -212,6 +278,10 @@ Start the installed Homebrew formula automatically at login with
 The semantic formula intentionally does not start a preloaded search process.
 Run `taplctl searchd start` and `taplctl searchd status` when you want one.
 
+The optional `searchd` daemon uses Unix sockets and is unavailable on Windows.
+Windows uses local semantic search when its optional dependencies are installed,
+with BM25/full-text search available without the daemon.
+
 The optional VS Code extension uses a persistent workspace-scoped `tapl-mcp`
 client. Set `taplWorkflow.taplMcpPath` if it cannot locate the executable.
 
@@ -247,7 +317,7 @@ automatically restyle historical records.
 
 ## Management commands
 
-`taplctl` has eight public commands. Agents use MCP to create, dispatch, settle,
+`taplctl` has nine public commands. Agents use MCP to create, dispatch, settle,
 search, and inspect workflow records; the CLI manages the installation.
 
 | Command | Purpose |
@@ -255,6 +325,7 @@ search, and inspect workflow records; the CLI manages the installation.
 | `taplctl init --workspace-root /path/to/workspace` | Explicitly initialize that folder's workspace |
 | `taplctl doctor` | Diagnose installation and workspace problems |
 | `taplctl install SCOPE` | Install or refresh Codex integration |
+| `taplctl uninstall SCOPE` | Disconnect Codex integration; preserve settings and data by default |
 | `taplctl config set/unset` | Edit supported runtime configuration values |
 | `taplctl viewer [--port 9000]` | Serve the local browser viewer |
 | `taplctl update --check` / `update` | Check or update standalone installations |

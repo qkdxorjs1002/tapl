@@ -5,6 +5,7 @@ import http.server
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,22 @@ from taplctl import updater as tapl_updater
 
 
 class PowerShellInstallerStaticTests(unittest.TestCase):
+    def test_lifecycle_guards_and_cmd_wrapper_contract(self) -> None:
+        source = INSTALLER.read_text(encoding="utf-8")
+        self.assertIn("[string]$Version", source)
+        self.assertIn("[switch]$Reinstall", source)
+        self.assertIn("[switch]$Uninstall", source)
+        self.assertIn("releases/download/$Version/taplctl-install-manifest.json", source)
+        self.assertIn("$manifestUrl = $managed.Metadata.manifest_url", source)
+        self.assertIn("function Assert-NoReparsePath", source)
+        self.assertIn("function Get-VerifiedVenvRemoval", source)
+        removal = source[source.index("function Remove-VerifiedVenv"):source.index("function Invoke-PythonCandidate")]
+        self.assertNotIn("-Recurse", removal)
+        wrapper = (REPOSITORY_ROOT / "install.cmd").read_text(encoding="utf-8")
+        self.assertIn('WindowsPowerShell\\v1.0\\powershell.exe"', wrapper)
+        self.assertIn('"%~dp0install.ps1" %*', wrapper)
+        self.assertIn("exit /b %errorlevel%", wrapper)
+
     def test_prerelease_validation_and_ordering_are_powershell_51_compatible(self) -> None:
         source = INSTALLER.read_text(encoding="utf-8")
 
@@ -101,16 +118,29 @@ class PowerShellInstallerTests(unittest.TestCase):
     def _write_safe_test_installer(self) -> Path:
         source = INSTALLER.read_text(encoding="utf-8")
 
-        path_start = source.index("function Add-ToUserPath {")
-        path_end = source.index("\n}\n\ntry {", path_start) + 2
-        safe_path_function = r'''function Add-ToUserPath {
-    param([Parameter(Mandatory = $true)][string]$Directory)
-    if (-not (Test-PathListContains $env:Path $Directory)) {
-        $env:Path = $env:Path.TrimEnd(';') + ';' + $Directory
+        # Keep production PATH algorithms; replace only registry I/O with a file
+        # so lifecycle assertions exercise preservation across fresh processes.
+        safe_path_functions = r'''function Get-TestUserPath {
+    if ([System.IO.File]::Exists($env:TAPL_TEST_PATH_LOG)) {
+        return [System.IO.File]::ReadAllText($env:TAPL_TEST_PATH_LOG, $Utf8NoBom)
     }
-    [System.IO.File]::WriteAllText($env:TAPL_TEST_PATH_LOG, $env:Path, $Utf8NoBom)
+    return $env:TAPL_TEST_INITIAL_USER_PATH
+}
+function Set-TestUserPath {
+    param([AllowEmptyString()][string]$Value)
+    [System.IO.File]::WriteAllText($env:TAPL_TEST_PATH_LOG, $Value, $Utf8NoBom)
 }'''
-        source = source[:path_start] + safe_path_function + source[path_end:]
+        source = source.replace(
+            '[System.Environment]::GetEnvironmentVariable("Path", [System.EnvironmentVariableTarget]::User)',
+            '(Get-TestUserPath)',
+        ).replace(
+            '[System.Environment]::SetEnvironmentVariable("Path", $newUserPath, [System.EnvironmentVariableTarget]::User)',
+            'Set-TestUserPath $newUserPath',
+        ).replace(
+            '[System.Environment]::SetEnvironmentVariable("Path", ($remaining -join \';\'), [System.EnvironmentVariableTarget]::User)',
+            "Set-TestUserPath ($remaining -join ';')",
+        )
+        source = source.replace('\ntry {\n    if ($env:OS', safe_path_functions + '\n\ntry {\n    if ($env:OS', 1)
 
         move_marker = "    if ([System.IO.File]::Exists($Destination)) {"
         move_hook = r'''    if (
@@ -160,9 +190,16 @@ class PowerShellInstallerTests(unittest.TestCase):
 '''
         self.assertEqual(source.count(pip_original), 1)
         source = source.replace(pip_original, pip_hook, 1)
+        source = source.replace(
+            "https://github.com/qkdxorjs1002/tapl/releases/download/",
+            f"{self.base_url}/releases/download/",
+        )
 
-        destination = self.base / "install.test.ps1"
+        script_directory = self.base / "installer scripts"
+        script_directory.mkdir()
+        destination = script_directory / "install.ps1"
         destination.write_text(source, encoding="utf-8")
+        shutil.copyfile(REPOSITORY_ROOT / "install.cmd", script_directory / "install.cmd")
         return destination
 
     def build_wheel(self, version: str, *, reported_version: str | None = None) -> tuple[Path, str]:
@@ -235,12 +272,13 @@ class PowerShellInstallerTests(unittest.TestCase):
                 "TAPL_TEST_PATH_LOG": str(self.path_log),
                 "TAPL_TEST_FAIL_MOVE": "",
                 "TAPL_TEST_FAIL_CANDIDATE": "",
+                "TAPL_TEST_INITIAL_USER_PATH": r"C:\fixture-first;;C:\fixture-last;",
             }
         )
         environment.update(overrides)
         return environment
 
-    def run_installer(self, **environment_overrides: str) -> subprocess.CompletedProcess[str]:
+    def run_installer(self, *arguments: str, **environment_overrides: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 self.powershell,
@@ -251,6 +289,7 @@ class PowerShellInstallerTests(unittest.TestCase):
                 "Bypass",
                 "-File",
                 str(self.installer),
+                *arguments,
             ],
             text=True,
             capture_output=True,
@@ -360,6 +399,189 @@ class PowerShellInstallerTests(unittest.TestCase):
         self.assertEqual(self.installed_metadata()["venv"], original["venv"])
         self.assertEqual(self.preserved_state()[1:], state[1:])
         self.assert_active_release("1.0.0")
+
+    def test_full_lifecycle_with_spaces_preserves_configuration_and_unrelated_files(self) -> None:
+        self.install_root = self.base / "application data with spaces" / "tapl"
+        self.bin_dir = self.base / "commands with spaces"
+        initial_path = r"C:\fixture-first;;C:\fixture-last;"
+        self.install_initial_release()
+        updated = self.install_release("1.1.0")
+        self.assertEqual(updated.returncode, 0, updated.stderr)
+        original = self.assert_active_release("1.1.0")
+
+        reinstalled = self.run_installer("-Reinstall")
+        self.assertEqual(reinstalled.returncode, 0, reinstalled.stderr)
+        active = self.assert_active_release("1.1.0")
+        self.assertNotEqual(active["venv"], original["venv"])
+        # Ordinary Python execution may create new cache files after inventory.
+        package = Path(str(active["venv"])) / "Lib" / "site-packages" / "taplctl"
+        (package / "__pycache__").mkdir(exist_ok=True)
+        (package / "__pycache__" / "cli.cpython-399.pyc").write_bytes(b"runtime cache")
+        unrelated = [self.install_root / "user-notes.txt", self.bin_dir / "other.cmd", self.home / "config.toml"]
+        for path in unrelated:
+            path.write_text("preserved", encoding="utf-8")
+        self.requests.clear()
+        removed = self.run_installer("-Uninstall", TAPL_PYTHON=str(self.base / "missing-python.exe"))
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertEqual(self.requests, [])
+        self.assertFalse(self.metadata_path.exists())
+        self.assertFalse(self.launcher_path.exists())
+        self.assertFalse((self.install_root / "versions").exists())
+        self.assertEqual(self.path_log.read_text(encoding="utf-8"), initial_path)
+        for path in unrelated:
+            self.assertEqual(path.read_text(encoding="utf-8"), "preserved")
+
+        installed_again = self.run_installer()
+        self.assertEqual(installed_again.returncode, 0, installed_again.stderr)
+        self.assert_active_release("1.1.0")
+
+    def test_explicit_prerelease_selection_and_reinstall_stay_pinned(self) -> None:
+        wheel, sha256 = self.build_wheel("2.14.0b1")
+        self.write_manifest("2.14.0b1", wheel, sha256)
+        pinned = self.fixture_dir / "releases" / "download" / "2.14.0-beta1" / "taplctl-install-manifest.json"
+        pinned.parent.mkdir(parents=True)
+        shutil.copyfile(self.fixture_dir / "taplctl-install-manifest.json", pinned)
+        installed = self.run_installer("-Version", "2.14.0-beta1", TAPL_INSTALL_MANIFEST_URL="")
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        original = self.assert_active_release("2.14.0b1")
+        self.assertEqual(original["manifest_url"], f"{self.base_url}/releases/download/2.14.0-beta1/taplctl-install-manifest.json")
+        stable_wheel, stable_sha = self.build_wheel("3.0.0")
+        self.write_manifest("3.0.0", stable_wheel, stable_sha)
+        self.requests.clear()
+        repaired = self.run_installer("-Reinstall", TAPL_INSTALL_MANIFEST_URL="")
+        self.assertEqual(repaired.returncode, 0, repaired.stderr)
+        self.assertNotEqual(self.assert_active_release("2.14.0b1")["venv"], original["venv"])
+        self.assertEqual(self.requests[0], "/releases/download/2.14.0-beta1/taplctl-install-manifest.json")
+
+    def test_version_mismatch_and_invalid_arguments_do_not_replace_installation(self) -> None:
+        self.install_initial_release()
+        state = self.preserved_state()
+        mismatched = self.run_installer("-Version", "2.14.0-beta1")
+        self.assertNotEqual(mismatched.returncode, 0)
+        self.assertIn("does not match requested -Version", mismatched.stderr)
+        self.assert_preserved(state)
+        self.requests.clear()
+        for arguments in (("-Version", "../bad"), ("-Uninstall", "-Reinstall"), ("-Uninstall", "-Version", "1.0.0")):
+            with self.subTest(arguments=arguments):
+                failed = self.run_installer(*arguments)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assert_preserved(state)
+        self.assertEqual(self.requests, [])
+
+    def test_reinstall_repairs_a_missing_managed_command(self) -> None:
+        old = self.install_initial_release()
+        (Path(str(old["venv"])) / "Scripts" / "taplctl.exe").unlink()
+        repaired = self.run_installer("-Reinstall")
+        self.assertEqual(repaired.returncode, 0, repaired.stderr)
+        self.assertNotEqual(self.assert_active_release("1.0.0")["venv"], old["venv"])
+        removed = self.run_installer("-Uninstall")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertIn("preserving historical environment", removed.stdout)
+        self.assertTrue(Path(str(old["venv"])).is_dir())
+        self.assertFalse(self.launcher_path.exists())
+        self.assertFalse(self.metadata_path.exists())
+
+    def test_existing_user_path_entry_is_preserved_on_uninstall(self) -> None:
+        initial = f'C:\\before;;"{self.bin_dir}";C:\\after;'
+        result = self.install_release("1.0.0", TAPL_TEST_INITIAL_USER_PATH=initial)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.installed_metadata()["added_to_user_path"])
+        removed = self.run_installer("-Uninstall", TAPL_TEST_INITIAL_USER_PATH=initial)
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        # No registry write is needed when PATH already belonged to the user.
+        self.assertFalse(self.path_log.exists())
+
+    def test_uninstall_refuses_ambiguous_environment_without_removing_anything(self) -> None:
+        metadata = self.install_initial_release()
+        venv = Path(str(metadata["venv"]))
+        extra = venv / "personal-file.txt"
+        extra.write_text("do not delete", encoding="utf-8")
+        state = self.preserved_state()
+        before_path = self.path_log.read_bytes()
+        refused = self.run_installer("-Uninstall")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("ownership is ambiguous", refused.stderr)
+        self.assert_preserved(state)
+        self.assertEqual(extra.read_text(encoding="utf-8"), "do not delete")
+        self.assertEqual(self.path_log.read_bytes(), before_path)
+
+    def test_uninstall_refuses_modified_binary_and_legacy_missing_inventory(self) -> None:
+        metadata = self.install_initial_release()
+        venv = Path(str(metadata["venv"]))
+        command = venv / "Scripts" / "taplctl.exe"
+        original = command.read_bytes()
+        command.write_bytes(b"tampered")
+        refused = self.run_installer("-Uninstall")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("ownership is ambiguous", refused.stderr)
+        self.assertTrue(self.metadata_path.exists())
+        self.assertTrue(self.launcher_path.exists())
+        command.write_bytes(original)
+        (venv / ".tapl-managed-venv.json").unlink()
+        refused = self.run_installer("-Uninstall")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("run -Reinstall before -Uninstall", refused.stderr)
+
+    def test_uninstall_refuses_a_junction_without_touching_its_target(self) -> None:
+        metadata = self.install_initial_release()
+        outside = self.base / "outside"
+        outside.mkdir()
+        sentinel = outside / "keep.txt"
+        sentinel.write_text("keep", encoding="utf-8")
+        junction = Path(str(metadata["venv"])) / "linked"
+        linked = subprocess.run(["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(outside)], capture_output=True, text=True)
+        self.assertEqual(linked.returncode, 0, linked.stderr)
+        state = self.preserved_state()
+        refused = self.run_installer("-Uninstall")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("symlink or reparse", refused.stderr)
+        self.assert_preserved(state)
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+        junction.rmdir()
+
+    def test_uninstall_preflights_read_only_binary_launcher_and_metadata(self) -> None:
+        metadata = self.install_initial_release()
+        venv = Path(str(metadata["venv"]))
+        state = self.preserved_state()
+        before_files = {path.relative_to(venv): path.read_bytes() for path in venv.rglob("*") if path.is_file()}
+        before_path = self.path_log.read_bytes()
+        for path in (venv / "Scripts" / "taplctl.exe", self.launcher_path, self.metadata_path):
+            with self.subTest(path=path):
+                try:
+                    path.chmod(stat.S_IREAD)
+                    refused = self.run_installer("-Uninstall")
+                    self.assertNotEqual(refused.returncode, 0)
+                    self.assertIn("read-only", refused.stderr)
+                    self.assertIn("No files were removed", refused.stderr)
+                    self.assert_preserved(state)
+                    self.assertEqual(self.path_log.read_bytes(), before_path)
+                    self.assertEqual({item.relative_to(venv): item.read_bytes() for item in venv.rglob("*") if item.is_file()}, before_files)
+                finally:
+                    path.chmod(stat.S_IREAD | stat.S_IWRITE)
+        removed = self.run_installer("-Uninstall")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertFalse(self.metadata_path.exists())
+        self.assertFalse(self.launcher_path.exists())
+
+    def test_cmd_wrapper_forwards_version_uninstall_and_failure_exit_codes(self) -> None:
+        wheel, sha256 = self.build_wheel("2.14.0b1")
+        self.write_manifest("2.14.0b1", wheel, sha256)
+        wrapper = self.installer.with_suffix(".cmd")
+
+        def run_cmd(*arguments: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["cmd.exe", "/d", "/s", "/c", f'""{wrapper}" {subprocess.list2cmdline(arguments)}"'],
+                capture_output=True, text=True, check=False, env=self.installer_environment(), timeout=120,
+            )
+
+        installed = run_cmd("-Version", "2.14.0-beta1")
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        self.assert_active_release("2.14.0b1")
+        failed = run_cmd("-Version", "invalid")
+        self.assertNotEqual(failed.returncode, 0)
+        removed = run_cmd("-Uninstall")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertFalse(self.launcher_path.exists())
 
     def test_newer_release_upgrades_and_older_release_is_a_noop(self) -> None:
         old = self.install_initial_release("1.0.0")

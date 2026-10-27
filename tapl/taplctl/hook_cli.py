@@ -13,6 +13,7 @@ from typing import Any
 from . import config as tapl_config
 from . import db, hooks
 from . import install as tapl_install
+from .command_runtime import configure_stdio
 
 
 JSON_HELP = "Print JSON output."
@@ -84,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_stdio()
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
         return _handle_hook(args)

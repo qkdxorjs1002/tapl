@@ -1,5 +1,12 @@
 #requires -Version 5.1
 
+[CmdletBinding()]
+param(
+    [string]$Version,
+    [switch]$Reinstall,
+    [switch]$Uninstall
+)
+
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
@@ -158,6 +165,133 @@ function Test-RegularFile {
     }
 }
 
+function Assert-NoReparsePath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $cursor = Get-NormalizedPath $Path
+    while (-not [string]::IsNullOrEmpty($cursor)) {
+        if (Test-Path -LiteralPath $cursor) {
+            $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                Stop-Installer "refusing a symlink or reparse installation path: $cursor"
+            }
+        }
+        $parent = [System.IO.Path]::GetDirectoryName($cursor)
+        if ($parent -eq $cursor) { break }
+        $cursor = $parent
+    }
+}
+
+function Get-VenvInventory {
+    param([Parameter(Mandatory = $true)][string]$Directory)
+    Assert-NoReparsePath $Directory
+    $files = [ordered]@{}
+    $directories = @()
+    # Walk one level at a time so a junction is rejected before traversal.
+    $pending = [System.Collections.Generic.Queue[string]]::new()
+    $pending.Enqueue($Directory)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Dequeue()
+        foreach ($item in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                Stop-Installer "refusing a symlink or reparse entry in the managed environment."
+            }
+            $relative = $item.FullName.Substring($Directory.Length + 1)
+            if ($item.PSIsContainer) {
+                $directories += $relative
+                $pending.Enqueue($item.FullName)
+            }
+            elseif ($relative -ne ".tapl-managed-venv.json") {
+                $files[$relative] = Get-FileSha256 $item.FullName
+            }
+        }
+    }
+    return [ordered]@{ schema_version = 1; files = $files; directories = @($directories | Sort-Object) }
+}
+
+function Write-VenvInventory {
+    param([Parameter(Mandatory = $true)][string]$Directory)
+    $inventory = Get-VenvInventory $Directory
+    $text = ($inventory | ConvertTo-Json -Depth 4) + "`n"
+    [System.IO.File]::WriteAllText((Join-Path $Directory ".tapl-managed-venv.json"), $text, $Utf8NoBom)
+}
+
+function Get-VerifiedVenvRemoval {
+    param([Parameter(Mandatory = $true)][string]$Directory)
+    $inventoryPath = Join-Path $Directory ".tapl-managed-venv.json"
+    if (-not (Test-RegularFile $inventoryPath)) {
+        Stop-Installer "managed environment lacks an ownership inventory; run -Reinstall before -Uninstall."
+    }
+    $actual = Get-VenvInventory $Directory
+    try {
+        $expected = (Read-Utf8Text $inventoryPath) | ConvertFrom-Json
+        if ((Get-PropertyValue $expected "schema_version") -ne 1) { throw "schema" }
+        $expectedFiles = Get-PropertyValue $expected "files"
+        if (-not ($expectedFiles -is [System.Management.Automation.PSCustomObject])) { throw "files" }
+        $properties = @($expectedFiles.PSObject.Properties | Where-Object { -not (Test-ManagedBytecode $_.Name $expectedFiles) })
+        $actualFileNames = @($actual.files.Keys | Where-Object { -not (Test-ManagedBytecode $_ $expectedFiles) })
+        if ($properties.Count -ne $actualFileNames.Count) { throw "files" }
+        foreach ($property in $properties) {
+            if (-not $actual.files.Contains($property.Name) -or $actual.files[$property.Name] -cne $property.Value) { throw "file" }
+        }
+        $expectedDirectories = @((Get-PropertyValue $expected "directories") | Where-Object { [System.IO.Path]::GetFileName($_) -ne '__pycache__' } | Sort-Object)
+        $actualDirectories = @($actual.directories | Where-Object { [System.IO.Path]::GetFileName($_) -ne '__pycache__' } | Sort-Object)
+        if (($expectedDirectories -join "`n") -cne ($actualDirectories -join "`n")) { throw "directories" }
+        foreach ($directory in $actual.directories) {
+            if ([System.IO.Path]::GetFileName($directory) -eq '__pycache__') {
+                $parent = [System.IO.Path]::GetDirectoryName($directory)
+                if (-not [string]::IsNullOrEmpty($parent) -and $expectedDirectories -notcontains $parent) { throw "bytecode directory" }
+            }
+        }
+    }
+    catch {
+        Stop-Installer "managed environment ownership is ambiguous or files changed; refusing to uninstall."
+    }
+    return @{ Directory = $Directory; Files = @($actual.files.Keys); Directories = @($actual.directories) }
+}
+
+function Test-ManagedBytecode {
+    param([string]$Relative, $Files)
+    if ([System.IO.Path]::GetFileName([System.IO.Path]::GetDirectoryName($Relative)) -ne '__pycache__') { return $false }
+    $name = [System.IO.Path]::GetFileName($Relative)
+    if ($name -cnotmatch '^(?<module>.+)\.cpython-[0-9]+(?:\.opt-[0-9]+)?\.pyc$') { return $false }
+    $sourceName = $Matches['module'] + '.py'
+    $sourceParent = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetDirectoryName($Relative))
+    if ([string]::IsNullOrEmpty($sourceParent)) { $source = $sourceName }
+    else { $source = Join-Path $sourceParent $sourceName }
+    return ($null -ne $Files.PSObject.Properties[$source])
+}
+
+function Remove-VerifiedVenv {
+    param([Parameter(Mandatory = $true)]$Plan)
+    foreach ($relative in $Plan.Files) { [System.IO.File]::Delete((Join-Path $Plan.Directory $relative)) }
+    [System.IO.File]::Delete((Join-Path $Plan.Directory ".tapl-managed-venv.json"))
+    foreach ($relative in @($Plan.Directories | Sort-Object { $_.Length } -Descending)) {
+        [System.IO.Directory]::Delete((Join-Path $Plan.Directory $relative), $false)
+    }
+    [System.IO.Directory]::Delete($Plan.Directory, $false)
+}
+
+function Assert-FileRemovalAccess {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) { throw "read-only file" }
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw "reparse file" }
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+        $stream.Dispose()
+    }
+    catch {
+        Stop-Installer "a managed file is read-only, in use or inaccessible; clear read-only attributes and close taplctl/Codex processes before retrying -Uninstall. No files were removed."
+    }
+}
+
+function Assert-RemovalAccess {
+    param([Parameter(Mandatory = $true)]$Plan)
+    foreach ($relative in @($Plan.Files) + @('.tapl-managed-venv.json')) {
+        Assert-FileRemovalAccess (Join-Path $Plan.Directory $relative)
+    }
+}
+
 function Invoke-PythonCandidate {
     param(
         [Parameter(Mandatory = $true)][string]$Executable,
@@ -173,6 +307,12 @@ function Invoke-PythonCandidate {
 }
 
 function Find-Python {
+    if (-not [string]::IsNullOrWhiteSpace($env:TAPL_PYTHON)) {
+        if (-not (Test-RegularFile $env:TAPL_PYTHON) -or -not (Invoke-PythonCandidate -Executable $env:TAPL_PYTHON)) {
+            Stop-Installer "TAPL_PYTHON must point to Python 3.11 or newer with the venv module."
+        }
+        return @{ Executable = $env:TAPL_PYTHON; PrefixArguments = [string[]]@() }
+    }
     $candidates = @(
         @{ Name = "py.exe"; Prefix = @("-3") },
         @{ Name = "python.exe"; Prefix = @() },
@@ -228,6 +368,8 @@ function Get-ManagedInstallation {
         $schema = Get-PropertyValue $metadata "schema_version"
         if (($schema -is [bool]) -or $schema -ne 1) { throw "schema" }
         if ((Get-PropertyValue $metadata "method") -ne "powershell") { throw "method" }
+        $pathOwnership = $metadata.PSObject.Properties['added_to_user_path']
+        if ($null -ne $pathOwnership -and -not ($pathOwnership.Value -is [bool])) { throw "path ownership" }
 
         $installRootValue = Get-PropertyValue $metadata "install_root"
         $binDirectoryValue = Get-PropertyValue $metadata "bin_dir"
@@ -249,6 +391,9 @@ function Get-ManagedInstallation {
         if (-not (Test-PathEqual $normalizedBinDirectory $ExpectedBinDirectory)) { throw "bin_dir" }
         if (-not (Test-PathEqual $normalizedExecutable $ExpectedLauncher)) { throw "executable" }
         if (-not (Test-StrictDescendant $normalizedVenv $ExpectedVersionsDirectory)) { throw "venv" }
+        if (-not (Test-PathEqual ([System.IO.Path]::GetDirectoryName($normalizedVenv)) $ExpectedVersionsDirectory)) { throw "venv" }
+        Assert-NoReparsePath $normalizedVenv
+        Assert-NoReparsePath (Join-Path $normalizedVenv "Scripts")
 
         $manifestUrlValue = Get-PropertyValue $metadata "manifest_url"
         $wheelUrlValue = Get-PropertyValue $metadata "wheel_url"
@@ -261,7 +406,7 @@ function Get-ManagedInstallation {
 
         $pythonCommand = Join-Path (Join-Path $normalizedVenv "Scripts") "python.exe"
         $taplCommand = Join-Path (Join-Path $normalizedVenv "Scripts") "taplctl.exe"
-        if (-not (Test-RegularFile $pythonCommand) -or -not (Test-RegularFile $taplCommand)) { throw "command" }
+        if (-not $Reinstall -and -not $Uninstall -and (-not (Test-RegularFile $pythonCommand) -or -not (Test-RegularFile $taplCommand))) { throw "command" }
         if (-not (Test-RegularFile $ExpectedLauncher)) { throw "launcher" }
         $expectedLauncherBytes = Get-WindowsLauncherBytes -Command $taplCommand
         $launcherBytes = [System.IO.File]::ReadAllBytes($ExpectedLauncher)
@@ -453,7 +598,7 @@ function Add-ToUserPath {
             $newUserPath = $Directory
         }
         else {
-            $newUserPath = $userPath.TrimEnd(';') + ';' + $Directory
+            $newUserPath = $userPath + ';' + $Directory
         }
         [System.Environment]::SetEnvironmentVariable("Path", $newUserPath, [System.EnvironmentVariableTarget]::User)
     }
@@ -462,8 +607,20 @@ function Add-ToUserPath {
             $env:Path = $Directory
         }
         else {
-            $env:Path = $env:Path.TrimEnd(';') + ';' + $Directory
+            $env:Path = $env:Path + ';' + $Directory
         }
+    }
+}
+
+function Remove-FromUserPath {
+    param([Parameter(Mandatory = $true)][string]$Directory)
+    $userPath = [System.Environment]::GetEnvironmentVariable("Path", [System.EnvironmentVariableTarget]::User)
+    if ($null -ne $userPath) {
+        $remaining = @($userPath.Split(';') | Where-Object { -not (Test-PathListContains $_ $Directory) })
+        [System.Environment]::SetEnvironmentVariable("Path", ($remaining -join ';'), [System.EnvironmentVariableTarget]::User)
+    }
+    if ($null -ne $env:Path) {
+        $env:Path = (@($env:Path.Split(';') | Where-Object { -not (Test-PathListContains $_ $Directory) }) -join ';')
     }
 }
 
@@ -472,7 +629,20 @@ try {
         Stop-Installer "this installer supports Windows only."
     }
 
-    $python = Find-Python
+    if ($Uninstall -and ($Reinstall -or -not [string]::IsNullOrEmpty($Version))) {
+        Stop-Installer "-Uninstall cannot be combined with -Version or -Reinstall."
+    }
+    $requestedPythonVersion = $null
+    if (-not [string]::IsNullOrEmpty($Version)) {
+        if ($Version -cnotmatch '^(?<base>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))(?:-(?<kind>alpha|beta|rc)(?<serial>0|[1-9][0-9]*))?$') {
+            Stop-Installer "-Version must be x.y.z or x.y.z-(alpha|beta|rc)N, for example 2.14.0-beta1."
+        }
+        $requestedPythonVersion = $Matches['base']
+        if (-not [string]::IsNullOrEmpty($Matches['kind'])) {
+            $markers = @{ alpha = 'a'; beta = 'b'; rc = 'rc' }
+            $requestedPythonVersion += $markers[$Matches['kind']] + $Matches['serial']
+        }
+    }
 
     if (-not [string]::IsNullOrEmpty($env:TAPL_INSTALL_ROOT)) {
         $installRoot = Get-NormalizedPath $env:TAPL_INSTALL_ROOT
@@ -493,6 +663,9 @@ try {
     if (-not [string]::IsNullOrEmpty($env:TAPL_INSTALL_MANIFEST_URL)) {
         $manifestUrl = $env:TAPL_INSTALL_MANIFEST_URL
     }
+    elseif (-not [string]::IsNullOrEmpty($Version)) {
+        $manifestUrl = "https://github.com/qkdxorjs1002/tapl/releases/download/$Version/taplctl-install-manifest.json"
+    }
     else {
         $manifestUrl = $DefaultManifestUrl
     }
@@ -503,19 +676,75 @@ try {
     $versionsDirectory = Join-Path $installRoot "versions"
     $metadataPath = Join-Path $installRoot "install.json"
     $launcherPath = Join-Path $binDirectory "taplctl.cmd"
+    foreach ($path in @($installRoot, $binDirectory, $versionsDirectory, $metadataPath, $launcherPath)) {
+        Assert-NoReparsePath $path
+    }
     $metadataExists = Test-Path -LiteralPath $metadataPath
     $launcherExists = Test-Path -LiteralPath $launcherPath
     $managed = $null
 
     if ($metadataExists) {
         $managed = Get-ManagedInstallation -MetadataPath $metadataPath -ExpectedInstallRoot $installRoot -ExpectedBinDirectory $binDirectory -ExpectedVersionsDirectory $versionsDirectory -ExpectedLauncher $launcherPath
-        $managedVersionOutput = Invoke-TaplVersion $managed.Command
-        if ($managedVersionOutput -ne "taplctl $($managed.Version)") {
+        $managedVersionOutput = $null
+        if (-not $Uninstall -and -not $Reinstall) { $managedVersionOutput = Invoke-TaplVersion $managed.Command }
+        if (-not $Uninstall -and -not $Reinstall -and $managedVersionOutput -ne "taplctl $($managed.Version)") {
             Stop-Installer "managed taplctl command version does not match install.json (expected taplctl $($managed.Version))."
         }
     }
     elseif ($launcherExists) {
         Stop-Installer "$launcherPath already exists and is not managed by a valid PowerShell install.json; move it or choose TAPL_BIN_DIR."
+    }
+
+    if ($Uninstall) {
+        if ($null -eq $managed) {
+            Write-InstallerNote "no managed installation was found; nothing to uninstall"
+            return
+        }
+        # The active environment must be fully owned. Damaged or unmarked
+        # historical environments are preserved for inspection after repair.
+        $removals = @(Get-VerifiedVenvRemoval $managed.Venv)
+        foreach ($item in @(Get-ChildItem -LiteralPath $versionsDirectory -Force -ErrorAction Stop)) {
+            if (Test-PathEqual $item.FullName $managed.Venv) {
+                continue
+            }
+            elseif (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                Write-InstallerNote "preserving historical reparse entry: $($item.FullName)"
+            }
+            elseif ($item.PSIsContainer -and (Test-Path -LiteralPath (Join-Path $item.FullName ".tapl-managed-venv.json"))) {
+                try { $removals += Get-VerifiedVenvRemoval $item.FullName }
+                catch { Write-InstallerNote "preserving historical environment with changed or ambiguous ownership: $($item.FullName)" }
+            }
+        }
+        foreach ($plan in $removals) { Assert-RemovalAccess $plan }
+        Assert-FileRemovalAccess $launcherPath
+        Assert-FileRemovalAccess $metadataPath
+        if (-not (Test-ByteArrayEqual ([System.IO.File]::ReadAllBytes($metadataPath)) $managed.MetadataBytes) -or
+            -not (Test-ByteArrayEqual ([System.IO.File]::ReadAllBytes($launcherPath)) $managed.LauncherBytes)) {
+            Stop-Installer "installation ownership changed during uninstall preparation; no files were removed."
+        }
+        try {
+            foreach ($plan in @($removals | Sort-Object { Test-PathEqual $_.Directory $managed.Venv })) { Remove-VerifiedVenv $plan }
+        }
+        catch {
+            Stop-Installer "could not remove all managed binaries; close taplctl/Codex processes. Metadata was preserved for inspection; configuration and workflow data were preserved."
+        }
+        $pathProperty = $managed.Metadata.PSObject.Properties['added_to_user_path']
+        [System.IO.File]::Delete($launcherPath)
+        [System.IO.File]::Delete($metadataPath)
+        if ($null -ne $pathProperty -and $pathProperty.Value -eq $true) { Remove-FromUserPath $binDirectory }
+        foreach ($directory in @($binDirectory, $versionsDirectory, $installRoot)) {
+            if ([System.IO.Directory]::Exists($directory) -and @(Get-ChildItem -LiteralPath $directory -Force).Count -eq 0) {
+                [System.IO.Directory]::Delete($directory, $false)
+            }
+        }
+        Write-InstallerNote "managed taplctl binaries were uninstalled; configuration and workflow data were preserved"
+        Write-Output "To remove workflow integration first, run taplctl uninstall user before -Uninstall."
+        return
+    }
+
+    $python = Find-Python
+    if ($Reinstall -and $null -ne $managed -and [string]::IsNullOrEmpty($Version) -and [string]::IsNullOrEmpty($env:TAPL_INSTALL_MANIFEST_URL)) {
+        $manifestUrl = $managed.Metadata.manifest_url
     }
 
     if ($null -eq $managed) {
@@ -528,7 +757,7 @@ try {
     [System.IO.Directory]::CreateDirectory($WorkDirectory) | Out-Null
     $manifestPath = Join-Path $WorkDirectory "taplctl-install-manifest.json"
 
-    Write-InstallerNote "fetching the latest release manifest"
+    Write-InstallerNote "fetching the release manifest"
     try {
         Invoke-WebRequest -UseBasicParsing -Uri $manifestUrl -OutFile $manifestPath -ErrorAction Stop | Out-Null
     }
@@ -562,9 +791,13 @@ try {
         Stop-Installer "release manifest validation failed."
     }
 
+    if ($null -ne $requestedPythonVersion -and $manifestVersion -cne $requestedPythonVersion) {
+        Stop-Installer "release manifest version does not match requested -Version $Version."
+    }
+
     if ($null -ne $managed) {
         $versionComparison = Compare-SemVer $managed.Version $manifestVersion
-        if ($versionComparison -gt 0) {
+        if ($versionComparison -gt 0 -and [string]::IsNullOrEmpty($Version) -and -not $Reinstall) {
             Write-InstallerNote "installed taplctl $($managed.Version) is newer than published release $manifestVersion; leaving it unchanged"
             Add-ToUserPath $binDirectory
             Write-Output ""
@@ -577,6 +810,7 @@ try {
     $currentVenv = $null
     if (
         $null -ne $managed -and
+        -not $Reinstall -and
         $managed.Version -eq $manifestVersion -and
         $managed.WheelSha256 -eq $wheelSha256
     ) {
@@ -637,6 +871,7 @@ try {
         if (-not (Test-RegularFile $candidateCommand) -or (Invoke-TaplVersion $candidateCommand) -ne "taplctl $manifestVersion") {
             Stop-Installer "the installed taplctl executable failed validation."
         }
+        Write-VenvInventory $CandidateVenv
         $currentVenv = $CandidateVenv
     }
 
@@ -654,6 +889,11 @@ try {
 
     $currentCommand = Join-Path (Join-Path $currentVenv "Scripts") "taplctl.exe"
     $launcherBytes = Get-WindowsLauncherBytes -Command $currentCommand
+    $addedToUserPath = -not (Test-PathListContains ([System.Environment]::GetEnvironmentVariable("Path", [System.EnvironmentVariableTarget]::User)) $binDirectory)
+    if ($null -ne $managed) {
+        $pathProperty = $managed.Metadata.PSObject.Properties['added_to_user_path']
+        $addedToUserPath = ($addedToUserPath -or ($null -ne $pathProperty -and $pathProperty.Value -eq $true))
+    }
     $metadataObject = [ordered]@{
         schema_version = 1
         method = "powershell"
@@ -665,6 +905,7 @@ try {
         bin_dir = $binDirectory
         venv = $currentVenv
         executable = $launcherPath
+        added_to_user_path = [bool]$addedToUserPath
         installed_at = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", [System.Globalization.CultureInfo]::InvariantCulture)
     }
     $metadataText = ($metadataObject | ConvertTo-Json -Depth 4) + "`n"
@@ -754,13 +995,18 @@ finally {
     }
     if ($CandidateIncomplete -and $null -ne $CandidateVenv -and (Test-Path -LiteralPath $CandidateVenv)) {
         try {
-            Remove-Item -LiteralPath $CandidateVenv -Recurse -Force -ErrorAction Stop
+            $inventory = Get-VenvInventory $CandidateVenv
+            Remove-VerifiedVenv @{ Directory = $CandidateVenv; Files = @($inventory.files.Keys); Directories = @($inventory.directories) }
         }
         catch {
             Write-Warning "taplctl installer: could not remove the incomplete candidate environment."
         }
     }
     if ($null -ne $WorkDirectory -and (Test-Path -LiteralPath $WorkDirectory)) {
-        Remove-Item -LiteralPath $WorkDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        try {
+            $inventory = Get-VenvInventory $WorkDirectory
+            Remove-VerifiedVenv @{ Directory = $WorkDirectory; Files = @($inventory.files.Keys); Directories = @($inventory.directories) }
+        }
+        catch { Write-Warning "taplctl installer: could not remove temporary download files." }
     }
 }

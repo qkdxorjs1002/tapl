@@ -16,13 +16,15 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__, config, config_editor, db
+from .command_runtime import windows_hook_command, windows_hook_tokens
 
 
 DEFAULT_HOOK_MODE = "observe"
 VERSION_RELATIVE = Path(".tapl") / "version"
 INSTALL_STATE_RELATIVE = Path(".tapl") / "install-state.json"
 # Bump when migration behavior changes without a template change.
-INSTALL_MIGRATION_REVISION = 1
+INSTALL_MIGRATION_REVISION = 2
+WINDOWS = sys.platform == "win32"
 TAPL_CONFIG_POLICY_PROMPT = "prompt"
 TAPL_CONFIG_POLICY_OVERWRITE = "overwrite"
 TAPL_CONFIG_POLICY_MERGE = "merge"
@@ -303,7 +305,7 @@ def installed_hook_mode(path: Path, fallback: str) -> str:
         if isinstance(value, dict):
             if is_tapl_hook_command_entry(value):
                 try:
-                    args = shlex.split(value["command"])
+                    args = windows_hook_tokens(value["command"]) or shlex.split(value["command"])
                 except ValueError:
                     args = []
                 for index, token in enumerate(args):
@@ -378,6 +380,12 @@ def install_hooks(path: Path, *, taplctl_command: str, mode: str, dry_run: bool)
 def resolved_taplctl_command(command: str | None) -> str:
     if command:
         return command
+    if WINDOWS:
+        # The public installer launcher is a .cmd file. MCP uses direct process
+        # spawning, so register the actual executable in this wheel's venv.
+        native = Path(sys.executable).parent / "taplctl.exe"
+        if native.is_file():
+            return str(native)
     found = shutil.which("taplctl")
     if found:
         return found
@@ -427,6 +435,8 @@ def build_hooks_config(*, taplctl_command: str, mode: str) -> dict[str, Any]:
 
 def hook_command(*, taplctl_command: str, event: str, mode: str) -> str:
     hook = sibling_tapl_command(taplctl_command, "tapl-hook")
+    if WINDOWS:
+        return windows_hook_command(hook, event, mode)
     return f"{shlex.quote(hook)} --event {shlex.quote(event)} --mode {shlex.quote(mode)}"
 
 

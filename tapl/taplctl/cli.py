@@ -30,6 +30,7 @@ from . import (
 )
 from . import install as tapl_install
 from . import uninstall as tapl_uninstall
+from .command_runtime import configure_stdio
 
 
 JSON_HELP = "Print JSON output."
@@ -64,6 +65,7 @@ _AGENT_LIST_ITEM_TAGS = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_stdio()
     arguments = list(sys.argv[1:] if argv is None else argv)
     # Old installed launchers must reach the native startup migration before
     # their config can be rewritten to tapl-mcp/tapl-hook.

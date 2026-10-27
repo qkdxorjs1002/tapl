@@ -152,7 +152,9 @@ TAPL이 Codex 세션 작업 폴더에 `.tapl/tapl.db`를 만들고, Codex가 MCP
 | macOS · 안정판 + 시맨틱 검색 | Homebrew `taplctl-semantic` | [선택 의존성 포함](docs/guide.ko.md#homebrew) |
 | macOS · 프리릴리즈 포함 최신 채널 | Homebrew `taplctl-pre` | [채널 선택](docs/guide.ko.md#homebrew) |
 | Linux · 안정판 기본 | 독립형 셸 설치 스크립트 | [설치 및 경로 설정](docs/guide.ko.md#linux) |
-| Windows 10/11 · 안정판 기본 | 독립형 PowerShell 설치 스크립트 | [설치 및 경로 설정](docs/guide.ko.md#windows) |
+| Windows 10/11 · 안정판 기본 | PowerShell / CMD 스크립트 | [설치·업데이트·재설치·제거](docs/guide.ko.md#windows) |
+
+Windows 테스트: [2.14.0-beta1 고정 릴리즈 다운로드와 명령](docs/guide.ko.md#2140-beta1-프리릴리즈-테스트). 설치 뒤 터미널을 다시 여세요.
 
 Python 3.11 이상이 필요합니다. Homebrew의 세 formula는 서로 충돌하므로 하나만 설치하세요.
 자세한 의존성, 업데이트, 설정은 [설치·운영 가이드](docs/guide.ko.md)에서 확인할 수 있습니다.

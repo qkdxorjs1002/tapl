@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import __version__, db, install as tapl_install, prompt as tapl_prompt, sessions
 from .application import WorkflowApplication
+from .command_runtime import configure_stdio
 
 
 SERVER_NAME = "tapl_mcp"
@@ -954,7 +955,7 @@ def create_server(
 
 def main() -> None:
     """Run the local TAPL MCP server over stdio."""
-
+    configure_stdio()
     try:
         create_server(refresh_install=True).run()
     except Exception as exc:

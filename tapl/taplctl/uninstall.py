@@ -13,6 +13,7 @@ import tomllib
 from typing import Any
 
 from . import config_editor, install
+from .command_runtime import windows_hook_tokens
 
 
 _DB_NAMES = ("tapl.db", "tapl.db-wal", "tapl.db-shm", "tapl.db-journal")
@@ -192,6 +193,9 @@ def _executable_name(value: str) -> str:
 
 def is_tapl_hook_command(command: str) -> bool:
     """Recognize owned executable invocations, never references in arguments."""
+    encoded = windows_hook_tokens(command)
+    if encoded is not None:
+        return _executable_name(encoded[0]) in {"tapl-hook", "tapl-hook.exe"}
     if "\n" in command or "\r" in command or "$(" in command or "`" in command:
         return False
     for windows in (False, True):

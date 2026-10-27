@@ -294,6 +294,34 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
 
 
 class ReleaseWorkflowContractTests(unittest.TestCase):
+    def test_windows_matrix_and_release_preflight_use_actual_wheel_lifecycle(self) -> None:
+        windows = yaml.safe_load(
+            (REPOSITORY_ROOT / '.github/workflows/windows.yml').read_text(encoding='utf-8')
+        )
+        release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding='utf-8'))
+        ci_job = windows['jobs']['windows-installer-tests']
+        preflight = release['jobs']['windows-installer-preflight']
+        self.assertEqual(ci_job['steps'], preflight['steps'])
+        for job in (ci_job, preflight):
+            self.assertEqual(job['runs-on'], 'windows-latest')
+            self.assertEqual(job['strategy']['matrix']['python-version'], ['3.11', '3.12'])
+            steps = {step['name']: step for step in job['steps']}
+            parser = steps['Parse installer and lifecycle smoke with Windows PowerShell 5.1']
+            self.assertEqual(parser['shell'], 'powershell')
+            self.assertIn('Language.Parser]::ParseFile', parser['run'])
+            self.assertIn('python -m unittest -v tapl.tests.test_installer_windows',
+                          steps['Run Windows installer tests (stdlib-only fixtures)']['run'])
+            self.assertIn('pip wheel --no-deps', steps['Build actual TAPL wheel']['run'])
+            smoke = steps['Test actual wheel install, update, reinstall, uninstall and CLI/MCP runtime']
+            self.assertEqual(smoke['shell'], 'powershell')
+            self.assertIn('windows_install_smoke.ps1 -Wheel $wheel -Python', smoke['run'])
+        self.assertIn('windows-installer-preflight', release['jobs']['release']['needs'])
+        release_steps = {step['name']: step for step in release['jobs']['release']['steps']}
+        self.assertIn('cp install.ps1 install.cmd release-dist/', release_steps['Prepare release assets']['run'])
+        for asset in ('install.ps1', 'install.cmd'):
+            self.assertIn(f'cmp {asset} release-dist/{asset}', release_steps['Validate release assets']['run'])
+        self.assertIn('release-dist/*', release_steps['Publish GitHub Release']['run'])
+
     def test_release_builds_validates_and_installs_all_runtime_archives(self) -> None:
         workflow_text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
         workflow = yaml.safe_load(workflow_text)

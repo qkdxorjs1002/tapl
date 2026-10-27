@@ -21,6 +21,11 @@ SOCKET_ENV = "TAPL_SEARCHD_SOCKET"
 DEFAULT_CONNECT_TIMEOUT_MS = 250
 DEFAULT_START_TIMEOUT_MS = 15000
 DEFAULT_EMBED_TIMEOUT_MS = 30000
+WINDOWS = sys.platform == "win32"
+UNSUPPORTED_MESSAGE = (
+    "searchd requires Unix domain sockets and is unavailable on Windows; "
+    "semantic search falls back to the local provider, or BM25 when optional dependencies are absent"
+)
 
 
 class SearchdError(RuntimeError):
@@ -81,6 +86,11 @@ def start(
     wait: bool = True,
 ) -> dict[str, Any]:
     path = resolve_socket_path(socket_path)
+    if WINDOWS or not hasattr(socket, "AF_UNIX"):
+        return {
+            "ok": False, "running": False, "started": False,
+            "socket_path": str(path), "error": UNSUPPORTED_MESSAGE,
+        }
     existing = status(settings, socket_path=path)
     if existing.get("ok"):
         existing["started"] = False
@@ -219,8 +229,8 @@ def embed_query(query: str, settings: tapl_config.SearchConfig) -> bytes:
 
 
 def request(socket_path: Path, payload: dict[str, Any], *, timeout_ms: int) -> dict[str, Any]:
-    if not hasattr(socket, "AF_UNIX"):
-        raise SearchdUnavailable("Unix domain sockets are not available on this platform")
+    if WINDOWS or not hasattr(socket, "AF_UNIX"):
+        raise SearchdUnavailable(UNSUPPORTED_MESSAGE)
     if not socket_path.exists():
         raise SearchdUnavailable(f"searchd socket not found: {socket_path}")
 
@@ -367,6 +377,8 @@ def run_server(
     socket_path: str | Path | None = None,
     model_idle_timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
+    if WINDOWS or not hasattr(socket, "AF_UNIX"):
+        raise SearchdUnavailable(UNSUPPORTED_MESSAGE)
     path = resolve_socket_path(socket_path)
     existing = status(settings, socket_path=path)
     if existing.get("ok"):

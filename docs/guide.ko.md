@@ -67,13 +67,85 @@ shell startup file이나 Codex hook은 수정하지 않습니다. 출력된 `PAT
 
 ## Windows 독립형 설치
 
+Windows 10/11, `venv`가 포함된 Python 3.11 이상, Windows PowerShell 5.1 이상
+또는 PowerShell 7이 필요합니다. 네이티브 CI는 Python 3.11과 3.12를 검증합니다.
+관리자 권한 없이 사용자별로 설치하며 WinGet 패키지 등록은 필요하지 않습니다.
+쓰기 가능한 폴더에서 실행하세요. 별도 신뢰 절차가 필요하면 내려받은 스크립트를
+먼저 검토하세요.
+
+PowerShell에서 최신 안정판 설치와 관리:
+
 ```powershell
-irm https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 | iex
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -OutFile install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+# 설치 뒤 터미널을 다시 열고 실행합니다.
+taplctl --version
+taplctl update --check
+taplctl update
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Reinstall
+# 실행 파일을 제거하기 전에 Codex 연결을 해제합니다.
+taplctl uninstall user
+taplctl uninstall repo  # 연결했던 각 저장소에서 실행
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 ```
 
-installer는 Windows 10/11, Windows PowerShell 5.1+ 또는 PowerShell 7, Python 3.11+와 `venv`, 쓰기 가능한 user directory를 지원합니다. 기본값은 `%LOCALAPPDATA%\tapl`, launcher는 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다. `TAPL_INSTALL_ROOT`, `TAPL_BIN_DIR`, `TAPL_INSTALL_MANIFEST_URL`로 경로나 manifest를 바꿀 수 있습니다.
+명령 프롬프트(CMD)에서는 두 스크립트를 같은 폴더에 둡니다.
 
-user `PATH`만 갱신하고 administrator 권한은 필요하지 않습니다. activation 전에 release manifest를 검증하고 wheel SHA-256을 확인합니다. Codex hook은 자동 설치하지 않습니다. 별도의 신뢰 절차가 필요한 환경이라면 script를 먼저 검토하세요.
+```bat
+curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -o install.ps1
+curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.cmd -o install.cmd
+install.cmd
+rem 설치 뒤 CMD를 다시 열고 실행합니다.
+taplctl --version
+taplctl update --check
+taplctl update
+install.cmd -Reinstall
+taplctl uninstall user
+taplctl uninstall repo
+install.cmd -Uninstall
+```
+
+### 2.14.0-beta1 프리릴리즈 테스트
+
+고정 릴리즈 자산을 내려받아 이 버전을 테스트합니다. GitHub의 `latest/download`
+주소는 안정판을 선택하므로 이 프리릴리즈를 선택하지 않습니다.
+
+PowerShell:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1
+# 같은 버전의 가상 환경을 새로 만들 때:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1 -Reinstall
+```
+
+CMD:
+
+```bat
+curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
+curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
+install.cmd -Version 2.14.0-beta1
+install.cmd -Version 2.14.0-beta1 -Reinstall
+```
+
+태그 `2.14.0-beta1`의 Python wheel 버전은 `2.14.0b1`이며 고정 manifest는
+`releases/download/2.14.0-beta1/taplctl-install-manifest.json`입니다.
+설치 전에 manifest와 wheel SHA-256을 검증합니다. `taplctl update`와 `-Reinstall`은
+설치 때 선택한 manifest를 재사용합니다. 다른 릴리즈를 선택하려면 설치 스크립트를
+`-Version TAG`와 함께 다시 실행하세요. `TAPL_INSTALL_MANIFEST_URL`을 명시하면
+`-Version`과 저장된 manifest보다 우선합니다. `-Version`을 명시하면 더 최신인
+프리릴리즈에서 안정판으로도 전환할 수 있으며, 생략하면 설치된 버전을 낮추지 않습니다.
+
+기본 설치 경로는 `%LOCALAPPDATA%\tapl`, launcher는
+`%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다. `TAPL_INSTALL_ROOT`와 `TAPL_BIN_DIR`로
+바꿀 수 있습니다. 사용자 `PATH`만 갱신하므로 설치 뒤 터미널을 다시 열어야 다른
+세션에도 적용됩니다. Codex hook은 아래 단계에서 연결하고 Codex 재시작 후 신뢰합니다.
+
+`-Uninstall`은 검증된 설치 관리 대상 실행 파일·가상 환경과 사용자 `PATH` 항목을
+제거하며 설정, 워크플로 DB, 무관한 파일을 보존합니다. Codex 연결은 별도입니다.
+`taplctl uninstall user` / `repo`는 해당 연결을 해제하며 기본적으로 데이터를 보존합니다.
+파일 목록이 없는 구형 설치는 `-Reinstall` 후 `-Uninstall`하세요. 관리 대상 파일이
+변경되었다면 제거를 중단하므로 먼저 확인해야 합니다.
 
 <a id="connect"></a>
 
@@ -187,6 +259,10 @@ origin은 HTTP(S) 스킴, 호스트, 선택적인 포트만 포함합니다. 여
 semantic formula는 preloaded search process를 의도적으로 시작하지 않습니다. 필요하면
 `taplctl searchd start`와 `taplctl searchd status`를 실행하세요.
 
+선택 `searchd` daemon은 Unix socket을 사용하므로 Windows에서는 지원하지 않습니다.
+Windows에서도 선택 의존성을 설치하면 로컬 semantic search를 사용할 수 있으며,
+daemon 없이 BM25/전문 검색을 사용할 수 있습니다.
+
 선택 VS Code extension은 workspace별 persistent `tapl-mcp` client를 사용합니다.
 executable을 못 찾으면 `taplWorkflow.taplMcpPath`를 설정하세요.
 
@@ -245,7 +321,7 @@ history 규칙을 따릅니다. 저장되거나 실행 가능한 task에는 아�
 
 실행 전 승인은 필요하지만 **수정·테스트·구현·검증을 직접 요청한 것 자체도 명시적인 실행 승인**입니다. 매 요청마다 별도 승인 질문이 필요한 것은 아닙니다. 작업의 범위와 위험에 따라 흐름을 분류하며, 간단한 읽기 전용 요청은 계획과 작업을 만들지 않는 가벼운 기록으로 끝날 수 있습니다.
 
-`taplctl`은 설치와 관리용입니다. 공개 명령은 `init`, `doctor`, `update`, `install`, `config`, `viewer`, `reindex`, `searchd`의 여덟 가지입니다. 워크플로 기록 생성·조회·검색과 작업 실행 상태 관리는 에이전트가 MCP 도구로 수행합니다.
+`taplctl`은 설치와 관리용입니다. 공개 명령은 `init`, `doctor`, `update`, `install`, `uninstall`, `config`, `viewer`, `reindex`, `searchd`의 아홉 가지입니다. 워크플로 기록 생성·조회·검색과 작업 실행 상태 관리는 에이전트가 MCP 도구로 수행합니다.
 
 ### 기록 작성 지침
 
@@ -272,6 +348,7 @@ MCP 필드의 자연어 값은 사람이 읽는 설명문입니다. 계획·작�
 | `taplctl init --workspace-root /path/to/workspace` | 지정한 폴더의 workspace를 명시적으로 초기화 |
 | `taplctl doctor` | 설치와 workspace 문제 진단 |
 | `taplctl install SCOPE` | Codex integration 설치 또는 갱신 |
+| `taplctl uninstall SCOPE` | Codex 연결 해제, 기본적으로 설정과 데이터 보존 |
 | `taplctl config set/unset` | 지원 runtime config 값 편집 |
 | `taplctl viewer [--port 9000]` | local browser viewer 열기 |
 | `taplctl update --check` / `update` | 독립형 설치 업데이트 확인 또는 실행 |

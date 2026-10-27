@@ -668,6 +668,28 @@ def _build_candidate(
             code="candidate_validation_failed",
             details={"expected_version": version},
         )
+    if method == "powershell":
+        _write_windows_venv_inventory(candidate)
+
+
+def _write_windows_venv_inventory(candidate: Path) -> None:
+    """Record installed files so the PowerShell uninstaller can verify ownership."""
+    files: dict[str, str] = {}
+    directories: list[str] = []
+    for path in sorted(candidate.rglob("*")):
+        relative = path.relative_to(candidate).as_posix().replace("/", "\\")
+        if relative == ".tapl-managed-venv.json":
+            continue
+        if path.is_symlink():
+            raise UpdateError("update virtual environment contains a symbolic link", code="candidate_validation_failed")
+        if path.is_dir():
+            directories.append(relative)
+        elif path.is_file():
+            files[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (candidate / ".tapl-managed-venv.json").write_text(
+        json.dumps({"schema_version": 1, "files": files, "directories": directories}, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _activation_metadata(
@@ -688,6 +710,8 @@ def _activation_metadata(
         "venv": str(candidate),
         "executable": str(installation.executable),
         "installed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        **({"added_to_user_path": installation.metadata.get("added_to_user_path", False)}
+           if installation.method == "powershell" else {}),
     }
 
 
