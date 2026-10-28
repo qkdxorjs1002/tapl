@@ -66,93 +66,86 @@ shell startup file이나 Codex hook은 수정하지 않습니다. 출력된 `PAT
 
 ## Windows 독립형 설치
 
-Windows 10/11, `venv`가 포함된 Python 3.11 이상, Windows PowerShell 5.1 이상
-또는 PowerShell 7이 필요합니다. 네이티브 CI는 Python 3.11과 3.12를 검증합니다.
-관리자 권한 없이 사용자별로 설치하며 WinGet 패키지 등록은 필요하지 않습니다.
-쓰기 가능한 폴더에서 실행하세요. 별도 신뢰 절차가 필요하면 내려받은 스크립트를
-먼저 검토하세요.
-
-아래 스크립트는 수명 주기 옵션을 지원하는 이번 베타의 자산입니다.
-버전 인자가 없으면 안정판 패키지를 설치합니다. Windows 런타임 수정까지
-테스트하려면 아래 프리릴리즈 설치 명령을 사용하세요.
-
-PowerShell에서 최신 안정판 설치와 관리:
-
 ```powershell
 Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-# 설치 뒤 터미널을 다시 열고 실행합니다.
-taplctl --version
-taplctl update --check
-taplctl update
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Reinstall
-# 실행 파일을 제거하기 전에 Codex 연결을 해제합니다.
-taplctl uninstall user
-taplctl uninstall repo  # 연결했던 각 저장소에서 실행
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 ```
 
-명령 프롬프트(CMD)에서는 두 스크립트를 같은 폴더에 둡니다.
+Windows 10/11, `venv`가 포함된 Python 3.11 이상, PowerShell 5.1 이상이 필요합니다.
+관리자 권한 없이 현재 사용자에게 최신 안정판을 설치합니다.
+
+기본 경로는 `%LOCALAPPDATA%\tapl`입니다. 사용자 `PATH`가 적용되도록 터미널을
+다시 열고 [TAPL을 Codex에 연결](#connect)하세요.
+
+<details>
+<summary>명령 프롬프트(CMD)에서 설치</summary>
+
+쓰기 가능한 폴더에 두 스크립트를 함께 내려받아 실행하세요.
 
 ```bat
 curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
 curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
 install.cmd
-rem 설치 뒤 CMD를 다시 열고 실행합니다.
-taplctl --version
-taplctl update --check
-taplctl update
-install.cmd -Reinstall
-taplctl uninstall user
-taplctl uninstall repo
-install.cmd -Uninstall
 ```
 
-### 2.14.0-beta1 프리릴리즈 테스트
+설치 뒤 CMD를 다시 열고 [Codex 연결 범위](#connect)를 선택하세요.
 
-고정 릴리즈 자산을 내려받아 이 버전을 테스트합니다. GitHub의 `latest/download`
-주소는 안정판을 선택하므로 이 프리릴리즈를 선택하지 않습니다.
+</details>
 
-PowerShell:
+<a id="2140-beta1-프리릴리즈-테스트"></a>
+
+<details>
+<summary>2.14.0-beta1 프리릴리즈 테스트</summary>
+
+위 스크립트를 내려받은 뒤 `-Version`으로 Windows 런타임 수정이 포함된 베타를
+선택하세요. 사용하는 셸에 맞는 명령 하나를 실행합니다.
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1
-# 같은 버전의 가상 환경을 새로 만들 때:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1 -Reinstall
 ```
-
-CMD:
 
 ```bat
-curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
-curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
 install.cmd -Version 2.14.0-beta1
-install.cmd -Version 2.14.0-beta1 -Reinstall
 ```
 
-태그 `2.14.0-beta1`의 Python wheel 버전은 `2.14.0b1`이며 고정 manifest는
-`releases/download/2.14.0-beta1/taplctl-install-manifest.json`입니다.
-설치 전에 manifest와 wheel SHA-256을 검증합니다. `taplctl update`와 `-Reinstall`은
-설치 때 선택한 manifest를 재사용합니다. 다른 릴리즈를 선택하려면 설치 스크립트를
-`-Version TAG`와 함께 다시 실행하세요. `TAPL_INSTALL_MANIFEST_URL`을 명시하면
-`-Version`과 저장된 manifest보다 우선합니다. `-Version`을 명시하면 더 최신인
-프리릴리즈에서 안정판으로도 전환할 수 있으며, 생략하면 설치된 버전을 낮추지 않습니다.
+위 고정 스크립트 주소는 안정판 설치에도 업데이트·재설치·제거 옵션을 제공합니다.
+GitHub의 `latest/download` 주소는 프리릴리즈를 선택하지 않습니다.
 
-Codex 연결은 버전별 가상 환경의 실행 파일을 참조합니다. 업데이트 또는 강제 재설치
-후에는 사용 중인 범위에 대해 아래 연결 명령을 다시 실행하고, 기존 `observe`/`enforce`
-모드를 유지한 뒤 Codex를 재시작하세요.
+</details>
 
-기본 설치 경로는 `%LOCALAPPDATA%\tapl`, launcher는
-`%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다. `TAPL_INSTALL_ROOT`와 `TAPL_BIN_DIR`로
-바꿀 수 있습니다. 사용자 `PATH`만 갱신하므로 설치 뒤 터미널을 다시 열어야 다른
-세션에도 적용됩니다. Codex hook은 아래 단계에서 연결하고 Codex 재시작 후 신뢰합니다.
+<details>
+<summary>업데이트·재설치·제거와 경로 변경</summary>
 
-`-Uninstall`은 검증된 설치 관리 대상 실행 파일·가상 환경과 사용자 `PATH` 항목을
-제거하며 설정, 워크플로 DB, 무관한 파일을 보존합니다. Codex 연결은 별도입니다.
-`taplctl uninstall user` / `repo`는 해당 연결을 해제하며 기본적으로 데이터를 보존합니다.
-파일 목록이 없는 구형 설치는 `-Reinstall` 후 `-Uninstall`하세요. 관리 대상 파일이
-변경되었다면 제거를 중단하므로 먼저 확인해야 합니다.
+업데이트를 확인한 뒤 새 버전을 설치합니다.
+
+```powershell
+taplctl update --check
+taplctl update
+```
+
+재설치와 실행 파일 제거에는 내려받은 설치 스크립트를 사용합니다. 제거 전에는
+설치했던 범위의 연결을 해제하세요. 사용자 범위는 `taplctl uninstall user`,
+저장소 범위는 연결했던 각 저장소에서 `taplctl uninstall repo`를 실행합니다.
+아래에서 사용하는 셸의 명령을 선택하세요.
+
+| 작업 | PowerShell | CMD |
+| --- | --- | --- |
+| 재설치 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Reinstall` | `install.cmd -Reinstall` |
+| 실행 파일 제거 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall` | `install.cmd -Uninstall` |
+
+업데이트·재설치 뒤에는 [사용 중인 범위를 다시 연결](#connect)하고 기존
+`observe`/`enforce` 모드를 유지한 뒤 Codex를 재시작하세요.
+
+제거해도 설정·워크플로 DB·무관한 파일은 보존합니다. 파일 목록이 없는 구형 설치는
+먼저 `-Reinstall`이 필요합니다. 관리 대상 파일이 변경되면 제거를 중단합니다.
+
+`TAPL_INSTALL_ROOT`와 `TAPL_BIN_DIR`로 설치·launcher 경로를 바꿀 수 있습니다.
+기본 launcher는 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다.
+업데이트·재설치는 선택한 릴리즈 manifest를 재사용합니다. 다른 버전으로 바꾸거나
+낮추려면 `-Version TAG`를 지정하세요. `TAPL_INSTALL_MANIFEST_URL`을 명시하면
+이 선택보다 우선합니다. 설치 전 manifest와 wheel SHA-256을 검증합니다.
+
+</details>
 
 <a id="connect"></a>
 

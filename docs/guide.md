@@ -77,96 +77,86 @@ The standalone installer defaults to the latest stable release.
 
 ## Windows
 
-Windows 10/11 requires Python 3.11+ with `venv` and Windows PowerShell 5.1+
-(or PowerShell 7). Native CI exercises Python 3.11 and 3.12. The scripts install
-per user without administrator access; no WinGet package registration is required.
-Run these commands from a writable folder. Review downloaded scripts if your
-organization requires it.
-
-The scripts below come from this beta so its lifecycle switches are available.
-With no version argument they install the stable package; use the prerelease
-section below to include the Windows runtime fixes.
-
-PowerShell — install the latest stable release, then manage it:
-
 ```powershell
 Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-# Restart your terminal after installation, then:
-taplctl --version
-taplctl update --check
-taplctl update
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Reinstall
-# Disconnect integrations before removing the executable:
-taplctl uninstall user
-taplctl uninstall repo  # run in each repository you connected
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 ```
 
-Command Prompt (CMD) — keep both downloaded scripts in the same folder:
+Requires Windows 10/11, Python 3.11+ with `venv`, and PowerShell 5.1+.
+Installs the latest stable release for your user without administrator access.
+
+The default location is `%LOCALAPPDATA%\tapl`. Reopen your terminal to load the
+updated user `PATH`, then [connect TAPL to Codex](#connect).
+
+<details>
+<summary>Install from Command Prompt (CMD)</summary>
+
+Download both scripts into the same writable folder, then run:
 
 ```bat
 curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
 curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
 install.cmd
-rem Restart CMD after installation, then:
-taplctl --version
-taplctl update --check
-taplctl update
-install.cmd -Reinstall
-taplctl uninstall user
-taplctl uninstall repo
-install.cmd -Uninstall
 ```
 
-### Test prerelease 2.14.0-beta1
+Reopen CMD afterward and [choose your Codex connection scope](#connect).
 
-Use the fixed release assets to test this version. GitHub's `latest/download`
-endpoint selects stable releases and does not select this prerelease.
+</details>
 
-PowerShell:
+<a id="test-prerelease-2140-beta1"></a>
+
+<details>
+<summary>Test prerelease 2.14.0-beta1</summary>
+
+After downloading the scripts above, use `-Version` to select the beta that
+includes the Windows runtime fixes. Run the command for your shell:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1
-# Force a fresh environment for the selected release when needed:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1 -Reinstall
 ```
-
-CMD:
 
 ```bat
-curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
-curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
 install.cmd -Version 2.14.0-beta1
-install.cmd -Version 2.14.0-beta1 -Reinstall
 ```
 
-The tag `2.14.0-beta1` uses Python wheel version `2.14.0b1` and the fixed
-`releases/download/2.14.0-beta1/taplctl-install-manifest.json` manifest. The
-installer validates that manifest and the wheel SHA-256 before activation.
-`taplctl update` and `-Reinstall` reuse the installation's selected manifest;
-rerun the installer with `-Version TAG` to select another release. Explicit
-`TAPL_INSTALL_MANIFEST_URL` overrides `-Version` and the remembered manifest.
-An explicit `-Version` also permits switching from a newer prerelease back to a
-stable release; without it, the installer does not downgrade a newer version.
+The fixed script URLs above provide the lifecycle options even when installing
+stable. GitHub's `latest/download` endpoint does not select prereleases.
 
-Codex connections reference executables inside a versioned environment. After an
-update or forced reinstall, repeat the connection instructions below for the
-scopes you use, keep your existing `observe`/`enforce` mode, and restart Codex.
+</details>
 
-The default root is `%LOCALAPPDATA%\tapl`, with the command launcher at
-`%LOCALAPPDATA%\tapl\bin\taplctl.cmd`. `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR`
-override those paths. The installer updates only user `PATH`; restart your
-terminal to make it visible in other sessions. Hooks are connected separately
-below, followed by a Codex restart and hook trust prompt.
+<details>
+<summary>Update, reinstall, uninstall, and custom paths</summary>
 
-`-Uninstall` removes verified installer-managed executables, environments and
-its user `PATH` entry. It preserves settings, workflow databases and unrelated
-files. It does not disconnect Codex: `taplctl uninstall user` / `repo` remove
-those integrations and preserve data by default. Legacy installs without a
-file inventory need `-Reinstall` before `-Uninstall`; modified managed files
-cause removal to stop for inspection.
+Check for updates, then install an available update:
+
+```powershell
+taplctl update --check
+taplctl update
+```
+
+Use the downloaded installer for reinstalling or removing executables. Before
+removal, disconnect each scope you installed: `taplctl uninstall user`, or
+`taplctl uninstall repo` from each connected repository. Choose your shell:
+
+| Action | PowerShell | CMD |
+| --- | --- | --- |
+| Reinstall | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Reinstall` | `install.cmd -Reinstall` |
+| Remove executables | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall` | `install.cmd -Uninstall` |
+
+After an update or reinstall, [reconnect the scopes you use](#connect), preserve
+your existing `observe`/`enforce` mode, and restart Codex.
+
+Removal preserves settings, workflow databases, and unrelated files. Legacy
+installs without a file inventory need `-Reinstall` first; modified managed files
+stop removal for inspection.
+
+`TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR` override the installation and launcher
+locations. The default launcher is `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`.
+Updates and reinstalls reuse the selected release manifest; use `-Version TAG`
+to switch releases, including a downgrade. `TAPL_INSTALL_MANIFEST_URL` overrides
+that selection. The installer verifies the manifest and wheel SHA-256 before use.
+
+</details>
 
 <a id="connect"></a>
 

@@ -190,15 +190,9 @@ See [connection scopes](#connection-scope) and the [platform-specific commands](
 | Homebrew · stable + semantic | `taplctl-semantic` | [Embedding and vector dependencies](docs/guide.md#homebrew) |
 | Homebrew · newest published release | `taplctl-pre` | [May include prereleases](docs/guide.md#homebrew) |
 | Linux | Standalone shell installer | [Setup and paths](docs/guide.md#linux) |
-| Windows 10 / 11 | PowerShell / CMD scripts | [Install, update, reinstall, uninstall](docs/guide.md#windows) |
+| Windows 10 / 11 | PowerShell / CMD scripts | [Setup and paths](docs/guide.md#windows) |
 
-Windows testing: [2.14.0-beta1 fixed release downloads and commands](docs/guide.md#test-prerelease-2140-beta1). Python 3.11+ is required; restart the terminal after installation.
-
-To request that beta through your agent, append this to the prompt:
-
-```text
-On Windows, install 2.14.0-beta1 using the assets and guide linked from https://github.com/qkdxorjs1002/tapl/releases/tag/2.14.0-beta1 instead of the stable release.
-```
+For Windows beta testing, see the [prerelease commands](docs/guide.md#test-prerelease-2140-beta1).
 
 Install only one Homebrew formula at a time; they share the same executables.
 Standalone installers default to the latest stable release. See the guide for
