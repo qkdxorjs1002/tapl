@@ -109,6 +109,30 @@ preserve the evidence, and leave a result the next session can use.
 
 ## Quick start
 
+<a id="agent-install"></a>
+
+### Ask your agent to install TAPL
+
+Copy this prompt into your coding agent, such as Codex:
+
+```text
+Install TAPL and connect it to Codex.
+Repository: https://github.com/qkdxorjs1002/tapl
+Installation guide: https://github.com/qkdxorjs1002/tapl/blob/main/docs/guide.md
+
+Read the guide, detect my OS and shell, and check prerequisites and any existing installation.
+Use the official installation method for my OS and the latest stable release unless I specify another channel.
+Connect Codex with the guide's platform-specific taplctl install user command.
+Preserve existing TAPL settings, hook mode, workflow databases, and unrelated Codex settings.
+Verify the result with taplctl --version and taplctl doctor.
+Report the installed version and any remaining terminal/Codex restart and hook-trust steps.
+```
+
+See [installation options](#installation) below for a repository-only connection
+or Windows beta testing.
+
+### Install with commands
+
 On macOS with Homebrew, install the stable release and connect it to Codex:
 
 ```sh
@@ -142,6 +166,11 @@ follow its [Codex connection command](docs/guide.md#connect).
 
 ## Installation
 
+You can also use the [Agent installation prompt](#agent-install) above to have
+your agent check the environment, install TAPL, connect Codex, and verify setup.
+For a repository-only connection, replace `taplctl install user` in the prompt
+with `taplctl install repo`.
+
 | Platform / channel | Install option | Details |
 | --- | --- | --- |
 | Homebrew · stable | `taplctl` | [Full-text search](docs/guide.md#homebrew) |
@@ -151,6 +180,12 @@ follow its [Codex connection command](docs/guide.md#connect).
 | Windows 10 / 11 | PowerShell / CMD scripts | [Install, update, reinstall, uninstall](docs/guide.md#windows) |
 
 Windows testing: [2.14.0-beta1 fixed release downloads and commands](docs/guide.md#test-prerelease-2140-beta1). Python 3.11+ is required; restart the terminal after installation.
+
+To request that beta through your agent, append this to the prompt:
+
+```text
+On Windows, install 2.14.0-beta1 using the assets and guide linked from https://github.com/qkdxorjs1002/tapl/releases/tag/2.14.0-beta1 instead of the stable release.
+```
 
 Install only one Homebrew formula at a time; they share the same executables.
 Standalone installers default to the latest stable release. See the guide for

@@ -116,6 +116,29 @@ Codex hook이 전달하는 `session_id`를 모든 `tapl_*` MCP 호출에 그대�
 
 ## 빠른 시작
 
+<a id="agent-install"></a>
+
+### Agent에게 설치 맡기기
+
+Codex 같은 코딩 Agent에게 아래 프롬프트를 복사해서 요청하세요.
+
+```text
+TAPL을 설치하고 Codex에 연결해줘.
+저장소: https://github.com/qkdxorjs1002/tapl
+설치 가이드: https://github.com/qkdxorjs1002/tapl/blob/main/docs/guide.ko.md
+
+가이드를 읽고 내 운영체제와 셸, 필수 환경, 기존 설치 여부를 확인해줘.
+다른 채널을 지정하지 않았다면 내 OS에 맞는 공식 방법으로 최신 안정판을 설치해줘.
+가이드의 운영체제별 taplctl install user 명령으로 Codex에 연결해줘.
+기존 TAPL 설정, hook 모드, 워크플로 DB와 다른 Codex 설정은 보존해줘.
+taplctl --version과 taplctl doctor로 설치 결과를 확인해줘.
+설치한 버전과 터미널·Codex 재시작, hook 신뢰 등 내가 마무리할 단계를 알려줘.
+```
+
+현재 저장소에만 연결하거나 Windows 베타를 테스트하려면 아래 [설치 옵션](#설치)을 참고하세요.
+
+### 명령으로 직접 설치하기
+
 macOS에서는 Homebrew로 안정판을 설치하고 Codex에 연결합니다.
 
 ```sh
@@ -146,6 +169,10 @@ TAPL이 Codex 세션 작업 폴더에 `.tapl/tapl.db`를 만들고, Codex가 MCP
 
 ## 설치
 
+위의 [Agent 설치 프롬프트](#agent-install)를 사용하면 환경 확인부터 TAPL 설치,
+Codex 연결과 검증까지 Agent에게 맡길 수 있습니다. 현재 저장소에만 연결하려면
+프롬프트의 `taplctl install user`를 `taplctl install repo`로 바꾸세요.
+
 | 플랫폼·채널 | 설치 방법 | 안내 |
 | --- | --- | --- |
 | macOS · 안정판 | Homebrew `taplctl` | [전문 검색 포함](docs/guide.ko.md#homebrew) |
@@ -155,6 +182,12 @@ TAPL이 Codex 세션 작업 폴더에 `.tapl/tapl.db`를 만들고, Codex가 MCP
 | Windows 10/11 · 안정판 기본 | PowerShell / CMD 스크립트 | [설치·업데이트·재설치·제거](docs/guide.ko.md#windows) |
 
 Windows 테스트: [2.14.0-beta1 고정 릴리즈 다운로드와 명령](docs/guide.ko.md#2140-beta1-프리릴리즈-테스트). 설치 뒤 터미널을 다시 여세요.
+
+Agent에게 이 베타 설치를 요청하려면 프롬프트 끝에 아래 문장을 추가하세요.
+
+```text
+Windows에서는 안정판 대신 https://github.com/qkdxorjs1002/tapl/releases/tag/2.14.0-beta1 에 연결된 자산과 가이드로 2.14.0-beta1을 설치해줘.
+```
 
 Python 3.11 이상이 필요합니다. Homebrew의 세 formula는 서로 충돌하므로 하나만 설치하세요.
 자세한 의존성, 업데이트, 설정은 [설치·운영 가이드](docs/guide.ko.md)에서 확인할 수 있습니다.
