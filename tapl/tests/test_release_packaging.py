@@ -405,8 +405,10 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             installer_tests = steps['Run Windows installer tests (stdlib-only fixtures)']['run'].split()
             self.assertEqual(installer_tests[:4], ['python', '-m', 'unittest', '-v'])
             self.assertIn('tapl.tests.test_installer_windows', installer_tests)
-            self.assertLess(installer_tests.index('tapl.tests.test_installer_bootstrap'),
-                            installer_tests.index('tapl.tests.test_installer_windows'))
+            bootstrap = steps['Test standalone Windows bootstrap']
+            self.assertIn('python -m unittest -v tapl.tests.test_installer_bootstrap', bootstrap['run'])
+            names = [step['name'] for step in job['steps']]
+            self.assertLess(names.index(bootstrap['name']), names.index('Test Windows runtime regressions'))
             self.assertIn('tapl.tests.test_release_packaging.WindowsInstallerAssetTests',
                           steps['Test version-bound Windows release assets']['run'])
             self.assertIn('pip wheel --no-deps', steps['Build actual TAPL wheel']['run'])
