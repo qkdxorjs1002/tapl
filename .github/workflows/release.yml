@@ -33,7 +33,7 @@ jobs:
       - name: Parse installer and lifecycle smoke with Windows PowerShell 5.1
         shell: powershell
         run: |
-          foreach ($script in @('install.ps1', '.github/scripts/windows_install_smoke.ps1')) {
+          foreach ($script in @('install.ps1', '.github/scripts/install-windows.ps1', '.github/scripts/windows_install_smoke.ps1')) {
             $tokens = $null
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile(
@@ -50,6 +50,9 @@ jobs:
           python -m pip install "./tapl[test]"
           python -m pytest -q tapl/tests/test_windows_runtime.py
 
+      - name: Test version-bound Windows release assets
+        run: python -m unittest -v tapl.tests.test_release_packaging.WindowsInstallerAssetTests
+
       - name: Build actual TAPL wheel
         run: python -m pip wheel --no-deps --wheel-dir dist ./tapl
 
@@ -60,7 +63,7 @@ jobs:
           ./.github/scripts/windows_install_smoke.ps1 -Wheel $wheel -Python (Get-Command python).Source
 
       - name: Run Windows installer tests (stdlib-only fixtures)
-        run: python -m unittest -v tapl.tests.test_installer_windows --failfast
+        run: python -m unittest -v tapl.tests.test_installer_windows tapl.tests.test_installer_bootstrap --failfast
 
   macos-runtime:
     name: Sign macOS runtime (${{ matrix.target }})
@@ -391,7 +394,8 @@ jobs:
 
           test -f "${wheel_path}"
           test -f "${vsix_path}"
-          cp install.ps1 install.cmd release-dist/
+          python .github/scripts/prepare_windows_installers.py \
+            --tag "${TAG_VERSION}" --python-version "${PYTHON_VERSION}" --output-dir release-dist
 
           wheel_name="$(basename "${wheel_path}")"
           wheel_sha256="$(sha256sum "${wheel_path}" | awk '{print $1}')"
@@ -454,8 +458,8 @@ jobs:
           set -euo pipefail
 
           sh -n install.sh
-          cmp install.ps1 release-dist/install.ps1
-          cmp install.cmd release-dist/install.cmd
+          python .github/scripts/prepare_windows_installers.py \
+            --tag "${TAG_VERSION}" --python-version "${PYTHON_VERSION}" --output-dir release-dist --check
           python - "release-dist/taplctl-install-manifest.json" "release-dist/${WHEEL_NAME}" "${PYTHON_VERSION}" "${WHEEL_URL}" "${WHEEL_SHA256}" <<'PY'
           import hashlib
           import json

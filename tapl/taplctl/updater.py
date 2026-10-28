@@ -34,6 +34,14 @@ _VERSION_RE = re.compile(
 _SHA256_RE = re.compile(r"[0-9a-fA-F]{64}")
 _WHEEL_NAME_RE = re.compile(r"[A-Za-z0-9_.+-]+")
 _MAX_MANIFEST_BYTES = 1024 * 1024
+_MAX_RELEASE_LIST_BYTES = 16 * 1024 * 1024
+_MAX_RELEASE_PAGES = 10
+_RELEASES_API = "https://api.github.com/repos/qkdxorjs1002/tapl/releases"
+_RELEASE_DOWNLOAD = "https://github.com/qkdxorjs1002/tapl/releases"
+_RELEASE_TAG_RE = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-(?:alpha|beta|rc)(?:0|[1-9][0-9]*))?"
+)
 
 
 class UpdateError(RuntimeError):
@@ -115,7 +123,7 @@ def check_for_update(
         current_prefix=current_prefix,
         current_python=current_python,
     )
-    selected_manifest_url = _select_manifest_url(manifest_url, installation)
+    selected_manifest_url = _select_manifest_url(manifest_url, installation, opener=opener, timeout=timeout)
     manifest = _fetch_manifest(selected_manifest_url, opener=opener, timeout=timeout)
     return _check_payload(installation, manifest, selected_manifest_url)
 
@@ -142,7 +150,7 @@ def update_installation(
         current_prefix=current_prefix,
         current_python=current_python,
     )
-    selected_manifest_url = _select_manifest_url(manifest_url, installation)
+    selected_manifest_url = _select_manifest_url(manifest_url, installation, opener=opener, timeout=timeout)
     manifest = _fetch_manifest(selected_manifest_url, opener=opener, timeout=timeout)
     check_payload = _check_payload(installation, manifest, selected_manifest_url)
     if not check_payload["update_available"]:
@@ -182,6 +190,7 @@ def update_installation(
                 method=installation.method,
                 python_path=python_path,
                 runner=command_runner,
+                semantic=installation.metadata.get("semantic", False),
             )
 
             # Refuse a concurrent ownership or metadata change after the slow
@@ -322,6 +331,13 @@ def _load_installation(
             if _resolved_link_target(executable) != command:
                 raise ValueError("the public taplctl symlink is not owned by this installation")
 
+        if "semantic" in metadata and type(metadata["semantic"]) is not bool:
+            raise ValueError("invalid install metadata semantic")
+        if "channel" in metadata and (
+            not isinstance(metadata["channel"], str)
+            or metadata["channel"] not in {"stable", "pre", "pinned"}
+        ):
+            raise ValueError("invalid install metadata channel")
         version = _required_version(metadata.get("version"), "install metadata version")
         manifest_url = _required_url(metadata.get("manifest_url"), "install metadata manifest URL")
         _required_url(metadata.get("wheel_url"), "install metadata wheel URL")
@@ -396,8 +412,21 @@ def _windows_launcher_bytes(command: Path) -> bytes:
     return _windows_launcher_text(command).replace("\n", "\r\n").encode("utf-8")
 
 
-def _select_manifest_url(override: str | None, installation: _Installation) -> str:
+def _select_manifest_url(
+    override: str | None,
+    installation: _Installation,
+    *,
+    opener: UrlOpener | None = None,
+    timeout: float = 30.0,
+) -> str:
     if override is None:
+        override = os.environ.get("TAPL_INSTALL_MANIFEST_URL") or None
+    if override is None:
+        channel = installation.metadata.get("channel")
+        if channel == "stable":
+            return f"{_RELEASE_DOWNLOAD}/latest/download/taplctl-install-manifest.json"
+        if channel == "pre":
+            return _newest_published_manifest_url(opener=opener, timeout=timeout)
         return installation.manifest_url
     try:
         return _required_url(override, "manifest URL")
@@ -407,6 +436,51 @@ def _select_manifest_url(override: str | None, installation: _Installation) -> s
             code="invalid_manifest_url",
             details={"manifest_url": _safe_url(override)},
         ) from exc
+
+
+def _newest_published_manifest_url(*, opener: UrlOpener | None, timeout: float) -> str:
+    """Select by publication time, never API order or an asset-supplied URL."""
+    newest: tuple[datetime, str] | None = None
+    for page in range(1, _MAX_RELEASE_PAGES + 1):
+        url = f"{_RELEASES_API}?per_page=100&page={page}"
+        with _open_url(url, opener=opener, timeout=timeout) as response:
+            raw = response.read(_MAX_RELEASE_LIST_BYTES + 1)
+        try:
+            if not isinstance(raw, bytes) or len(raw) > _MAX_RELEASE_LIST_BYTES:
+                raise ValueError("release list is too large or is not bytes")
+            releases = json.loads(raw.decode("utf-8"))
+            if not isinstance(releases, list) or len(releases) > 100:
+                raise ValueError("release list must be an array of at most 100 releases")
+            for release in releases:
+                if not isinstance(release, dict) or type(release.get("draft")) is not bool:
+                    raise ValueError("invalid release entry")
+                if type(release.get("prerelease")) is not bool:
+                    raise ValueError("invalid prerelease flag")
+                if release["draft"]:
+                    continue
+                tag = release.get("tag_name")
+                if not isinstance(tag, str):
+                    raise ValueError("invalid release tag")
+                if _RELEASE_TAG_RE.fullmatch(tag) is None:
+                    continue
+                published_at = release.get("published_at")
+                if not isinstance(published_at, str) or re.fullmatch(
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", published_at
+                ) is None:
+                    raise ValueError("invalid release publication time")
+                published = datetime.strptime(published_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                candidate = (published, tag)
+                if newest is None or candidate > newest:
+                    newest = candidate
+        except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            raise UpdateError(
+                f"release list validation failed: {exc}", code="invalid_release_list"
+            ) from exc
+        if len(releases) < 100:
+            if newest is None:
+                raise UpdateError("no supported published release was found", code="release_not_found")
+            return f"{_RELEASE_DOWNLOAD}/download/{newest[1]}/taplctl-install-manifest.json"
+    raise UpdateError("release list pagination limit exceeded", code="invalid_release_list")
 
 
 def _required_url(value: Any, label: str) -> str:
@@ -629,6 +703,7 @@ def _build_candidate(
     method: str,
     python_path: Path,
     runner: CommandRunner,
+    semantic: bool = False,
 ) -> None:
     _run(
         runner,
@@ -651,7 +726,7 @@ def _build_candidate(
             "install",
             "--disable-pip-version-check",
             "--upgrade",
-            str(wheel_path),
+            str(wheel_path) + ("[semantic]" if semantic else ""),
         ],
         failure_code="wheel_install_failed",
         failure_message="pip could not install the taplctl update",
@@ -710,6 +785,8 @@ def _activation_metadata(
         "venv": str(candidate),
         "executable": str(installation.executable),
         "installed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        **{field: installation.metadata[field] for field in ("semantic", "channel")
+           if field in installation.metadata},
         **({"added_to_user_path": installation.metadata.get("added_to_user_path", False)}
            if installation.method == "powershell" else {}),
     }

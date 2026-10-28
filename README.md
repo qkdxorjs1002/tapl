@@ -130,7 +130,7 @@ Report the installed version and any remaining terminal/Codex restart and hook-t
 ```
 
 See [connection scopes](#connection-scope) below and [installation options](#installation)
-for other platforms or Windows beta testing.
+for other platforms or Windows prerelease testing.
 
 ### Install with commands
 
@@ -192,7 +192,8 @@ See [connection scopes](#connection-scope) and the [platform-specific commands](
 | Linux | Standalone shell installer | [Setup and paths](docs/guide.md#linux) |
 | Windows 10 / 11 | PowerShell / CMD scripts | [Setup and paths](docs/guide.md#windows) |
 
-For Windows beta testing, see the [prerelease commands](docs/guide.md#test-prerelease-2140-beta1).
+Windows supports `-Pre`, `-Semantic`, and `-Version TAG`; see the
+[channel and semantic options](docs/guide.md#windows-prerelease).
 
 Install only one Homebrew formula at a time; they share the same executables.
 Standalone installers default to the latest stable release. See the guide for

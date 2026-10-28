@@ -78,12 +78,13 @@ The standalone installer defaults to the latest stable release.
 ## Windows
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -OutFile install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 Requires Windows 10/11, Python 3.11+ with `venv`, and PowerShell 5.1+.
 Installs the latest stable release for your user without administrator access.
+The fixed entry scripts download and run the selected release’s installer.
 
 The default location is `%LOCALAPPDATA%\tapl`. Reopen your terminal to load the
 updated user `PATH`, then [connect TAPL to Codex](#connect).
@@ -91,11 +92,10 @@ updated user `PATH`, then [connect TAPL to Codex](#connect).
 <details>
 <summary>Install from Command Prompt (CMD)</summary>
 
-Download both scripts into the same writable folder, then run:
+Download the CMD script into a writable folder, then run:
 
 ```bat
-curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
-curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
+curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.cmd -o install.cmd
 install.cmd
 ```
 
@@ -103,24 +103,35 @@ Reopen CMD afterward and [choose your Codex connection scope](#connect).
 
 </details>
 
+<a id="windows-prerelease"></a>
 <a id="test-prerelease-2140-beta1"></a>
 
 <details>
-<summary>Test prerelease 2.14.0-beta1</summary>
+<summary>Release channel and semantic search options</summary>
 
-After downloading the scripts above, use `-Version` to select the beta that
-includes the Windows runtime fixes. Run the command for your shell:
+The downloaded entry scripts accept these options in PowerShell and CMD:
+
+| Options | Installs |
+| --- | --- |
+| None | Latest stable release |
+| `-Pre` | Latest published release, including prereleases; may also select a newer stable release |
+| `-Semantic` | Latest stable release with embedding and vector dependencies |
+| `-Pre -Semantic` | Latest published release with semantic dependencies |
+| `-Version TAG` | The specified release; replace `TAG` with its release tag |
+
+Combine `-Semantic` with `-Version TAG` if needed. `-Pre` and `-Version` cannot be combined.
+For a specific release, run the command for your shell:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version TAG
 ```
 
 ```bat
-install.cmd -Version 2.14.0-beta1
+install.cmd -Version TAG
 ```
 
-The fixed script URLs above provide the lifecycle options even when installing
-stable. GitHub's `latest/download` endpoint does not select prereleases.
+Each release asset installs only its own version. The fixed entry scripts choose
+the release before running that release’s installer.
 
 </details>
 
@@ -152,9 +163,11 @@ stop removal for inspection.
 
 `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR` override the installation and launcher
 locations. The default launcher is `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`.
-Updates and reinstalls reuse the selected release manifest; use `-Version TAG`
-to switch releases, including a downgrade. `TAPL_INSTALL_MANIFEST_URL` overrides
-that selection. The installer verifies the manifest and wheel SHA-256 before use.
+Updates preserve the selected stable, prerelease, or pinned channel and semantic
+options. Use the entry script’s `-Version TAG` to switch releases, including a
+downgrade. `TAPL_INSTALL_MANIFEST_URL` selects a custom manifest; a release
+installer still requires its own version. The installer verifies the manifest
+and wheel SHA-256 before use.
 
 </details>
 

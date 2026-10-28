@@ -23,8 +23,8 @@ function Assert-Smoke {
 
 function Invoke-Installer {
     param([string[]]$InstallerArguments = @())
-    # Exercise the public CMD wrapper and its argument/exit-code forwarding.
-    & (Join-Path $repoRoot 'install.cmd') @InstallerArguments
+    # Exercise the release CMD payload and its argument/exit-code forwarding.
+    & (Join-Path $installerRoot 'install.cmd') @InstallerArguments
     Assert-Smoke ($LASTEXITCODE -eq 0) "install.cmd failed: $InstallerArguments"
 }
 
@@ -51,6 +51,11 @@ function Write-Manifest {
 
 try {
     New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
+    # Stage payloads under their published names so the CMD wrapper finds install.ps1.
+    $installerRoot = Join-Path $temporaryRoot 'release installer'
+    New-Item -ItemType Directory -Path $installerRoot | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install-windows.ps1') -Destination (Join-Path $installerRoot 'install.ps1')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install-windows.cmd') -Destination (Join-Path $installerRoot 'install.cmd')
     $fixtures = Join-Path $temporaryRoot 'served wheels'
     New-Item -ItemType Directory -Path $fixtures | Out-Null
     Copy-Item -LiteralPath $Wheel -Destination $fixtures
@@ -87,6 +92,14 @@ server.serve_forever()
     $baseUrl = 'http://127.0.0.1:' + (Get-Content -Raw -LiteralPath $portFile).Trim()
     $env:TAPL_INSTALL_MANIFEST_URL = "$baseUrl/taplctl-install-manifest.json"
     $firstVersion = Write-Manifest $firstWheel
+    # A published payload must reject a manifest belonging to a different release.
+    $pinnedRoot = Join-Path $temporaryRoot 'pinned release installer'
+    $pinnedVersion = if ($firstVersion -eq '0.0.0') { '0.0.1' } else { '0.0.0' }
+    & $Python (Join-Path $PSScriptRoot 'prepare_windows_installers.py') --tag $pinnedVersion --python-version $pinnedVersion --output-dir $pinnedRoot
+    Assert-Smoke ($LASTEXITCODE -eq 0) 'Could not render a pinned release installer.'
+    & (Join-Path $pinnedRoot 'install.cmd')
+    Assert-Smoke ($LASTEXITCODE -ne 0) 'Pinned release accepted a different manifest version.'
+    Assert-Smoke (-not (Test-Path -LiteralPath $env:TAPL_INSTALL_METADATA)) 'Rejected pinned release changed install metadata.'
     Invoke-Installer
     $first = Get-InstallMetadata
     Assert-Smoke ($first.version -eq $firstVersion) 'Initial actual wheel was not activated.'

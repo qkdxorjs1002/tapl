@@ -67,12 +67,13 @@ shell startup file이나 Codex hook은 수정하지 않습니다. 출력된 `PAT
 ## Windows 독립형 설치
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -OutFile install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 Windows 10/11, `venv`가 포함된 Python 3.11 이상, PowerShell 5.1 이상이 필요합니다.
 관리자 권한 없이 현재 사용자에게 최신 안정판을 설치합니다.
+고정 주소의 진입 스크립트가 선택한 릴리즈의 설치 스크립트를 내려받아 실행합니다.
 
 기본 경로는 `%LOCALAPPDATA%\tapl`입니다. 사용자 `PATH`가 적용되도록 터미널을
 다시 열고 [TAPL을 Codex에 연결](#connect)하세요.
@@ -80,11 +81,10 @@ Windows 10/11, `venv`가 포함된 Python 3.11 이상, PowerShell 5.1 이상이 
 <details>
 <summary>명령 프롬프트(CMD)에서 설치</summary>
 
-쓰기 가능한 폴더에 두 스크립트를 함께 내려받아 실행하세요.
+쓰기 가능한 폴더에 CMD 스크립트 하나를 내려받아 실행하세요.
 
 ```bat
-curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.ps1 -o install.ps1
-curl.exe -fL https://github.com/qkdxorjs1002/tapl/releases/download/2.14.0-beta1/install.cmd -o install.cmd
+curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.cmd -o install.cmd
 install.cmd
 ```
 
@@ -92,24 +92,35 @@ install.cmd
 
 </details>
 
+<a id="windows-prerelease"></a>
 <a id="2140-beta1-프리릴리즈-테스트"></a>
 
 <details>
-<summary>2.14.0-beta1 프리릴리즈 테스트</summary>
+<summary>릴리즈 채널과 시맨틱 검색 옵션</summary>
 
-위 스크립트를 내려받은 뒤 `-Version`으로 Windows 런타임 수정이 포함된 베타를
-선택하세요. 사용하는 셸에 맞는 명령 하나를 실행합니다.
+내려받은 진입 스크립트는 PowerShell과 CMD에서 같은 옵션을 받습니다.
+
+| 옵션 | 설치 대상 |
+| --- | --- |
+| 없음 | 최신 안정판 |
+| `-Pre` | 프리릴리즈를 포함한 가장 최근 게시 릴리즈. 더 최신인 안정판을 선택할 수도 있음 |
+| `-Semantic` | 최신 안정판과 임베딩·벡터 의존성 |
+| `-Pre -Semantic` | 가장 최근 게시 릴리즈와 시맨틱 의존성 |
+| `-Version TAG` | 지정한 릴리즈. `TAG`를 원하는 릴리즈 태그로 변경 |
+
+`-Semantic`은 `-Version TAG`와 함께 사용할 수 있습니다. `-Pre`와 `-Version`은 함께 사용할 수 없습니다.
+특정 버전은 사용하는 셸에 맞춰 실행하세요.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version 2.14.0-beta1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version TAG
 ```
 
 ```bat
-install.cmd -Version 2.14.0-beta1
+install.cmd -Version TAG
 ```
 
-위 고정 스크립트 주소는 안정판 설치에도 업데이트·재설치·제거 옵션을 제공합니다.
-GitHub의 `latest/download` 주소는 프리릴리즈를 선택하지 않습니다.
+각 릴리즈의 설치 파일은 자신의 버전만 설치합니다. 고정 주소의 진입 스크립트가
+릴리즈를 선택한 뒤 해당 릴리즈의 설치 스크립트를 실행합니다.
 
 </details>
 
@@ -141,9 +152,10 @@ taplctl update
 
 `TAPL_INSTALL_ROOT`와 `TAPL_BIN_DIR`로 설치·launcher 경로를 바꿀 수 있습니다.
 기본 launcher는 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다.
-업데이트·재설치는 선택한 릴리즈 manifest를 재사용합니다. 다른 버전으로 바꾸거나
-낮추려면 `-Version TAG`를 지정하세요. `TAPL_INSTALL_MANIFEST_URL`을 명시하면
-이 선택보다 우선합니다. 설치 전 manifest와 wheel SHA-256을 검증합니다.
+업데이트는 선택한 안정판·프리릴리즈·고정 버전 채널과 시맨틱 옵션을 유지합니다.
+다른 버전으로 바꾸거나 낮추려면 진입 스크립트에 `-Version TAG`를 지정하세요.
+`TAPL_INSTALL_MANIFEST_URL`로 별도 manifest를 선택할 수 있지만, 릴리즈 설치 파일은
+자신의 버전만 허용합니다. 설치 전 manifest와 wheel SHA-256을 검증합니다.
 
 </details>
 

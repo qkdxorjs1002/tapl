@@ -136,7 +136,7 @@ taplctl --version과 taplctl doctor로 설치 결과를 확인해줘.
 설치한 버전과 터미널·Codex 재시작, hook 신뢰 등 내가 마무리할 단계를 알려줘.
 ```
 
-아래 [연결 범위](#connection-scope)와 다른 플랫폼·Windows 베타의 [설치 옵션](#설치)을 참고하세요.
+아래 [연결 범위](#connection-scope)와 다른 플랫폼·Windows 프리릴리즈의 [설치 옵션](#설치)을 참고하세요.
 
 ### 명령으로 직접 설치하기
 
@@ -195,7 +195,8 @@ Codex 연결과 검증까지 Agent에게 맡길 수 있습니다. Codex 프로�
 | Linux · 안정판 기본 | 독립형 셸 설치 스크립트 | [설치 및 경로 설정](docs/guide.ko.md#linux) |
 | Windows 10/11 · 안정판 기본 | PowerShell / CMD 스크립트 | [설치 및 경로 설정](docs/guide.ko.md#windows) |
 
-Windows 베타 테스트는 [프리릴리즈 명령](docs/guide.ko.md#2140-beta1-프리릴리즈-테스트)을 참고하세요.
+Windows의 `-Pre`, `-Semantic`, `-Version TAG`는
+[채널·시맨틱 옵션](docs/guide.ko.md#windows-prerelease)을 참고하세요.
 
 Python 3.11 이상이 필요합니다. Homebrew의 세 formula는 서로 충돌하므로 하나만 설치하세요.
 자세한 의존성, 업데이트, 설정은 [설치·운영 가이드](docs/guide.ko.md)에서 확인할 수 있습니다.

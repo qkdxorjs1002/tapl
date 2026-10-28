@@ -293,6 +293,96 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
         )
 
 
+class WindowsInstallerAssetTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.workspace = Path(self.temporary.name)
+        self.source = self.workspace / 'scripts'
+        self.source.mkdir()
+        self.output = self.workspace / 'release-dist'
+        for extension in ('ps1', 'cmd'):
+            shutil.copyfile(
+                REPOSITORY_ROOT / f'.github/scripts/install-windows.{extension}',
+                self.source / f'install-windows.{extension}',
+            )
+
+    def _prepare(self, tag: str = '3.2.1', python_version: str = '3.2.1',
+                 *, check: bool = False) -> subprocess.CompletedProcess[str]:
+        command = [sys.executable, str(REPOSITORY_ROOT / '.github/scripts/prepare_windows_installers.py'),
+                   '--tag', tag, '--python-version', python_version,
+                   '--source-dir', str(self.source), '--output-dir', str(self.output)]
+        if check:
+            command.append('--check')
+        return subprocess.run(command, text=True, capture_output=True, check=False)
+
+    def test_stable_and_prerelease_assets_are_bound_to_their_own_version(self) -> None:
+        template = (self.source / 'install-windows.ps1').read_bytes()
+        for tag, version in (('3.2.1', '3.2.1'), ('3.2.1-alpha2', '3.2.1a2'),
+                             ('3.2.1-beta3', '3.2.1b3'), ('3.2.1-rc4', '3.2.1rc4')):
+            with self.subTest(tag=tag):
+                result = self._prepare(tag, version)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                published = (self.output / 'install.ps1').read_bytes()
+                expected = template.replace(b'__TAPL_RELEASE_TAG__', tag.encode()).replace(
+                    b'__TAPL_RELEASE_PYTHON_VERSION__', version.encode())
+                self.assertEqual(published, expected)
+                self.assertNotRegex(published, rb'__TAPL_[A-Z0-9_]+__')
+                self.assertIn(f'$ReleaseTag = "{tag}"'.encode(), published)
+                self.assertIn(f'$ReleasePythonVersion = "{version}"'.encode(), published)
+                for extension in ('ps1', 'cmd'):
+                    self.assertNotEqual((self.output / f'install.{extension}').read_bytes(),
+                                        (REPOSITORY_ROOT / f'install.{extension}').read_bytes())
+                self.assertEqual((self.output / 'install.cmd').read_bytes(),
+                                 (self.source / 'install-windows.cmd').read_bytes())
+                validation = self._prepare(tag, version, check=True)
+                self.assertEqual(validation.returncode, 0, validation.stderr)
+        self.assertEqual((self.source / 'install-windows.ps1').read_bytes(), template)
+
+    def test_rejects_malformed_and_mismatched_tag_versions_without_writing_assets(self) -> None:
+        for tag, version in (('v3.2.1', '3.2.1'), ('3.2.1-beta', '3.2.1b1'),
+                             ('03.2.1', '3.2.1'), ('3.2.1', '3.2.2'),
+                             ('3.2.1-beta1', '3.2.1'), ('3.2.1-rc1', '3.2.1b1'),
+                             ('3.2.1', '3.2.1;exit 0')):
+            with self.subTest(tag=tag, version=version):
+                result = self._prepare(tag, version)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.output.exists())
+
+    def test_rejects_missing_duplicate_and_unresolved_template_tokens(self) -> None:
+        template_path = self.source / 'install-windows.ps1'
+        template = template_path.read_bytes()
+        for token in (b'__TAPL_RELEASE_TAG__', b'__TAPL_RELEASE_PYTHON_VERSION__'):
+            for invalid in (template.replace(token, b''), template + b'\n# ' + token):
+                with self.subTest(token=token, duplicate=invalid.endswith(token)):
+                    template_path.write_bytes(invalid)
+                    result = self._prepare()
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('exactly once', result.stderr)
+                    self.assertFalse(self.output.exists())
+        template_path.write_bytes(template + b'\n# __TAPL_UNKNOWN_TOKEN__')
+        result = self._prepare()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unresolved template token', result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_check_rejects_tampered_or_missing_assets_without_rewriting(self) -> None:
+        result = self._prepare()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for extension in ('ps1', 'cmd'):
+            asset = self.output / f'install.{extension}'
+            original = asset.read_bytes()
+            asset.write_bytes(original + b'\nREM changed')
+            validation = self._prepare(check=True)
+            self.assertNotEqual(validation.returncode, 0)
+            self.assertIn('does not match', validation.stderr)
+            self.assertEqual(asset.read_bytes(), original + b'\nREM changed')
+            asset.write_bytes(original)
+        (self.output / 'install.cmd').unlink()
+        self.assertNotEqual(self._prepare(check=True).returncode, 0)
+        self.assertFalse((self.output / 'install.cmd').exists())
+
+
 class ReleaseWorkflowContractTests(unittest.TestCase):
     def test_windows_matrix_and_release_preflight_use_actual_wheel_lifecycle(self) -> None:
         windows = yaml.safe_load(
@@ -309,18 +399,46 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             parser = steps['Parse installer and lifecycle smoke with Windows PowerShell 5.1']
             self.assertEqual(parser['shell'], 'powershell')
             self.assertIn('Language.Parser]::ParseFile', parser['run'])
+            for script in ('install.ps1', '.github/scripts/install-windows.ps1',
+                           '.github/scripts/windows_install_smoke.ps1'):
+                self.assertIn(f"'{script}'", parser['run'])
             self.assertIn('python -m unittest -v tapl.tests.test_installer_windows',
                           steps['Run Windows installer tests (stdlib-only fixtures)']['run'])
+            self.assertIn('tapl.tests.test_installer_bootstrap',
+                          steps['Run Windows installer tests (stdlib-only fixtures)']['run'])
+            self.assertIn('tapl.tests.test_release_packaging.WindowsInstallerAssetTests',
+                          steps['Test version-bound Windows release assets']['run'])
             self.assertIn('pip wheel --no-deps', steps['Build actual TAPL wheel']['run'])
             smoke = steps['Test actual wheel install, update, reinstall, uninstall and CLI/MCP runtime']
             self.assertEqual(smoke['shell'], 'powershell')
             self.assertIn('windows_install_smoke.ps1 -Wheel $wheel -Python', smoke['run'])
         self.assertIn('windows-installer-preflight', release['jobs']['release']['needs'])
         release_steps = {step['name']: step for step in release['jobs']['release']['steps']}
-        self.assertIn('cp install.ps1 install.cmd release-dist/', release_steps['Prepare release assets']['run'])
-        for asset in ('install.ps1', 'install.cmd'):
-            self.assertIn(f'cmp {asset} release-dist/{asset}', release_steps['Validate release assets']['run'])
+        preparation = release_steps['Prepare release assets']['run']
+        validation = release_steps['Validate release assets']['run']
+        helper = 'python .github/scripts/prepare_windows_installers.py'
+        for command in (preparation, validation):
+            self.assertIn(helper, command)
+            self.assertIn('--tag "${TAG_VERSION}" --python-version "${PYTHON_VERSION}"', command)
+            self.assertIn('--output-dir release-dist', command)
+        self.assertNotIn('--check', preparation)
+        self.assertIn('--check', validation)
+        self.assertNotIn('cp install.ps1', preparation)
+        self.assertNotIn('cp install.cmd', preparation)
         self.assertIn('release-dist/*', release_steps['Publish GitHub Release']['run'])
+
+    def test_windows_wheel_smoke_stages_release_wrapper_with_adjacent_payload(self) -> None:
+        smoke = (REPOSITORY_ROOT / '.github/scripts/windows_install_smoke.ps1').read_text(encoding='utf-8')
+        for extension in ('ps1', 'cmd'):
+            self.assertIn(
+                f"Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install-windows.{extension}') "
+                f"-Destination (Join-Path $installerRoot 'install.{extension}')",
+                smoke,
+            )
+        self.assertIn("& (Join-Path $installerRoot 'install.cmd') @InstallerArguments", smoke)
+        self.assertNotIn("& (Join-Path $repoRoot 'install.cmd')", smoke)
+        self.assertIn("prepare_windows_installers.py') --tag $pinnedVersion", smoke)
+        self.assertIn("Pinned release accepted a different manifest version.", smoke)
 
     def test_release_builds_validates_and_installs_all_runtime_archives(self) -> None:
         workflow_text = RELEASE_WORKFLOW.read_text(encoding="utf-8")

@@ -18,7 +18,8 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPOSITORY_ROOT / "tapl"
-INSTALLER = REPOSITORY_ROOT / "install.ps1"
+INSTALLER = REPOSITORY_ROOT / ".github" / "scripts" / "install-windows.ps1"
+WRAPPER = INSTALLER.with_suffix(".cmd")
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
@@ -31,13 +32,18 @@ class PowerShellInstallerStaticTests(unittest.TestCase):
         self.assertIn("[string]$Version", source)
         self.assertIn("[switch]$Reinstall", source)
         self.assertIn("[switch]$Uninstall", source)
+        self.assertIn("[switch]$Semantic", source)
+        self.assertIn("[ValidateSet('stable', 'pre', 'pinned')]", source)
+        self.assertEqual(source.count('__TAPL_RELEASE_TAG__'), 1)
+        self.assertEqual(source.count('__TAPL_RELEASE_PYTHON_VERSION__'), 1)
+        self.assertNotIn("releases/latest/download", source)
         self.assertIn("releases/download/$Version/taplctl-install-manifest.json", source)
         self.assertIn("$manifestUrl = $managed.Metadata.manifest_url", source)
         self.assertIn("function Assert-NoReparsePath", source)
         self.assertIn("function Get-VerifiedVenvRemoval", source)
         removal = source[source.index("function Remove-VerifiedVenv"):source.index("function Invoke-PythonCandidate")]
         self.assertNotIn("-Recurse", removal)
-        wrapper = (REPOSITORY_ROOT / "install.cmd").read_text(encoding="utf-8")
+        wrapper = WRAPPER.read_text(encoding="utf-8")
         self.assertIn('WindowsPowerShell\\v1.0\\powershell.exe"', wrapper)
         self.assertIn('"%~dp0install.ps1" %*', wrapper)
         self.assertIn("exit /b %errorlevel%", wrapper)
@@ -172,7 +178,7 @@ function Set-TestUserPath {
         self.assertEqual(source.count(python_marker), 1)
         source = source.replace(python_marker, python_hook + python_marker, 1)
 
-        pip_original = '''        & $candidatePython -m pip install --disable-pip-version-check --upgrade $wheelPath
+        pip_original = '''        & $candidatePython -m pip install --disable-pip-version-check --upgrade $wheelRequirement
         if ($LASTEXITCODE -ne 0) {
             Stop-Installer "pip could not install taplctl; the previous installation was left unchanged."
         }
@@ -181,7 +187,10 @@ function Set-TestUserPath {
             $pipExit = 92
         }
         else {
-            & $candidatePython -m pip install --disable-pip-version-check --upgrade $wheelPath
+            if ($env:TAPL_TEST_PIP_LOG) {
+                [System.IO.File]::AppendAllText($env:TAPL_TEST_PIP_LOG, $wheelRequirement + "`n", $Utf8NoBom)
+            }
+            & $candidatePython -m pip install --disable-pip-version-check --upgrade $wheelRequirement
             $pipExit = $LASTEXITCODE
         }
         if ($pipExit -ne 0) {
@@ -199,7 +208,7 @@ function Set-TestUserPath {
         script_directory.mkdir()
         destination = script_directory / "install.ps1"
         destination.write_text(source, encoding="utf-8")
-        shutil.copyfile(REPOSITORY_ROOT / "install.cmd", script_directory / "install.cmd")
+        shutil.copyfile(WRAPPER, script_directory / "install.cmd")
         return destination
 
     def build_wheel(self, version: str, *, reported_version: str | None = None) -> tuple[Path, str]:
@@ -220,6 +229,7 @@ function Set-TestUserPath {
                 "Metadata-Version: 2.1\n"
                 "Name: taplctl\n"
                 f"Version: {version}\n"
+                "Provides-Extra: semantic\n"
             ),
             f"{dist_info}/WHEEL": (
                 "Wheel-Version: 1.0\n"
@@ -270,6 +280,7 @@ function Set-TestUserPath {
                 "TAPL_BIN_DIR": str(self.bin_dir),
                 "TAPL_INSTALL_MANIFEST_URL": self.manifest_url,
                 "TAPL_TEST_PATH_LOG": str(self.path_log),
+                "TAPL_TEST_PIP_LOG": str(self.base / "pip.log"),
                 "TAPL_TEST_FAIL_MOVE": "",
                 "TAPL_TEST_FAIL_CANDIDATE": "",
                 "TAPL_TEST_INITIAL_USER_PATH": r"C:\fixture-first;;C:\fixture-last;",
@@ -376,6 +387,87 @@ function Set-TestUserPath {
             state[2],
         )
 
+    def stamp_release(self, tag: str, python_version: str) -> None:
+        source = self.installer.read_text(encoding="utf-8")
+        source = source.replace('__TAPL_RELEASE_TAG__', tag).replace('__TAPL_RELEASE_PYTHON_VERSION__', python_version)
+        self.installer.write_text(source, encoding="utf-8")
+
+    def test_developer_template_has_no_implicit_latest_release(self) -> None:
+        failed = self.run_installer(TAPL_INSTALL_MANIFEST_URL="")
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("developer installer template requires", failed.stderr)
+        self.assertEqual(self.requests, [])
+        self.assertFalse(self.metadata_path.exists())
+
+    def test_release_binding_rejects_different_tag_and_override_manifest(self) -> None:
+        self.install_initial_release("1.1.0")
+        self.stamp_release("1.0.0", "1.0.0")
+        before = self.preserved_state()
+        self.requests.clear()
+        failed = self.run_installer("-Version", "1.1.0")
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("only installs 1.0.0", failed.stderr)
+        self.assertEqual(self.requests, [])
+        self.assert_preserved(before)
+        failed = self.run_installer("-Reinstall")
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("does not match the requested installer version", failed.stderr)
+        self.assert_preserved(before)
+
+    def test_release_reinstall_fetches_own_tag_instead_of_existing_install_manifest(self) -> None:
+        old = self.install_initial_release("1.1.0")
+        wheel, sha256 = self.build_wheel("1.0.0")
+        self.write_manifest("1.0.0", wheel, sha256)
+        fixed = self.fixture_dir / "releases" / "download" / "1.0.0" / "taplctl-install-manifest.json"
+        fixed.parent.mkdir(parents=True)
+        shutil.copyfile(self.fixture_dir / "taplctl-install-manifest.json", fixed)
+        self.stamp_release("1.0.0", "1.0.0")
+        self.requests.clear()
+        result = self.run_installer("-Reinstall", TAPL_INSTALL_MANIFEST_URL="")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed = self.assert_active_release("1.0.0")
+        self.assertNotEqual(installed["venv"], old["venv"])
+        self.assertEqual(self.requests[0], "/releases/download/1.0.0/taplctl-install-manifest.json")
+        self.assertEqual(installed["channel"], "pinned")
+
+    def test_semantic_same_version_rebuild_and_reinstall_preserve_extra(self) -> None:
+        old = self.install_initial_release()
+        self.assertIs(old["semantic"], False)
+        self.assertEqual(old["channel"], "pinned")
+        legacy = {key: value for key, value in old.items() if key not in {"semantic", "channel"}}
+        self.metadata_path.write_text(json.dumps(legacy), encoding="utf-8")
+        compatible = self.run_installer()
+        self.assertEqual(compatible.returncode, 0, compatible.stderr)
+        self.assertEqual(self.installed_metadata()["venv"], old["venv"])
+        enabled = self.run_installer("-Semantic", "-Channel", "pre")
+        self.assertEqual(enabled.returncode, 0, enabled.stderr)
+        semantic = self.assert_active_release("1.0.0")
+        self.assertNotEqual(semantic["venv"], old["venv"])
+        self.assertIs(semantic["semantic"], True)
+        self.assertEqual(semantic["channel"], "pre")
+        self.assertTrue((self.base / "pip.log").read_text().splitlines()[-1].endswith("[semantic]"))
+        repeated = self.run_installer("-Semantic", "-Channel", "pre")
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertEqual(self.installed_metadata()["venv"], semantic["venv"])
+        repaired = self.run_installer("-Reinstall", "-Channel", "pre")
+        self.assertEqual(repaired.returncode, 0, repaired.stderr)
+        self.assertNotEqual(self.installed_metadata()["venv"], semantic["venv"])
+        self.assertIs(self.installed_metadata()["semantic"], True)
+        self.assertTrue((self.base / "pip.log").read_text().splitlines()[-1].endswith("[semantic]"))
+
+    def test_invalid_semantic_and_channel_metadata_preserve_owned_state(self) -> None:
+        original = self.install_initial_release()
+        for field, value in (("semantic", "true"), ("semantic", 1), ("channel", "PRE"), ("channel", None)):
+            with self.subTest(field=field, value=value):
+                metadata = dict(original)
+                metadata[field] = value
+                self.metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+                before = self.preserved_state()
+                failed = self.run_installer("-Reinstall")
+                self.assertNotEqual(failed.returncode, 0)
+                self.assert_preserved(before)
+        self.metadata_path.write_text(json.dumps(original), encoding="utf-8")
+
     def test_first_install_creates_canonical_launcher_metadata_and_process_path(self) -> None:
         result = self.install_release("1.0.0")
 
@@ -458,7 +550,7 @@ function Set-TestUserPath {
         state = self.preserved_state()
         mismatched = self.run_installer("-Version", "2.14.0-beta1")
         self.assertNotEqual(mismatched.returncode, 0)
-        self.assertIn("does not match requested -Version", mismatched.stderr)
+        self.assertIn("does not match the requested installer version", mismatched.stderr)
         self.assert_preserved(state)
         self.requests.clear()
         for arguments in (("-Version", "../bad"), ("-Uninstall", "-Reinstall"), ("-Uninstall", "-Version", "1.0.0")):
