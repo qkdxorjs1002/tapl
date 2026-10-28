@@ -46,7 +46,10 @@ function Get-LatestPublishedReleaseTag {
         if (-not $json.StartsWith("[") -or -not $json.EndsWith("]")) {
             throw "the releases API response is not a JSON array."
         }
-        $releases = @($json | ConvertFrom-Json @jsonParameters)
+        # Windows PowerShell returns the JSON array as one pipeline object.
+        # Assign first, then normalize, so both 5.1 and pwsh yield flat items.
+        $parsedReleases = $json | ConvertFrom-Json @jsonParameters
+        $releases = @($parsedReleases)
         foreach ($release in $releases) {
             $draft = Get-ReleaseProperty $release "draft"
             $tag = Get-ReleaseProperty $release "tag_name"

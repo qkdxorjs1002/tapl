@@ -328,6 +328,22 @@ class PowerShellBootstrapTests(_Fixture):
         self.assertEqual(self.requests, ["/api/releases?per_page=100&page=1", "/releases/download/3.0.0/install.ps1"])
         self.assert_clean()
 
+    def test_pre_normalizes_non_enumerated_json_arrays(self) -> None:
+        conversion = '$parsedReleases = $json | ConvertFrom-Json @jsonParameters'
+        self.assertEqual(self.source.count(conversion), 1)
+        self.script.write_text(self.source.replace(
+            conversion, '$parsedReleases = Write-Output -NoEnumerate ($json | ConvertFrom-Json @jsonParameters)',
+        ), encoding="utf-8")
+        tag = "3.0.0-beta1"
+        self.assets[f"/releases/download/{tag}/install.ps1"] = (200, self.payload)
+        for releases in ([self.release(tag)], [self.release("2.0.0"), self.release(tag, "2026-05-01T00:00:00Z")]):
+            with self.subTest(count=len(releases)):
+                self.api_page(releases)
+                result = self.run_script("-Pre")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.captured()["version"], tag)
+                self.assert_clean()
+
     def test_pre_paginates_full_pages_and_selects_from_later_page(self) -> None:
         self.api_page([self.release(f"1.0.{index}") for index in range(100)])
         self.api_page([self.release("2.0.0-rc1", "2026-05-01T00:00:00Z")], page=2)
