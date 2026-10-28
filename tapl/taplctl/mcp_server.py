@@ -610,6 +610,25 @@ def create_server(
             operation="run_summarize",
         )
 
+    @server.tool(name="tapl_discard_run", title="Discard confirmed TAPL run", annotations=ToolAnnotations(
+        read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False,
+    ))
+    async def discard_run(
+        run_id: Annotated[str, Field(description="Exact active run id selected for discard.", min_length=1, max_length=256, strict=True)],
+        confirmed: Annotated[bool, Field(description="Literal true only after the user confirms discard.", strict=True)],
+        confirmation_run_id: Annotated[str, Field(description="Full run id typed by the user; must exactly match run_id, including case.", min_length=1, max_length=256, strict=True)],
+        session_id: Annotated[str, Field(description="Required explicit owner session; empty string selects a legacy run.", max_length=256, strict=True)],
+    ) -> dict[str, Any]:
+        """Discard after exact typed confirmation: delete empty runs, archive retained work, and never activate another run."""
+
+        # Explicit owner identity (including legacy '') is mandatory here. The
+        # atomic use case checks exact ownership; ordinary write guards stay intact.
+        return await call_application(
+            application.discard_run, run_id=run_id, confirmed=confirmed,
+            confirmation_run_id=confirmation_run_id,
+            session_id=session_id, require_session=False,
+        )
+
     @server.tool(name="tapl_split_run", title="Split independent TAPL runs", annotations=WRITE)
     async def split_run(
         requests: Annotated[

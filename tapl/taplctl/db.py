@@ -2701,6 +2701,169 @@ def record_event(
     conn.commit()
 
 
+def validate_discard_confirmation(*, run_id: str, confirmed: bool, confirmation_run_id: str) -> None:
+    """Validate the user's exact typed target before opening a write connection."""
+    if confirmed is not True:
+        raise ValueError("discard requires explicit confirmation: confirmed must be true")
+    if not isinstance(run_id, str) or not run_id.strip() or len(run_id) > 256:
+        raise ValueError("run_id must be a nonempty string of at most 256 characters")
+    if not isinstance(confirmation_run_id, str) or confirmation_run_id != run_id:
+        raise ValueError("confirmation_run_id must exactly match the full run_id")
+
+
+def discard_run(
+    conn: sqlite3.Connection, *, run_id: str, confirmed: bool, confirmation_run_id: str,
+) -> dict[str, Any]:
+    """Delete empty runs and force-archive retained work in one owned transaction.
+
+    Normal archive/cancel helpers commit independently and may activate queued
+    work. This operation never does so and preserves substantive references.
+    """
+    validate_discard_confirmation(run_id=run_id, confirmed=confirmed, confirmation_run_id=confirmation_run_id)
+    _begin_immediate(conn)
+    try:
+        run = require_run_owner(conn, run_id)
+        current = active_run(conn)
+        if run["status"] != "active" or current is None or current["id"] != run_id:
+            raise ValueError("stale_run: run_id must match the exact active run")
+        owner = connection_session_id(conn)
+        runs = [run]
+        if run["split_group_id"]:
+            runs.extend(conn.execute(
+                "SELECT * FROM workflow_runs WHERE session_id = ? AND split_group_id = ? "
+                "AND status = 'queued' ORDER BY split_position, created_at, id",
+                (owner, run["split_group_id"]),
+            ).fetchall())
+        run_ids = [str(row["id"]) for row in runs]
+        # Decide before any mutation: cascades must never erase memory, results,
+        # execution history, or references belonging to a retained run.
+        deletable: set[str] = set()
+        neighbors: dict[str, set[str]] = {}
+        for target in runs:
+            target_id = str(target["id"])
+            substantive = conn.execute(
+                "SELECT EXISTS(SELECT 1 FROM items WHERE run_id = :run) "
+                "OR EXISTS(SELECT 1 FROM execution_batches WHERE run_id = :run) "
+                "OR EXISTS(SELECT 1 FROM archives WHERE run_id = :run) "
+                "OR EXISTS(SELECT 1 FROM memories WHERE created_run_id = :run "
+                "OR source_run_id = :run OR last_reinforced_run_id = :run) "
+                "OR EXISTS(SELECT 1 FROM events WHERE run_id = :run AND "
+                "(session_id <> :owner OR (event_type LIKE 'memory\\_%' ESCAPE '\\' "
+                "AND event_type <> 'memory_recall_attempted'))) "
+                "OR EXISTS(SELECT 1 FROM approvals a JOIN execution_batches b ON b.approval_id = a.id "
+                "WHERE a.run_id = :run)",
+                {"run": target_id, "owner": owner},
+            ).fetchone()[0]
+            if not str(target["result_summary"] or "").strip() and not substantive:
+                deletable.add(target_id)
+            neighbors[target_id] = {str(row[0]) for row in conn.execute(
+                "SELECT dependency_run_id FROM workflow_run_dependencies WHERE run_id = ? "
+                "UNION SELECT run_id FROM workflow_run_dependencies WHERE dependency_run_id = ?",
+                (target_id, target_id),
+            )}
+        while True:
+            referenced = {value for value in deletable if neighbors[value] - deletable}
+            if not referenced:
+                break
+            deletable -= referenced
+        deleted_run_ids = [value for value in run_ids if value in deletable]
+        archived_run_ids = [value for value in run_ids if value not in deletable]
+        now = utc_now()
+        reason = "Run discarded by user confirmation in Viewer"
+        execution_ids: list[str] = []
+        batch_ids: list[str] = []
+        archives: list[dict[str, Any]] = []
+        for target in runs:
+            target_id = str(target["id"])
+            if target_id in deletable:
+                conn.execute("DELETE FROM events WHERE run_id = ? AND session_id = ?", (target_id, owner))
+                conn.execute("DELETE FROM approvals WHERE run_id = ?", (target_id,))
+                conn.execute("DELETE FROM workflow_runs WHERE id = ? AND session_id = ?", (target_id, owner))
+                continue
+            executions = conn.execute(
+                "SELECT te.id, te.task_item_id, te.batch_id FROM task_executions te "
+                "JOIN execution_batches b ON b.id = te.batch_id "
+                "WHERE b.run_id = ? AND te.state IN ('dispatched', 'running') ORDER BY te.id",
+                (target_id,),
+            ).fetchall()
+            target_execution_ids = [str(row["id"]) for row in executions]
+            live_task_ids = {row["task_item_id"] for row in executions}
+            target_batch_ids = [str(row["id"]) for row in conn.execute(
+                "SELECT b.id FROM execution_batches b WHERE b.run_id = ? "
+                "AND (b.state = 'active' OR EXISTS (SELECT 1 FROM task_executions te "
+                "WHERE te.batch_id = b.id AND te.state IN ('dispatched', 'running'))) ORDER BY b.id",
+                (target_id,),
+            )]
+            conn.executemany(
+                "UPDATE task_executions SET state = 'cancelled', error = ?, finished_at = ? WHERE id = ?",
+                [(reason, now, value) for value in target_execution_ids],
+            )
+            conn.executemany(
+                "UPDATE execution_batches SET state = 'cancelled', finished_at = ? WHERE id = ?",
+                [(now, value) for value in target_batch_ids],
+            )
+            for task in conn.execute(
+                "SELECT i.id, i.status, t.* FROM items i JOIN tasks t ON t.item_id = i.id WHERE i.run_id = ?",
+                (target_id,),
+            ).fetchall():
+                if task["status"] != "In Progress" and (
+                    task["id"] not in live_task_ids or task["status"] in TERMINAL_TASK_STATUSES
+                ):
+                    continue
+                next_action = "Run archived after user discard; no further execution is scheduled."
+                body = render_task_body(
+                    goal=task["goal"], action=task["action"], verification=task["verification"],
+                    result=task["result"], blocker=reason, next_action=next_action,
+                )
+                conn.execute("UPDATE tasks SET blocker = ?, next_action = ? WHERE item_id = ?",
+                             (reason, next_action, task["id"]))
+                conn.execute("UPDATE items SET status = 'Blocked', body = ?, updated_at = ? WHERE id = ?",
+                             (body, now, task["id"]))
+                refresh_item_fts(conn, conn.execute("SELECT * FROM items WHERE id = ?", (task["id"],)).fetchone())
+            for timing in conn.execute(
+                "SELECT tt.task_item_id FROM task_timing tt JOIN items i ON i.id = tt.task_item_id "
+                "WHERE i.run_id = ? AND tt.running_since IS NOT NULL", (target_id,),
+            ).fetchall():
+                stop_task_timing(conn, int(timing["task_item_id"]), now=now)
+            conn.execute(
+                "UPDATE workflow_runs SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, target_id),
+            )
+            conn.execute("UPDATE items SET archived = 1, updated_at = ? WHERE run_id = ?", (now, target_id))
+            archive_id = f"discard-{target_id}"
+            if conn.execute("SELECT 1 FROM archives WHERE id = ?", (archive_id,)).fetchone():
+                archive_id += "-" + uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO archives(id, run_id, slug, summary, created_at) VALUES(?, ?, ?, ?, ?)",
+                (archive_id, target_id, target["slug"] or "discarded-run", reason, now),
+            )
+            archives.append(dict(conn.execute("SELECT * FROM archives WHERE id = ?", (archive_id,)).fetchone()))
+            execution_ids.extend(target_execution_ids)
+            batch_ids.extend(target_batch_ids)
+        # One owner-scoped audit survives physical deletion. Keep all retained
+        # review checkpoints and memories without fabricating review success.
+        payload = {
+            "source": "viewer_user", "confirmed": True, "reason": reason,
+            "requested_run_id": run_id, "confirmation_run_id": confirmation_run_id,
+            "deleted_run_ids": deleted_run_ids, "archived_run_ids": archived_run_ids,
+            "cancelled_execution_ids": execution_ids,
+            "cancelled_batch_ids": batch_ids, "memory_review_bypassed": bool(archived_run_ids),
+        }
+        conn.execute(
+            "INSERT INTO events(run_id, session_id, event_type, tool_name, mode, payload_json, message, created_at) "
+            "VALUES(NULL, ?, 'run_discarded', 'tapl_discard_run', 'write', ?, ?, ?)",
+            (owner, json.dumps(payload, ensure_ascii=False, sort_keys=True), reason, now),
+        )
+        conn.commit()
+        return {"ok": True, "operation": "run_discard", "archived_run_ids": archived_run_ids,
+                "deleted_run_ids": deleted_run_ids,
+                "archives": archives, "cancelled_execution_ids": execution_ids,
+                "cancelled_batch_ids": batch_ids}
+    except BaseException:
+        conn.rollback()
+        raise
+
+
 def archive_active_run(conn: sqlite3.Connection, *, slug: str, summary: str = "", memory_review_enabled: bool = True) -> sqlite3.Row:
     # Hold the writer lock across eligibility and mutation, including queued activation.
     owns_transaction = not conn.in_transaction

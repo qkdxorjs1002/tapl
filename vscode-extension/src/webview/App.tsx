@@ -14,6 +14,8 @@ import { resolveLocale, type SupportedLocale } from '../i18n';
 import type {
   DisplayLayout,
   HostMessage,
+  HostCapabilities,
+  RunDiscardResult,
   TaplArchive,
   TaplArchiveDetail,
   TaplEvent,
@@ -81,8 +83,11 @@ export function App(): JSX.Element {
     view?: WebviewView;
     locale?: SupportedLocale;
     layout?: unknown;
+    capabilities?: HostCapabilities;
   } | undefined;
   const [memorySupported, setMemorySupported] = useState(false);
+  const [discardSupported, setDiscardSupported] = useState(restored?.capabilities?.discardRun === true);
+  const [discardResult, setDiscardResult] = useState<RunDiscardResult>();
   const [view, setView] = useState<WebviewView | undefined>(restored?.view);
   const [locale, setLocale] = useState<SupportedLocale>(() => resolveLocale(
     restored?.locale ?? document.documentElement.lang ?? navigator.language
@@ -108,12 +113,19 @@ export function App(): JSX.Element {
         const nextLocale = resolveLocale(message.locale);
         const nextLayout = resolveDisplayLayout(message.layout);
         setMemorySupported(message.capabilities?.associativeMemory === true);
+        setDiscardSupported(message.capabilities?.discardRun === true);
+        if (message.discardResult) setDiscardResult(message.discardResult);
         setView(message.view);
         setLocale(nextLocale);
         setLayout(nextLayout);
         api.setState({ view: message.view, locale: nextLocale, layout: nextLayout, capabilities: message.capabilities, workspace: message.workspace });
       }
       if (message.type === 'error') {
+        if (message.discardResult) {
+          // Keep the board and confirmation open so a failed discard can be retried.
+          setDiscardResult(message.discardResult);
+          return;
+        }
         const nextLocale = resolveLocale(message.locale);
         const nextLayout = resolveDisplayLayout(message.layout);
         const errorView: WebviewView = { type: 'error', message: message.message };
@@ -150,7 +162,7 @@ export function App(): JSX.Element {
     <I18nProvider locale={locale}>
       <ExecutionClockContext.Provider value={nowMs}>
         <main className="tapl-shell" data-theme="tapl" data-layout={layout}>
-          <ViewRenderer view={view} layout={layout} memorySupported={memorySupported} send={(message) => api.postMessage(message)} />
+          <ViewRenderer view={view} layout={layout} memorySupported={memorySupported} discardSupported={discardSupported} discardResult={discardResult} send={(message) => api.postMessage(message)} />
         </main>
       </ExecutionClockContext.Provider>
     </I18nProvider>
@@ -187,9 +199,13 @@ function ViewRenderer({
   view,
   layout,
   memorySupported,
+  discardSupported,
+  discardResult,
   send
 }: {
   memorySupported: boolean;
+  discardSupported: boolean;
+  discardResult?: RunDiscardResult;
   view: WebviewView;
   layout: DisplayLayout;
   send: (message: WebviewCommand) => void;
@@ -202,7 +218,7 @@ function ViewRenderer({
     case 'workspace':
       return <WorkspaceView view={view} send={send} />;
     case 'overview':
-      return <OverviewView view={view} layout={layout} memorySupported={memorySupported} send={send} />;
+      return <OverviewView view={view} layout={layout} memorySupported={memorySupported} discardSupported={discardSupported} discardResult={discardResult} send={send} />;
     case 'archive':
       return <ArchiveView archive={view.archive} detail={view.detail} send={send} />;
     case 'archiveEvents':
@@ -222,10 +238,14 @@ function OverviewView({
   view,
   layout,
   memorySupported,
+  discardSupported,
+  discardResult,
   send
 }: {
   view: Extract<WebviewView, { type: 'overview' }>;
   memorySupported: boolean;
+  discardSupported: boolean;
+  discardResult?: RunDiscardResult;
   layout: DisplayLayout;
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
@@ -255,7 +275,7 @@ function OverviewView({
 
   return (
     <>
-      <RunTabs runs={runs} selectedId={status.active_run?.id} send={send} />
+      <RunTabs runs={runs} selectedId={status.active_run?.id} workspace={view.workspace} discardSupported={discardSupported} discardResult={discardResult} send={send} />
       <div className="tapl-run-panel" id="tapl-run-panel" role="tabpanel"
         aria-labelledby={status.active_run ? `tapl-run-tab-${status.active_run.id}` : undefined}
         aria-label={!status.active_run ? t('noActiveRunTitle') : undefined}>
@@ -340,49 +360,174 @@ function OverviewView({
   );
 }
 
-function RunTabs({ runs, selectedId, send }: {
+export function RunTabs({ runs, selectedId, workspace, discardSupported, discardResult, send }: {
   runs: TaplWorkflowRun[];
   selectedId?: string;
+  workspace?: string;
+  discardSupported: boolean;
+  discardResult?: RunDiscardResult;
   send: (message: WebviewCommand) => void;
 }): JSX.Element {
   const { t } = useI18n();
   const tabListRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const pendingRef = useRef(false);
+  const [target, setTarget] = useState<{ runId: string; targetSessionId: string; workspace: string; title: string } | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const [confirmationRunId, setConfirmationRunId] = useState('');
+  const confirmationMatches = target !== null && confirmationRunId === target.runId;
+  const confirmationMismatch = confirmationRunId.length > 0 && !confirmationMatches;
+  const targetAvailable = target !== null && discardSupported && target.workspace === workspace
+    && runs.some((run) => run.id === target.runId && run.session_id === target.targetSessionId);
   const focusIndex = Math.max(0, runs.findIndex((run) => run.id === selectedId));
   const selectRun = (run: TaplWorkflowRun) => {
     if (run.id !== selectedId) send({ command: 'selectRun', sessionId: run.session_id ?? '' });
   };
 
+  useEffect(() => {
+    if (!target) return;
+    const dialog = dialogRef.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog?.showModal();
+    cancelRef.current?.focus();
+    return () => {
+      dialog?.close();
+      if (opener?.isConnected) opener.focus();
+      else tabListRef.current?.querySelector<HTMLButtonElement>('[role="tab"][tabindex="0"]')?.focus();
+    };
+  }, [target]);
+
+  useEffect(() => {
+    // Polling or a workspace switch must never retarget an already-open dialog.
+    if (target && !targetAvailable) {
+      setTarget(null);
+      setConfirmationRunId('');
+      pendingRef.current = false;
+      setPending(false);
+    }
+  }, [target, targetAvailable]);
+
+  useEffect(() => {
+    if (!discardResult || !pendingRef.current || discardResult.runId !== target?.runId) return;
+    pendingRef.current = false;
+    setPending(false);
+    if (discardResult.ok) {
+      setTarget(null);
+      setConfirmationRunId('');
+    }
+    else setError(discardResult.message || t('discardRunFailed'));
+    // Only a newly received host result resolves a submitted request. Opening a
+    // dialog again must not consume a result left over from an earlier attempt.
+  }, [discardResult]);
+
+  const cancel = () => {
+    if (!pendingRef.current) {
+      setTarget(null);
+      setConfirmationRunId('');
+    }
+  };
+  const confirm = () => {
+    if (!target || !targetAvailable || !confirmationMatches || pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    setError('');
+    send({ command: 'discardRun', runId: target.runId, targetSessionId: target.targetSessionId, workspace: target.workspace, confirmed: true, confirmationRunId });
+  };
+
   return (
-    <div className="tapl-run-tabs" role="tablist" aria-label={t('activeRun')} ref={tabListRef}>
-      {runs.length ? runs.map((run, index) => {
-        const title = String(run.request_summary || run.slug || run.id || t('active'));
-        return (
-          <button key={run.id} id={`tapl-run-tab-${run.id}`} className="tapl-run-tab"
-            type="button" role="tab" aria-selected={run.id === selectedId}
-            aria-controls="tapl-run-panel" tabIndex={index === focusIndex ? 0 : -1}
-            title={run.session_id ? `${title}\n${run.session_id}` : title}
-            onClick={() => selectRun(run)}
-            onKeyDown={(event) => {
-              let nextIndex: number;
-              switch (event.key) {
-                case 'ArrowRight': nextIndex = (index + 1) % runs.length; break;
-                case 'ArrowLeft': nextIndex = (index - 1 + runs.length) % runs.length; break;
-                case 'Home': nextIndex = 0; break;
-                case 'End': nextIndex = runs.length - 1; break;
-                default: return;
-              }
-              event.preventDefault();
-              tabListRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus();
-              selectRun(runs[nextIndex]);
-            }}>
-            <span className="tapl-run-tab-title">{title}</span>
-            <span className="tapl-run-tab-session">{run.session_id?.slice(0, 8) || t('active')}</span>
-          </button>
-        );
-      }) : <button className="tapl-run-tab" type="button" role="tab" aria-selected={false} disabled>
-        <span className="tapl-run-tab-title">{t('noActiveRunTitle')}</span>
-      </button>}
-    </div>
+    <>
+      <div className="tapl-run-tabs" role="tablist" aria-label={t('activeRun')} ref={tabListRef}>
+        {runs.length ? runs.map((run, index) => {
+          const title = String(run.request_summary || run.slug || run.id || t('active'));
+          const closeLabel = t('closeRun', { title });
+          return (
+            <div className="tapl-run-tab-slot" key={run.id} role="presentation">
+              <button id={`tapl-run-tab-${run.id}`} className="tapl-run-tab"
+                type="button" role="tab" aria-selected={run.id === selectedId}
+                aria-controls="tapl-run-panel" tabIndex={index === focusIndex ? 0 : -1}
+                title={run.session_id ? `${title}\n${run.session_id}` : title}
+                onClick={() => selectRun(run)}
+                onKeyDown={(event) => {
+                  let nextIndex: number;
+                  switch (event.key) {
+                    case 'ArrowRight': nextIndex = (index + 1) % runs.length; break;
+                    case 'ArrowLeft': nextIndex = (index - 1 + runs.length) % runs.length; break;
+                    case 'Home': nextIndex = 0; break;
+                    case 'End': nextIndex = runs.length - 1; break;
+                    default: return;
+                  }
+                  event.preventDefault();
+                  tabListRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus();
+                  selectRun(runs[nextIndex]);
+                }}>
+                <span className="tapl-run-tab-title">{title}</span>
+                <span className="tapl-run-tab-session">{run.session_id?.slice(0, 8) || t('active')}</span>
+              </button>
+              {discardSupported && workspace && run.id && typeof run.session_id === 'string' ? <button className="tapl-run-tab-close" type="button"
+                aria-label={closeLabel} title={closeLabel} disabled={pending}
+                onClick={() => {
+                  if (!workspace || !run.id || typeof run.session_id !== 'string') return;
+                  setError('');
+                  setConfirmationRunId('');
+                  setTarget({ runId: run.id, targetSessionId: run.session_id, workspace, title });
+                }}><span aria-hidden="true">×</span></button> : null}
+            </div>
+          );
+        }) : <button className="tapl-run-tab" type="button" role="tab" aria-selected={false} disabled>
+          <span className="tapl-run-tab-title">{t('noActiveRunTitle')}</span>
+        </button>}
+      </div>
+      {target ? <dialog ref={dialogRef} className="tapl-discard-dialog" aria-labelledby="tapl-discard-title"
+        aria-describedby="tapl-discard-scope tapl-discard-effects tapl-discard-process"
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key !== 'Tab') return;
+          const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+          )).filter((control) => control.getClientRects().length > 0);
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (!first) {
+            event.preventDefault();
+            event.currentTarget.focus();
+          } else if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+        onCancel={(event) => { event.preventDefault(); cancel(); }}>
+        <h2 id="tapl-discard-title">{t('discardRunTitle')}</h2>
+        <p className="tapl-discard-run-title">{target.title}</p>
+        <p id="tapl-discard-scope">{t('discardRunScope')}</p>
+        <p id="tapl-discard-effects">{t('discardRunEffects')}</p>
+        <p id="tapl-discard-process">{t('discardRunProcess')}</p>
+        <dl className="tapl-discard-identity">
+          <dt>{t('run')}</dt><dd><code className="tapl-discard-run-id">{target.runId}</code></dd>
+          <dt>{t('workspace')}</dt><dd>{target.workspace}</dd>
+          <dt>{t('discardRunOwner')}</dt><dd>{target.targetSessionId || t('discardRunLegacyOwner')}</dd>
+        </dl>
+        <div className="tapl-discard-confirmation">
+          <label htmlFor="tapl-discard-confirmation-id">{t('discardRunIdLabel')}</label>
+          <p id="tapl-discard-confirmation-help">{t('discardRunIdHelp')}</p>
+          <input id="tapl-discard-confirmation-id" type="text" className="input input-bordered input-sm w-full"
+            value={confirmationRunId} autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
+            disabled={pending} aria-invalid={confirmationMismatch}
+            aria-describedby={`tapl-discard-confirmation-help${confirmationMismatch ? ' tapl-discard-confirmation-mismatch' : ''}`}
+            onChange={(event) => setConfirmationRunId(event.currentTarget.value)} />
+          {confirmationMismatch ? <p id="tapl-discard-confirmation-mismatch" role="status" className="tapl-discard-error">{t('discardRunIdMismatch')}</p> : null}
+        </div>
+        {error ? <p role="alert" className="tapl-discard-error">{error}</p> : null}
+        <div className="tapl-discard-actions">
+          <button ref={cancelRef} type="button" className="btn btn-secondary btn-sm" disabled={pending} onClick={cancel}>{t('cancel')}</button>
+          <button type="button" className="btn btn-error btn-sm" disabled={pending || !targetAvailable || !confirmationMatches} onClick={confirm}>{t(pending ? 'discardingRun' : 'discardRunConfirm')}</button>
+        </div>
+      </dialog> : null}
+    </>
   );
 }
 

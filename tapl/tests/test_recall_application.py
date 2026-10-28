@@ -139,7 +139,7 @@ def test_memory_mcp_schema_annotations_and_validation(app):
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert tools['tapl_recall'].annotations.read_only_hint
     assert tools['tapl_get_memory'].annotations.read_only_hint
-    assert app.get_status()['viewer_capabilities'] == {'associativeMemory': True}
+    assert app.get_status()['viewer_capabilities'] == {'associativeMemory': True, 'discardRun': True}
     for name in ('tapl_update_memory', 'tapl_delete_memory'):
         assert not tools[name].annotations.read_only_hint
         assert tools[name].annotations.destructive_hint

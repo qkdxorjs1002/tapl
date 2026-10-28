@@ -86,7 +86,7 @@ When one request contains independent topics, Codex keeps one RUN and writes a s
 
 Each PLAN has its own requirements, approach, and validation; each TASK references its topic's PLAN through `spec_id`. Steps, constraints, examples, and tests serving one outcome stay together. Separate RUN lifecycles are used only when explicitly requested.
 
-Multiple Codex sessions in the same working folder can work concurrently in their own RUNs. Each RUN has one owning session; resuming that session continues its RUN. Approvals, TASKs, split queues, Stop, and archiving remain scoped to that owner. The read-only Viewer lets you select an active RUN.
+Multiple Codex sessions in the same working folder can work concurrently in their own RUNs. Each RUN has one owning session; resuming that session continues its RUN. Approvals, TASKs, split queues, Stop, and archiving remain scoped to that owner. The Viewer lets you select an active RUN or explicitly confirm its discard.
 
 Include the Codex hook's `session_id` on every `tapl_*` MCP call. Older clients that omit it can read only the isolated legacy scope, and unidentified writes are rejected once the workspace contains session-owned records. Existing database RUNs remain in the legacy scope; the schema upgrade first saves `.tapl/tapl.db.pre-v14.bak`. New sessions never automatically take ownership of another session's RUN. Workflow state is isolated, while working files remain shared; coordinate simultaneous edits to the same file or use separate worktrees.
 
@@ -208,6 +208,11 @@ findings, archives, and associative memories. Memory screens support read-only
 list, search, detail, and original-source inspection. Ask the agent explicitly to
 edit or delete a memory through MCP. The command does not open a browser automatically;
 press `Ctrl+C` to stop it.
+
+The **×** icon on a RUN tab opens a confirmation dialog. Enter or paste the full
+RUN ID exactly to confirm. RUNs with records are force-archived with their dependent
+work; truly empty RUNs are deleted without an archive. Cancellation changes nothing.
+See [RUN discard behavior](docs/guide.md#discard-run) for scope and execution details.
 
 Use `taplctl viewer --port 9000` if port 8000 is busy. If no workspace is selected,
 the viewer asks for an initialized workspace folder.

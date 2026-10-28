@@ -176,6 +176,13 @@ export interface AssociativeMemory {
 
 export interface HostCapabilities {
   associativeMemory: boolean;
+  discardRun?: boolean;
+}
+
+export interface RunDiscardResult {
+  runId: string;
+  ok: boolean;
+  message?: string;
 }
 
 /** Read-only counts and the most recent persisted capture failure. */
@@ -200,9 +207,9 @@ export type WebviewView =
   | { type: 'error'; message: string };
 
 export type HostMessage =
-  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities }
-  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities }
-  | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout };
+  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; discardResult?: RunDiscardResult }
+  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; discardResult?: RunDiscardResult }
+  | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout; discardResult?: RunDiscardResult };
 
 /** Lightweight standalone-viewer response used to detect workspace changes. */
 export interface RevisionMessage {
@@ -221,6 +228,7 @@ export type WebviewCommand =
   | { command: 'chooseWorkspace' }
   | { command: 'selectWorkspace'; workspace: string }
   | { command: 'selectRun'; sessionId: string }
+  | { command: 'discardRun'; runId: string; targetSessionId: string; workspace: string; confirmed: true; confirmationRunId: string }
   | { command: 'refresh' }
   | { command: 'back' }
   | { command: 'debug' }

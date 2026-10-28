@@ -5,6 +5,20 @@ exports.translate = translate;
 exports.translateStatus = translateStatus;
 exports.translateKind = translateKind;
 const EN_MESSAGES = {
+    closeRun: 'Close RUN: {title}',
+    discardRunTitle: 'Discard this RUN?',
+    discardRunScope: 'A truly empty RUN with no plans, tasks, findings, or other records is permanently deleted without an archive. A RUN with records is force-archived with all its records, preserving its history.',
+    discardRunEffects: 'Queued RUNs in the same split group and owned by the same session are also discarded. Active executions and batches are cancelled, and timing is stopped. Other sessions are unaffected.',
+    discardRunProcess: 'External agents and processes are not stopped. Stop them separately if needed.',
+    discardRunOwner: 'Owner session',
+    discardRunLegacyOwner: 'Legacy session',
+    discardRunConfirm: 'Discard RUN',
+    discardRunIdLabel: 'Full RUN ID',
+    discardRunIdHelp: 'Type or paste the full RUN ID shown above to confirm. It must match exactly, including letter case and with no extra spaces.',
+    discardRunIdMismatch: 'The RUN ID does not match exactly.',
+    discardingRun: 'Discarding…',
+    discardRunFailed: 'Could not discard this RUN. Try again.',
+    cancel: 'Cancel',
     memories: "Associative memory",
     memoryDetail: "Memory detail",
     memoryDiagnostics: "Memory diagnostics",
@@ -204,6 +218,20 @@ const EN_MESSAGES = {
     approvedTasksAppear: 'Approved tasks will appear here in execution order.'
 };
 const KO_MESSAGES = {
+    closeRun: 'RUN 닫기: {title}',
+    discardRunTitle: '이 RUN을 폐기할까요?',
+    discardRunScope: '계획, 작업, 발견 사항 등 기록이 전혀 없는 RUN은 아카이브 없이 영구 삭제합니다. 기록이 있는 RUN은 모든 하위 기록과 함께 강제로 아카이브하여 이력을 보존합니다.',
+    discardRunEffects: '동일 세션이 소유한 같은 분할 그룹의 대기 RUN도 함께 폐기합니다. 진행 중인 실행과 배치는 취소하고 시간 측정을 종료합니다. 다른 세션은 영향을 받지 않습니다.',
+    discardRunProcess: '외부 에이전트와 프로세스는 종료되지 않습니다. 필요하면 별도로 중지하세요.',
+    discardRunOwner: '소유 세션',
+    discardRunLegacyOwner: '레거시 세션',
+    discardRunConfirm: 'RUN 폐기',
+    discardRunIdLabel: '전체 RUN ID',
+    discardRunIdHelp: '확인하려면 위의 전체 RUN ID를 입력하거나 붙여넣으세요. 대소문자와 공백까지 정확히 일치해야 합니다.',
+    discardRunIdMismatch: 'RUN ID가 정확히 일치하지 않습니다.',
+    discardingRun: '폐기 중…',
+    discardRunFailed: 'RUN을 폐기하지 못했습니다. 다시 시도하세요.',
+    cancel: '취소',
     memories: "연상 기억",
     memoryDetail: "기억 상세",
     memoryDiagnostics: "기억 진단",

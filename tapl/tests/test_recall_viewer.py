@@ -31,7 +31,7 @@ def memory_workspace(tmp_path):
 def test_memory_list_detail_and_both_original_kinds(memory_workspace):
     workspace, path, ids = memory_workspace
     app = viewer.ViewerApplication(default_workspace=workspace)
-    assert app.handle_message({"command": "ready"})["capabilities"] == {"associativeMemory": True}
+    assert app.handle_message({"command": "ready"})["capabilities"] == {"associativeMemory": True, "discardRun": True}
     listing = app.handle_message({"command": "memories"})
     assert listing["view"]["total"] == 2
     assert listing["view"]["limit"] == 50

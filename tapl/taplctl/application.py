@@ -92,7 +92,7 @@ class WorkflowApplication:
             "session_id": state.get("session_id", ""),
             "schema": state.get("schema") or {},
             "active_runs": state.get("active_runs") or [],
-            "viewer_capabilities": {"associativeMemory": True},
+            "viewer_capabilities": {"associativeMemory": True, "discardRun": True},
             "memory_review": state["memory_review"] if self._settings().recall.enabled else {"status": "disabled"},
             "active_run": state.get("active_run"),
             "task_counts": state.get("task_counts") or {},
@@ -606,6 +606,12 @@ class WorkflowApplication:
                 prompt=prompt, source=source,
             )
         return {"ok": True, "approval": db.row_to_dict(row)}
+
+    def discard_run(self, *, run_id: str, confirmed: bool, confirmation_run_id: str) -> dict[str, Any]:
+        """Discard only the explicitly confirmed active run owned by this session."""
+        db.validate_discard_confirmation(run_id=run_id, confirmed=confirmed, confirmation_run_id=confirmation_run_id)
+        with self._connection() as conn:
+            return db.discard_run(conn, run_id=run_id, confirmed=confirmed, confirmation_run_id=confirmation_run_id)
 
     def finish_archive(self, slug: str, *, summary: str = "") -> dict[str, Any]:
         with self._connection() as conn:

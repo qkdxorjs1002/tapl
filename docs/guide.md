@@ -251,6 +251,22 @@ folder has no database—for example, when started as a Homebrew login service�
 page asks for an initialized workspace folder and remembers the last successful
 choice in that browser.
 
+<a id="discard-run"></a>
+
+### Discard a RUN
+
+Click the **×** icon on its tab, then type or paste the full RUN ID shown in the
+dialog. The confirmation button stays disabled until the input matches exactly,
+including case and whitespace. Cancel or Escape leaves the RUN unchanged.
+
+Confirmation force-archives records, plans, tasks, findings, and queued RUNs in the
+same owner's split request. Active database executions/batches are cancelled and
+task timers stop. No queued RUN starts automatically. Truly empty RUNs are deleted
+without creating an archive; results, execution history, memories, and retained
+references count as records to preserve. Other sessions and unrelated requests
+remain unchanged. This updates workflow state and does not terminate an external
+running agent process.
+
 When a trusted reverse proxy or tunnel publishes the viewer at another origin,
 allow that exact browser origin explicitly:
 

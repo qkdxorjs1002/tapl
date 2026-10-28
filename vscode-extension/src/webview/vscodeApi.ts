@@ -58,6 +58,7 @@ class BrowserApi implements VsCodeApi {
   private refreshDirty = false;
   private trailingRefreshIsManual = false;
   private autoRefreshPending = false;
+  private discardPending = false;
 
   private readonly onVisibilityChange = (): void => {
     if (document.visibilityState === 'visible') {
@@ -68,6 +69,18 @@ class BrowserApi implements VsCodeApi {
   };
 
   postMessage(message: WebviewCommand): void {
+    if (message.command === 'discardRun') {
+      const workspace = this.activeWorkspace ?? this.state.workspace ?? readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
+      if (this.discardPending || this.state.capabilities?.discardRun !== true || message.confirmed !== true
+        || typeof message.runId !== 'string' || !message.runId.trim()
+        || typeof message.confirmationRunId !== 'string' || message.confirmationRunId !== message.runId
+        || typeof message.targetSessionId !== 'string' || message.targetSessionId.length > 256
+        || message.targetSessionId !== message.targetSessionId.trim() || /[\x00-\x1f\x7f]/.test(message.targetSessionId)
+        || !workspace || message.workspace !== workspace) {
+        this.discardError(message.runId, 'RUN discard requires the complete matching RUN ID, explicit confirmation, and the current workspace.');
+        return;
+      }
+    }
     if (message.command !== 'refresh') {
       this.pendingNavigation = false;
       this.requestGeneration += 1;
@@ -93,6 +106,7 @@ class BrowserApi implements VsCodeApi {
       this.requestRefresh(false);
       return;
     }
+    if (message.command === 'discardRun') this.discardPending = true;
     this.navigate(message);
   }
 
@@ -101,6 +115,7 @@ class BrowserApi implements VsCodeApi {
     this.pendingNavigation = true;
     this.clearRevisionTimer();
     void this.send(message, { view }).finally(() => {
+      if (message.command === 'discardRun') this.discardPending = false;
       if (generation === this.requestGeneration) {
         this.pendingNavigation = false;
         this.scheduleRevisionCheck();
@@ -143,7 +158,9 @@ class BrowserApi implements VsCodeApi {
     const workspaceGeneration = this.workspaceGeneration;
     const activeWorkspace = this.activeWorkspace;
     const recentWorkspace = readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
-    const requestWorkspace = message.command === 'ready'
+    const requestWorkspace = message.command === 'discardRun'
+      ? message.workspace
+      : message.command === 'ready'
       ? ''
       : message.command === 'selectWorkspace'
         ? message.workspace.trim()
@@ -165,12 +182,25 @@ class BrowserApi implements VsCodeApi {
       });
       const payload = await response.json() as HostMessage;
       if (generation !== this.requestGeneration || workspaceGeneration !== this.workspaceGeneration || activeWorkspace !== this.activeWorkspace) {
+        // Resolve an outstanding confirmation without letting its old overview
+        // replace a more recent selection. Workspace switches dismiss the dialog.
+        if (message.command === 'discardRun' && workspaceGeneration === this.workspaceGeneration && activeWorkspace === this.activeWorkspace) {
+          const discardResult = 'discardResult' in payload && payload.discardResult
+            ? payload.discardResult
+            : { runId: message.runId, ok: false, message: 'RUN discard response was unavailable.' };
+          dispatchHostMessage({ type: 'error', message: discardResult.message ?? '',
+            locale: this.state.locale ?? resolveBrowserLocale(), layout: this.state.layout ?? 'auto', discardResult });
+          this.autoRefreshPending = true;
+        }
         return true; // A newer navigation or workspace selection owns the screen.
       }
       if (!response.ok) {
         throw new Error(payload.type === 'error' && typeof payload.message === 'string'
           ? payload.message
           : `Viewer request failed (${response.status}).`);
+      }
+      if (message.command === 'discardRun' && !('discardResult' in payload && payload.discardResult)) {
+        throw new Error('RUN discard response was invalid.');
       }
       if (
         options.background
@@ -210,10 +240,15 @@ class BrowserApi implements VsCodeApi {
       dispatchHostMessage(payload);
       return true;
     } catch (error) {
-      if (generation !== this.requestGeneration || workspaceGeneration !== this.workspaceGeneration || activeWorkspace !== this.activeWorkspace) {
+      if (workspaceGeneration !== this.workspaceGeneration || activeWorkspace !== this.activeWorkspace
+        || (generation !== this.requestGeneration && message.command !== 'discardRun')) {
         return true;
       }
       if (!options.background) {
+        if (message.command === 'discardRun') {
+          this.discardError(message.runId, error instanceof Error ? error.message : 'The local viewer request failed.');
+          return false;
+        }
         dispatchHostMessage({
           type: 'error',
           message: error instanceof Error ? error.message : 'The local viewer request failed.',
@@ -223,6 +258,11 @@ class BrowserApi implements VsCodeApi {
       }
       return false;
     }
+  }
+
+  private discardError(runId: string, message: string): void {
+    dispatchHostMessage({ type: 'error', message, locale: this.state.locale ?? resolveBrowserLocale(),
+      layout: this.state.layout ?? 'auto', discardResult: { runId, ok: false, message } });
   }
 
   private requestRefresh(background: boolean): void {
@@ -488,7 +528,7 @@ function shouldPushHistory(
   previous: WebviewView | undefined,
   response: HostMessage
 ): boolean {
-  if (!previous || command.command === 'ready' || command.command === 'refresh' || command.command === 'selectWorkspace') {
+  if (!previous || command.command === 'ready' || command.command === 'refresh' || command.command === 'selectWorkspace' || command.command === 'discardRun') {
     return false;
   }
   return (response.type === 'hydrate' || response.type === 'view:update')

@@ -130,7 +130,7 @@ def test_get_item_mcp_default_and_false_are_exact_full_responses(tmp_path: Path,
 
         async def exercise() -> None:
             tools = await server.list_tools()
-            assert len(tools) == 29
+            assert len(tools) == 30
             tool = next(tool for tool in tools if tool.name == "tapl_get_item")
             assert tool.annotations.read_only_hint
             assert tool.input_schema["required"] == ["item_id"]

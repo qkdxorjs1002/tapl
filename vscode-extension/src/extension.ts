@@ -13,7 +13,7 @@ import {
   type TaplMcpWorkspace
 } from './taplMcpClient';
 
-import type { DisplayLayout, AssociativeMemory, MemoryDiagnostics, HostCapabilities, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
+import type { DisplayLayout, AssociativeMemory, MemoryDiagnostics, HostCapabilities, RunDiscardResult, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
 
 type NodeKind = 'overview' | 'task' | 'archive' | 'empty';
 type DisplayLanguage = 'auto' | SupportedLocale;
@@ -267,6 +267,7 @@ class WorkflowWebviewManager {
   private shellReady = false;
   private generation = 0;
   private capabilities: HostCapabilities = { associativeMemory: false };
+  private discardPending = false;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -348,7 +349,7 @@ class WorkflowWebviewManager {
 </html>`;
   }
 
-  private async postCurrentView(type: 'hydrate' | 'view:update'): Promise<void> {
+  private async postCurrentView(type: 'hydrate' | 'view:update', discardResult?: RunDiscardResult): Promise<void> {
     const panel = this.panel;
     if (!panel) { return; }
     const generation = ++this.generation;
@@ -357,12 +358,16 @@ class WorkflowWebviewManager {
     // A slow read must not replace a newer navigation, workspace or closed panel.
     if (generation !== this.generation || panel !== this.panel || root !== getWorkspaceRoot()) { return; }
     if (view.type === 'overview' || view.type === 'debug') {
-      this.capabilities = { associativeMemory: view.status.viewer_capabilities?.associativeMemory === true };
+      this.capabilities = {
+        associativeMemory: view.status.viewer_capabilities?.associativeMemory === true,
+        discardRun: view.status.viewer_capabilities?.discardRun === true
+      };
     }
     panel.title = workspaceTaplTitle();
     const message: HostWebviewMessage = {
       type, view, locale: displayLocale(), layout: displayLayout(),
-      workspace: root?.uri.fsPath, capabilities: this.capabilities
+      workspace: root?.uri.fsPath, capabilities: this.capabilities,
+      ...(discardResult ? { discardResult } : {})
     };
     await panel.webview.postMessage(message);
   }
@@ -426,6 +431,7 @@ class WorkflowWebviewManager {
     switch (message.command) {
       case 'ready': await this.postCurrentView('hydrate'); return;
       case 'refresh': await this.refresh(); return;
+      case 'discardRun': await this.discardRun(message); return;
       case 'selectRun': {
         const root = getWorkspaceRoot();
         if (root && typeof message.sessionId === 'string' && message.sessionId.length <= 256) {
@@ -473,6 +479,56 @@ class WorkflowWebviewManager {
           await this.navigate({ type: message.command === 'openMemory' ? 'memory' : 'memorySource', memoryId: message.memoryId }, { pushHistory: true });
         }
         return;
+    }
+  }
+
+  private async discardRun(message: Record<string, unknown>): Promise<void> {
+    const panel = this.panel;
+    const root = getWorkspaceRoot();
+    const runId = typeof message.runId === 'string' ? message.runId : '';
+    const confirmationRunId = message.confirmationRunId;
+    const targetSessionId = message.targetSessionId;
+    const workspace = message.workspace;
+    const generation = this.generation;
+    const error = async (text: string): Promise<void> => {
+      if (panel && panel === this.panel && root === getWorkspaceRoot()) {
+        await panel.webview.postMessage({ type: 'error', message: text, locale: displayLocale(), layout: displayLayout(),
+          discardResult: { runId, ok: false, message: text } } satisfies HostWebviewMessage);
+      }
+    };
+    if (!panel || !root) { return; }
+    if (!this.capabilities.discardRun || this.discardPending || message.confirmed !== true || !runId.trim()
+      || typeof confirmationRunId !== 'string' || confirmationRunId !== runId
+      || typeof targetSessionId !== 'string' || targetSessionId.length > 256
+      || targetSessionId !== targetSessionId.trim() || /[\x00-\x1f\x7f]/.test(targetSessionId)
+      || workspace !== root.uri.fsPath) {
+      await error('RUN discard requires the complete matching RUN ID, explicit confirmation, and the current workspace.');
+      return;
+    }
+    this.discardPending = true;
+    try {
+      // Capture both identities before awaiting; writes never consult the selected read owner.
+      const result = await callTaplMcp('tapl_discard_run', {
+        run_id: runId, confirmed: true, confirmation_run_id: confirmationRunId, session_id: targetSessionId
+      }, root);
+      if (root !== getWorkspaceRoot() || panel !== this.panel || workspace !== root.uri.fsPath) { return; }
+      if (!result.ok || result.value.ok === false) {
+        await error(result.ok ? String(result.value.error ?? 'RUN discard failed.') : result.error);
+        return;
+      }
+      if (selectedRunSessions.get(workspace) === targetSessionId) {
+        selectedRunSessions.delete(workspace);
+      }
+      if (generation === this.generation) {
+        this.backStack.length = 0;
+        this.currentView = { type: 'overview' };
+      }
+      await this.postCurrentView('view:update', { runId, ok: true });
+      if (root === getWorkspaceRoot() && panel === this.panel) {
+        await vscode.commands.executeCommand(`${COMMAND_PREFIX}.refresh`);
+      }
+    } finally {
+      this.discardPending = false;
     }
   }
 }
@@ -525,7 +581,7 @@ async function safeStatus(
     full: options.full ?? false,
     include_events: options.includeEvents ?? false,
     events_limit: options.eventsLimit ?? 12,
-    ...(selectedSession ? { session_id: selectedSession } : {})
+    ...(selectedSession !== undefined ? { session_id: selectedSession } : {})
   };
   let result = await callTaplMcp('tapl_get_status', args, root);
   if (!result.ok) {
@@ -534,7 +590,7 @@ async function safeStatus(
   const initial = result.value as unknown as TaplStatus;
   if (!initial.active_run && initial.active_runs?.length && root) {
     const owner = initial.active_runs[0].session_id;
-    if (owner) {
+    if (typeof owner === 'string') {
       selectedRunSessions.set(root.uri.fsPath, owner);
       result = await callTaplMcp('tapl_get_status', { ...args, session_id: owner }, root);
       if (!result.ok) { return result; }
@@ -637,7 +693,7 @@ async function searchTapl(query: string): Promise<{ ok: true; value: TaplSearchP
 }
 
 async function callTaplMcp(
-  tool: 'tapl_get_status' | 'tapl_get_item' | 'tapl_search_history' | 'tapl_list_archives' | 'tapl_get_archive' | 'tapl_recall' | 'tapl_get_memory',
+  tool: 'tapl_get_status' | 'tapl_get_item' | 'tapl_search_history' | 'tapl_list_archives' | 'tapl_get_archive' | 'tapl_recall' | 'tapl_get_memory' | 'tapl_discard_run',
   args: Record<string, unknown>,
   root: vscode.WorkspaceFolder | undefined = getWorkspaceRoot()
 ): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false; error: string }> {

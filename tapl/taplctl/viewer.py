@@ -13,6 +13,7 @@ from typing import Any, Callable, Iterable
 from urllib.parse import unquote, urlsplit
 
 from . import config, db, embeddings, recall, sessions, validation
+from .application import WorkflowApplication, WorkflowApplicationError
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -241,6 +242,7 @@ class NativeJsonRunner:
 
         payload: dict[str, Any] = {
             "schema": state.get("schema") or {},
+            "viewer_capabilities": {"associativeMemory": True, "discardRun": True},
             "session_id": state.get("session_id", ""),
             "active_runs": state.get("active_runs") or [],
             "active_run": state.get("active_run"),
@@ -349,7 +351,7 @@ def run_native_json(db_path: Path, args: list[str]) -> dict[str, Any]:
 
 
 class ViewerApplication:
-    """Map a small read-only browser protocol to native TAPL read operations."""
+    """Map browser reads and explicit, confirmed RUN discard to native operations."""
 
     def __init__(
         self,
@@ -380,6 +382,8 @@ class ViewerApplication:
     def handle_message(self, payload: object) -> dict[str, Any]:
         identity = payload.get("sessionId") if isinstance(payload, dict) else None
         try:
+            if isinstance(payload, dict) and payload.get("command") == "discardRun":
+                return self._discard_run(payload)
             if isinstance(payload, dict) and payload.get("command") == "selectRun" and not isinstance(identity, str):
                 raise ValueError("Missing sessionId.")
             with sessions.session_scope(identity):
@@ -387,6 +391,52 @@ class ViewerApplication:
         except ValueError as exc:
             locale = "ko" if isinstance(payload, dict) and str(payload.get("locale", "")).startswith("ko") else "en"
             return self._error_message(str(exc), locale=locale, layout="auto")
+
+    def _discard_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        locale = "ko" if str(payload.get("locale", "")).lower().startswith("ko") else "en"
+        layout = payload.get("layout") if payload.get("layout") in {"small", "medium", "large"} else "auto"
+        run_id = payload.get("runId")
+        result = {"runId": run_id if isinstance(run_id, str) else "", "ok": False}
+        try:
+            if payload.get("confirmed") is not True:
+                raise ViewerError("Explicit confirmation is required to discard a RUN.")
+            if not isinstance(run_id, str) or not run_id.strip():
+                raise ViewerError("Missing runId.")
+            confirmation_run_id = payload.get("confirmationRunId")
+            if not isinstance(confirmation_run_id, str) or confirmation_run_id != run_id:
+                raise ViewerError("Enter the complete RUN ID exactly to confirm discard.")
+            target = payload.get("targetSessionId")
+            if not isinstance(target, str):
+                raise ViewerError("Missing targetSessionId.")
+            target = sessions.normalize_session_id(target)
+            selected = sessions.normalize_session_id(payload.get("sessionId"))
+            raw_workspace = payload.get("workspace")
+            if not isinstance(raw_workspace, str) or not raw_workspace.strip():
+                raise ViewerError("Missing workspace.")
+            # Each browser captures its own workspace in the confirmation. The
+            # stateless server resolves that explicit target without a default.
+            workspace, db_path = workspace_database(raw_workspace.strip())
+            # The selected read owner is never used to select the mutation target.
+            with sessions.session_scope(target):
+                WorkflowApplication(workspace, session_id=target).discard_run(
+                    run_id=run_id, confirmed=True, confirmation_run_id=confirmation_run_id)
+            if selected == target:
+                conn = db.connect(db_path, session_id="")
+                try:
+                    remaining = db.active_runs(conn)
+                    selected = str(remaining[0]["session_id"]) if remaining else ""
+                finally:
+                    conn.close()
+            with sessions.session_scope(selected):
+                view = self._overview(db_path, search_query="")
+            view["workspace"] = str(workspace)
+            return {"type": "view:update", "view": view, "locale": locale, "layout": layout,
+                    "workspace": str(workspace), "capabilities": {"associativeMemory": True, "discardRun": True},
+                    "discardResult": {"runId": run_id, "ok": True}}
+        except (ViewerError, WorkflowApplicationError, OSError, sqlite3.Error, ValueError) as exc:
+            message = str(exc)
+            return {**self._error_message(message, locale=locale, layout=layout),
+                    "discardResult": {**result, "message": message}}
 
     def _handle_message(self, payload: object) -> dict[str, Any]:
         locale = "en"
@@ -436,7 +486,7 @@ class ViewerApplication:
             "locale": locale,
             "layout": layout,
             "workspace": str(workspace) if workspace else "",
-            "capabilities": {"associativeMemory": True},
+            "capabilities": {"associativeMemory": True, "discardRun": True},
         }
 
     def _build_view(self, payload: dict[str, Any], db_path: Path) -> dict[str, Any]:
@@ -619,6 +669,10 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "Invalid JSON."})
+            return
+        if isinstance(payload, dict) and payload.get("command") == "discardRun" and not self.headers.get("Origin"):
+            self._send_json(HTTPStatus.FORBIDDEN, {"type": "error", "message": "An allowed Origin is required to discard a RUN.",
+                "discardResult": {"runId": payload.get("runId", ""), "ok": False}})
             return
         self._send_json(HTTPStatus.OK, self.server.app.handle_message(payload))
 

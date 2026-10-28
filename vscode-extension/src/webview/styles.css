@@ -143,6 +143,14 @@ pre {
   box-shadow: var(--tapl-shadow-raised);
 }
 
+.tapl-run-tab-slot {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  max-width: calc((100% - 8px) / 3);
+  min-width: 0;
+}
+
 .tapl-run-tab {
   display: flex;
   flex: 1 1 0;
@@ -160,6 +168,70 @@ pre {
   text-align: left;
   cursor: pointer;
 }
+
+.tapl-run-tab-slot > .tapl-run-tab {
+  width: 100%;
+  max-width: none;
+}
+
+.tapl-run-tab-slot:has(.tapl-run-tab-close) > .tapl-run-tab {
+  padding-right: 36px;
+}
+
+.tapl-run-tab-close {
+  position: absolute;
+  right: 6px;
+  top: 13px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--tapl-muted);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.tapl-run-tab-close:hover:not(:disabled) {
+  background: var(--tapl-panel);
+  color: var(--tapl-foreground);
+}
+
+.tapl-run-tab-close:focus-visible {
+  outline: 2px solid var(--tapl-accent);
+  outline-offset: -2px;
+}
+
+.tapl-run-tab-close:disabled { cursor: wait; opacity: .5; }
+
+.tapl-discard-dialog {
+  margin: auto;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 24px;
+  border: 1px solid var(--tapl-muted);
+  border-radius: 14px;
+  background: var(--tapl-surface);
+  color: var(--tapl-foreground);
+  box-shadow: var(--tapl-shadow-raised);
+}
+
+.tapl-discard-dialog::backdrop { background: rgb(0 0 0 / .6); }
+.tapl-discard-dialog h2 { margin: 0 0 12px; font-size: 20px; font-weight: 600; }
+.tapl-discard-dialog p { margin: 12px 0; }
+.tapl-discard-run-title { font-weight: 600; overflow-wrap: anywhere; }
+.tapl-discard-identity { margin: 16px 0; font-size: 12px; }
+.tapl-discard-identity dt { color: var(--tapl-muted); margin-top: 8px; }
+.tapl-discard-identity dd { margin: 0; overflow-wrap: anywhere; }
+.tapl-discard-run-id { user-select: text; cursor: text; }
+.tapl-discard-confirmation label { display: block; font-size: 13px; font-weight: 600; }
+.tapl-discard-confirmation p { font-size: 12px; }
+.tapl-discard-confirmation input { font-family: monospace; }
+.tapl-discard-error { color: var(--vscode-errorForeground, #ef6464); }
+.tapl-discard-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
 .tapl-run-tab:hover:not(:disabled),
 .tapl-run-tab[aria-selected='true'] {

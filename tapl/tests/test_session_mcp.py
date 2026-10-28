@@ -28,7 +28,10 @@ def test_all_mcp_tools_can_route_a_session(workspace: Path) -> None:
     assert tools
     for tool in tools:
         assert "session_id" in tool.input_schema["properties"], tool.name
-        assert "session_id" not in tool.input_schema.get("required", []), tool.name
+        if tool.name == "tapl_discard_run":
+            assert "session_id" in tool.input_schema.get("required", []), tool.name
+        else:
+            assert "session_id" not in tool.input_schema.get("required", []), tool.name
 
 
 def test_one_mcp_server_routes_concurrent_sessions_and_write_recommendations(workspace: Path) -> None:

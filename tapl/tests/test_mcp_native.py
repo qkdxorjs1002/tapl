@@ -119,7 +119,12 @@ def test_mcp_exposes_native_application_tools() -> None:
         tools = asyncio.run(mcp_server.create_server(workspace_root=_workspace(tmp)).list_tools())
 
     by_name = {tool.name: tool for tool in tools}
-    assert len(tools) == 29
+    assert len(tools) == 30
+    assert "tapl_discard_run" in by_name
+    assert by_name["tapl_discard_run"].annotations.destructive_hint
+    assert set(by_name["tapl_discard_run"].input_schema["required"]) == {
+        "run_id", "confirmation_run_id", "confirmed", "session_id",
+    }
     assert "tapl_get_context" in by_name
     assert "tapl_list_archives" in by_name
     assert "tapl_get_archive" in by_name

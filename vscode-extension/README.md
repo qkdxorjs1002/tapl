@@ -91,4 +91,9 @@ The extension and browser Viewer use the same React screens, CSS, and protocol t
 
 Both show associative memory lists, search, details, and original sources. Memory screens are read-only: ask the agent to change or delete a memory. Use a current `tapl-mcp` for memory support; older servers keep the other Viewer screens available.
 
-Run `npm run test:host` to check the extension's read-only routing, refresh, navigation, and workspace contracts, then `npm run compile` to build and sync the shared browser assets.
+RUN tabs include a close icon. Discard requires a confirmation dialog and an exact
+full RUN ID entered or pasted by the user. Records are archived; truly empty RUNs
+are deleted. External agent processes keep running. This action requires a current
+`tapl-mcp`; older servers keep the Viewer read-only.
+
+Run `npm run test:host` to check routing, confirmed discard, refresh, navigation, and workspace contracts, then `npm run compile` to build and sync the shared browser assets.
