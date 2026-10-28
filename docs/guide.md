@@ -172,11 +172,19 @@ cause removal to stop for inspection.
 
 ## Connect TAPL to Codex
 
-For any of the three Homebrew formulae, run:
+After installing TAPL, choose **one** Codex connection scope:
 
-```sh
-taplctl install user
-```
+| Scope | Applies to | Command |
+| --- | --- | --- |
+| User | Your Codex projects, through user settings in `~/.codex` | `taplctl install user` |
+| Repository | Only the target repository, through its local `.codex` settings | `taplctl install repo` |
+
+Run `repo` from the target repository, or specify it with
+`taplctl install repo --repo /path/to/repository`. Repository installation also
+creates local `.tapl` configuration and workflow state. This scope choice is
+independent of the package installation method or release channel.
+
+For any of the three Homebrew formulae, use the chosen command above.
 
 The installer finds `taplctl` on `PATH` and uses the sibling `tapl-mcp` and
 `tapl-hook` commands. A normal Homebrew installation needs no path override.
@@ -188,7 +196,10 @@ Use `--taplctl-command` only when automatic discovery selects the wrong executab
 or you need a specific installation. For example:
 
 ```sh
+# Choose one scope:
 taplctl install user --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
+# Or, from the target repository:
+taplctl install repo --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
 ```
 
 Replace the formula name if you installed `taplctl-semantic` or `taplctl-pre`.
@@ -201,7 +212,10 @@ Standalone installations use their actual executable paths:
 Linux standalone installer:
 
 ```sh
+# Choose one scope:
 taplctl install user --taplctl-command "$(realpath "$(command -v taplctl)")"
+# Or, from the target repository:
+taplctl install repo --taplctl-command "$(realpath "$(command -v taplctl)")"
 ```
 
 Windows standalone installer (PowerShell):
@@ -209,11 +223,13 @@ Windows standalone installer (PowerShell):
 ```powershell
 $taplRoot = if ($env:TAPL_INSTALL_ROOT) { $env:TAPL_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA "tapl" }
 $taplInstall = Get-Content -Raw (Join-Path $taplRoot "install.json") | ConvertFrom-Json
+# Choose one scope:
 taplctl install user --taplctl-command (Join-Path $taplInstall.venv "Scripts\taplctl.exe")
+# Or, from the target repository:
+taplctl install repo --taplctl-command (Join-Path $taplInstall.venv "Scripts\taplctl.exe")
 ```
 
-These commands install for your Codex account. Replace `user` with `repo` to
-connect only the current repository. Installation adds an enabled
+Run only the command for your chosen scope. Both scopes add an enabled
 `mcp_servers.tapl` entry for `tapl-mcp` and lifecycle hooks for `tapl-hook`.
 Restart Codex afterward, then trust the installed hook when first prompted.
 

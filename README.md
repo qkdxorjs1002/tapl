@@ -122,25 +122,37 @@ Installation guide: https://github.com/qkdxorjs1002/tapl/blob/main/docs/guide.md
 
 Read the guide, detect my OS and shell, and check prerequisites and any existing installation.
 Use the official installation method for my OS and the latest stable release unless I specify another channel.
-Connect Codex with the guide's platform-specific taplctl install user command.
+Before connecting, confirm my preferred scope unless I already specified it: user (all my Codex projects) or repo (only the target repository).
+Run taplctl install user or taplctl install repo for the chosen scope, using the guide's platform-specific executable path when needed.
 Preserve existing TAPL settings, hook mode, workflow databases, and unrelated Codex settings.
 Verify the result with taplctl --version and taplctl doctor.
 Report the installed version and any remaining terminal/Codex restart and hook-trust steps.
 ```
 
-See [installation options](#installation) below for a repository-only connection
-or Windows beta testing.
+See [connection scopes](#connection-scope) below and [installation options](#installation)
+for other platforms or Windows beta testing.
 
 ### Install with commands
 
-On macOS with Homebrew, install the stable release and connect it to Codex:
+On macOS with Homebrew, install the stable release:
 
 ```sh
 brew tap qkdxorjs1002/tap
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
-taplctl install user
 ```
+
+<a id="connection-scope"></a>
+
+Then choose **one** Codex connection scope:
+
+| Scope | When to choose it | Command |
+| --- | --- | --- |
+| User | Use TAPL across your Codex projects | `taplctl install user` |
+| Repository | Use TAPL only in the target repository | `taplctl install repo` |
+
+Run the repository command from the target repository, or specify its path with
+`taplctl install repo --repo /path/to/repository`.
 
 1. **Restart Codex** to load the TAPL MCP server and lifecycle hooks.
 2. **Trust the installed hook** when Codex first asks.
@@ -168,8 +180,9 @@ follow its [Codex connection command](docs/guide.md#connect).
 
 You can also use the [Agent installation prompt](#agent-install) above to have
 your agent check the environment, install TAPL, connect Codex, and verify setup.
-For a repository-only connection, replace `taplctl install user` in the prompt
-with `taplctl install repo`.
+Choose `taplctl install user` for your Codex projects or `taplctl install repo`
+for one repository. The prompt confirms this choice before connecting.
+See [connection scopes](#connection-scope) and the [platform-specific commands](docs/guide.md#connect).
 
 | Platform / channel | Install option | Details |
 | --- | --- | --- |

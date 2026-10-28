@@ -129,24 +129,36 @@ TAPL을 설치하고 Codex에 연결해줘.
 
 가이드를 읽고 내 운영체제와 셸, 필수 환경, 기존 설치 여부를 확인해줘.
 다른 채널을 지정하지 않았다면 내 OS에 맞는 공식 방법으로 최신 안정판을 설치해줘.
-가이드의 운영체제별 taplctl install user 명령으로 Codex에 연결해줘.
+연결 범위를 이미 지정하지 않았다면 user(내 Codex 프로젝트 전체)와 repo(대상 저장소만) 중 내가 원하는 범위를 확인해줘.
+선택한 범위에 맞춰 taplctl install user 또는 taplctl install repo를 실행하고, 필요하면 가이드의 운영체제별 실행 파일 경로를 사용해줘.
 기존 TAPL 설정, hook 모드, 워크플로 DB와 다른 Codex 설정은 보존해줘.
 taplctl --version과 taplctl doctor로 설치 결과를 확인해줘.
 설치한 버전과 터미널·Codex 재시작, hook 신뢰 등 내가 마무리할 단계를 알려줘.
 ```
 
-현재 저장소에만 연결하거나 Windows 베타를 테스트하려면 아래 [설치 옵션](#설치)을 참고하세요.
+아래 [연결 범위](#connection-scope)와 다른 플랫폼·Windows 베타의 [설치 옵션](#설치)을 참고하세요.
 
 ### 명령으로 직접 설치하기
 
-macOS에서는 Homebrew로 안정판을 설치하고 Codex에 연결합니다.
+macOS에서는 Homebrew로 안정판을 설치합니다.
 
 ```sh
 brew tap qkdxorjs1002/tap
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
-taplctl install user
 ```
+
+<a id="connection-scope"></a>
+
+이어서 Codex 연결 범위를 **하나 선택**하세요.
+
+| 범위 | 선택 기준 | 명령 |
+| --- | --- | --- |
+| 사용자 | 내 Codex 프로젝트 전체에서 사용 | `taplctl install user` |
+| 저장소 | 대상 저장소에서만 사용 | `taplctl install repo` |
+
+저장소 명령은 대상 저장소 디렉터리에서 실행하거나
+`taplctl install repo --repo /path/to/repository`로 경로를 지정하세요.
 
 1. TAPL MCP 서버와 hook을 읽도록 **Codex를 재시작**합니다.
 2. Codex가 처음 확인을 요청하면 **설치된 hook을 신뢰**합니다.
@@ -170,8 +182,10 @@ TAPL이 Codex 세션 작업 폴더에 `.tapl/tapl.db`를 만들고, Codex가 MCP
 ## 설치
 
 위의 [Agent 설치 프롬프트](#agent-install)를 사용하면 환경 확인부터 TAPL 설치,
-Codex 연결과 검증까지 Agent에게 맡길 수 있습니다. 현재 저장소에만 연결하려면
-프롬프트의 `taplctl install user`를 `taplctl install repo`로 바꾸세요.
+Codex 연결과 검증까지 Agent에게 맡길 수 있습니다. Codex 프로젝트 전체에 연결하려면
+`taplctl install user`, 한 저장소에만 연결하려면 `taplctl install repo`를 선택하세요.
+프롬프트는 연결 전에 이 선택을 확인합니다.
+[연결 범위](#connection-scope)와 [운영체제별 명령](docs/guide.ko.md#connect)을 참고하세요.
 
 | 플랫폼·채널 | 설치 방법 | 안내 |
 | --- | --- | --- |

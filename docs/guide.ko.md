@@ -28,21 +28,18 @@ brew tap qkdxorjs1002/tap
 # 안정판: SQLite 전문 검색
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
-taplctl install user
 ```
 
 ```sh
 # 안정판: 시맨틱 검색 의존성 포함
 brew trust --formula qkdxorjs1002/tap/taplctl-semantic
 brew install taplctl-semantic
-taplctl install user
 ```
 
 ```sh
 # 프리릴리즈를 포함해 가장 최근에 공개된 릴리즈
 brew trust --formula qkdxorjs1002/tap/taplctl-pre
 brew install taplctl-pre
-taplctl install user
 ```
 
 `taplctl-pre`에는 `taplctl@pre` 별칭도 있습니다. 이 가이드에서는 정식 formula 이름을 사용합니다. `taplctl`과 `taplctl-semantic`은 안정판만 따릅니다.
@@ -50,6 +47,8 @@ taplctl install user
 Homebrew는 릴리즈에 포함된 wheel 묶음의 고정 의존성을 설치하며, 설치 중 PyPI에서 패키지를 해석하지 않습니다. 현재 formula는 `taplctl`, `tapl-mcp`, `tapl-hook`을 모두 연결하므로 실행 경로를 따로 지정할 필요가 없습니다.
 
 formula를 업그레이드하거나 재설치하면 해당 TAPL viewer 서비스가 이미 실행 중일 때만 자동 재시작을 시도합니다. 중지된 서비스와 신규 설치는 중지 상태로 유지됩니다. 직접 실행한 `searchd`나 MCP stdio 프로세스에는 적용되지 않습니다.
+
+설치 후 [Codex 연결 범위](#connect)를 선택하세요.
 
 <a id="linux"></a>
 
@@ -159,11 +158,19 @@ Codex 연결은 버전별 가상 환경의 실행 파일을 참조합니다. 업
 
 ## TAPL을 Codex에 연결
 
-Homebrew의 세 formula 모두 같은 명령으로 연결합니다.
+TAPL 설치 후 Codex 연결 범위를 **하나 선택**하세요.
 
-```sh
-taplctl install user
-```
+| 범위 | 적용 대상 | 명령 |
+| --- | --- | --- |
+| 사용자 | `~/.codex` 사용자 설정을 통해 내 Codex 프로젝트 전체 | `taplctl install user` |
+| 저장소 | 대상 저장소의 로컬 `.codex` 설정을 통해 해당 저장소만 | `taplctl install repo` |
+
+`repo`는 대상 저장소 디렉터리에서 실행하거나
+`taplctl install repo --repo /path/to/repository`로 경로를 지정하세요.
+저장소 설치는 로컬 `.tapl` 설정과 워크플로 DB도 만듭니다.
+연결 범위는 패키지 설치 방법이나 릴리즈 채널과 별개로 선택합니다.
+
+Homebrew의 세 formula 모두 위에서 선택한 명령으로 연결합니다.
 
 설치 프로그램이 `PATH`에서 `taplctl`을 찾고 같은 디렉터리의 `tapl-mcp`와
 `tapl-hook`을 사용합니다. 일반적인 Homebrew 설치에서는 경로 옵션이 필요하지 않습니다.
@@ -175,7 +182,10 @@ taplctl install user
 `--taplctl-command`를 사용하세요. 예를 들면 다음과 같습니다.
 
 ```sh
+# 연결 범위를 하나 선택:
 taplctl install user --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
+# 또는 대상 저장소에서:
+taplctl install repo --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
 ```
 
 `taplctl-semantic`이나 `taplctl-pre`를 설치했다면 formula 이름을 바꾸세요.
@@ -188,7 +198,10 @@ taplctl install user --taplctl-command "$(brew --prefix taplctl)/libexec/bin/tap
 Linux 독립형 설치:
 
 ```sh
+# 연결 범위를 하나 선택:
 taplctl install user --taplctl-command "$(realpath "$(command -v taplctl)")"
+# 또는 대상 저장소에서:
+taplctl install repo --taplctl-command "$(realpath "$(command -v taplctl)")"
 ```
 
 Windows 독립형 설치:
@@ -196,11 +209,13 @@ Windows 독립형 설치:
 ```powershell
 $taplRoot = if ($env:TAPL_INSTALL_ROOT) { $env:TAPL_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA "tapl" }
 $taplInstall = Get-Content -Raw (Join-Path $taplRoot "install.json") | ConvertFrom-Json
+# 연결 범위를 하나 선택:
 taplctl install user --taplctl-command (Join-Path $taplInstall.venv "Scripts\taplctl.exe")
+# 또는 대상 저장소에서:
+taplctl install repo --taplctl-command (Join-Path $taplInstall.venv "Scripts\taplctl.exe")
 ```
 
-위 명령은 현재 사용자의 Codex 환경 전체에 연결합니다. 현재 저장소에만 연결하려면 `user`를 `repo`로
-바꾸세요.
+선택한 범위의 명령 하나만 실행하세요.
 
 사용자 설치에서는 Codex가 세션 작업 폴더의 TAPL DB를 초기화하며, 로컬
 `.tapl/config.toml`과 `.tapl/version`은 생성하지 않습니다. 저장소 자동 갱신에는
