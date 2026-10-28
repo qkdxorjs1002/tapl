@@ -332,7 +332,9 @@ class PowerShellBootstrapTests(_Fixture):
         conversion = '$parsedReleases = $json | ConvertFrom-Json @jsonParameters'
         self.assertEqual(self.source.count(conversion), 1)
         self.script.write_text(self.source.replace(
-            conversion, '$parsedReleases = Write-Output -NoEnumerate ($json | ConvertFrom-Json @jsonParameters)',
+            # 5.1 preserves an object array even when JSON has one item.
+            # Passing a scalar to Write-Output instead creates a different list.
+            conversion, '$parsedReleases = Write-Output -NoEnumerate ([object[]]($json | ConvertFrom-Json @jsonParameters))',
         ), encoding="utf-8")
         tag = "3.0.0-beta1"
         self.assets[f"/releases/download/{tag}/install.ps1"] = (200, self.payload)
