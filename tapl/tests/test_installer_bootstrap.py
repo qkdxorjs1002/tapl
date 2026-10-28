@@ -475,6 +475,25 @@ class CommandBootstrapTests(_Fixture):
         self.assertEqual(self.requests, ["/main/install.ps1", "/api/releases?per_page=100&page=1", "/releases/download/3.0.0-beta1/install.ps1"])
         self.assert_clean()
 
+    def test_windows_powershell_uses_current_host_modules(self) -> None:
+        legacy_host = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        # Reproduce a Python intermediary inheriting pwsh's module path. The
+        # 5.1 entry script must still resolve its own Security/Utility modules.
+        self.environment["PSModulePath"] = str(Path(str(POWERSHELL)).parent / "Modules")
+        self.api_page([self.release("3.0.0-beta1")])
+        self.assets["/releases/download/3.0.0-beta1/install.ps1"] = (200, self.payload)
+        for flags, channel, semantic in (((), "stable", False), (("-Pre", "-Semantic"), "pre", True)):
+            with self.subTest(flags=flags):
+                result = subprocess.run(
+                    [str(legacy_host), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                     "-File", str(self.script), *flags], env=self.environment,
+                    capture_output=True, text=True, check=False, timeout=60,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.captured()["channel"], channel)
+                self.assertEqual(self.captured()["semantic"], semantic)
+                self.assert_clean()
+
     def test_failed_bootstrap_download_fails_closed_and_cleans(self) -> None:
         self.assets["/main/install.ps1"] = (500, self.source)
         result = self.run_cmd()

@@ -1,5 +1,7 @@
 @echo off
 setlocal DisableDelayedExpansion
+rem Let Windows PowerShell rebuild its own module paths, even from a pwsh parent.
+set "PSModulePath="
 if not defined TEMP exit /b 1
 set "TAPL_BOOTSTRAP_WORK=%TEMP%\tapl-cmd-%RANDOM%-%RANDOM%-%RANDOM%"
 mkdir "%TAPL_BOOTSTRAP_WORK%" >nul 2>&1

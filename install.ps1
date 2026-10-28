@@ -12,6 +12,9 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
+# A Windows PowerShell child can inherit PowerShell 7's module search paths.
+# Resolve built-in commands from the current host before inherited editions.
+$env:PSModulePath = [IO.Path]::Combine($PSHOME, "Modules")
 $ReleaseBaseUrl = "https://github.com/qkdxorjs1002/tapl/releases"
 $ReleasesApiUrl = "https://api.github.com/repos/qkdxorjs1002/tapl/releases"
 $MaxReleasePages = 10
