@@ -64,4 +64,4 @@ jobs:
           ./.github/scripts/windows_install_smoke.ps1 -Wheel $wheel -Python (Get-Command python).Source
 
       - name: Run Windows installer tests (stdlib-only fixtures)
-        run: python -m unittest -v tapl.tests.test_installer_windows tapl.tests.test_installer_bootstrap --failfast
+        run: python -m unittest -v tapl.tests.test_installer_bootstrap tapl.tests.test_installer_windows --failfast

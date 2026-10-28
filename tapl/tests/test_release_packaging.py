@@ -402,10 +402,11 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             for script in ('install.ps1', '.github/scripts/install-windows.ps1',
                            '.github/scripts/windows_install_smoke.ps1'):
                 self.assertIn(f"'{script}'", parser['run'])
-            self.assertIn('python -m unittest -v tapl.tests.test_installer_windows',
-                          steps['Run Windows installer tests (stdlib-only fixtures)']['run'])
-            self.assertIn('tapl.tests.test_installer_bootstrap',
-                          steps['Run Windows installer tests (stdlib-only fixtures)']['run'])
+            installer_tests = steps['Run Windows installer tests (stdlib-only fixtures)']['run'].split()
+            self.assertEqual(installer_tests[:4], ['python', '-m', 'unittest', '-v'])
+            self.assertIn('tapl.tests.test_installer_windows', installer_tests)
+            self.assertLess(installer_tests.index('tapl.tests.test_installer_bootstrap'),
+                            installer_tests.index('tapl.tests.test_installer_windows'))
             self.assertIn('tapl.tests.test_release_packaging.WindowsInstallerAssetTests',
                           steps['Test version-bound Windows release assets']['run'])
             self.assertIn('pip wheel --no-deps', steps['Build actual TAPL wheel']['run'])
