@@ -68,6 +68,17 @@ See the [associative memory guide](docs/guide.md#associative-memory) for detaile
 
 ## See the workflow
 
+Choose PLAN/TASK authoring detail: `precise` (the current default), `normal`, or `minimal`.
+Normal and minimal reduce prose and unnecessary task splitting without fixed counts or length limits.
+
+```sh
+taplctl config set workflow.authoring_detail normal
+# Restore the default:
+taplctl config unset workflow.authoring_detail
+```
+
+See [authoring detail](docs/guide.md#authoring-detail) for each level and configuration scope.
+
 Ask for an outcome, in your own words:
 
 > Investigate the missing permission check and document the evidence.

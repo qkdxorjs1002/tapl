@@ -492,7 +492,8 @@ commands validate the complete resulting config and preserve comments and
 unrelated settings. Use `taplctl config --help` or `taplctl config set --help`
 for every supported key, value format, allowed enum, and example.
 
-The supported keys are `search.mode` (`semantic`, `bm25`, `word`, or `hybrid`),
+The supported keys are `workflow.authoring_detail` (`precise`, `normal`, or `minimal`),
+`search.mode` (`semantic`, `bm25`, `word`, or `hybrid`),
 `search.max_results` (integer ≥ 1), `search.hybrid_semantic_ratio` (0.0–1.0),
 `search.semantic_provider` (`local`, `daemon`, or `auto`),
 `search.searchd_model_idle_timeout_seconds` (integer ≥ 0),
@@ -510,6 +511,30 @@ another file, place the global option before the command:
 ```sh
 taplctl --config /path/to/config.toml config set search.mode bm25
 ```
+
+### Authoring detail
+
+| Value | PLAN/TASK writing behavior |
+| --- | --- |
+| `precise` (default) | Preserves current detailed writing and task decomposition. |
+| `normal` | Groups related edits and records relevant facts concisely. Separates independently risky work and substantive verification when needed. |
+| `minimal` | Focuses on objective, action and verification, references shared plan facts, and combines related changes with their verification. |
+
+```sh
+taplctl config set workflow.authoring_detail normal
+taplctl config set workflow.authoring_detail minimal
+taplctl config get workflow.authoring_detail
+taplctl config unset workflow.authoring_detail  # restore precise
+```
+
+Normal and minimal impose no fixed task count, character count or token budget. Complexity, risk, ownership,
+dependencies and verification boundaries determine decomposition; the existing task-count heuristic does not
+apply at these levels. These writing instructions reduce duplication and unnecessary splitting to save tokens;
+actual savings depend on the task and model. Fast/Standard/Strict mode, approvals, required fields and completion
+verification remain unchanged, including Strict risk, interface, rollback and validation boundaries.
+
+The working-folder/user selection rules above apply. Use `--config` to select a specific file.
+The next full MCP policy lookup delivers the new detail setting and a changed `policy_revision`.
 
 ## Associative memory
 

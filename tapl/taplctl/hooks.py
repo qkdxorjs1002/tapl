@@ -72,6 +72,8 @@ def _handle_event(
     payload: dict[str, Any],
     tapl_settings: tapl_config.TaplConfig | None = None,
 ) -> dict[str, Any]:
+    resolved_settings = tapl_settings or tapl_config.TaplConfig(path="", exists=False)
+    authoring_detail = resolved_settings.workflow.authoring_detail
     tool_name = tool or infer_tool_name(payload)
     message = ""
     block = False
@@ -83,7 +85,6 @@ def _handle_event(
         db.ensure_active_run(conn, request_summary=db.DEFAULT_REQUEST_SUMMARY)
 
     if event in {"SessionStart", "UserPromptSubmit"}:
-        resolved_settings = tapl_settings or tapl_config.TaplConfig(path="", exists=False)
         context_packet = tapl_context.build_context(
             conn,
             event=event,
@@ -99,7 +100,7 @@ def _handle_event(
             message = tapl_prompt.durable_edit_requires_plan_message()
             block = mode == "enforce"
         else:
-            check = validation.validate_plan_task_execute(conn)
+            check = validation.validate_plan_task_execute(conn, authoring_detail=authoring_detail)
             issue_message = validation.format_issues(check)
             if issue_message:
                 message = combine_messages(message, issue_message)
@@ -132,7 +133,7 @@ def _handle_event(
                 tapl_prompt.stop_active_executions_message(len(active_executions)),
             )
             block = mode == "enforce"
-        check = validation.validate_workflow_state(state)
+        check = validation.validate_workflow_state(state, authoring_detail=authoring_detail)
         issue_message = validation.format_issues(check)
         if issue_message:
             message = combine_messages(message, issue_message)

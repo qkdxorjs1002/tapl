@@ -195,6 +195,7 @@ class NativeJsonRunner:
         return db.connect(db_path)
 
     def _status(self, db_path: Path, *, full: bool, include_events: bool) -> dict[str, Any]:
+        settings = self._settings(db_path)
         conn = self._connection(db_path)
         try:
             state = db.status_payload(conn)
@@ -203,10 +204,12 @@ class NativeJsonRunner:
             if not state["active_run"] and not db.connection_session_id(conn) and state["active_runs"]:
                 db.bind_session(conn, state["active_runs"][0]["session_id"])
                 state = db.status_payload(conn)
-            state["plan_task_execute"] = validation.validate_workflow_state(state)
+            state["plan_task_execute"] = validation.validate_workflow_state(
+                state, authoring_detail=settings.workflow.authoring_detail,
+            )
         finally:
             conn.close()
-        state["config"] = self._settings(db_path).as_dict()
+        state["config"] = settings.as_dict()
         return self._status_output(state, full=full, include_events=include_events)
 
     @staticmethod

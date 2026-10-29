@@ -39,7 +39,7 @@ class ConfigGetTests(unittest.TestCase):
             self.assertEqual(payload["path"], str(path))
             self.assertFalse(payload["exists"])
             self.assertIsNone(payload["key"])
-            self.assertEqual(set(payload["value"]), {"search", "viewer", "recall", "subagents"})
+            self.assertEqual(set(payload["value"]), {"search", "viewer", "recall", "subagents", "workflow"})
             self.assertEqual(payload["value"]["search"]["mode"], config.DEFAULT_SEARCH_MODE)
             self.assertIsNone(payload["value"]["subagents"]["available_models"])
             self.assertEqual(list(root.iterdir()), [])

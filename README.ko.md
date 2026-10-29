@@ -70,6 +70,17 @@ taplctl config unset recall.enabled
 
 ## 작업 흐름 보기
 
+PLAN·TASK 작성 상세도는 `정확하게(precise, 기본)`·`보통(normal)`·`최소(minimal)`로 선택할 수 있습니다.
+보통·최소는 고정 개수나 길이 제한 없이 본문과 불필요한 TASK 분할을 줄입니다.
+
+```sh
+taplctl config set workflow.authoring_detail normal
+# 기본 동작으로 복원:
+taplctl config unset workflow.authoring_detail
+```
+
+각 수준과 설정 범위는 [작성 상세도 안내](docs/guide.ko.md#authoring-detail)를 참고하세요.
+
 Codex에게 평소처럼 요청하세요.
 
 > 권한 검사 누락의 원인을 조사하고 근거를 정리해줘.

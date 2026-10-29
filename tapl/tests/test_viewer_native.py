@@ -61,3 +61,23 @@ def test_native_runner_supports_an_explicit_database_outside_a_workspace() -> No
 
         assert status["active_run"] is None
         assert status["recent_events"] == []
+
+
+def test_native_viewer_validation_uses_selected_authoring_detail(tmp_path) -> None:
+    db.initialize_workspace(tmp_path)
+    workflow = WorkflowApplication(tmp_path)
+    workflow.summarize_run("Update handler", work_type="implementation", workflow_mode="standard")
+    workflow.apply_plan("PLAN-001", objective="Fix handler", requirements_trace="REQ-001",
+                        selected_approach="Update handler and test", validation="Run regression test")
+    workflow.create_task("TASK-001", "Fix handler", "PLAN-001", "Correct output",
+                         "Update handler and regression test", "Run regression test")
+    runner = viewer.NativeJsonRunner()
+    path = tmp_path / db.DEFAULT_DB_RELATIVE
+    for detail in ("normal", "minimal", "precise"):
+        (tmp_path / ".tapl/config.toml").write_text(
+            f'[workflow]\nauthoring_detail = "{detail}"\n', encoding="utf-8",
+        )
+        status = runner(path, ["status", "--json"])
+        issues = {item["code"] for item in status["plan_task_execute"]["issues"]}
+        assert ("task_granularity_too_coarse" in issues) == (detail == "precise")
+        assert status["config"]["workflow"]["authoring_detail"] == detail

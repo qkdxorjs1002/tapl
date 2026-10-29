@@ -457,7 +457,8 @@ taplctl config unset search.mode
 허용값, 예시는 `taplctl config --help` 또는 `taplctl config set --help`에서 확인할 수
 있습니다.
 
-지원 key는 `search.mode`(`semantic`, `bm25`, `word`, `hybrid`),
+지원 key는 `workflow.authoring_detail`(`precise`, `normal`, `minimal`),
+`search.mode`(`semantic`, `bm25`, `word`, `hybrid`),
 `search.max_results`(1 이상의 정수), `search.hybrid_semantic_ratio`(0.0–1.0),
 `search.semantic_provider`(`local`, `daemon`, `auto`),
 `search.searchd_model_idle_timeout_seconds`(0 이상의 정수),
@@ -475,6 +476,32 @@ profile table의 TOML 배열)입니다.
 ```sh
 taplctl --config /path/to/config.toml config set search.mode bm25
 ```
+
+<a id="authoring-detail"></a>
+
+### PLAN·TASK 작성 상세도
+
+| 값 | 작성 방식 |
+| --- | --- |
+| `precise` · 정확하게, 기본 | 현재의 상세한 작성과 TASK 분할 기준을 유지합니다. |
+| `normal` · 보통 | 관련 편집을 묶고 필요한 내용을 간결하게 기록합니다. 독립적인 위험이나 별도 검증이 필요한 작업은 분리합니다. |
+| `minimal` · 최소 | 목표·실행·검증 중심으로 작성하고 공유 PLAN 내용을 반복하지 않습니다. 함께 처리할 수 있는 변경과 검증을 묶습니다. |
+
+```sh
+taplctl config set workflow.authoring_detail normal
+taplctl config set workflow.authoring_detail minimal
+taplctl config get workflow.authoring_detail
+taplctl config unset workflow.authoring_detail  # 기본값 precise 복원
+```
+
+보통·최소는 TASK 개수나 글자·토큰 수를 고정하지 않습니다. 복잡도·위험·소유권·의존성·검증 경계에
+따라 나누며, 기존 TASK 개수 휴리스틱은 적용하지 않습니다. 설명 중복과 불필요한 분할을 줄여
+토큰 사용을 줄이는 작성 지침이며 실제 절감량은 작업과 모델에 따라 달라집니다.
+Fast/Standard/Strict 모드, 승인, 필수 필드와 완료 검증은 유지합니다. Strict에 필요한 위험·인터페이스·
+롤백·검증 경계도 생략하지 않습니다.
+
+설정은 위의 작업 폴더/사용자 설정 선택 규칙을 따릅니다. 특정 파일을 바꾸려면 `--config`를 사용하세요.
+MCP는 다음 전체 정책 조회에서 변경된 상세도와 새 `policy_revision`을 전달합니다.
 
 ## 연상 기억
 

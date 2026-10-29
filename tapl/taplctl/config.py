@@ -20,6 +20,7 @@ DEFAULT_SEARCH_MAX_RESULTS = 12
 DEFAULT_SEMANTIC_PROVIDER = "auto"
 DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
 DEFAULT_RECALL_ENABLED = True
+DEFAULT_AUTHORING_DETAIL = "precise"
 DEFAULT_SUBAGENTS_ENABLED = True
 DEFAULT_SUBAGENT_STRATEGY = "aggressive"
 DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -78,6 +79,7 @@ DEFAULT_SUBAGENT_PROFILE_SPECS: tuple[
 )
 
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
+AUTHORING_DETAILS = ("precise", "normal", "minimal")
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
 SUBAGENT_STRATEGIES = ("conservative", "balanced", "aggressive")
 SUBAGENT_DELEGATION_BIASES = ("inherit", "prefer", "neutral", "avoid")
@@ -101,6 +103,12 @@ class EditableConfigKey:
 
 
 EDITABLE_CONFIG_KEYS = (
+    EditableConfigKey(
+        "workflow.authoring_detail",
+        "DETAIL",
+        "Plan and task writing detail and task decomposition granularity.",
+        allowed=AUTHORING_DETAILS,
+    ),
     EditableConfigKey(
         "recall.enabled", "BOOLEAN",
         "Automatic memory capture, recall, and reinforcement; true or false.",
@@ -341,6 +349,14 @@ class RecallConfig:
 
 
 @dataclass(frozen=True)
+class WorkflowConfig:
+    authoring_detail: str = DEFAULT_AUTHORING_DETAIL
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"authoring_detail": self.authoring_detail}
+
+
+@dataclass(frozen=True)
 class TaplConfig:
     path: str
     exists: bool
@@ -348,6 +364,7 @@ class TaplConfig:
     subagents: SubagentsConfig = field(default_factory=SubagentsConfig)
     viewer: ViewerConfig = field(default_factory=ViewerConfig)
     recall: RecallConfig = field(default_factory=RecallConfig)
+    workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -356,6 +373,7 @@ class TaplConfig:
             "search": self.search.as_dict(),
             "viewer": self.viewer.as_dict(),
             "recall": self.recall.as_dict(),
+            "workflow": self.workflow.as_dict(),
             "subagents": self.subagents.as_dict(),
         }
 
@@ -552,6 +570,15 @@ def from_mapping(
             setting(table(data, "recall"), "enabled", default=DEFAULT_RECALL_ENABLED),
             "recall.enabled",
         )),
+        workflow=WorkflowConfig(authoring_detail=choice(
+            setting(
+                table(data, "workflow"),
+                "authoring_detail",
+                default=DEFAULT_AUTHORING_DETAIL,
+            ),
+            AUTHORING_DETAILS,
+            "workflow.authoring_detail",
+        )),
         subagents=SubagentsConfig(
             enabled=subagents_enabled,
             strategy=subagent_strategy,
@@ -594,6 +621,8 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
             raise ValueError(f"{key} value must be one TOML value")
         value = parsed_value["value"]
 
+    if key == "workflow.authoring_detail":
+        return choice(value, AUTHORING_DETAILS, key)
     if key == "search.mode":
         return choice(value, SEARCH_MODES, key)
     if key == "search.max_results":

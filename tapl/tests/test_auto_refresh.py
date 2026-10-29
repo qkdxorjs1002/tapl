@@ -58,7 +58,7 @@ class AutoRefreshTests(unittest.TestCase):
         root = self.install_scope("user")
         (root / install.INSTALL_STATE_RELATIVE).unlink()
         config = root / ".tapl/config.toml"
-        config.write_text('[search]\nmax_results = 3\n[subagents]\nsetup_complete = true\nstrategy = "balanced"\n[subagents.models]\n"custom" = ["high"]\n')
+        config.write_text('[workflow]\nauthoring_detail = "minimal"\n[search]\nmax_results = 3\n[subagents]\nsetup_complete = true\nstrategy = "balanced"\n[subagents.models]\n"custom" = ["high"]\n')
         with mock.patch.object(install, "prompt_tapl_config_policy", side_effect=AssertionError("prompted")):
             self.refresh(tapl_config_policy="overwrite")
         parsed = tomllib.loads(config.read_text())
@@ -66,6 +66,7 @@ class AutoRefreshTests(unittest.TestCase):
         self.assertEqual(parsed["subagents"]["models"], {"custom": ["high"]})
         self.assertEqual(parsed["subagents"]["strategy"], "balanced")
         self.assertTrue(parsed["recall"]["enabled"])
+        self.assertEqual(parsed["workflow"]["authoring_detail"], "minimal")
 
     def test_customization_alone_does_not_trigger_refresh(self):
         root = self.install_scope("user")

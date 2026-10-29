@@ -21,7 +21,9 @@ def build_context(
 ) -> dict[str, Any]:
     state = db.status_payload(conn)
     state["session_id"] = db.connection_session_id(conn)
-    plan_task = validation.validate_workflow_state(state)
+    plan_task = validation.validate_workflow_state(
+        state, authoring_detail=settings.workflow.authoring_detail,
+    )
     prompt = prompt_summary(payload or {})
     covered_issue_codes = covered_validation_issue_codes(state, plan_task)
     return {
@@ -48,6 +50,7 @@ def build_context(
             state=state,
             prompt=prompt,
             subagents=settings.subagents,
+            authoring_detail=settings.workflow.authoring_detail,
         ),
         "next_actions": (
             ["Call `tapl_get_next` and ask the first-use SubAgent preference question before delegating."]
@@ -162,12 +165,14 @@ def workflow_guidance(
     state: dict[str, Any],
     prompt: str = "",
     subagents: tapl_config.SubagentsConfig | None = None,
+    authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
 ) -> list[str]:
     return tapl_prompt.context_workflow_guidance(
         event=event,
         state=state,
         prompt=prompt,
         subagents=subagents,
+        authoring_detail=authoring_detail,
     )
 
 

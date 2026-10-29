@@ -6,7 +6,7 @@ import re
 import sqlite3
 from typing import Any
 
-from . import db, prompt as tapl_prompt
+from . import config, db, prompt as tapl_prompt
 
 
 EXECUTABLE_STATUSES = ("Pending", "In Progress", "Blocked")
@@ -18,17 +18,23 @@ def validate_plan_task_execute(
     conn: sqlite3.Connection,
     *,
     include_guidance: bool = False,
+    authoring_detail: str = config.DEFAULT_AUTHORING_DETAIL,
 ) -> dict[str, Any]:
-    return validate_workflow_state(db.status_payload(conn), include_guidance=include_guidance)
+    return validate_workflow_state(
+        db.status_payload(conn), include_guidance=include_guidance, authoring_detail=authoring_detail,
+    )
 
 
 def validate_workflow_state(
     state: dict[str, Any],
     *,
     include_guidance: bool = False,
+    authoring_detail: str = config.DEFAULT_AUTHORING_DETAIL,
 ) -> dict[str, Any]:
     """Apply the complete validation policy to one already-read snapshot."""
 
+    if authoring_detail not in config.AUTHORING_DETAILS:
+        raise ValueError(f"Unknown authoring detail: {authoring_detail}")
     if not state.get("active_run"):
         result: dict[str, Any] = {
             "ok": True,
@@ -37,7 +43,7 @@ def validate_workflow_state(
             "issues": [],
         }
         if include_guidance:
-            result["guidance"] = guidance()
+            result["guidance"] = guidance(authoring_detail=authoring_detail)
         return result
 
     run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
@@ -48,7 +54,7 @@ def validate_workflow_state(
     issues.extend(validate_stable_ids(plans, tasks))
     issues.extend(validate_plan_detail(plans, required=record_mode != "lightweight"))
     issues.extend(validate_plan_content(plans))
-    issues.extend(validate_task_granularity(plans, tasks))
+    issues.extend(validate_task_granularity(plans, tasks, authoring_detail=authoring_detail))
     issues.extend(validate_task_content(tasks))
     issues.extend(validate_task_planning_contract(tasks))
     issues.extend(validate_advisory_selection_context(tasks))
@@ -66,13 +72,14 @@ def validate_workflow_state(
         "issues": issues,
     }
     if include_guidance:
-        result["guidance"] = guidance()
+        result["guidance"] = guidance(authoring_detail=authoring_detail)
     return result
 
 
 def validate_plan_input(
     *,
     plan_id: str,
+    authoring_detail: str = config.DEFAULT_AUTHORING_DETAIL,
 ) -> dict[str, Any]:
     issues = validate_stable_ids([{"stable_id": plan_id}], [])
     errors = [item for item in issues if item["severity"] == "error"]
@@ -82,7 +89,7 @@ def validate_plan_input(
         "errors": errors,
         "warnings": warnings,
         "issues": issues,
-        "guidance": guidance(),
+        "guidance": guidance(authoring_detail=authoring_detail),
     }
 
 
@@ -91,6 +98,7 @@ def validate_task_input(
     task_id: str,
     status: str,
     spec_id: str,
+    authoring_detail: str = config.DEFAULT_AUTHORING_DETAIL,
 ) -> dict[str, Any]:
     task = {
         "stable_id": task_id,
@@ -105,7 +113,7 @@ def validate_task_input(
         "errors": errors,
         "warnings": warnings,
         "issues": issues,
-        "guidance": guidance(),
+        "guidance": guidance(authoring_detail=authoring_detail),
     }
 
 
@@ -181,7 +189,11 @@ def validate_plan_detail(
 def validate_task_granularity(
     plans: list[dict[str, Any]],
     tasks: list[dict[str, Any]],
+    *,
+    authoring_detail: str = config.DEFAULT_AUTHORING_DETAIL,
 ) -> list[dict[str, Any]]:
+    if authoring_detail != "precise":
+        return []
     task_count = len([task for task in tasks if task_status(task) != "Skipped"])
     if task_count == 0:
         return []
@@ -902,28 +914,28 @@ def has_any(text: str, needles: tuple[str, ...]) -> bool:
     return any(needle.lower() in lowered for needle in needles) or bool(re.search(r"\bREQ-\d+\b", text))
 
 
-def guidance() -> dict[str, Any]:
+def guidance(*, authoring_detail: str = config.DEFAULT_AUTHORING_DETAIL) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "field_contract_source": "Use TAPL MCP tool descriptions and input schemas for exact field contracts.",
         "stable_ids": stable_id_guidance(),
-        "adaptive_plan_policy": plan_detail_guidance(),
-        "adaptive_task_policy": task_granularity_guidance(),
+        "adaptive_plan_policy": plan_detail_guidance(authoring_detail=authoring_detail),
+        "adaptive_task_policy": task_granularity_guidance(authoring_detail=authoring_detail),
         "task_required_fields": tapl_prompt.task_required_field_summary(),
         "execution_approval_policy": execution_approval_validation_guidance(),
     }
     return payload
 
 
-def plan_detail_guidance() -> str:
-    return tapl_prompt.plan_detail_guidance()
+def plan_detail_guidance(*, authoring_detail: str = config.DEFAULT_AUTHORING_DETAIL) -> str:
+    return tapl_prompt.plan_detail_guidance(authoring_detail=authoring_detail)
 
 
 def stable_id_guidance() -> str:
     return tapl_prompt.stable_id_guidance()
 
 
-def task_granularity_guidance() -> str:
-    return tapl_prompt.task_granularity_guidance()
+def task_granularity_guidance(*, authoring_detail: str = config.DEFAULT_AUTHORING_DETAIL) -> str:
+    return tapl_prompt.task_granularity_guidance(authoring_detail=authoring_detail)
 
 
 def execution_approval_validation_guidance() -> str:

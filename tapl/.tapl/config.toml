@@ -1,3 +1,9 @@
+[workflow]
+# PLAN/TASK authoring detail: "precise" (current behavior), "normal", or "minimal".
+# Lower levels reduce prose and unnecessary task splitting without count or length caps.
+# Approval, ownership, dependency and verification requirements still apply.
+authoring_detail = "precise"
+
 [recall]
 # Automatic capture, recall, and reinforcement. Manual memory management remains available.
 enabled = true

@@ -1370,6 +1370,7 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertEqual(
             [spec.key for spec in tapl_config.EDITABLE_CONFIG_KEYS],
             [
+                "workflow.authoring_detail",
                 "recall.enabled",
                 "search.mode",
                 "search.max_results",

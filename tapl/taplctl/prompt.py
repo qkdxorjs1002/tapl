@@ -297,10 +297,12 @@ def render_template(template: str, **variables: Any) -> str:
     return Template(template).safe_substitute(values).strip()
 
 
-def render(template: str, **overrides: Any) -> str:
+def render(
+    template: str, *, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL, **overrides: Any,
+) -> str:
     # Hooks use only a small subset of the full policy. Resolve placeholders
     # once, without constructing unused (or explicitly overridden) guidance.
-    providers = _template_variable_providers()
+    providers = _template_variable_providers(authoring_detail=authoring_detail)
     values = {key: str(value) for key, value in overrides.items()}
     for key in Template(template).get_identifiers():
         if key not in values and key in providers:
@@ -308,16 +310,22 @@ def render(template: str, **overrides: Any) -> str:
     return render_template(template, **values)
 
 
-def template_variables(**overrides: Any) -> dict[str, str]:
-    values = {key: provider() for key, provider in _template_variable_providers().items()}
+def template_variables(
+    *, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL, **overrides: Any,
+) -> dict[str, str]:
+    values = {key: provider() for key, provider in _template_variable_providers(authoring_detail=authoring_detail).items()}
     values.update({key: str(value) for key, value in overrides.items()})
     return values
 
 
-def _template_variable_providers() -> dict[str, Callable[[], str]]:
+def _template_variable_providers(
+    *, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
+) -> dict[str, Callable[[], str]]:
     # Build on demand so patched providers and current configuration remain
     # visible; no cached policy can survive a configuration change.
-    return {
+    if authoring_detail not in tapl_config.AUTHORING_DETAILS:
+        raise ValueError(f"Unknown authoring detail: {authoring_detail}")
+    providers = {
         "entry_guidance": entry_guidance,
         "receipt_guidance": receipt_guidance,
         "plan_labels": lambda: ", ".join(PLAN_KEY_LABELS),
@@ -359,6 +367,22 @@ def _template_variable_providers() -> dict[str, Callable[[], str]]:
         "approval_field_contract": lambda: field_contract_section("approval"),
         "markdown_finding_guidance": lambda: markdown_record_guidance("finding details and impact"),
     }
+    if authoring_detail != "precise":
+        for name, provider in (
+            ("plan_detail_guidance", plan_detail_guidance),
+            ("plan_format_guidance", plan_format_guidance),
+            ("task_granularity_guidance", task_granularity_guidance),
+            ("task_fields_guidance", task_format_guidance),
+            ("custom_fields_guidance", custom_fields_guidance),
+            ("record_writing_guidance", record_writing_guidance),
+            ("subagent_delegation_guidance", subagent_delegation_guidance),
+        ):
+            providers[name] = lambda provider=provider: provider(authoring_detail=authoring_detail)
+        providers["task_granularity_guidance"] = lambda: (
+            task_granularity_guidance(authoring_detail=authoring_detail) + " "
+            + task_format_guidance(authoring_detail=authoring_detail)
+        )
+    return providers
 
 
 def field_specs(record: str) -> tuple[FieldSpec, ...]:
@@ -804,16 +828,21 @@ def context_workflow_guidance(
     state: dict[str, Any],
     prompt: str = "",
     subagents: tapl_config.SubagentsConfig | None = None,
+    authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
 ) -> list[str]:
+    detail = [] if authoring_detail == "precise" else [
+        f"PLAN/TASK authoring detail: {authoring_detail}. Follow the selected writing/decomposition policy "
+        "from `tapl_get_next`; approval and verification gates remain unchanged."
+    ]
     if event == "SessionStart":
         guidance = [session_start_guidance()]
         if subagents is not None and not subagents.setup_complete:
             guidance.append("SubAgent setup is pending. On the first concrete user request, call `tapl_get_next` for setup guidance.")
-        return guidance
+        return guidance + detail
     if event == "Stop":
-        return [stop_guidance()]
+        return [stop_guidance()] + detail
 
-    return [user_prompt_submit_guidance(subagents=subagents)]
+    return [user_prompt_submit_guidance(subagents=subagents)] + detail
 
 
 def session_start_guidance() -> str:
@@ -921,12 +950,16 @@ def mcp_bootstrap_instructions() -> str:
     )
 
 
-def mcp_server_instructions(*, subagents: tapl_config.SubagentsConfig | None = None) -> str:
+def mcp_server_instructions(
+    *, subagents: tapl_config.SubagentsConfig | None = None,
+    authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
+) -> str:
     """Render the complete invariant workflow policy, preserved for full delivery."""
 
     settings = subagents or tapl_config.SubagentsConfig()
     return render(
         MCP_SERVER_INSTRUCTIONS_TEMPLATE,
+        authoring_detail=authoring_detail,
         subagent_delegation_guidance=(
             "Use the entry response's current settings. Ordinary entry requires no catalog comparison.\n\n"
             + (subagent_delegation_guidance(settings, include_exploration=False) if settings.setup_complete else
@@ -960,7 +993,19 @@ def external_findings_guidance() -> str:
     )
 
 
-def plan_detail_guidance() -> str:
+def plan_detail_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL) -> str:
+    if authoring_detail == "normal":
+        return (
+            "Normal authoring: write concise plan facts relevant to Fast/Standard/Strict mode. Strict retains "
+            "risks, interfaces, rollback and validation boundaries. Retain approval needs; finalize only after "
+            "explicit user confirmation."
+        )
+    if authoring_detail == "minimal":
+        return (
+            "Minimal authoring: record essential objective, approach and verification. Strict retains risks, "
+            "interfaces, rollback and validation boundaries. Retain approval needs; finalize only after "
+            "explicit user confirmation."
+        )
     return (
         "Plan depth follows the mode: Fast durable work gets a compact executable plan; Standard gets a concise "
         "executable plan; Strict documents risk, interfaces, rollback, and validation boundaries. "
@@ -984,7 +1029,12 @@ def planning_approval_guidance() -> str:
     )
 
 
-def record_writing_guidance() -> str:
+def record_writing_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL) -> str:
+    if authoring_detail != "precise":
+        return (
+            "Write readable values in the user's language with natural grammar and spacing. Remove repetition; "
+            "preserve identifiers, paths, commands and quotations verbatim."
+        )
     return (
         "Natural-language values are for people to read, including tool arguments and custom-field descriptions. "
         "Use normal grammar and spacing for the user's language; preserve Korean word spacing. "
@@ -996,7 +1046,11 @@ def record_writing_guidance() -> str:
     )
 
 
-def plan_format_guidance() -> str:
+def plan_format_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL) -> str:
+    if authoring_detail == "normal":
+        return "Use relevant plan fields concisely, retaining requirements trace and actionable validation; omit optional filler and repeated facts."
+    if authoring_detail == "minimal":
+        return "Keep requirements trace and actionable validation. Omit optional filler; reference shared plan facts instead of repeating them."
     return (
         "Plan records should include objective, related REQ-* trace, selected approach, "
         "affected files/interfaces, execution order, risks, validation, and approval needs when applicable."
@@ -1025,7 +1079,16 @@ def structured_record_guidance(subject: str = "plan and task content") -> str:
     )
 
 
-def custom_fields_guidance() -> str:
+def custom_fields_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL) -> str:
+    if authoring_detail != "precise":
+        return (
+            "Use concise `custom_fields` only for durable facts absent from standard fields. Routine root work "
+            "needs no advisory filler. For model selection/profile overrides retain canonical `Task Profile` "
+            "{name, match_reason}, relevant `Task Characteristics`, and `Execution Decision` "
+            "{executor, delegation_reason, model, reasoning_effort, model_reason}; explain overrides. "
+            "Reference shared plan facts. Preserve keys/types and dispatch's `SubAgent Model`; root verifies "
+            "the manifest before spawning. Top-level null deletes a duplicate."
+        )
     return (
         "Use `custom_fields` for durable searchable metadata. Executable tasks maintain canonical JSON objects: "
         "`Task Profile` {name, match_reason} (profile or none), "
@@ -1218,12 +1281,13 @@ def subagent_catalog_guidance() -> str:
 
 def subagent_current_guidance(
     subagents: tapl_config.SubagentsConfig, *, include_request: bool = True,
+    authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
 ) -> str:
     if not subagents.setup_complete:
         return subagent_setup_guidance()
     if not subagents.enabled:
         return "SubAgent setup is complete and delegation is disabled by the user's preference. Use the root agent."
-    parts = [subagent_delegation_guidance(subagents), subagent_catalog_guidance()]
+    parts = [subagent_delegation_guidance(subagents, authoring_detail=authoring_detail), subagent_catalog_guidance()]
     if include_request:
         parts.append(subagent_delegation_request_guidance(subagents))
     return "\n\n".join(parts)
@@ -1470,6 +1534,7 @@ def _render_builtin_profile(
 
 def subagent_delegation_guidance(
     subagents: tapl_config.SubagentsConfig | None = None, *, include_exploration: bool = True,
+    authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
 ) -> str:
     if not subagents_enabled(subagents):
         return ""
@@ -1535,6 +1600,13 @@ def subagent_delegation_guidance(
             "`tapl_get_next`'s subagent_guidance; helpers cannot edit/test/write state or bypass executable-task lifecycle."
         )
 
+    decision_guidance = (
+        "- Assess independence, context, risk, coordination cost, and parallel value, including root-context savings; "
+        "record executable-task decisions in canonical task fields.\n"
+        if authoring_detail == "precise" else
+        "- Assess independence, context, risk, coordination cost and parallel value; record concise canonical "
+        "selection metadata for SubAgents or profile overrides. Routine root work needs no advisory filler.\n"
+    )
     exploration_section = (
         "- Helpers and executable delegates use current completed/enabled setup, user preference, strategy and profiles; "
         "choose only model/effort pairs in both the allowlist and the live delegation-tool catalog. If setup is pending, "
@@ -1547,8 +1619,7 @@ def subagent_delegation_guidance(
         "### SubAgent Delegation\n\n"
         f"{preference_guidance}"
         f"- Strategy: {strategy_guidance}\n"
-        "- Assess independence, context, risk, coordination cost, and parallel value, including root-context savings; "
-        "record executable-task decisions in canonical task fields.\n"
+        f"{decision_guidance}"
         "- Advisory profiles: assess all characteristics; most specific wins, order breaks ties. Record overrides for executable tasks; skip "
         "unavailable candidates; no match -> allowlist, then root. Presets are replaceable, not model roles.\n"
         f"{profile_section}"
@@ -1559,7 +1630,17 @@ def subagent_delegation_guidance(
     )
 
 
-def task_granularity_guidance() -> str:
+def task_granularity_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL) -> str:
+    if authoring_detail == "normal":
+        return (
+            "Group related edits into coherent tasks. Separate substantive verification and independently "
+            "risky work when they need distinct ownership, dependencies or review. Scope and risk determine the split."
+        )
+    if authoring_detail == "minimal":
+        return (
+            "Use the smallest coherent task decomposition for the objective; combine related actions and their "
+            "verification. Split for independent risk, ownership, dependencies or substantive verification."
+        )
     return "Split every independent edit, migration, and verification step."
 
 
@@ -1568,7 +1649,18 @@ def task_required_fields() -> str:
     return f"Each executable task must include {fields} when applicable."
 
 
-def task_format_guidance() -> str:
+def task_format_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL) -> str:
+    if authoring_detail == "normal":
+        return (
+            "Keep required goal, action and verification actionable and concise; reference shared plan facts. "
+            "Explain consequential decisions briefly. "
+            "Record result on completion, blocker and next_action when blocked. Update only changed fields."
+        )
+    if authoring_detail == "minimal":
+        return (
+            "Write only actionable goal, action and verification with shared plan references; omit optional narrative. "
+            "Record result on completion, blocker and next_action when blocked. Update only changed fields."
+        )
     fields = task_required_field_names("Pending")
     return (
         f"Executable implementation/verification tasks should include {', '.join(fields)}, "

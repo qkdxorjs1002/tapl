@@ -79,7 +79,10 @@ class WorkflowApplication:
         with self._connection() as conn:
             state = db.status_payload(conn)
             state["session_id"] = db.connection_session_id(conn)
-        check = validation.validate_workflow_state(state)
+        settings = self._settings()
+        check = validation.validate_workflow_state(
+            state, authoring_detail=settings.workflow.authoring_detail,
+        )
         fields = (
             "id", "stable_id", "kind", "title", "status", "source",
             "archived", "created_at", "updated_at", "custom_fields", "execution_timing",
@@ -93,7 +96,7 @@ class WorkflowApplication:
             "schema": state.get("schema") or {},
             "active_runs": state.get("active_runs") or [],
             "viewer_capabilities": {"associativeMemory": True, "discardRun": True},
-            "memory_review": state["memory_review"] if self._settings().recall.enabled else {"status": "disabled"},
+            "memory_review": state["memory_review"] if settings.recall.enabled else {"status": "disabled"},
             "active_run": state.get("active_run"),
             "task_counts": state.get("task_counts") or {},
             "incomplete_tasks": state.get("incomplete_tasks", 0),
@@ -113,7 +116,7 @@ class WorkflowApplication:
             "active_batches": state.get("active_batches") or [],
             "active_executions": state.get("active_executions") or [],
             "approvals": state.get("approvals") or {},
-            "config": self._settings().as_dict(),
+            "config": settings.as_dict(),
             "plan_task_execute": check,
         }
         if include_events:
@@ -128,8 +131,10 @@ class WorkflowApplication:
         with self._connection() as conn:
             state = db.status_payload(conn)
             state["session_id"] = db.connection_session_id(conn)
-        check = validation.validate_workflow_state(state)
         settings = self._settings()
+        check = validation.validate_workflow_state(
+            state, authoring_detail=settings.workflow.authoring_detail,
+        )
         if not settings.recall.enabled:
             state["memory_review"] = {"status": "disabled"}
         actions = recommendations.next_recommendations(state, check)
@@ -178,11 +183,15 @@ class WorkflowApplication:
         state, settings, actions = self._next_context()
         policy = {
             "workflow_policy": (
-                prompt.mcp_server_instructions(subagents=settings.subagents)
+                prompt.mcp_server_instructions(
+                    subagents=settings.subagents, authoring_detail=settings.workflow.authoring_detail,
+                )
                 if workflow_policy is None else workflow_policy
             ),
             "config": settings.as_dict(),
-            "subagent_guidance": prompt.subagent_current_guidance(settings.subagents),
+            "subagent_guidance": prompt.subagent_current_guidance(
+                settings.subagents, authoring_detail=settings.workflow.authoring_detail,
+            ),
         }
         revision = hashlib.sha256(
             json.dumps(policy, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -281,13 +290,18 @@ class WorkflowApplication:
             "path": edited.path,
             "changed": edited.changed,
             "subagents": edited.config.as_dict(),
-            "subagent_guidance": prompt.subagent_current_guidance(edited.config),
+            "subagent_guidance": prompt.subagent_current_guidance(
+                edited.config, authoring_detail=settings.workflow.authoring_detail,
+            ),
         }
 
     def validate_state(self) -> dict[str, Any]:
+        settings = self._settings()
         with self._connection() as conn:
             meta = db.get_meta(conn)
-            check = validation.validate_plan_task_execute(conn)
+            check = validation.validate_plan_task_execute(
+                conn, authoring_detail=settings.workflow.authoring_detail,
+            )
             return {
                 "ok": meta.get("schema_version") == str(db.SCHEMA_VERSION) and check["ok"],
                 "session_id": db.connection_session_id(conn),
@@ -295,7 +309,7 @@ class WorkflowApplication:
                 "active_run": db.workflow_run_to_dict(db.active_run(conn)),
                 "queued_runs": db.queued_runs(conn),
                 "incomplete_tasks": db.incomplete_task_count(conn),
-                "config": self._settings().as_dict(),
+                "config": settings.as_dict(),
                 "plan_task_execute": check,
             }
 
@@ -472,8 +486,11 @@ class WorkflowApplication:
         return payload
 
     def apply_plan(self, plan_id: str = "PLAN-001", **values: Any) -> dict[str, Any]:
+        settings = self._settings()
         with self._connection() as conn:
-            input_check = validation.validate_plan_input(plan_id=plan_id)
+            input_check = validation.validate_plan_input(
+                plan_id=plan_id, authoring_detail=settings.workflow.authoring_detail,
+            )
             if not input_check["ok"]:
                 raise WorkflowApplicationError(_validation_message(input_check))
             existing = db.get_active_plan(conn, plan_id)
@@ -494,7 +511,9 @@ class WorkflowApplication:
                 notes=self._field(existing, "notes", values.get("notes", UNSET)),
                 custom_fields=None if values.get("custom_fields", UNSET) is UNSET else values["custom_fields"],
             )
-            check = validation.validate_plan_task_execute(conn)
+            check = validation.validate_plan_task_execute(
+                conn, authoring_detail=settings.workflow.authoring_detail,
+            )
         return {"ok": True, "item": db.row_to_dict(item), "plan_task_execute": check}
 
     def create_task(self, task_id: str, title: str, spec_id: str, goal: str, action: str, verification_text: str, **values: Any) -> dict[str, Any]:
@@ -513,6 +532,7 @@ class WorkflowApplication:
         return self._write_task(task_id, status="In Progress", custom_fields=custom_fields)
 
     def _write_task(self, task_id: str, **values: Any) -> dict[str, Any]:
+        settings = self._settings()
         with self._connection() as conn:
             existing = db.get_active_task(conn, task_id)
             if existing is None and (values.get("title") is None or values.get("status") is None):
@@ -522,7 +542,8 @@ class WorkflowApplication:
             status = self._field(existing, "status", values.get("status", UNSET))
             spec_id = self._field(existing, "spec_id", values.get("spec_id", UNSET))
             input_check = validation.validate_task_input(
-                task_id=task_id, status=status, spec_id=spec_id
+                task_id=task_id, status=status, spec_id=spec_id,
+                authoring_detail=settings.workflow.authoring_detail,
             )
             if not input_check["ok"]:
                 raise WorkflowApplicationError(_validation_message(input_check))
@@ -545,7 +566,9 @@ class WorkflowApplication:
                 owned_paths=None if values.get("owned_paths", UNSET) is UNSET else values["owned_paths"],
                 depends_on=None if values.get("depends_on", UNSET) is UNSET else values["depends_on"],
             )
-            check = validation.validate_plan_task_execute(conn)
+            check = validation.validate_plan_task_execute(
+                conn, authoring_detail=settings.workflow.authoring_detail,
+            )
             task_item = db.item_detail(conn, int(item["id"]))
         return {"ok": True, "item": task_item, "plan_task_execute": check}
 

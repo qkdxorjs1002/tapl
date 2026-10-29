@@ -733,7 +733,11 @@ def default_config_text() -> str:
     if template is not None:
         return template
     profile_lines = default_subagent_profile_text()
-    return f"""[recall]
+    return f"""[workflow]
+# PLAN/TASK authoring detail: precise (default), normal, or minimal.
+authoring_detail = "{config.DEFAULT_AUTHORING_DETAIL}"
+
+[recall]
 # Automatic capture, recall, and reinforcement. Manual memory management stays available.
 enabled = true
 
