@@ -77,21 +77,8 @@ taplctl config set workflow.authoring_detail normal
 taplctl config unset workflow.authoring_detail
 ```
 
-See [authoring detail](docs/guide.md#authoring-detail) for each level and configuration scope.
-
-Reference benchmark (2026-10-29): the same SQLite rollback fix, five independent Morae VMs per option,
-TAPL `2.14.0-beta3`, model `gpt-6.1-sol` with `high` reasoning. Values are medians; changes are relative to `precise`.
-
-| Option | PLAN/TASK body characters | Whole-conversation output tokens |
-| --- | ---: | ---: |
-| `precise` (default) | 2,227 | 5,607 |
-| `normal` | 1,646 (−26.1%) | 4,638 (−17.3%) |
-| `minimal` | 1,290 (−42.1%) | 4,031 (−28.1%) |
-
-All 15 samples passed functional and TAPL workflow checks. Output tokens include code changes, tools and verification.
-Total input tokens, including cached input, showed no clear reduction. This single-workload result is a reference,
-not a general cost or quality guarantee. See the [benchmark guide](docs/guide.md#authoring-detail-benchmark)
-for aggregate results and methods.
+See the [configuration guide](docs/guide.md#authoring-detail) for each level and configuration scope,
+and [benchmark results](docs/guide.md#authoring-detail-benchmark) for measured comparisons.
 
 Ask for an outcome, in your own words:
 
