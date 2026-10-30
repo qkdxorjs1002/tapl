@@ -1,874 +1,98 @@
 # TAPL user guide
 
-Operational details for installing, configuring, and running TAPL with Codex.
+[English](guide.md) · [한국어](guide.ko.md)
 
-[← README](../README.md) · [한국어 가이드](guide.ko.md)
-
-[Requirements](#requirements) · [Homebrew](#homebrew) · [Linux](#linux) ·
-[Windows](#windows) · [Connect](#connect) · [Viewer](#viewer) ·
-[Configuration](#configuration) · [SubAgents](#subagents) · [Troubleshooting](#troubleshooting)
+Find the topic guides in the [documentation home](README.md). This compatibility index keeps previous guide links connected to their topics.
 
 <a id="requirements"></a>
-
-## Requirements
-
-- Python 3.11 or newer with the `venv` module. Homebrew uses `python@3.12`.
-- SQLite with FTS5 and extension loading support.
-- Homebrew for a formula installation; `uv` for source development.
-- Windows PowerShell 5.1 or newer, or PowerShell 7, for the Windows installer.
-- A browser for `taplctl viewer`; VS Code only for the optional extension.
-
-The release wheel is platform-independent, but its Python dependencies still need compatible wheels. Uncommon architectures, very new Python releases, and musl-based Linux distributions such as Alpine may require local build tools.
-
 <a id="homebrew"></a>
-
-## Homebrew
-
-Add the tap, then choose exactly one formula:
-
-```sh
-brew tap qkdxorjs1002/tap
-
-# Stable release with full-text search
-brew trust --formula qkdxorjs1002/tap/taplctl
-brew install taplctl
-
-# Or: stable release with semantic/vector search dependencies
-brew trust --formula qkdxorjs1002/tap/taplctl-semantic
-brew install taplctl-semantic
-
-# Or: newest published release, including prereleases
-brew trust --formula qkdxorjs1002/tap/taplctl-pre
-brew install taplctl-pre
-```
-
-`taplctl` and `taplctl-semantic` follow stable releases. `taplctl-pre` follows the
-newest published release, whether stable or prerelease; `taplctl@pre` is an alias.
-Use the canonical formula names above consistently for trust, installation, and
-prefix lookup.
-
-All three formulae link `taplctl`, `tapl-mcp`, and `tapl-hook` and cannot coexist.
-Before switching, uninstall the current formula, for example `brew uninstall taplctl`.
-Homebrew installs pinned dependencies from release-hosted wheel bundles without
-resolving packages from PyPI during installation.
-
-During an upgrade or reinstall, the formula attempts to restart its viewer
-service only if it was already running. A stopped or unregistered service, and a
-fresh install, remain stopped. This does not restart a manually started
-`searchd` or MCP stdio process.
-
-Next, [connect TAPL to Codex](#connect).
-
 <a id="linux"></a>
-
-## Linux
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
-```
-
-The installer needs `curl`, Python 3.11+ with `venv`, and writable installation directories. Its defaults are `${XDG_DATA_HOME:-$HOME/.local/share}/tapl` and `${XDG_BIN_HOME:-$HOME/.local/bin}`; override them with the corresponding XDG variables or `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR`.
-
-It does not modify shell startup files or install Codex hooks. Apply any printed `PATH` export, make it persistent if needed, then connect TAPL to Codex below.
-
-The standalone installer defaults to the latest stable release.
-
 <a id="windows"></a>
-
-## Windows
-
-```powershell
-Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -OutFile install.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-```
-
-Requires Windows 10/11, Python 3.11+ with `venv`, and PowerShell 5.1+.
-Installs the latest stable release for your user without administrator access.
-The fixed entry scripts download and run the selected release’s installer.
-
-The default location is `%LOCALAPPDATA%\tapl`. Reopen your terminal to load the
-updated user `PATH`, then [connect TAPL to Codex](#connect).
-
-<details>
-<summary>Install from Command Prompt (CMD)</summary>
-
-Download the CMD script into a writable folder, then run:
-
-```bat
-curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.cmd -o install.cmd
-install.cmd
-```
-
-Reopen CMD afterward and [choose your Codex connection scope](#connect).
-
-</details>
-
 <a id="windows-prerelease"></a>
 <a id="test-prerelease-2140-beta1"></a>
+<a id="updates"></a>
 
-<details>
-<summary>Release channel and semantic search options</summary>
+## Installation and updates
 
-The downloaded entry scripts accept these options in PowerShell and CMD:
+[Installation and updates](getting-started/installation.md)
 
-| Options | Installs |
-| --- | --- |
-| None | Latest stable release |
-| `-Pre` | Latest published release, including prereleases; may also select a newer stable release |
-| `-Semantic` | Latest stable release with embedding and vector dependencies |
-| `-Pre -Semantic` | Latest published release with semantic dependencies |
-| `-Version TAG` | The specified release; replace `TAG` with its release tag |
-
-Combine `-Semantic` with `-Version TAG` if needed. `-Pre` and `-Version` cannot be combined.
-For a specific release, run the command for your shell:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version TAG
-```
-
-```bat
-install.cmd -Version TAG
-```
-
-Each release asset installs only its own version. The fixed entry scripts choose
-the release before running that release’s installer.
-
-</details>
-
-<details>
-<summary>Update, reinstall, uninstall, and custom paths</summary>
-
-Check for updates, then install an available update:
-
-```powershell
-taplctl update --check
-taplctl update
-```
-
-Use the downloaded installer for reinstalling or removing executables. Before
-removal, disconnect each scope you installed: `taplctl uninstall user`, or
-`taplctl uninstall repo` from each connected repository. Choose your shell:
-
-| Action | PowerShell | CMD |
-| --- | --- | --- |
-| Reinstall | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Reinstall` | `install.cmd -Reinstall` |
-| Remove executables | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall` | `install.cmd -Uninstall` |
-
-After an update or reinstall, [reconnect the scopes you use](#connect), preserve
-your existing `observe`/`enforce` mode, and restart Codex.
-
-Removal preserves settings, workflow databases, and unrelated files. Legacy
-installs without a file inventory need `-Reinstall` first; modified managed files
-stop removal for inspection.
-
-`TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR` override the installation and launcher
-locations. The default launcher is `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`.
-Updates preserve the selected stable, prerelease, or pinned channel and semantic
-options. Use the entry script’s `-Version TAG` to switch releases, including a
-downgrade. `TAPL_INSTALL_MANIFEST_URL` selects a custom manifest; a release
-installer still requires its own version. The installer verifies the manifest
-and wheel SHA-256 before use.
-
-</details>
 
 <a id="connect"></a>
+<a id="connect-tapl-to-codex"></a>
 
-## Connect TAPL to Codex
+## Agent integration
 
-After installing TAPL, choose **one** Codex connection scope:
+[Agent integration](getting-started/integrations.md)
 
-| Scope | Applies to | Command |
-| --- | --- | --- |
-| User | Your Codex projects, through user settings in `~/.codex` | `taplctl install user` |
-| Repository | Only the target repository, through its local `.codex` settings | `taplctl install repo` |
-
-Run `repo` from the target repository, or specify it with
-`taplctl install repo --repo /path/to/repository`. Repository installation also
-creates local `.tapl` configuration and workflow state. This scope choice is
-independent of the package installation method or release channel.
-
-For any of the three Homebrew formulae, use the chosen command above.
-
-The installer finds `taplctl` on `PATH` and uses the sibling `tapl-mcp` and
-`tapl-hook` commands. A normal Homebrew installation needs no path override.
-
-<details>
-<summary>Optional: select a specific installation</summary>
-
-Use `--taplctl-command` only when automatic discovery selects the wrong executable
-or you need a specific installation. For example:
-
-```sh
-# Choose one scope:
-taplctl install user --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
-# Or, from the target repository:
-taplctl install repo --taplctl-command "$(brew --prefix taplctl)/libexec/bin/taplctl"
-```
-
-Replace the formula name if you installed `taplctl-semantic` or `taplctl-pre`.
-The specified executable locates that installation's companion commands.
-
-</details>
-
-Standalone installations use their actual executable paths:
-
-Linux standalone installer:
-
-```sh
-# Choose one scope:
-taplctl install user --taplctl-command "$(realpath "$(command -v taplctl)")"
-# Or, from the target repository:
-taplctl install repo --taplctl-command "$(realpath "$(command -v taplctl)")"
-```
-
-Windows standalone installer (PowerShell):
-
-```powershell
-$taplRoot = if ($env:TAPL_INSTALL_ROOT) { $env:TAPL_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA "tapl" }
-$taplInstall = Get-Content -Raw (Join-Path $taplRoot "install.json") | ConvertFrom-Json
-# Choose one scope:
-taplctl install user --taplctl-command (Join-Path $taplInstall.venv "Scripts\taplctl.exe")
-# Or, from the target repository:
-taplctl install repo --taplctl-command (Join-Path $taplInstall.venv "Scripts\taplctl.exe")
-```
-
-Run only the command for your chosen scope. Both scopes add an enabled
-`mcp_servers.tapl` entry for `tapl-mcp` and lifecycle hooks for `tapl-hook`.
-Restart Codex afterward, then trust the installed hook when first prompted.
-
-With a user installation, Codex initializes the session working folder's TAPL
-database without creating local `.tapl/config.toml` or `.tapl/version` files. Automatic repository
-refresh requires an existing database and `.tapl/version`; automatic user refresh
-also requires `~/.tapl/version`. Leftover hooks or a
-config override alone do not trigger installation. A missing local config keeps
-inheriting user settings or defaults. Run `taplctl install repo` explicitly to
-restore missing repository installation files. The installer also removes an old
-TAPL MCP `cwd` override, so a stale fixed folder does not pin the server to a
-different workspace.
-
-<p align="center">
-  <img src="../assets/tapl-trust-hook.png" alt="Codex trust prompt for the installed TAPL hook" />
-</p>
 
 <a id="viewer"></a>
+<a id="discard-run"></a>
+<a id="discard-a-run"></a>
 
 ## Viewer and services
 
-From an initialized workspace:
+[Viewer and services](guides/viewer.md)
 
-```sh
-taplctl viewer
-# tapl viewer: http://127.0.0.1:8000
 
-taplctl viewer --port 9000  # when port 8000 is busy
-```
+<a id="resume-and-search"></a>
 
-The viewer listens only on `127.0.0.1`, does not open a browser automatically,
-and stops with `Ctrl+C`. Without `--workspace`, it selects `.tapl/tapl.db` only
-in the folder where you start it. It does not search parent folders. If that
-folder has no database—for example, when started as a Homebrew login service—the
-page asks for an initialized workspace folder and remembers the last successful
-choice in that browser.
+## Search and resumption
 
-<a id="discard-run"></a>
+[Search and resumption](guides/search.md)
 
-### Discard a RUN
 
-Click the **×** icon on its tab, then type or paste the full RUN ID shown in the
-dialog. The confirmation button stays disabled until the input matches exactly,
-including case and whitespace. Cancel or Escape leaves the RUN unchanged.
+<a id="writing-workflow-records"></a>
 
-Confirmation force-archives records, plans, tasks, findings, and queued RUNs in the
-same owner's split request. Active database executions/batches are cancelled and
-task timers stop. No queued RUN starts automatically. Truly empty RUNs are deleted
-without creating an archive; results, execution history, memories, and retained
-references count as records to preserve. Other sessions and unrelated requests
-remain unchanged. This updates workflow state and does not terminate an external
-running agent process.
+## Workflow records
 
-When a trusted reverse proxy or tunnel publishes the viewer at another origin,
-allow that exact browser origin explicitly:
+[Workflow records](concepts/records.md)
 
-```sh
-taplctl viewer --allowed-origin https://tapl.example.com
-```
 
-For a persistent service, add the origins to `~/.tapl/config.toml` and restart
-the matching Homebrew service:
-
-```toml
-[viewer]
-allowed_origins = [
-  "https://tapl.example.com",
-  "https://tapl.internal.example",
-]
-```
-
-```sh
-brew services restart taplctl
-```
-
-The value must contain only the HTTP(S) scheme, host, and optional port. Repeat
-`--allowed-origin` or use the configuration array to allow more than one origin.
-CLI and configuration origins are combined. TAPL continues to listen only on
-loopback; the proxy should handle authentication and TLS. Avoid wildcard origin
-rules when the viewer is reachable from an untrusted network.
-
-Start the installed Homebrew formula automatically at login with
-`brew services start taplctl`, `brew services start taplctl-semantic`, or
-`brew services start taplctl-pre`. Each service serves the viewer on port 8000.
-
-The semantic formula intentionally does not start a preloaded search process.
-Run `taplctl searchd start` and `taplctl searchd status` when you want one.
-
-The optional `searchd` daemon uses Unix sockets and is unavailable on Windows.
-Windows uses local semantic search when its optional dependencies are installed,
-with BM25/full-text search available without the daemon.
-
-The optional VS Code extension uses a persistent workspace-scoped `tapl-mcp`
-client. Set `taplWorkflow.taplMcpPath` if it cannot locate the executable.
-
-See the [VS Code extension guide](../vscode-extension/README.md) for its setup.
-
-## Resume and search
-
-Codex reads current state, archive details, and history through typed MCP tools.
-SQLite full-text search works in every installation. Install the semantic extra
-or the `taplctl-semantic` formula for embedding and vector search. Use
-`taplctl reindex` when an existing workspace needs its index rebuilt.
-
-## Writing workflow records
-
-Natural-language values in MCP fields are text for people to read, including
-plan/task descriptions and custom-field descriptions. Write them with normal
-grammar and spacing for the user's language; preserve natural Korean word
-spacing. Keep records concise by removing repetition rather than joining words.
-When reusing an older record, write readable descriptions instead of copying its
-compressed wording. Preserve literal identifiers, paths, commands, and direct
-quotations.
-
-Examples of text style, not additional workflow requirements:
-
-- `objective`: 개발 앱 설정을 준비한 뒤 Task 1개를 실행하고 결과를 확인한다.
-- `action`: APP_CONFIG_YML 경로를 확인하고 검증 결과를 기록한다.
-
-The full MCP policy includes these examples and the typed-field, Markdown, and
-plan-format guidance. Natural-language field descriptions repeat a short
-readability reminder. This is agent writing guidance: it adds no spacing-based
-runtime warnings, input rejection, or automatic rewriting, and does not
-automatically restyle historical records.
 
 ## Management commands
 
-`taplctl` has nine public commands. Agents use MCP to create, dispatch, settle,
-search, and inspect workflow records; the CLI manages the installation.
+[Management commands](reference/cli.md)
 
-| Command | Purpose |
-| --- | --- |
-| `taplctl init --workspace-root /path/to/workspace` | Explicitly initialize that folder's workspace |
-| `taplctl doctor` | Diagnose installation and workspace problems |
-| `taplctl install SCOPE` | Install or refresh Codex integration |
-| `taplctl uninstall SCOPE` | Disconnect Codex integration; preserve settings and data by default |
-| `taplctl config set/unset` | Edit supported runtime configuration values |
-| `taplctl viewer [--port 9000]` | Serve the local browser viewer |
-| `taplctl update --check` / `update` | Check or update standalone installations |
-| `taplctl reindex` | Rebuild search indexes |
-| `taplctl searchd start` / `status` | Manage the optional semantic search process |
 
-<a id="updates"></a>
+<a id="workspace-and-configuration"></a>
 
-## Updates
+## Configuration
 
-For Linux and Windows standalone installations:
+[Configuration](guides/configuration.md)
 
-```sh
-taplctl update --check
-taplctl update
-```
 
-The updater validates the release manifest and wheel SHA-256. It does not update
-Homebrew or source checkouts. For Homebrew, use `brew update` followed by
-`brew upgrade taplctl`, `brew upgrade taplctl-semantic`, or
-`brew upgrade taplctl-pre`, matching the installed formula.
 
-<a id="configuration"></a>
+## Authoring detail
 
-## Workspace and configuration
+[Authoring detail](guides/authoring-detail.md)
 
-For a Codex session, the working folder itself owns `.tapl/tapl.db`. The hook
-requires an existing absolute `cwd` in the Codex event and uses that exact
-folder; a missing or invalid `cwd` is rejected. A hook `--db` override is
-accepted only when it names that folder's database. The MCP server binds to its
-startup working folder for its lifetime. TAPL does not search parent databases,
-Git roots, or repository markers. For example, a session in `repo/packages/app`
-uses `repo/packages/app/.tapl/tapl.db` even if `repo/.tapl/tapl.db` exists.
-
-Each folder has independent history. Existing databases stay where they are;
-TAPL does not move or merge them. Open Codex in the folder whose history you
-want. Administrative `taplctl` commands retain explicit `--db` and
-`--workspace-root` options to operate on a chosen path.
-
-TAPL reads the working folder's `.tapl/config.toml` first, then
-`~/.tapl/config.toml`. It does not search ancestor folders for a project config.
-User-wide settings still apply when the working folder has no local config.
-
-Installation preserves unrelated Codex settings. `hooks.json` is managed-merged,
-and `.codex/config.toml` is TOML-merged with existing user values taking
-precedence. Runtime config is created on first install; upgrades can prompt to
-overwrite defaults or merge missing keys. Use `--force` for TAPL-managed template
-values to win, or `--tapl-config-policy {prompt,overwrite,merge}` to select the
-runtime config policy explicitly. Explicit `merge` and `overwrite` apply even
-when reinstalling the same version. The default `prompt` policy preserves an
-existing same-version config without prompting. `merge` keeps existing values
-and adds missing defaults; `overwrite` replaces the runtime config with defaults.
-
-Remove TAPL's Codex integration with the matching scope:
-
-```sh
-taplctl uninstall user
-taplctl uninstall repo --repo /path/to/repository
-```
-
-Uninstall removes TAPL's MCP entry, recognized TAPL hooks, and the scope's
-installation version marker. It keeps other Codex settings and hooks, TAPL
-configuration, and workflow data. Preserved settings do not trigger automatic
-reinstallation; run `taplctl install user` or `taplctl install repo` to reconnect.
-Restart Codex after changing its integration. These commands leave the installed
-program and background services in place; manage those through your package manager.
-
-Add `--purge-config` to also delete the selected scope's `.tapl/config.toml`.
-Use `--purge-db` to delete `.tapl/tapl.db` and its SQLite `-wal`, `-shm`, and
-`-journal` files. Each option preserves the other category; combine them to delete
-both. Close sessions using that scope before deleting its database.
-Backups, other files, and other workspaces are
-preserved. `user` targets the home directory containing `--codex-home` (default
-`~/.codex`); `repo` targets `--repo` or the current directory.
-
-```sh
-taplctl uninstall user --purge-config
-taplctl uninstall user --purge-db
-taplctl uninstall user --purge-config --purge-db --dry-run
-```
-
-`--dry-run` previews changes without writing or deleting files. Both scopes also
-support `--json` and `--agent` output. Malformed configuration files, a symlinked
-repository root, and symlinks inside the selected installation scope are rejected
-before changes begin.
-
-Read effective settings, including defaults, without changing any files:
-
-```sh
-taplctl config get
-taplctl config get search
-taplctl config get search.mode
-taplctl config get subagents.models.gpt-5.6-sol
-taplctl --config /path/to/config.toml config get search.mode --json
-```
-
-`get` follows the same file precedence as `set` and `unset`: an explicit
-`--config` path, then the current folder's config, then the user config.
-If the selected file does not exist, it returns runtime defaults without creating
-it. Omitting `KEY` returns all effective settings; a section or individual key
-returns that value. Strings print directly; other values use JSON. `--json`
-includes the source path, whether the file exists, the key, and its value.
-`--agent` retains the value as JSON in its `<value format="json">` element,
-including empty values and `null` for an unset model catalog. Unknown keys and
-invalid configuration files fail with a nonzero exit code.
-
-Edit runtime values without hand-editing TOML:
-
-```sh
-taplctl config set search.mode hybrid
-taplctl config set search.max_results 20
-taplctl config set viewer.allowed_origins '["https://tapl.example.com"]'
-taplctl config set subagents.strategy balanced
-taplctl config unset search.mode
-```
-
-`set` accepts a dot-separated `KEY` and one `VALUE`. Values use TOML syntax;
-enum strings may be unquoted, while arrays should normally be shell-quoted as
-shown above. `unset` accepts only `KEY` and restores the built-in default. Both
-commands validate the complete resulting config and preserve comments and
-unrelated settings. Use `taplctl config --help` or `taplctl config set --help`
-for every supported key, value format, allowed enum, and example.
-
-The supported keys are `workflow.authoring_detail` (`precise`, `normal`, or `minimal`),
-`search.mode` (`semantic`, `bm25`, `word`, or `hybrid`),
-`search.max_results` (integer ≥ 1), `search.hybrid_semantic_ratio` (0.0–1.0),
-`search.semantic_provider` (`local`, `daemon`, or `auto`),
-`search.searchd_model_idle_timeout_seconds` (integer ≥ 0),
-`viewer.allowed_origins` (unique HTTP(S) origins in a TOML string array),
-`subagents.enabled` (`true` or `false`), `subagents.strategy` (`conservative`,
-`balanced`, or `aggressive`), `subagents.setup_complete` (`true` or `false`),
-`subagents.preference` (a free-form string), `subagents.models.<model-id>` (a
-non-empty TOML array of unique reasoning-effort strings), or
-`subagents.profiles` (a TOML array of inline profile tables).
-
-Without an override, the command uses the same working-folder-then-user lookup order
-described above and creates the working folder's local path when neither file exists. To edit
-another file, place the global option before the command:
-
-```sh
-taplctl --config /path/to/config.toml config set search.mode bm25
-```
-
-### Authoring detail
-
-| Value | PLAN/TASK writing behavior |
-| --- | --- |
-| `precise` (default) | Preserves current detailed writing and task decomposition. |
-| `normal` | Groups related edits and records relevant facts concisely. Separates independently risky work and substantive verification when needed. |
-| `minimal` | Focuses on objective, action and verification, references shared plan facts, and combines related changes with their verification. |
-
-```sh
-taplctl config set workflow.authoring_detail normal
-taplctl config set workflow.authoring_detail minimal
-taplctl config get workflow.authoring_detail
-taplctl config unset workflow.authoring_detail  # restore precise
-```
-
-Normal and minimal impose no fixed task count, character count or token budget. Complexity, risk, ownership,
-dependencies and verification boundaries determine decomposition; the existing task-count heuristic does not
-apply at these levels. These writing instructions reduce duplication and unnecessary splitting to save tokens;
-actual savings depend on the task and model. Fast/Standard/Strict mode, approvals, required fields and completion
-verification remain unchanged, including Strict risk, interface, rollback and validation boundaries.
-
-The working-folder/user selection rules above apply. Use `--config` to select a specific file.
-The next full MCP policy lookup delivers the new detail setting and a changed `policy_revision`.
 
 <a id="authoring-detail-benchmark"></a>
-
-#### Reference benchmark
-
-The same SQLite rollback bug fix was measured on 2026-10-29–30 in five independent Morae VMs per condition
-(20 runs), using TAPL `2.14.0-beta3` (`2.14.0b3`), Codex CLI `0.159.0`, and `gpt-6.1-sol` with `high` reasoning.
-All conditions shared the work request and initial code. TAPL conditions used Strict mode and enforcing hooks,
-with recall and subagents disabled. `agents-history` used an AGENTS.md policy for file-based RUN/PLAN/TASK,
-optional FINDING and transition history, without TAPL MCP or hooks.
-`agents-history` is a comparison condition, not a configuration value. All 20 runs passed functional checks;
-the 15 TAPL runs passed core workflow checks, and the five file-history runs passed structural record checks.
-The [policy and audit excerpt](#authoring-detail-file-history) below describes the file-history requirements and procedural exceptions.
-
-Values below are **medians of five samples per condition**; percentages compare with **`tapl + precise` (default)**.
-PLAN/TASK counts are observed counts, not limits. Percentage changes are not shown for N/A measurements.
-
-| Condition | Observed PLAN / TASK | Body characters | Authoring argument bytes | Total input tokens¹ | Output tokens | Elapsed time² |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `tapl + precise` (default) | 1 / 3 | 2,227 | 5,257 | 348,705 | 5,607 | 167.7 s |
-| `tapl + normal` | 1 / 2 | 1,646 (−26.1%) | 2,758 (−47.5%) | 347,300 (−0.4%) | 4,638 (−17.3%) | 129.9 s (−22.6%) |
-| `tapl + minimal` | 1 / 1–2 | 1,290 (−42.1%) | 2,168 (−58.8%) | 364,056 (+4.4%) | 4,031 (−28.1%) | 125.0 s (−25.5%) |
-| Without TAPL + AGENTS history (`agents-history`) | 1 / 3–4 | 6,323 (+183.9%) | N/A | 210,919 (−39.5%) | 9,077 (+61.9%) | 184.9 s (+10.3%) |
-
-¹ Input includes cached input. Median uncached input, calculated per sample as `input_tokens - cached_input_tokens`,
-was **30,881 / 44,706 / 39,160 / 16,780** for precise / normal / minimal / agents-history. These are separate medians; subtracting column
-medians can give a different result. No prices or billing amounts were calculated.
-
-² Time covers the Codex session from launch to exit, including model responses, tool calls and in-session verification.
-VM setup and post-session auditing are excluded. Sample time ranges overlap across conditions;
-server load and cache effects were not controlled, so these medians do not establish a general speed advantage.
-
-Body characters count the final stored PLAN/TASK Markdown, including task completion and verification results.
-Authoring argument bytes sum the arguments of completed `tapl_apply_plan` and `tapl_create_task` calls using the same
-UTF-8 JSON serialization, including empty `{}` values; they exclude other tools. These measurements are not token counts.
-Input and output tokens cover the **whole conversation**, including code changes, reasoning, tool discovery and verification.
-N/A does not mean a measured zero. File-history body counts exclude the first ID/title heading;
-RUN/FINDING/HISTORY sizes are preserved separately. MCP argument and typed/custom JSON measurements are N/A.
-
-The file-history samples produced more PLAN/TASK text than precise (6,323 vs 2,227 characters).
-Policy wording, formatting, decomposition and actual recorded content differ, so token differences cannot
-be attributed solely to MCP versus file writing. This policy does not replicate TAPL's enforcement or all product features.
-
-Normal and minimal reduced record size and output-token medians in this workload; clear overall input savings were not observed.
-Provider-side caching, tool discovery and additional regression tests varied between samples. One synthetic task with five
-repeats per option does not establish a general quality, speed or cost guarantee.
-The agents-history samples were collected later, rather than randomized together with the original 15 TAPL runs;
-time and cache effects cannot be separated from condition effects. These measurements do not establish
-the value of TAPL's workflow records.
-
+<a id="reference-benchmark"></a>
 <a id="authoring-detail-file-history"></a>
+<a id="file-history-policy-and-audit-excerpt"></a>
 
-#### File-history policy and audit excerpt
+## Benchmark and audit excerpt
 
-The AGENTS.md policy required the following, without fixed count or length limits:
+[Benchmark and audit excerpt](reference/benchmarks.md)
 
-- Before implementation, write a RUN with request, mode and approval; a finalized PLAN with requirements,
-  approach, scope, execution order, risks, rollback and validation; and Pending TASKs with actions and verification.
-- Start each TASK immediately before its action and settle it only after verification. Keep a timestamped
-  transition history, preserving earlier entries, and record findings with their source and impact when relevant.
-- Settle all tasks and record the verified result before archiving the RUN, preserving all record files and references.
 
-Review of the final Markdown and chronological tool traces produced these observations:
-
-| Check | Samples meeting the requirement |
-| --- | ---: |
-| Structural record checks | 5 / 5 |
-| PLAN and TASKs written before implementation | 5 / 5 |
-| All TASKs settled before archive | 1 / 5 |
-| Earlier HISTORY entries preserved | 4 / 5 |
-| No observed procedural exception | 1 / 5 |
-
-Four runs archived before completing the final TASK; one of those also replaced earlier HISTORY lines
-while correcting timestamps. Structural success does not establish full procedural compliance.
-These are observations, not enforcement guarantees. Only aggregate results and this excerpt are published;
-raw conversations, individual records and experiment artifacts are private.
 
 ## Associative memory
 
-Automatic hints are capped at 1,200 UTF-8 bytes in total. They use the existing
-SQLite database and FTS, without embeddings, additional model calls, or a daemon.
-Korean cues support spacing variants such as `연상 기억` and `연상기억`.
-Search aliases join Hangul word spans of at least four syllables while preserving
-the original cues and notes. Queries still use only their first eight words.
-Aliases stay within each cue and never join across English, numbers, code
-identifiers, or punctuation. Automatic recall requires a whole-cue spacing match
-or the existing two-meaningful-word match; one word such as `기억` or `프로젝트`
-does not qualify as a match for an entire longer cue.
-Reinforcement occurs at most once per run and requires 24 hours since the last
-content edit or reinforcement. Age alone never deletes or excludes a relevant memory.
+[Associative memory](guides/memory.md)
 
-`[recall] enabled = true` is the default. `tapl_summarize_run` accepts an optional
-`recall_query` and emits at most three compact hints once per run. Hooks, status,
-and next-action checks do not search memory. Start from emitted cues and verify
-the original item or archive; use `tapl_search_history` when cues are insufficient.
-Memory text is evidence to assess, never instructions to execute.
-
-`tapl_finish_run` accepts optional `memory_candidates`, `memory_uses`, and
-`memory_review={"decision":"capture"|"skip","reason":"..."}`. Each candidate has
-slot 1 or 2, 3–5 cues, a note of at most 240 characters, and `source_run_id` with
-an optional `source_item_id`. One or two short sentences are recommended, not a
-validation rule: abbreviations, versions, decimals, and punctuation are allowed.
-Capture only durable lessons supported by this run, such as a verified pitfall
-or reusable decision. Omit routine summaries, secrets, raw dumps, and speculation.
-Uses identify the memory and revision, `source_checked=true`, and concrete
-`usage`; merely seeing a hint does not strengthen it. Supply `expected_run_id`
-with any memory argument.
-
-Review memory when finishing every enabled run. Candidates imply `capture`;
-when there is no durable lesson, send `memory_review={"decision":"skip",
-"reason":"No reusable lesson beyond the recorded result."}`. A skip requires a
-nonempty reason of at most 240 characters. Omitting both candidates and a decision
-leaves `review_required`; completing the work does not mean capture succeeded.
-
-The user-visible result commits before memory processing, so a memory failure
-does not undo the work result. Read the complete compact receipt, including
-`recall` and `memory`, rather than extracting only `active_run`. Run
-`tapl_finish_run` → inspect its memory result and recommendations →
-`tapl_finish_archive` sequentially. Reuse the receipt; query status/next only if
-needed details are missing, the response failed or was truncated, context was
-lost, or workflow state may have changed elsewhere. Status and next-action responses expose
-`memory_review` with `status`, `decision`, `capture_count`, and `pending_errors`.
-Decisions and unresolved failures persist in existing run events across retries
-and process restarts. Correct a failed candidate and retry its same run/slot
-once, or explicitly skip with a reason. Do not resend successful slots or blindly
-repeat invalid input. Resolve the pending review before archiving a newly
-reviewed run. Older runs with no memory-review event remain archivable, and
-runs with recall disabled are exempt. A stale archived-run retry cannot update
-the next active run.
-
-Content edits reset the memory's freshness; verified use can extend its
-half-life from 7 days toward a 90-day cap without rewriting content timestamps.
-The Viewer supports read-only memory list/search, detail, and original-source
-inspection. Its shared browser and VS Code screens distinguish the overall
-stored count from query matches and show the most recent capture failure when
-available. That failure is historical diagnostics, even after an explicit skip;
-check the run's current review to determine whether anything remains pending.
-Older hosts without diagnostics still support their existing memory screens.
-Ask the agent explicitly to update or delete a memory through `tapl_update_memory`
-or `tapl_delete_memory` with `expected_revision`. Conflicts require reading the
-current revision before trying again. Deletion tombstones the memory and removes
-it from recall. `tapl_recall` is a manual read-only query. No inference graph,
-extra LLM call, or background process is added.
-
-```sh
-taplctl config set recall.enabled false
-taplctl config unset recall.enabled  # restore default true
-```
-
-Disabling recall stops automatic capture, recall, and reinforcement. Manual
-inspection, update, and deletion remain available. These use MCP; no workflow
-memory commands are added to the management CLI.
-Upgrading a schema 11 database to schema 12 first saves a one-time
-`.tapl/tapl.db.pre-v12.bak` backup, then rebuilds the memory search index.
-Original content, revisions, reinforcement state, and workflow records remain
-unchanged. A failed rebuild rolls back both the index and version change so it
-can be retried. Databases older than schema 11 retain the existing
-`.tapl/tapl.db.pre-v11.bak` backup procedure. Stop all running TAPL servers before
-upgrading and restart them with the new version. To roll back, stop the servers
-before restoring the corresponding backup; preserve work recorded after the
-backup separately.
 
 <a id="subagents"></a>
+<a id="subagent-setup-and-preferences"></a>
+<a id="read-only-exploration"></a>
 
-## SubAgent setup and preferences
+## SubAgents and parallel work
 
-TAPL coordinates execution manifests; the Codex/root runtime creates and manages
-SubAgents. Executable tasks need completed dependencies and exclusive,
-non-overlapping file or directory ownership. Sequential work, shared state, and
-cross-task decisions remain on root. Strategy and profiles guide the decision;
-they do not force delegation.
+[SubAgents and parallel work](guides/subagents.md)
 
-```toml
-[subagents]
-# TAPL asks for preferences on the first concrete request.
-setup_complete = false
-enabled = true
-# strategy is a decision bias; the agent still evaluates each task.
-strategy = "aggressive"
-preference = ""
 
-[subagents.models]
-# Models are recorded from the current runtime during first-use setup.
-```
-
-On the first concrete TAPL request, the agent checks the model IDs and reasoning
-efforts exposed by its current runtime, then asks whether to use SubAgents and
-what preferences to apply. It saves the answer in the resolved
-configuration file and marks setup complete. TAPL never calls a provider API or
-ships an external model list for this step. `enabled = true` takes effect only
-after setup is complete. If the runtime catalog is unavailable, setup remains
-pending and work stays on the root agent. After an answer, the agent records it
-with `tapl_configure_subagents`; the answer itself is the user confirmation.
-Existing configurations with an explicit model allowlist or `enabled = false`
-remain complete and retain their choices; new model settings apply only when
-the user requests an update.
-
-After your answer, TAPL also records the full runtime catalog in `subagents.available_models`.
-Ordinary `tapl_get_next` entry omits catalog arguments and uses saved preferences.
-It does not check for new models at the start of each session. Before delegating,
-verify the selected model/effort against the live tool and allowlist; skip
-unavailable pairs and use root if none remain. Saved catalog entries are not
-proof that a model is still available.
-
-Only during setup or a user-requested settings check, compare the entire live
-catalog with `tapl_get_next(available_models=..., catalog_complete=true)`, including
-models fixed by agent roles as well as selectable overrides. When a catalog is
-supplied without explicit completeness, the response reports `comparison_status="incomplete"` with no
-inferred changes or configuration prompt; continue work without a repair query.
-A complete comparison reports `"compared"`, or `"no_baseline"` for legacy settings.
-A complete empty catalog can establish removal, while a partial or omitted one
-cannot. Confirmed additions, removals and effort changes offer update or keep.
-Wait for the user's answer before saving through `tapl_configure_subagents`.
-Keeping records the confirmed catalog without changing the allowlist. Existing
-configurations without a catalog remain usable; record a baseline during settings review.
-
-The installed template includes these model-neutral advisory profiles, listed
-in safety-first order:
-
-| Profile | Use when | Bias |
-| --- | --- | --- |
-| `high-risk-cross-cutting` | High-risk, cross-cutting, shared-context, or coordination-heavy work | `avoid` |
-| `deep-reasoning` | Complex, uncertain, or context-heavy decisions | `neutral` |
-| `general-implementation` | Ordinary bounded implementation work | `inherit` |
-| `bounded-routine` | Small, local, predictable, low-risk work | `prefer` |
-
-Profiles have empty candidates until setup supplies the runtime-supported model
-and effort pairs. They describe task characteristics and delegation bias; they
-do not assign permanent roles to model IDs.
-
-An explicit `profiles = []` disables profiles. Any non-empty user
-`subagents.profiles` array fully replaces the template profiles, and its
-candidates must be present in `subagents.models`.
-
-When enabled, TAPL delivers its delegation policy, active profiles, and
-model/reasoning allowlist through `tapl_get_next`. Matching remains advisory: the
-agent evaluates all task characteristics, prefers the most specific profile,
-and uses configured order only as a tie-break. It may choose and record a
-justified profile or candidate override, skips unavailable candidates, and
-falls back to another allowlisted pair or root when needed. The installed
-`.tapl/config.toml` records selected models and preferences, then documents
-every runtime option, its type, and allowed values inline.
-
-For example, this array replaces the template profiles with one model-neutral
-preference:
-
-```toml
-[[subagents.profiles]]
-name = "release-automation"
-characteristics = "bounded deployment steps with a known rollback"
-delegation_bias = "prefer"
-candidates = []
-```
-
-The `strategy` setting controls the delegation bias:
-
-- `aggressive` (the default) favors delegation when tasks are independent,
-  sufficiently self-contained, low enough risk, and have meaningful parallel
-  value or save root context. It does not require delegation when context sharing
-  or coordination cost makes root execution better.
-- `balanced` weighs the same dimensions without a directional preference.
-- `conservative` favors root execution and delegates only when the expected
-  parallel value or root context savings clearly outweigh context transfer,
-  coordination, and risk.
-
-For stored or executable tasks, every strategy still requires execution approval,
-dependency readiness, exclusive non-overlapping `owned_paths`, atomic dispatch,
-and settlement by the exact `execution_id`; the root retains TAPL writes and
-cross-task decisions. Dispatch records the manifest model and reasoning effort
-in the legacy `SubAgent Model`
-custom field before the runtime spawns that SubAgent. To change the bias, set
-`strategy` to `balanced` or `conservative`; to disable TAPL delegation guidance,
-set `enabled = false`. This does not remove delegation instructions from another
-source such as `AGENTS.md`.
-
-For each executable task, TAPL uses four canonical task custom fields throughout
-the lifecycle:
-
-- `Task Profile` records the selected profile (or no match) and match reason.
-- `Task Characteristics` records independence, required context, risk,
-  coordination cost, and parallel value.
-- `Execution Decision` records root versus SubAgent, model/effort, rationale,
-  and any profile or model override. Create or update these fields during task
-  design, before dispatch, and after settlement when the decision changes.
-- `User Notes` is conditional. Add it only for durable user-relevant facts not
-  represented by standard fields, using concise category/content/impact entries.
-
-The legacy `SubAgent Model` field remains written at atomic dispatch for
-compatibility and is omitted when no SubAgent runs. The installed configuration
-is preference input; runtime support, safety gates, and the recorded decision
-remain authoritative.
-
-The workflow follows the scope the user authorized. An explicit request to edit
-or test counts as approval for that work; an investigation-only request does not
-authorize a fix. Record the applicable approval and execution state without
-asking again for permission already given.
-
-### Read-only exploration
-
-Once setup is complete and delegation is enabled, bounded exploration may use a
-host SubAgent before or after planning without artificial tasks, batches, or
-`owned_paths`. Skip scouting for self-contained requests or sufficiently known
-scope. Root handles a known target needing one check; unclear targets,
-dependencies, or validation boundaries can use one eligible read-only helper
-without nested helpers.
-
-Before classification, root and helper share at most three targeted local
-read-only lookups total. Failures do not replenish that budget; unreported helper
-usage consumes its allocated quota. Give the helper the request, scope, remaining
-lookup and response budgets, restrictions, and stop condition instead of full
-history by default. Prioritize source, configuration, and tests; request compact
-`file:line` findings, dependencies, validation needs, risks, unknowns, and lookup
-usage. Root uses the report without repeating searches except for essential
-unresolved questions within the remaining budget.
-
-The scout may not edit, run tests, perform external research or history searches,
-or mutate TAPL state. Root classifies the workflow and writes its records after
-the scout. After classification, applicable source and history rules apply.
-Select only model/effort pairs in both the configured allowlist and live runtime
-catalog. Pending setup, disabled delegation, or no suitable candidate leaves the
-lookup on root. Scouting does not bypass execution approval and does not
-promise lower latency or token usage.
-
-<a id="troubleshooting"></a>
 
 ## Troubleshooting
 
-| Symptom | What to do |
-| --- | --- |
-| Codex does not see TAPL | Run `taplctl doctor`, repeat the package-specific connect command in [Connect TAPL to Codex](#connect), then restart Codex |
-| `taplctl` is not found after standalone install | Apply the installer's printed `PATH` export and add it to your shell profile |
-| The viewer cannot find a workspace | Initialize it or choose a folder that already contains `.tapl/tapl.db` |
-| Port 8000 is busy | Stop the Homebrew service or run `taplctl viewer --port PORT` |
-| A Homebrew formula conflicts | Uninstall the installed TAPL formula before selecting another |
-
-For an unresolved issue, include the relevant `taplctl doctor` output in a
-[bug report](https://github.com/qkdxorjs1002/tapl/issues).
+[Troubleshooting](guides/troubleshooting.md)

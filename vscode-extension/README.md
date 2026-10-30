@@ -27,14 +27,14 @@ Views refresh when the workflow database changes. The interface follows your
 VS Code display language, with English and Korean available explicitly.
 
 New to TAPL? [See the workflow example](https://github.com/qkdxorjs1002/tapl#workflow)
-and [install TAPL](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guide.md).
+and [install TAPL](https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/installation.md).
 
 ## Get started
 
 You need **VS Code 1.90+**, a reachable **`tapl-mcp`** executable, and a workspace
 initialized by TAPL.
 
-1. [Install TAPL and connect it to Codex](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guide.md#connect).
+1. [Install TAPL and connect it to Codex](https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/integrations.md).
 2. Install the extension. You can download a `.vsix` from
    [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases) and use
    **Extensions: Install from VSIX…** in the Command Palette.
@@ -56,25 +56,11 @@ it uses `tapl-mcp.exe`.
 
 ## Commands
 
-Open the Command Palette and search for **TAPL Workflow**.
-
-| Command | Action |
-| --- | --- |
-| **Refresh Workflow Views** | Reload the workspace's workflow state |
-| **Open TAPL Dashboard** | Inspect the detailed dashboard |
-| **Open TAPL Archive** | Browse a saved run |
-| **Search TAPL Workflow** | Find earlier workflow records |
+Use the Command Palette to find **TAPL Workflow** commands. The [extension guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#commands-and-settings) lists every command and setting.
 
 ## Make it fit your workspace
 
-| Setting | Values | Default |
-| --- | --- | --- |
-| `taplWorkflow.taplMcpPath` | MCP command or absolute path | Automatic discovery |
-| `taplWorkflow.layout` | `auto`, `small`, `medium`, `large` | `auto` |
-| `taplWorkflow.language` | `auto`, `ko`, `en` | `auto` |
-
-The extension keeps a workspace-scoped MCP connection and watches the database,
-WAL, and SHM files so workflow changes appear without a manual refresh.
+See [workspace and session routing](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#workspace-and-session-routing) for multi-root workspaces, executable discovery, layout, and language settings.
 
 ## Support and license
 
@@ -87,13 +73,6 @@ for bundled dependencies.
 
 ## Shared Viewer
 
-The extension and browser Viewer use the same React screens, CSS, and protocol types (`src/viewer/types.ts`). The extension provides the VS Code workspace and MCP adapters; the browser provides HTTP and local workspace selection.
+The extension and browser share the same Viewer. See the [extension guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#shared-viewer-and-capabilities) for feature availability and the [Viewer guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/viewer.md) for RUN discard confirmation and service setup.
 
-Both show associative memory lists, search, details, and original sources. Memory screens are read-only: ask the agent to change or delete a memory. Use a current `tapl-mcp` for memory support; older servers keep the other Viewer screens available.
-
-RUN tabs include a close icon. Discard requires a confirmation dialog and an exact
-full RUN ID entered or pasted by the user. Records are archived; truly empty RUNs
-are deleted. External agent processes keep running. This action requires a current
-`tapl-mcp`; older servers keep the Viewer read-only.
-
-Run `npm run test:host` to check routing, confirmed discard, refresh, navigation, and workspace contracts, then `npm run compile` to build and sync the shared browser assets.
+For development checks, use [contributing and verification](https://github.com/qkdxorjs1002/tapl/blob/main/docs/development/contributing.md).

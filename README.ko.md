@@ -10,11 +10,11 @@
 </p>
 <p align="center">
   <a href="https://github.com/qkdxorjs1002/tapl/releases"><img src="https://img.shields.io/github/v/release/qkdxorjs1002/tapl" alt="GitHub 안정 릴리즈" /></a>
-  <a href="docs/guide.ko.md#requirements"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.11 이상" /></a>
+  <a href="docs/getting-started/installation.ko.md"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.11 이상" /></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT 라이선스" /></a>
 </p>
 <p align="center">
-  <a href="#quick-start">빠른 시작</a> · <a href="#associative-memory">연상 기억</a> · <a href="#workflow">진행 예시</a> · <a href="docs/guide.ko.md">설치·운영 가이드</a>
+  <a href="#quick-start">빠른 시작</a> · <a href="#associative-memory">연상 기억</a> · <a href="#workflow">진행 예시</a> · <a href="docs/README.ko.md">문서</a>
 </p>
 
 ## 왜 TAPL인가요?
@@ -64,7 +64,7 @@ taplctl config set recall.enabled false
 taplctl config unset recall.enabled
 ```
 
-세부 기준과 제한은 [연상 기억 안내](docs/guide.ko.md#연상-기억)를 참고하세요.
+세부 기준과 제한은 [연상 기억 안내](docs/guides/memory.ko.md)를 참고하세요.
 
 <a id="workflow"></a>
 
@@ -79,8 +79,8 @@ taplctl config set workflow.authoring_detail normal
 taplctl config unset workflow.authoring_detail
 ```
 
-옵션별 동작과 설정 범위는 [설정 가이드](docs/guide.ko.md#authoring-detail),
-실측 비교는 [벤치마크](docs/guide.ko.md#authoring-detail-benchmark)를 참고하세요.
+옵션별 동작과 설정 범위는 [설정 가이드](docs/guides/authoring-detail.ko.md),
+실측 비교는 [벤치마크](docs/reference/benchmarks.ko.md)를 참고하세요.
 
 Codex에게 평소처럼 요청하세요.
 
@@ -137,7 +137,7 @@ Codex 같은 코딩 Agent에게 아래 프롬프트를 복사해서 요청하세
 ```text
 TAPL을 설치하고 Codex에 연결해줘.
 저장소: https://github.com/qkdxorjs1002/tapl
-설치 가이드: https://github.com/qkdxorjs1002/tapl/blob/main/docs/guide.ko.md
+설치 가이드: https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/installation.ko.md
 
 가이드를 읽고 내 운영체제와 셸, 필수 환경, 기존 설치 여부를 확인해줘.
 다른 채널을 지정하지 않았다면 내 OS에 맞는 공식 방법으로 최신 안정판을 설치해줘.
@@ -188,8 +188,8 @@ TAPL이 Codex 세션 작업 폴더에 `.tapl/tapl.db`를 만들고, Codex가 MCP
 
 작업 중에는 RUN 분류와 함께 계획·실행·검증 단계 진입을 짧은 PLAN/TASK 안내로 표시합니다.
 
-[Linux 설치](docs/guide.ko.md#linux)와 [Windows 설치](docs/guide.ko.md#windows)는 가이드를 참고하세요.
-설치 후 [운영체제별 Codex 연결 명령](docs/guide.ko.md#connect)을 실행합니다.
+[Linux 설치](docs/getting-started/installation.ko.md)와 [Windows 설치](docs/getting-started/installation.ko.md)는 가이드를 참고하세요.
+설치 후 [운영체제별 Codex 연결 명령](docs/getting-started/integrations.ko.md)을 실행합니다.
 
 ## 설치
 
@@ -197,21 +197,21 @@ TAPL이 Codex 세션 작업 폴더에 `.tapl/tapl.db`를 만들고, Codex가 MCP
 Codex 연결과 검증까지 Agent에게 맡길 수 있습니다. Codex 프로젝트 전체에 연결하려면
 `taplctl install user`, 한 저장소에만 연결하려면 `taplctl install repo`를 선택하세요.
 프롬프트는 연결 전에 이 선택을 확인합니다.
-[연결 범위](#connection-scope)와 [운영체제별 명령](docs/guide.ko.md#connect)을 참고하세요.
+[연결 범위](#connection-scope)와 [운영체제별 명령](docs/getting-started/integrations.ko.md)을 참고하세요.
 
 | 플랫폼·채널 | 설치 방법 | 안내 |
 | --- | --- | --- |
-| macOS · 안정판 | Homebrew `taplctl` | [전문 검색 포함](docs/guide.ko.md#homebrew) |
-| macOS · 안정판 + 시맨틱 검색 | Homebrew `taplctl-semantic` | [선택 의존성 포함](docs/guide.ko.md#homebrew) |
-| macOS · 프리릴리즈 포함 최신 채널 | Homebrew `taplctl-pre` | [채널 선택](docs/guide.ko.md#homebrew) |
-| Linux · 안정판 기본 | 독립형 셸 설치 스크립트 | [설치 및 경로 설정](docs/guide.ko.md#linux) |
-| Windows 10/11 · 안정판 기본 | PowerShell / CMD 스크립트 | [설치 및 경로 설정](docs/guide.ko.md#windows) |
+| macOS · 안정판 | Homebrew `taplctl` | [전문 검색 포함](docs/getting-started/installation.ko.md) |
+| macOS · 안정판 + 시맨틱 검색 | Homebrew `taplctl-semantic` | [선택 의존성 포함](docs/getting-started/installation.ko.md) |
+| macOS · 프리릴리즈 포함 최신 채널 | Homebrew `taplctl-pre` | [채널 선택](docs/getting-started/installation.ko.md) |
+| Linux · 안정판 기본 | 독립형 셸 설치 스크립트 | [설치 및 경로 설정](docs/getting-started/installation.ko.md) |
+| Windows 10/11 · 안정판 기본 | PowerShell / CMD 스크립트 | [설치 및 경로 설정](docs/getting-started/installation.ko.md) |
 
 Windows의 `-Pre`, `-Semantic`, `-Version TAG`는
-[채널·시맨틱 옵션](docs/guide.ko.md#windows-prerelease)을 참고하세요.
+[채널·시맨틱 옵션](docs/getting-started/installation.ko.md)을 참고하세요.
 
 Python 3.11 이상이 필요합니다. Homebrew의 세 formula는 서로 충돌하므로 하나만 설치하세요.
-자세한 의존성, 업데이트, 설정은 [설치·운영 가이드](docs/guide.ko.md)에서 확인할 수 있습니다.
+자세한 의존성, 업데이트, 설정은 [설치·운영 가이드](docs/README.ko.md)에서 확인할 수 있습니다.
 
 ## Viewer 열기
 
@@ -219,7 +219,7 @@ Python 3.11 이상이 필요합니다. Homebrew의 세 formula는 서로 충돌�
 
 연상 기억의 목록·검색·상세·원본을 읽기 전용으로 확인할 수 있습니다.
 기억 수정이나 삭제가 필요하면 Agent에게 지시합니다.
-저장 기준과 반복 사용에 따른 강화는 [연상 기억 안내](docs/guide.ko.md#연상-기억)를 참고하세요.
+저장 기준과 반복 사용에 따른 강화는 [연상 기억 안내](docs/guides/memory.ko.md)를 참고하세요.
 
 같은 작업 폴더에서 실행하세요.
 
@@ -234,11 +234,11 @@ taplctl viewer
 RUN 탭의 **×** 아이콘을 누르면 확인창이 열립니다. 전체 RUN ID를 정확히 입력하거나
 붙여넣은 뒤 확인하면 기록이 있는 RUN은 종속 기록과 함께 강제 아카이브하고,
 진짜 빈 RUN은 아카이브 없이 삭제합니다. 취소하면 변경하지 않습니다.
-처리 범위와 실행 중 작업에 미치는 영향은 [RUN 폐기 안내](docs/guide.ko.md#discard-run)를 참고하세요.
+처리 범위와 실행 중 작업에 미치는 영향은 [RUN 폐기 안내](docs/guides/viewer.ko.md)를 참고하세요.
 
 8000 포트가 사용 중이면 `taplctl viewer --port 9000`을 사용하세요.
 작업 공간 없이 시작하면 viewer에서 초기화된 저장소 폴더를 선택할 수 있습니다.
-서비스 자동 시작과 리버스 프록시는 [Viewer 운영 안내](docs/guide.ko.md#viewer)를 참고하세요.
+서비스 자동 시작과 리버스 프록시는 [Viewer 운영 안내](docs/guides/viewer.ko.md)를 참고하세요.
 
 VS Code에서도 [선택 확장 기능](vscode-extension/README.md)으로 작업 기록을 볼 수 있습니다.
 
@@ -259,83 +259,21 @@ flowchart LR
 
 SQLite 데이터베이스가 이 구성 요소들이 공유하는 작업 기록의 기준입니다.
 SubAgent의 생성과 관리는 Codex 런타임이 담당하고, TAPL은 의존성과 실행 범위를 조율합니다.
-[위임 설정과 프로필](docs/guide.ko.md#subagents)에서 동작을 조정할 수 있습니다.
+[위임 설정과 프로필](docs/guides/subagents.ko.md)에서 동작을 조정할 수 있습니다.
 
 ## 문서
 
-- [설치·운영 가이드](docs/guide.ko.md) — 플랫폼별 설치, 업데이트, 설정, 문제 해결
-- [VS Code 확장 기능](vscode-extension/README.md) — 편집기에서 작업 기록 보기
+- [문서 홈](docs/README.ko.md) — 주제별 전체 문서와 탐색
+- [빠른 시작](docs/getting-started/quickstart.ko.md) · [설정](docs/guides/configuration.ko.md) · [VS Code](docs/guides/vscode.ko.md)
+- [CLI 참조](docs/reference/cli.ko.md) · [MCP 도구 참조](docs/reference/mcp.ko.md)
 - [GitHub Issues](https://github.com/qkdxorjs1002/tapl/issues) — 버그 신고와 기능 제안
 
 ## 개발
 
-### 워크플로우 지침 전달
+<a id="워크플로우-지침-전달"></a>
 
-MCP 초기화는 짧은 필수 bootstrap을 제공합니다. agent는 작업 전에 `tapl_get_next`에서
-권위 있는 전체 `workflow_policy`, `subagent_guidance`, `config`를 읽습니다. 기존 지침
-원문과 승인·계획·작업·위임·검증·복구·아카이브 규칙은 그대로 유지합니다.
-
-첫 `tapl_get_next` 한 번에서 정책, `state_summary`, 다음 행동을 함께 받습니다.
-새 세션을 포함한 일반 진입에서는 모델 목록 인자를 생략합니다. 저장된 선호를 사용하되,
-위임 직전에 선택한 model/effort가 실제 도구에 있는지 확인합니다. 사용할 수 없는 조합은
-제외하고 허용된 조합이 남지 않으면 메인 에이전트가 진행합니다.
-상태 요약은 활성 run ID·분류, 작업·대기 run·batch 수, 실행 승인 상태를 제공합니다.
-`tapl_get_status`는 재개·복구에 필요한 상세 정보가 없거나 명시적으로 상태 검사를
-권고할 때만 호출하며, 본문이 필요하면 `full=true`를 사용합니다. bootstrap과 훅은
-이 첫 호출을 공유하므로 각각의 지침을 만족시키기 위해 다시 호출하지 않습니다.
-
-모델 목록 비교는 최초 설정 또는 사용자가 요청한 설정 점검에서만
-`tapl_get_next(available_models=..., catalog_complete=true)`로 수행합니다.
-역할별 고정 모델까지 포함한 전체 live 목록을 확인한 뒤에만 완전성을 표시합니다.
-기본값 `catalog_complete=false`에서는 목록이 있어도
-`model_changes.comparison_status="incomplete"`로 반환하며 변경·제거를 추론하거나
-설정 변경을 제안하지 않습니다. 목록을 채우려고 일반 진입을 재호출하지 않으며,
-저장된 목록으로 현재 가용성을 추정하지 않습니다. 완전한 빈 목록은 제거를 확인할 수
-있지만, 미전달·불완전 목록은 그렇지 않습니다. 기존 호출자가 비교를 원하면 완전성을
-명시해야 합니다. 새 모델 알림은 매 세션 시작이 아닌 설정 점검 시점에 제공합니다.
-
-응답의 `policy_revision`은 전달한 정책·지침·설정 전체를 식별합니다. 호출자는 **해당
-내용 전체를 현재 컨텍스트에서 사용할 수 있을 때만** 이를 `known_policy_revision`으로
-전달할 수 있습니다. 같은 revision이면 변경 없는 필드만 생략하며, 상태 요약·다음 행동과
-명시적으로 요청한 완전한 catalog 비교는 항상 새로 계산합니다. 알 수 없는 revision,
-정책·설정 변경, 완전한 catalog 비교에서 확인한 변경에는 전체 내용을 반환합니다.
-새 세션, 컨텍스트 압축 후, 내용 유지가 불확실한 때에는
-revision을 생략해야 하며 요약만으로는 충분하지 않습니다. 이 선택 인자 없이 호출하면
-항상 전체 내용을 받습니다.
-revision은 정책 전달만 줄이며 상태 캐시나 승인 근거로 사용할 수 없습니다.
-
-기록 조회의 `tapl_get_item(compact=true)`는 반환한 구조화 필드로 정확히 재현되는
-plan/task 본문만 생략합니다. 기본값과 `compact=false`는 기존 전체 응답을 유지하며,
-finding 본문·사용자 작성 내용·원본 텍스트는 보존합니다. 간결 검증 응답도 모든 차단
-오류를 유지하고 경고만 제한합니다. 생략한 항목 수는 `omitted_issue_count`로 표시합니다.
-
-코드 모드에서는 전체 도구 목록 출력 없이 필요한 도구를 정확한 이름으로 함께 조회하고
-`structuredContent`를 한 번만 출력합니다(필요하면 텍스트를 파싱해 사용). 불러온 정책의 승인·원문 확인·검증·위임
-조건을 지키며, 완료 후에는 기억 검토 결과를 확인한 다음 아카이브합니다.
-
-일부 MCP 호스트는 서버 지침을 도구마다 반복하므로 초기화에는 필수 정책 진입
-안내만 전달합니다. 전체 정책과 도구 스키마는 유지하며, 일반 진입의 `tapl_get_next`는
-여전히 전체 정책을 반환합니다. 훅 렌더링은 실제로 참조하는 안내문만 계산하고
-설정을 캐시하지 않습니다.
-
-상태 조회는 트랜잭션 안에서 읽은 동일 snapshot을 검증에 사용합니다. 쓰기 영수증은
-최신 다음 행동을 계속 제공하면서 응답에서 버릴 정책 문구의 생성만 생략합니다.
-반환된 권고를 바로 사용하며, 쓰기·읽기 전용 status 확인·Stop 훅 이후에 습관적으로
-`get_next`를 다시 호출하지 않습니다. 오류·응답 잘림, 정책·컨텍스트 유실,
-다른 실행 주체의 상태 변경 가능성이 있으면 새로 조회합니다.
-실행 승인과 원자적 dispatch/settlement 검사는 변경하지 않습니다.
-
-저장소 루트에서 실행합니다.
-
-```sh
-uv --directory tapl sync --extra test
-uv --directory tapl run --extra test python -m unittest discover -s tests
-uv --directory tapl build
-npm --prefix vscode-extension run compile
-git diff --check
-```
-
-시맨틱 검색을 개발할 때는 `uv --directory tapl sync --extra semantic`을 사용하세요.
+[기여와 검증](docs/development/contributing.ko.md)에서 개발 환경과 검사 방법을 확인하세요.
+[내부 구조](docs/development/architecture.ko.md)와 [MCP 참조](docs/reference/mcp.ko.md)는 구성 요소와 워크플로 지침 전달을 설명합니다.
 
 ## 라이선스
 

@@ -7,10 +7,10 @@
 <p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a></p>
 <p align="center">
   <a href="https://github.com/qkdxorjs1002/tapl/releases"><img src="https://img.shields.io/github/v/release/qkdxorjs1002/tapl" alt="Latest stable release" /></a>
-  <a href="docs/guide.md#requirements"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.11 or newer" /></a>
+  <a href="docs/getting-started/installation.md"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.11 or newer" /></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT license" /></a>
 </p>
-<p align="center"><a href="#quick-start">Quick start</a> · <a href="#associative-memory">Associative memory</a> · <a href="#workflow">Workflow</a> · <a href="docs/guide.md">Guide</a></p>
+<p align="center"><a href="#quick-start">Quick start</a> · <a href="#associative-memory">Associative memory</a> · <a href="#workflow">Workflow</a> · <a href="docs/README.md">Documentation</a></p>
 
 ## Why TAPL?
 
@@ -62,7 +62,7 @@ taplctl config set recall.enabled false
 taplctl config unset recall.enabled
 ```
 
-See the [associative memory guide](docs/guide.md#associative-memory) for detailed rules and limits.
+See the [associative memory guide](docs/guides/memory.md) for detailed rules and limits.
 
 <a id="workflow"></a>
 
@@ -77,8 +77,8 @@ taplctl config set workflow.authoring_detail normal
 taplctl config unset workflow.authoring_detail
 ```
 
-See the [configuration guide](docs/guide.md#authoring-detail) for each level and configuration scope,
-and [benchmark results](docs/guide.md#authoring-detail-benchmark) for measured comparisons.
+See the [configuration guide](docs/guides/authoring-detail.md) for each level and configuration scope,
+and [benchmark results](docs/reference/benchmarks.md) for measured comparisons.
 
 Ask for an outcome, in your own words:
 
@@ -130,7 +130,7 @@ Copy this prompt into your coding agent, such as Codex:
 ```text
 Install TAPL and connect it to Codex.
 Repository: https://github.com/qkdxorjs1002/tapl
-Installation guide: https://github.com/qkdxorjs1002/tapl/blob/main/docs/guide.md
+Installation guide: https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/installation.md
 
 Read the guide, detect my OS and shell, and check prerequisites and any existing installation.
 Use the official installation method for my OS and the latest stable release unless I specify another channel.
@@ -186,7 +186,7 @@ During work, TAPL reports planning, execution, and verification with concise
 PLAN/TASK notices alongside the RUN classification.
 
 Using Linux, Windows, or another release channel? Choose an option below and
-follow its [Codex connection command](docs/guide.md#connect).
+follow its [Codex connection command](docs/getting-started/integrations.md).
 
 ## Installation
 
@@ -194,23 +194,23 @@ You can also use the [Agent installation prompt](#agent-install) above to have
 your agent check the environment, install TAPL, connect Codex, and verify setup.
 Choose `taplctl install user` for your Codex projects or `taplctl install repo`
 for one repository. The prompt confirms this choice before connecting.
-See [connection scopes](#connection-scope) and the [platform-specific commands](docs/guide.md#connect).
+See [connection scopes](#connection-scope) and the [platform-specific commands](docs/getting-started/integrations.md).
 
 | Platform / channel | Install option | Details |
 | --- | --- | --- |
-| Homebrew · stable | `taplctl` | [Full-text search](docs/guide.md#homebrew) |
-| Homebrew · stable + semantic | `taplctl-semantic` | [Embedding and vector dependencies](docs/guide.md#homebrew) |
-| Homebrew · newest published release | `taplctl-pre` | [May include prereleases](docs/guide.md#homebrew) |
-| Linux | Standalone shell installer | [Setup and paths](docs/guide.md#linux) |
-| Windows 10 / 11 | PowerShell / CMD scripts | [Setup and paths](docs/guide.md#windows) |
+| Homebrew · stable | `taplctl` | [Full-text search](docs/getting-started/installation.md) |
+| Homebrew · stable + semantic | `taplctl-semantic` | [Embedding and vector dependencies](docs/getting-started/installation.md) |
+| Homebrew · newest published release | `taplctl-pre` | [May include prereleases](docs/getting-started/installation.md) |
+| Linux | Standalone shell installer | [Setup and paths](docs/getting-started/installation.md) |
+| Windows 10 / 11 | PowerShell / CMD scripts | [Setup and paths](docs/getting-started/installation.md) |
 
 Windows supports `-Pre`, `-Semantic`, and `-Version TAG`; see the
-[channel and semantic options](docs/guide.md#windows-prerelease).
+[channel and semantic options](docs/getting-started/installation.md).
 
 Install only one Homebrew formula at a time; they share the same executables.
 Standalone installers default to the latest stable release. See the guide for
-[requirements](docs/guide.md#requirements), [updates](docs/guide.md#updates), and
-[troubleshooting](docs/guide.md#troubleshooting).
+[requirements](docs/getting-started/installation.md), [updates](docs/getting-started/installation.md), and
+[troubleshooting](docs/guides/troubleshooting.md).
 
 ## Open the viewer
 
@@ -232,13 +232,13 @@ press `Ctrl+C` to stop it.
 The **×** icon on a RUN tab opens a confirmation dialog. Enter or paste the full
 RUN ID exactly to confirm. RUNs with records are force-archived with their dependent
 work; truly empty RUNs are deleted without an archive. Cancellation changes nothing.
-See [RUN discard behavior](docs/guide.md#discard-run) for scope and execution details.
+See [RUN discard behavior](docs/guides/viewer.md) for scope and execution details.
 
 Use `taplctl viewer --port 9000` if port 8000 is busy. If no workspace is selected,
 the viewer asks for an initialized workspace folder.
 
 For login services, reverse proxies, and the optional VS Code viewer, see
-[viewer setup](docs/guide.md#viewer).
+[viewer setup](docs/guides/viewer.md).
 
 ## How it works
 
@@ -262,88 +262,17 @@ manages SubAgents.
 
 ## Documentation
 
-- [User guide](docs/guide.md) — installation, configuration, search, services, and SubAgent preferences.
-- [VS Code extension](vscode-extension/README.md) — workspace viewer setup and usage.
-- [Issues](https://github.com/qkdxorjs1002/tapl/issues) — report a bug or request a feature.
+- [Documentation home](docs/README.md) — all topics and reading paths
+- [Quick start](docs/getting-started/quickstart.md) · [Configuration](docs/guides/configuration.md) · [VS Code](docs/guides/vscode.md)
+- [CLI reference](docs/reference/cli.md) · [MCP tool reference](docs/reference/mcp.md)
+- [Issues](https://github.com/qkdxorjs1002/tapl/issues) — report a bug or request a feature
 
 ## Development
 
-### Workflow policy delivery
+<a id="workflow-policy-delivery"></a>
 
-MCP initialization provides a short mandatory bootstrap. Before work, agents load
-the complete, authoritative `workflow_policy`, `subagent_guidance`, and `config`
-from `tapl_get_next`. The workflow text and its approval, planning, task,
-delegation, verification, recovery, and archive rules remain intact.
-
-Initialization carries only the policy-entry gate because some MCP hosts repeat
-server instructions with every tool. All workflow capabilities and tool schemas
-remain available; `tapl_get_next` still returns the complete policy on ordinary entry.
-Hook rendering evaluates only referenced guidance, without caching settings.
-
-Use one entry call to load policy, `state_summary`, and recommendations. Omit
-model-catalog arguments during ordinary entry, including a new session. Use
-saved preferences and check each selected model/effort against the live delegation
-tool before spawning; skip unavailable pairs and use root if none remain.
-The summary includes the active run's identity and
-classification, task/queue/batch counts, and execution-approval state. Call
-`tapl_get_status` only for missing details needed to resume or recover work, or
-an explicit inspection recommendation; use `full=true` for record bodies.
-Bootstrap and hook instructions share this single entry, not separate calls.
-
-`tapl_get_item(compact=true)` omits a plan/task body only when the returned
-canonical fields reproduce it exactly. Omitting the option or using `compact=false` retains the
-existing full response; findings, custom bodies and raw text are preserved.
-Compact validation receipts retain every blocking error and limit warnings,
-reporting omitted items with `omitted_issue_count`.
-
-In code mode, discover needed tools by exact name together, without printing the
-full tool catalog, and emit only one `structuredContent` result (parsed text fallback). Follow the loaded policy's
-approval, source, verification and dispatch gates, and inspect memory review
-before archiving.
-
-Catalog comparison is an explicit setup/settings operation:
-`tapl_get_next(available_models=..., catalog_complete=true)`. Verify the entire
-live catalog, including fixed agent-role models, before asserting completeness.
-The default `catalog_complete=false` treats any supplied list as an incomplete
-observation: `model_changes.comparison_status="incomplete"`, no inferred changes
-and no reconfiguration prompt. Do not retry ordinary entry to fill that list or
-use saved entries as evidence of live availability. A verified empty catalog
-can establish removal; a missing or partial catalog cannot. Existing callers
-that want a comparison must opt in to completeness. New-model suggestions now
-occur during settings checks, not at the start of every session.
-
-The response includes a `policy_revision` covering the exact policy, guidance,
-and config. A caller may send it as `known_policy_revision` only while **all of
-that content remains available in its current context**. A matching revision
-omits those unchanged fields; state summaries, recommendations and requested
-complete catalog comparisons are always fresh. Unknown revisions, policy/config
-changes, and changes in a complete catalog comparison return full content.
-Omit the revision on a new session, after
-compaction, or whenever retention is uncertain; a summary is insufficient.
-Calls without the optional revision always receive the full content.
-The revision only controls policy delivery; it is not a state cache or approval evidence.
-
-State inspection validates one transactionally consistent snapshot. Write
-receipts still return current next actions, without generating policy text that
-the receipt would discard. Follow those actions directly; writes, read-only
-status checks, and Stop hooks do not require another `get_next`. Refresh after
-errors or truncation, lost policy/context, or possible workflow
-changes by another actor. These optimizations do not change execution approval
-or the atomic dispatch/settlement checks.
-
-```sh
-uv --directory tapl sync --extra test
-uv --directory tapl run --extra test python -m unittest discover -s tests
-uv --directory tapl build
-npm --prefix vscode-extension run compile
-git diff --check
-```
-
-For semantic search development:
-
-```sh
-uv --directory tapl sync --extra semantic
-```
+See [contributing and verification](docs/development/contributing.md) for setup and checks.
+[Architecture](docs/development/architecture.md) and the [MCP reference](docs/reference/mcp.md) explain component boundaries and workflow policy delivery.
 
 ## License
 
