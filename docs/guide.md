@@ -552,16 +552,20 @@ The [policy and audit excerpt](#authoring-detail-file-history) below describes t
 Values below are **medians of five samples per condition**; percentages compare with **`tapl + precise` (default)**.
 PLAN/TASK counts are observed counts, not limits. Percentage changes are not shown for N/A measurements.
 
-| Condition | Observed PLAN / TASK | Body characters | Authoring argument bytes | Total input tokens¹ | Output tokens |
-| --- | --- | ---: | ---: | ---: | ---: |
-| `tapl + precise` (default) | 1 / 3 | 2,227 | 5,257 | 348,705 | 5,607 |
-| `tapl + normal` | 1 / 2 | 1,646 (−26.1%) | 2,758 (−47.5%) | 347,300 (−0.4%) | 4,638 (−17.3%) |
-| `tapl + minimal` | 1 / 1–2 | 1,290 (−42.1%) | 2,168 (−58.8%) | 364,056 (+4.4%) | 4,031 (−28.1%) |
-| Without TAPL + AGENTS history (`agents-history`) | 1 / 3–4 | 6,323 (+183.9%) | N/A | 210,919 (−39.5%) | 9,077 (+61.9%) |
+| Condition | Observed PLAN / TASK | Body characters | Authoring argument bytes | Total input tokens¹ | Output tokens | Elapsed time² |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `tapl + precise` (default) | 1 / 3 | 2,227 | 5,257 | 348,705 | 5,607 | 167.7 s |
+| `tapl + normal` | 1 / 2 | 1,646 (−26.1%) | 2,758 (−47.5%) | 347,300 (−0.4%) | 4,638 (−17.3%) | 129.9 s (−22.6%) |
+| `tapl + minimal` | 1 / 1–2 | 1,290 (−42.1%) | 2,168 (−58.8%) | 364,056 (+4.4%) | 4,031 (−28.1%) | 125.0 s (−25.5%) |
+| Without TAPL + AGENTS history (`agents-history`) | 1 / 3–4 | 6,323 (+183.9%) | N/A | 210,919 (−39.5%) | 9,077 (+61.9%) | 184.9 s (+10.3%) |
 
 ¹ Input includes cached input. Median uncached input, calculated per sample as `input_tokens - cached_input_tokens`,
 was **30,881 / 44,706 / 39,160 / 16,780** for precise / normal / minimal / agents-history. These are separate medians; subtracting column
 medians can give a different result. No prices or billing amounts were calculated.
+
+² Time covers the Codex session from launch to exit, including model responses, tool calls and in-session verification.
+VM setup and post-session auditing are excluded. Sample time ranges overlap across conditions;
+server load and cache effects were not controlled, so these medians do not establish a general speed advantage.
 
 Body characters count the final stored PLAN/TASK Markdown, including task completion and verification results.
 Authoring argument bytes sum the arguments of completed `tapl_apply_plan` and `tapl_create_task` calls using the same
