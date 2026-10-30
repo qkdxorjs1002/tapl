@@ -116,7 +116,7 @@ def test_next_summary_covers_entry_without_status_and_tracks_approval() -> None:
             app.apply_plan("PLAN-001", title="Plan")
             app.create_task("TASK-001", "Inspect", "PLAN-001", "Goal", "Action", "Check")
             app.record_approval(decision="approved", prompt="Implement the approved request", source="explicit_user")
-            updated = app.get_next(known_policy_revision=empty["policy_revision"])
+            updated = app.get_next(known_policy_revision=initial["policy_revision"])
             assert updated["policy_unchanged"]
             assert updated["state_summary"]["counts"]["tasks"] == 1
             assert updated["state_summary"]["task_counts"]["Pending"] == 1

@@ -20,7 +20,7 @@ DEFAULT_SEARCH_MAX_RESULTS = 12
 DEFAULT_SEMANTIC_PROVIDER = "auto"
 DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS = 1800
 DEFAULT_RECALL_ENABLED = True
-DEFAULT_AUTHORING_DETAIL = "precise"
+DEFAULT_AUTHORING_DETAIL = "auto"
 DEFAULT_SUBAGENTS_ENABLED = True
 DEFAULT_SUBAGENT_STRATEGY = "aggressive"
 DEFAULT_SUBAGENT_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -79,10 +79,33 @@ DEFAULT_SUBAGENT_PROFILE_SPECS: tuple[
 )
 
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
-AUTHORING_DETAILS = ("precise", "normal", "minimal")
+EFFECTIVE_AUTHORING_DETAILS = ("precise", "normal", "minimal")
+AUTHORING_DETAILS = ("auto", *EFFECTIVE_AUTHORING_DETAILS)
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
 SUBAGENT_STRATEGIES = ("conservative", "balanced", "aggressive")
 SUBAGENT_DELEGATION_BIASES = ("inherit", "prefer", "neutral", "avoid")
+
+
+def resolve_authoring_detail(authoring_detail: str, workflow_mode: str | None = None) -> str:
+    """Resolve a configured preference against an already-selected RUN mode."""
+
+    if authoring_detail not in AUTHORING_DETAILS:
+        raise ValueError(f"Unknown authoring detail: {authoring_detail}")
+    if workflow_mode is not None and workflow_mode not in ("fast", "standard", "strict"):
+        raise ValueError(f"Unknown workflow mode: {workflow_mode}")
+    if authoring_detail != "auto":
+        return authoring_detail
+    return {"fast": "minimal", "standard": "normal", "strict": "precise", None: "normal"}[workflow_mode]
+
+
+def authoring_policy(authoring_detail: str, workflow_mode: str | None = None) -> dict[str, Any]:
+    """Keep the configured preference separate from its effective policy."""
+
+    return {
+        "configured": authoring_detail,
+        "effective": resolve_authoring_detail(authoring_detail, workflow_mode),
+        "workflow_mode": workflow_mode,
+    }
 
 
 @dataclass(frozen=True)

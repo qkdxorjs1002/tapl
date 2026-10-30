@@ -21,6 +21,9 @@ def build_context(
 ) -> dict[str, Any]:
     state = db.status_payload(conn)
     state["session_id"] = db.connection_session_id(conn)
+    authoring_policy = tapl_config.authoring_policy(
+        settings.workflow.authoring_detail, (state.get("active_run") or {}).get("workflow_mode"),
+    )
     plan_task = validation.validate_workflow_state(
         state, authoring_detail=settings.workflow.authoring_detail,
     )
@@ -43,6 +46,7 @@ def build_context(
         "active_batches": state.get("active_batches", []),
         "active_executions": state.get("active_executions", []),
         "config": settings.as_dict(),
+        "authoring_policy": authoring_policy,
         "plan_task_execute": plan_task,
         "instructions": [tapl_prompt.session_routing_guidance()] + instructions(event=event),
         "workflow_guidance": workflow_guidance(
@@ -69,6 +73,12 @@ def format_context(packet: dict[str, Any]) -> str:
         "tapl context:",
         f"- session_id: {packet.get('session_id', '')!r}; pass this exact value on every TAPL tool call.",
     ]
+    authoring_policy = packet.get("authoring_policy")
+    if authoring_policy:
+        lines.append(
+            f"- PLAN/TASK authoring detail: {authoring_policy['effective']} "
+            f"(configured: {authoring_policy['configured']}; workflow mode: {authoring_policy['workflow_mode'] or 'none'})."
+        )
     if run["present"]:
         summary = f"active run: {run['request_summary']}" if run["request_summary"] else "active run present"
         lines.append(

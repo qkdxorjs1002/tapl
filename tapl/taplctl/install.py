@@ -734,7 +734,8 @@ def default_config_text() -> str:
         return template
     profile_lines = default_subagent_profile_text()
     return f"""[workflow]
-# PLAN/TASK authoring detail: precise (default), normal, or minimal.
+# PLAN/TASK authoring detail: auto (default), precise, normal, or minimal.
+# Auto follows RUN mode: Fast=minimal, Standard=normal, Strict=precise; no RUN=normal.
 authoring_detail = "{config.DEFAULT_AUTHORING_DETAIL}"
 
 [recall]

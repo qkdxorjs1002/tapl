@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from . import config, config_editor, context as tapl_context, db, embeddings, prompt, recall as memory_store, recommendations, sessions, validation
+from .prompt import authoring_policy_update
 
 
 UNSET = object()
@@ -41,6 +42,11 @@ class WorkflowApplication:
 
     def _settings(self) -> config.TaplConfig:
         return config.load(start=self.workspace_root)
+
+    @staticmethod
+    def _authoring_policy(settings: config.TaplConfig, state: dict[str, Any]) -> dict[str, Any]:
+        run = state.get("active_run") or {}
+        return config.authoring_policy(settings.workflow.authoring_detail, run.get("workflow_mode"))
 
     @staticmethod
     def _field(existing: Any, name: str, value: Any, default: str = "") -> str:
@@ -80,6 +86,8 @@ class WorkflowApplication:
             state = db.status_payload(conn)
             state["session_id"] = db.connection_session_id(conn)
         settings = self._settings()
+        authoring_policy = self._authoring_policy(settings, state)
+        state["authoring_policy"] = authoring_policy
         check = validation.validate_workflow_state(
             state, authoring_detail=settings.workflow.authoring_detail,
         )
@@ -117,6 +125,7 @@ class WorkflowApplication:
             "active_executions": state.get("active_executions") or [],
             "approvals": state.get("approvals") or {},
             "config": settings.as_dict(),
+            "authoring_policy": authoring_policy,
             "plan_task_execute": check,
         }
         if include_events:
@@ -132,6 +141,8 @@ class WorkflowApplication:
             state = db.status_payload(conn)
             state["session_id"] = db.connection_session_id(conn)
         settings = self._settings()
+        authoring_policy = self._authoring_policy(settings, state)
+        state["authoring_policy"] = authoring_policy
         check = validation.validate_workflow_state(
             state, authoring_detail=settings.workflow.authoring_detail,
         )
@@ -149,7 +160,11 @@ class WorkflowApplication:
         """Compute fresh receipt recommendations without rendering policy/config."""
 
         state, _, actions = self._next_context()
-        return {"ok": True, "session_id": state.get("session_id", ""), "recommendations": actions}
+        return {
+            "ok": True, "session_id": state.get("session_id", ""), "recommendations": actions,
+            "authoring_policy": state["authoring_policy"],
+            "state_summary": self._next_state_summary(state),
+        }
 
     @staticmethod
     def _next_state_summary(state: dict[str, Any]) -> dict[str, Any]:
@@ -181,16 +196,18 @@ class WorkflowApplication:
         if catalog_complete and available_models is None:
             raise WorkflowApplicationError("catalog_complete=true requires an explicit available_models catalog")
         state, settings, actions = self._next_context()
+        authoring_policy = state["authoring_policy"]
         policy = {
+            "authoring_policy": authoring_policy,
             "workflow_policy": (
                 prompt.mcp_server_instructions(
-                    subagents=settings.subagents, authoring_detail=settings.workflow.authoring_detail,
+                    subagents=settings.subagents, authoring_detail=authoring_policy["effective"],
                 )
                 if workflow_policy is None else workflow_policy
             ),
             "config": settings.as_dict(),
             "subagent_guidance": prompt.subagent_current_guidance(
-                settings.subagents, authoring_detail=settings.workflow.authoring_detail,
+                settings.subagents, authoring_detail=authoring_policy["effective"],
             ),
         }
         revision = hashlib.sha256(
@@ -248,7 +265,8 @@ class WorkflowApplication:
         payload["policy_unchanged"] = unchanged
         if unchanged:
             for key in policy:
-                del payload[key]
+                if key != "authoring_policy":
+                    del payload[key]
         return payload
 
     def configure_subagents(
@@ -284,14 +302,18 @@ class WorkflowApplication:
             preference=preference,
             available_models=available_models,
         )
+        with self._connection() as conn:
+            state = db.status_payload(conn)
+        authoring_policy = self._authoring_policy(settings, state)
         return {
             "ok": True,
             "operation": "subagents_configure",
+            "authoring_policy": authoring_policy,
             "path": edited.path,
             "changed": edited.changed,
             "subagents": edited.config.as_dict(),
             "subagent_guidance": prompt.subagent_current_guidance(
-                edited.config, authoring_detail=settings.workflow.authoring_detail,
+                edited.config, authoring_detail=authoring_policy["effective"],
             ),
         }
 
@@ -299,17 +321,20 @@ class WorkflowApplication:
         settings = self._settings()
         with self._connection() as conn:
             meta = db.get_meta(conn)
-            check = validation.validate_plan_task_execute(
-                conn, authoring_detail=settings.workflow.authoring_detail,
+            state = db.status_payload(conn)
+            authoring_policy = self._authoring_policy(settings, state)
+            check = validation.validate_workflow_state(
+                state, authoring_detail=settings.workflow.authoring_detail,
             )
             return {
                 "ok": meta.get("schema_version") == str(db.SCHEMA_VERSION) and check["ok"],
                 "session_id": db.connection_session_id(conn),
                 "schema_version": meta.get("schema_version"),
-                "active_run": db.workflow_run_to_dict(db.active_run(conn)),
-                "queued_runs": db.queued_runs(conn),
-                "incomplete_tasks": db.incomplete_task_count(conn),
+                "active_run": state.get("active_run"),
+                "queued_runs": state.get("queued_runs") or [],
+                "incomplete_tasks": state.get("incomplete_tasks", 0),
                 "config": settings.as_dict(),
+                "authoring_policy": authoring_policy,
                 "plan_task_execute": check,
             }
 
@@ -397,8 +422,14 @@ class WorkflowApplication:
             raise WorkflowApplicationError("recall_query must be a string of at most 500 characters")
         if not summary.strip():
             raise WorkflowApplicationError("summary must not be empty")
+        settings = self._settings()
         with self._connection() as conn:
-            if db.active_run(conn) is None:
+            previous_run = db.active_run(conn)
+            previous_policy = config.authoring_policy(
+                settings.workflow.authoring_detail,
+                previous_run["workflow_mode"] if previous_run is not None else None,
+            )
+            if previous_run is None:
                 db.ensure_active_run(
                     conn,
                     request_summary=summary,
@@ -417,9 +448,11 @@ class WorkflowApplication:
                 workflow_mode=workflow_mode,
             )
             run = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (bound_run_id,)).fetchone()
-            payload = {"ok": True, "active_run": db.workflow_run_to_dict(run)}
+            authoring_policy = config.authoring_policy(settings.workflow.authoring_detail, run["workflow_mode"])
+            payload = {"ok": True, "active_run": db.workflow_run_to_dict(run),
+                       **authoring_policy_update(previous_policy, authoring_policy)}
             try:
-                if self._settings().recall.enabled:
+                if settings.recall.enabled:
                     payload["recall"] = memory_store.emit_recall_once(
                         conn, run_id=str(run["id"]), query=recall_query or summary,
                     )
@@ -432,11 +465,15 @@ class WorkflowApplication:
     def split_run(self, requests: list[dict[str, Any]]) -> dict[str, Any]:
         """Split a fresh active request into independent queued workflow runs."""
 
+        settings = self._settings()
         with self._connection() as conn:
-            if db.active_run(conn) is None:
+            previous_run = db.active_run(conn)
+            previous_policy = self._authoring_policy(settings, {"active_run": db.workflow_run_to_dict(previous_run)})
+            if previous_run is None:
                 db.ensure_active_run(conn)
             payload = db.split_active_run(conn, requests)
-        return {"ok": True, **payload}
+        current_policy = self._authoring_policy(settings, payload)
+        return {"ok": True, **payload, **authoring_policy_update(previous_policy, current_policy)}
 
     def finish_run(
         self, result: str, *, expected_run_id: str | None = None,
@@ -488,8 +525,10 @@ class WorkflowApplication:
     def apply_plan(self, plan_id: str = "PLAN-001", **values: Any) -> dict[str, Any]:
         settings = self._settings()
         with self._connection() as conn:
+            authoring_policy = self._authoring_policy(settings, db.status_payload(conn))
+            previous_policy = authoring_policy
             input_check = validation.validate_plan_input(
-                plan_id=plan_id, authoring_detail=settings.workflow.authoring_detail,
+                plan_id=plan_id, authoring_detail=authoring_policy["effective"],
             )
             if not input_check["ok"]:
                 raise WorkflowApplicationError(_validation_message(input_check))
@@ -511,10 +550,13 @@ class WorkflowApplication:
                 notes=self._field(existing, "notes", values.get("notes", UNSET)),
                 custom_fields=None if values.get("custom_fields", UNSET) is UNSET else values["custom_fields"],
             )
-            check = validation.validate_plan_task_execute(
-                conn, authoring_detail=settings.workflow.authoring_detail,
+            state = db.status_payload(conn)
+            authoring_policy = self._authoring_policy(settings, state)
+            check = validation.validate_workflow_state(
+                state, authoring_detail=settings.workflow.authoring_detail,
             )
-        return {"ok": True, "item": db.row_to_dict(item), "plan_task_execute": check}
+        return {"ok": True, "item": db.row_to_dict(item), "plan_task_execute": check,
+                **authoring_policy_update(previous_policy, authoring_policy)}
 
     def create_task(self, task_id: str, title: str, spec_id: str, goal: str, action: str, verification_text: str, **values: Any) -> dict[str, Any]:
         return self._write_task(
@@ -534,6 +576,8 @@ class WorkflowApplication:
     def _write_task(self, task_id: str, **values: Any) -> dict[str, Any]:
         settings = self._settings()
         with self._connection() as conn:
+            authoring_policy = self._authoring_policy(settings, db.status_payload(conn))
+            previous_policy = authoring_policy
             existing = db.get_active_task(conn, task_id)
             if existing is None and (values.get("title") is None or values.get("status") is None):
                 raise WorkflowApplicationError(
@@ -543,7 +587,7 @@ class WorkflowApplication:
             spec_id = self._field(existing, "spec_id", values.get("spec_id", UNSET))
             input_check = validation.validate_task_input(
                 task_id=task_id, status=status, spec_id=spec_id,
-                authoring_detail=settings.workflow.authoring_detail,
+                authoring_detail=authoring_policy["effective"],
             )
             if not input_check["ok"]:
                 raise WorkflowApplicationError(_validation_message(input_check))
@@ -566,11 +610,14 @@ class WorkflowApplication:
                 owned_paths=None if values.get("owned_paths", UNSET) is UNSET else values["owned_paths"],
                 depends_on=None if values.get("depends_on", UNSET) is UNSET else values["depends_on"],
             )
-            check = validation.validate_plan_task_execute(
-                conn, authoring_detail=settings.workflow.authoring_detail,
+            state = db.status_payload(conn)
+            authoring_policy = self._authoring_policy(settings, state)
+            check = validation.validate_workflow_state(
+                state, authoring_detail=settings.workflow.authoring_detail,
             )
             task_item = db.item_detail(conn, int(item["id"]))
-        return {"ok": True, "item": task_item, "plan_task_execute": check}
+        return {"ok": True, "item": task_item, "plan_task_execute": check,
+                **authoring_policy_update(previous_policy, authoring_policy)}
 
     def dispatch_tasks(self, task_ids: list[str], *, batch_id: str | None = None, failure_policy: str = db.DEFAULT_FAILURE_POLICY, execution_metadata: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         subagents = self._settings().subagents
@@ -615,12 +662,15 @@ class WorkflowApplication:
         return {"ok": True, **receipt}
 
     def add_finding(self, title: str, *, source: str = "", finding: str = "", impact: str = "", related_ids: str = "") -> dict[str, Any]:
+        settings = self._settings()
         with self._connection() as conn:
+            previous_policy = self._authoring_policy(settings, {"active_run": db.workflow_run_to_dict(db.active_run(conn))})
             item = db.add_finding(
                 conn, title=title, source=source, finding=finding,
                 impact=impact, related_ids=related_ids,
             )
-        return {"ok": True, "item": db.row_to_dict(item)}
+            current_policy = self._authoring_policy(settings, {"active_run": db.workflow_run_to_dict(db.active_run(conn))})
+        return {"ok": True, "item": db.row_to_dict(item), **authoring_policy_update(previous_policy, current_policy)}
 
     def record_approval(self, *, decision: str, prompt: str, source: str) -> dict[str, Any]:
         with self._connection() as conn:
@@ -633,19 +683,27 @@ class WorkflowApplication:
     def discard_run(self, *, run_id: str, confirmed: bool, confirmation_run_id: str) -> dict[str, Any]:
         """Discard only the explicitly confirmed active run owned by this session."""
         db.validate_discard_confirmation(run_id=run_id, confirmed=confirmed, confirmation_run_id=confirmation_run_id)
+        settings = self._settings()
         with self._connection() as conn:
-            return db.discard_run(conn, run_id=run_id, confirmed=confirmed, confirmation_run_id=confirmation_run_id)
+            previous_policy = self._authoring_policy(settings, {"active_run": db.workflow_run_to_dict(db.active_run(conn))})
+            payload = db.discard_run(conn, run_id=run_id, confirmed=confirmed, confirmation_run_id=confirmation_run_id)
+            current_policy = self._authoring_policy(settings, {"active_run": db.workflow_run_to_dict(db.active_run(conn))})
+        return {**payload, **authoring_policy_update(previous_policy, current_policy)}
 
     def finish_archive(self, slug: str, *, summary: str = "") -> dict[str, Any]:
+        settings = self._settings()
         with self._connection() as conn:
-            row = db.archive_active_run(conn, slug=slug, summary=summary, memory_review_enabled=self._settings().recall.enabled)
+            previous_policy = self._authoring_policy(settings, {"active_run": db.workflow_run_to_dict(db.active_run(conn))})
+            row = db.archive_active_run(conn, slug=slug, summary=summary, memory_review_enabled=settings.recall.enabled)
             next_run = db.workflow_run_to_dict(db.active_run(conn))
             queued = db.queued_runs(conn)
+        current_policy = self._authoring_policy(settings, {"active_run": next_run})
         return {
             "ok": True,
             "archive": db.row_to_dict(row),
             "next_active_run": next_run,
             "queued_runs": queued,
+            **authoring_policy_update(previous_policy, current_policy),
         }
 
 

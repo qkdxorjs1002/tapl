@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from unittest import mock
+
+import pytest
 
 from taplctl import db, viewer
 from taplctl.application import WorkflowApplication
@@ -81,3 +84,37 @@ def test_native_viewer_validation_uses_selected_authoring_detail(tmp_path) -> No
         issues = {item["code"] for item in status["plan_task_execute"]["issues"]}
         assert ("task_granularity_too_coarse" in issues) == (detail == "precise")
         assert status["config"]["workflow"]["authoring_detail"] == detail
+
+
+@pytest.mark.parametrize("mode,effective", [("fast", "minimal"), ("standard", "normal"), ("strict", "precise")])
+def test_native_viewer_auto_policy_follows_selected_run_snapshot(tmp_path, mode, effective) -> None:
+    db.initialize_workspace(tmp_path)
+    (tmp_path / ".tapl/config.toml").write_text('[workflow]\nauthoring_detail="auto"\n', encoding="utf-8")
+    workflow = WorkflowApplication(tmp_path)
+    workflow.summarize_run("Review selected run", work_type="analysis", workflow_mode=mode)
+    runner = viewer.NativeJsonRunner()
+    for args in (["status", "--json"], ["status", "--json", "--full"]):
+        with mock.patch.object(db, "status_payload", wraps=db.status_payload) as snapshots:
+            status = runner(tmp_path / db.DEFAULT_DB_RELATIVE, args)
+        assert snapshots.call_count == 1
+        assert status["authoring_policy"] == {
+            "configured": "auto", "effective": effective, "workflow_mode": mode,
+        }
+        assert status["plan_task_execute"]["authoring_policy"] == status["authoring_policy"]
+        assert status["config"]["workflow"]["authoring_detail"] == "auto"
+
+
+def test_native_viewer_auto_policy_uses_owner_selection_and_empty_fallback(tmp_path) -> None:
+    db.initialize_workspace(tmp_path)
+    (tmp_path / ".tapl/config.toml").write_text('[workflow]\nauthoring_detail="auto"\n', encoding="utf-8")
+    path = tmp_path / db.DEFAULT_DB_RELATIVE
+    runner = viewer.NativeJsonRunner()
+    assert runner(path, ["status"])["authoring_policy"] == {
+        "configured": "auto", "effective": "normal", "workflow_mode": None,
+    }
+    owner = WorkflowApplication(tmp_path, session_id="strict-owner")
+    owner.summarize_run("Review public contract", work_type="analysis", workflow_mode="strict")
+    status = runner(path, ["status"])
+    assert status["session_id"] == "strict-owner"
+    assert status["authoring_policy"]["effective"] == "precise"
+    assert status["plan_task_execute"]["authoring_policy"] == status["authoring_policy"]

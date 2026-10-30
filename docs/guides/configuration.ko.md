@@ -32,6 +32,8 @@ taplctl --config /path/to/config.toml config get search.mode --json
 taplctl --config /path/to/config.toml config set search.mode bm25
 ```
 
+`workflow.authoring_detail`은 기본 `auto`를 포함한 설정 선택값을 보여 주며 RUN 모드에 맞춰 변환하지 않습니다. 런타임 `authoring_policy`가 `configured`·`effective`·`workflow_mode`를 별도로 제공합니다. `auto`는 Fast → `minimal`, Standard → `normal`, Strict → `precise`이며 활성 RUN이 없으면 `normal`입니다. 직접 지정한 수준은 고정되고 설치·업데이트도 기존 선택을 보존합니다. 정책 갱신·검증은 [작성 상세도](authoring-detail.ko.md)를 참고하세요.
+
 `get`은 없는 파일을 생성하지 않습니다. `KEY`를 생략하면 전체 유효 설정을, section이나 점으로 구분한 키를 지정하면 해당 값을 읽습니다. 문자열은 그대로, 그 외 값은 JSON으로 출력합니다. `--json`은 선택 경로, 파일 존재 여부, 키와 값을 포함합니다. `--agent`는 빈 값과 미설정 catalog의 `null`도 `<value format="json">`에 JSON으로 유지합니다. 알 수 없는 키나 잘못된 설정 파일은 0이 아닌 종료 코드로 실패합니다.
 
 `set KEY VALUE`는 TOML 값을 받으며 enum 문자열은 따옴표 없이 쓸 수 있습니다. 배열과 TOML 문자열은 shell 따옴표로 감싸세요. `unset KEY`는 저장된 값을 제거해 기본값을 적용합니다. 두 명령 모두 최종 설정 전체를 검증하고 주석과 무관한 설정을 보존합니다. 로컬·사용자 파일이 모두 없으면 로컬 경로를 만듭니다. 로컬 파일 없이 사용자 파일만 있으면 편집도 사용자 파일에 적용되므로, 목적지를 명시하려면 `--config`를 사용하세요.
@@ -49,7 +51,7 @@ taplctl config set viewer.allowed_origins '["https://viewer.example.invalid"]'
 
 | 키 | 형식 / 허용값 | 내장 기본값 |
 | --- | --- | --- |
-| `workflow.authoring_detail` | `precise`, `normal`, `minimal` | `precise` |
+| `workflow.authoring_detail` | `auto`, `precise`, `normal`, `minimal` | `auto` |
 | `recall.enabled` | Boolean | `true` |
 | `search.mode` | `semantic`, `bm25`, `word`, `hybrid` | `hybrid` |
 | `search.max_results` | 1 이상 정수 | `12` |

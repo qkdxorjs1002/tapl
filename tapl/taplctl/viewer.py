@@ -204,6 +204,10 @@ class NativeJsonRunner:
             if not state["active_run"] and not db.connection_session_id(conn) and state["active_runs"]:
                 db.bind_session(conn, state["active_runs"][0]["session_id"])
                 state = db.status_payload(conn)
+            run = state["active_run"] or {}
+            state["authoring_policy"] = config.authoring_policy(
+                settings.workflow.authoring_detail, run.get("workflow_mode"),
+            )
             state["plan_task_execute"] = validation.validate_workflow_state(
                 state, authoring_detail=settings.workflow.authoring_detail,
             )
@@ -267,7 +271,7 @@ class NativeJsonRunner:
             "active_batches": list(state.get("active_batches") or []),
             "active_executions": list(state.get("active_executions") or []),
         }
-        for key in ("config", "plan_task_execute", "approvals"):
+        for key in ("config", "authoring_policy", "plan_task_execute", "approvals"):
             if key in state:
                 payload[key] = state[key]
         if include_events:

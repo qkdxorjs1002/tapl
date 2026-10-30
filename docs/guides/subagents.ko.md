@@ -106,7 +106,7 @@ legacy `SubAgent Model` custom field에
 delegation guidance를 비활성화하려면 `enabled = false`로 설정하세요. 다른 source(예:
 `AGENTS.md`)의 delegation instruction까지 제거하지는 않습니다.
 
-`workflow.authoring_detail = "precise"`에서는 executable task의 lifecycle 전체에서 다음 canonical custom field로 결정을 기록합니다.
+유효 상세도가 `precise`이면(직접 지정하거나 Strict 모드의 `auto`로 결정되면) executable task의 lifecycle 전체에서 다음 canonical custom field로 결정을 기록합니다.
 
 - `Task Profile`: 선택한 profile(또는 match 없음)과 match 이유를 기록합니다.
 - `Task Characteristics`: independence, 필요한 context, risk, coordination cost,

@@ -125,11 +125,13 @@ taplctl config set viewer.allowed_origins '["https://tapl.example.com"]'
 taplctl config unset workflow.authoring_detail
 ```
 
+`workflow.authoring_detail`의 기본값은 `auto`이며 `get`은 이 설정 선택값을 반환합니다. 런타임 유효 상세도는 별도이며 직접 지정한 수준은 모드가 바뀌어도 고정됩니다. `unset`은 `auto`를 복원합니다. 활성 RUN이 없을 때의 동작·정책 갱신은 [작성 상세도](../guides/authoring-detail.ko.md)를 참고하세요.
+
 지원 키는 다음과 같습니다.
 
 | 키 | 값 |
 | --- | --- |
-| `workflow.authoring_detail` | `precise`, `normal`, `minimal` |
+| `workflow.authoring_detail` | `auto` (Fast → `minimal`, Standard → `normal`, Strict → `precise`), `precise`, `normal`, `minimal` |
 | `recall.enabled` | Boolean |
 | `search.mode` | `semantic`, `bm25`, `word`, `hybrid` |
 | `search.max_results` | 1 이상 정수 |

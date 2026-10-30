@@ -125,11 +125,13 @@ taplctl config set viewer.allowed_origins '["https://tapl.example.com"]'
 taplctl config unset workflow.authoring_detail
 ```
 
+`workflow.authoring_detail` defaults to `auto`; `get` returns that configured value. Runtime effective detail is separate, and explicit levels stay fixed across modes. `unset` restores `auto`. See [Authoring detail](../guides/authoring-detail.md) for no-RUN fallback and policy refresh.
+
 Supported keys:
 
 | Key | Value |
 | --- | --- |
-| `workflow.authoring_detail` | `precise`, `normal`, `minimal` |
+| `workflow.authoring_detail` | `auto` (Fast → `minimal`, Standard → `normal`, Strict → `precise`), `precise`, `normal`, `minimal` |
 | `recall.enabled` | Boolean |
 | `search.mode` | `semantic`, `bm25`, `word`, `hybrid` |
 | `search.max_results` | Integer ≥ 1 |

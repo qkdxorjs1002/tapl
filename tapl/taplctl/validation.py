@@ -33,20 +33,21 @@ def validate_workflow_state(
 ) -> dict[str, Any]:
     """Apply the complete validation policy to one already-read snapshot."""
 
-    if authoring_detail not in config.AUTHORING_DETAILS:
-        raise ValueError(f"Unknown authoring detail: {authoring_detail}")
+    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
+    policy = config.authoring_policy(authoring_detail, run.get("workflow_mode"))
+    authoring_detail = policy["effective"]
     if not state.get("active_run"):
         result: dict[str, Any] = {
             "ok": True,
             "errors": [],
             "warnings": [],
             "issues": [],
+            "authoring_policy": policy,
         }
         if include_guidance:
             result["guidance"] = guidance(authoring_detail=authoring_detail)
         return result
 
-    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
     record_mode = str(run.get("record_mode") or db.DEFAULT_RECORD_MODE)
     plans = state.get("plans", [])
     tasks = state.get("tasks", [])
@@ -54,6 +55,8 @@ def validate_workflow_state(
     issues.extend(validate_stable_ids(plans, tasks))
     issues.extend(validate_plan_detail(plans, required=record_mode != "lightweight"))
     issues.extend(validate_plan_content(plans))
+    if run.get("workflow_mode") == "strict":
+        issues.extend(validate_strict_plan_evidence(plans, tasks))
     issues.extend(validate_task_granularity(plans, tasks, authoring_detail=authoring_detail))
     issues.extend(validate_task_content(tasks))
     issues.extend(validate_task_planning_contract(tasks))
@@ -70,6 +73,7 @@ def validate_workflow_state(
         "errors": errors,
         "warnings": warnings,
         "issues": issues,
+        "authoring_policy": policy,
     }
     if include_guidance:
         result["guidance"] = guidance(authoring_detail=authoring_detail)
@@ -192,7 +196,11 @@ def validate_task_granularity(
     *,
     authoring_detail: str = config.DEFAULT_AUTHORING_DETAIL,
 ) -> list[dict[str, Any]]:
+    authoring_detail = config.resolve_authoring_detail(authoring_detail)
     if authoring_detail != "precise":
+        return []
+    # A mode increase must not require repartitioning already-settled history.
+    if tasks and all(task_status(task) in db.TERMINAL_TASK_STATUSES for task in tasks):
         return []
     task_count = len([task for task in tasks if task_status(task) != "Skipped"])
     if task_count == 0:
@@ -213,6 +221,35 @@ def validate_task_granularity(
             task_granularity_remediation(),
         )
     ]
+
+
+def validate_strict_plan_evidence(
+    plans: list[dict[str, Any]], tasks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Warn about absent typed evidence without judging prose semantics."""
+
+    issues: list[dict[str, Any]] = []
+    for plan in plans:
+        if plan.get("archived") or str(plan.get("status") or "").lower() != "finalized":
+            continue
+        plan_id = plan.get("stable_id") or plan.get("plan_id")
+        plan_tasks = [task for task in tasks if task.get("spec_id") == plan_id]
+        if plan_tasks and all(task_status(task) in db.TERMINAL_TASK_STATUSES for task in plan_tasks):
+            continue
+        missing = [field for field in ("risks", "affected_files", "validation")
+                   if not str(plan.get(field) or "").strip()]
+        if not missing:
+            continue
+        issues.append(issue(
+            "warning", "strict_plan_evidence_missing",
+            f"Finalized Strict plan `{plan_id}` is missing typed evidence: {', '.join(missing)}.",
+            "Review the current PLAN and unfinished TASKs: add actual risk, affected files/interfaces, "
+            "rollback/recovery and verification evidence with validation boundaries. Fill the missing typed "
+            "fields; describe rollback in the relevant plan fields. Presence alone does not prove semantic "
+            "quality. Preserve completed and archived records; do not rewrite them automatically.",
+            stable_id=plan_id,
+        ))
+    return issues
 
 
 def validate_plan_content(plans: list[dict[str, Any]]) -> list[dict[str, Any]]:

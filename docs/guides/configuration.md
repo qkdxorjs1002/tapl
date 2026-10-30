@@ -32,6 +32,8 @@ taplctl --config /path/to/config.toml config get search.mode --json
 taplctl --config /path/to/config.toml config set search.mode bm25
 ```
 
+`workflow.authoring_detail` reports the configured selection, including the default `auto`; it does not resolve a RUN mode. Runtime `authoring_policy` separately reports `configured`, `effective` and `workflow_mode`. `auto` maps Fast → `minimal`, Standard → `normal`, Strict → `precise`, with `normal` when no RUN is active. Explicit levels stay fixed and installation/updates preserve existing selections. See [Authoring detail](authoring-detail.md) for policy refresh and validation.
+
 `get` never creates a missing file. Omit `KEY` for all effective settings, or select a section or dot-separated key. Strings print directly; other values print as JSON. `--json` includes the selected path, file existence, key and value. `--agent` keeps the JSON value in `<value format="json">`, including empty values and `null` for an unset catalog. Unknown keys and invalid config fail with a nonzero exit code.
 
 `set KEY VALUE` accepts TOML values; enum strings may be unquoted. Shell-quote arrays and TOML strings. `unset KEY` removes the stored value so its default applies. Both commands validate the complete resulting configuration and preserve comments and unrelated settings. If neither local nor user file exists, a write creates the local path. An existing user file is selected for edits when there is no local file: use `--config` to choose the destination explicitly.
@@ -49,7 +51,7 @@ These canonical keys are accepted by `config set` and `config unset`. Runtime de
 
 | Key | Type / allowed values | Built-in default |
 | --- | --- | --- |
-| `workflow.authoring_detail` | `precise`, `normal`, `minimal` | `precise` |
+| `workflow.authoring_detail` | `auto`, `precise`, `normal`, `minimal` | `auto` |
 | `recall.enabled` | Boolean | `true` |
 | `search.mode` | `semantic`, `bm25`, `word`, `hybrid` | `hybrid` |
 | `search.max_results` | Integer ≥ 1 | `12` |

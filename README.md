@@ -68,8 +68,8 @@ See the [associative memory guide](docs/guides/memory.md) for detailed rules and
 
 ## See the workflow
 
-Choose PLAN/TASK authoring detail: `precise` (the current default), `normal`, or `minimal`.
-Normal and minimal reduce prose and unnecessary task splitting without fixed counts or length limits.
+PLAN/TASK authoring detail defaults to `auto`: Fast uses `minimal`, Standard uses `normal`, and Strict uses `precise`.
+Choose an explicit level to keep it fixed; record detail has no fixed count or length target.
 
 ```sh
 taplctl config set workflow.authoring_detail normal
@@ -77,7 +77,7 @@ taplctl config set workflow.authoring_detail normal
 taplctl config unset workflow.authoring_detail
 ```
 
-See the [configuration guide](docs/guides/authoring-detail.md) for each level and configuration scope,
+See the [authoring detail guide](docs/guides/authoring-detail.md) for each level and configuration scope,
 and [benchmark results](docs/reference/benchmarks.md) for measured comparisons.
 
 Ask for an outcome, in your own words:
