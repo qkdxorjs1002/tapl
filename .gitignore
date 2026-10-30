@@ -1,5 +1,13 @@
 .DS_Store
+# Private experiment artifacts and local tooling
 /docs/experiments/
+/.github/scripts/authoring_detail_experiment.py
+/.github/scripts/authoring_history_policy.md
+/.github/scripts/run_authoring_detail_boxes.py
+/.github/scripts/summarize_authoring_detail_experiment.py
+/tapl/tests/test_authoring_detail_boxes.py
+/tapl/tests/test_authoring_detail_experiment.py
+/tapl/tests/test_authoring_detail_summary.py
 tapl/uv.lock
 /.tapl/*
 !/.tapl/config.toml
