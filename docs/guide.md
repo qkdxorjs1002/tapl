@@ -552,16 +552,16 @@ optional FINDING and transition history (`agents-history`). All 25 samples passe
 The five file-history samples passed structural record checks; procedural exceptions are reported below.
 `agents-history` is also a comparison condition, not a configuration value.
 
-Values below are **medians of five samples per option**; percentages compare with `precise`.
-PLAN/TASK counts are observed counts, not limits.
+Values below are **medians of five samples per condition**; input/output percentages compare with **no TAPL and no recording policy (`no-tapl`)**.
+PLAN/TASK counts are observed counts, not limits. The baseline has no records or authoring arguments, so their percentage changes are undefined.
 
 | Condition | Observed PLAN / TASK | Body characters | Authoring argument bytes | Total input tokens¹ | Output tokens |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `precise` (default) | 1 / 3 | 2,227 | 5,257 | 348,705 | 5,607 |
-| `normal` | 1 / 2 | 1,646 (−26.1%) | 2,758 (−47.5%) | 347,300 (−0.4%) | 4,638 (−17.3%) |
-| `minimal` | 1 / 1–2 | 1,290 (−42.1%) | 2,168 (−58.8%) | 364,056 (+4.4%) | 4,031 (−28.1%) |
-| Without TAPL (`no-tapl`) | N/A | N/A | N/A | 76,564 (−78.0%) | 1,307 (−76.7%) |
-| Without TAPL + AGENTS history (`agents-history`) | 1 / 3–4 | 6,323 (+183.9%) | N/A | 210,919 (−39.5%) | 9,077 (+61.9%) |
+| Without TAPL (`no-tapl`, baseline) | N/A | N/A | N/A | 76,564 | 1,307 |
+| `tapl + precise` (default) | 1 / 3 | 2,227 | 5,257 | 348,705 (+355.4%) | 5,607 (+329.0%) |
+| `tapl + normal` | 1 / 2 | 1,646 | 2,758 | 347,300 (+353.6%) | 4,638 (+254.9%) |
+| `tapl + minimal` | 1 / 1–2 | 1,290 | 2,168 | 364,056 (+375.5%) | 4,031 (+208.4%) |
+| Without TAPL + AGENTS history (`agents-history`) | 1 / 3–4 | 6,323 | N/A | 210,919 (+175.5%) | 9,077 (+594.5%) |
 
 ¹ Input includes cached input. Median uncached input, calculated per sample as `input_tokens - cached_input_tokens`,
 was **30,881 / 44,706 / 39,160 / 10,363 / 16,780** for precise / normal / minimal / no-tapl / agents-history. These are separate medians; subtracting column
