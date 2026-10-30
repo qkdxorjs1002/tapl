@@ -541,11 +541,11 @@ The next full MCP policy lookup delivers the new detail setting and a changed `p
 #### Reference benchmark
 
 The same SQLite rollback bug fix was measured on 2026-10-29–30 in five independent Morae VMs per condition
-(25 runs), using TAPL `2.14.0-beta3` (`2.14.0b3`), Codex CLI `0.159.0`, and `gpt-6.1-sol` with `high` reasoning.
+(20 runs), using TAPL `2.14.0-beta3` (`2.14.0b3`), Codex CLI `0.159.0`, and `gpt-6.1-sol` with `high` reasoning.
 All conditions shared the work request and initial code. TAPL conditions used Strict mode and enforcing hooks,
-with recall and subagents disabled. `no-tapl` omitted TAPL-specific instructions, MCP and hooks;
-`agents-history` added only an AGENTS.md policy for file-based RUN/PLAN/TASK, optional FINDING and transition history.
-These two comparison conditions are not configuration values. All 25 runs passed functional checks;
+with recall and subagents disabled. `agents-history` used an AGENTS.md policy for file-based RUN/PLAN/TASK,
+optional FINDING and transition history, without TAPL MCP or hooks.
+`agents-history` is a comparison condition, not a configuration value. All 20 runs passed functional checks;
 the 15 TAPL runs passed core workflow checks, and the five file-history runs passed structural record checks.
 The [policy and audit excerpt](#authoring-detail-file-history) below describes the file-history requirements and procedural exceptions.
 
@@ -557,18 +557,16 @@ PLAN/TASK counts are observed counts, not limits. Percentage changes are not sho
 | `tapl + precise` (default) | 1 / 3 | 2,227 | 5,257 | 348,705 | 5,607 |
 | `tapl + normal` | 1 / 2 | 1,646 (−26.1%) | 2,758 (−47.5%) | 347,300 (−0.4%) | 4,638 (−17.3%) |
 | `tapl + minimal` | 1 / 1–2 | 1,290 (−42.1%) | 2,168 (−58.8%) | 364,056 (+4.4%) | 4,031 (−28.1%) |
-| Without TAPL (`no-tapl`) | N/A | N/A | N/A | 76,564 (−78.0%) | 1,307 (−76.7%) |
 | Without TAPL + AGENTS history (`agents-history`) | 1 / 3–4 | 6,323 (+183.9%) | N/A | 210,919 (−39.5%) | 9,077 (+61.9%) |
 
 ¹ Input includes cached input. Median uncached input, calculated per sample as `input_tokens - cached_input_tokens`,
-was **30,881 / 44,706 / 39,160 / 10,363 / 16,780** for precise / normal / minimal / no-tapl / agents-history. These are separate medians; subtracting column
+was **30,881 / 44,706 / 39,160 / 16,780** for precise / normal / minimal / agents-history. These are separate medians; subtracting column
 medians can give a different result. No prices or billing amounts were calculated.
 
 Body characters count the final stored PLAN/TASK Markdown, including task completion and verification results.
 Authoring argument bytes sum the arguments of completed `tapl_apply_plan` and `tapl_create_task` calls using the same
 UTF-8 JSON serialization, including empty `{}` values; they exclude other tools. These measurements are not token counts.
 Input and output tokens cover the **whole conversation**, including code changes, reasoning, tool discovery and verification.
-The plain no-tapl condition has no PLAN/TASK records; agents-history has measured Markdown records.
 N/A does not mean a measured zero. File-history body counts exclude the first ID/title heading;
 RUN/FINDING/HISTORY sizes are preserved separately. MCP argument and typed/custom JSON measurements are N/A.
 
@@ -579,9 +577,9 @@ be attributed solely to MCP versus file writing. This policy does not replicate 
 Normal and minimal reduced record size and output-token medians in this workload; clear overall input savings were not observed.
 Provider-side caching, tool discovery and additional regression tests varied between samples. One synthetic task with five
 repeats per option does not establish a general quality, speed or cost guarantee.
-The no-tapl samples were collected later, rather than randomized together with the original 15;
-time and cache effects cannot be separated from condition effects. Their prompts omit only TAPL-specific
-instructions, and the initial code hashes match. They do not measure the value of TAPL's workflow records.
+The agents-history samples were collected later, rather than randomized together with the original 15 TAPL runs;
+time and cache effects cannot be separated from condition effects. These measurements do not establish
+the value of TAPL's workflow records.
 
 <a id="authoring-detail-file-history"></a>
 
