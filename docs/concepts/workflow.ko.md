@@ -35,7 +35,9 @@ Agent는 요청 결과를 `answer`, `investigation`, `analysis`, `planning`, `im
 - **Lightweight:** Fast의 비영구 Answer/Investigation/Analysis/Planning. PLAN·TASK 기록이 필요 없습니다.
 - **Planned:** 영구 변경과 모든 Standard/Strict 요청. 명시적 PLAN·TASK로 실행을 관리합니다.
 
-계획을 만들면 작업 종류·엄격도를 바꾸지 않고 lightweight를 planned로 승격할 수 있습니다. 작성 상세도(`precise`, `normal`, `minimal`)는 기록 분량과 Task 묶음을 바꾸며 엄격도·승인·필수 근거·완료 규칙은 바꾸지 않습니다. [작성 상세도](../guides/authoring-detail.ko.md)를 참고하세요.
+계획을 만들면 작업 종류·엄격도를 바꾸지 않고 lightweight를 planned로 승격할 수 있습니다. 기본 작성 상세도는 `auto`로 Fast → `minimal`, Standard → `normal`, Strict → `precise`를 사용합니다. 직접 지정한 `precise`·`normal`·`minimal`은 고정됩니다. 활성 RUN이 없으면 `auto`는 `normal`로 동작하지만 분류·승인 gate는 유지합니다. 상세도는 필요한 기록에만 적용하므로 Fast lightweight는 여전히 PLAN·TASK를 만들지 않습니다. 본문과 묶음을 조절해도 위험·복구·검증·승인·소유권·위임 요건은 유지합니다. [작성 상세도](../guides/authoring-detail.ko.md)를 참고하세요.
+
+모드를 상향하면 `tapl_get_next`로 정책을 다시 조회하고 현재 PLAN과 미완료 TASK의 근거가 새 엄격도·유효 상세도에 맞는지 보완합니다. 정책과 검증은 재평가하며, 완료·보관 기록을 자동으로 다시 작성하거나 분할하지 않습니다.
 
 ## 한 요청의 여러 주제
 

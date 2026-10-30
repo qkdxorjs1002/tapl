@@ -57,7 +57,7 @@ def test_transport_entry_gate_keeps_policy_required_and_legacy_bootstrap():
     for shape in ("canonical JSON objects", "`Task Profile` {name, match_reason}",
                   "delegation_reason", "when selecting a model",
                   "Existing rationale aliases remain accepted"):
-        assert shape in prompt.custom_fields_guidance()
+        assert shape in prompt.custom_fields_guidance(authoring_detail="precise")
     assert "Group by requested outcome, not file or execution unit" in prompt.request_partition_guidance()
     assert "correct mistaken plan splitting" in prompt.request_partition_guidance()
     assert "the same PLAN and `parallel_group`" in prompt.task_execution_order_guidance()

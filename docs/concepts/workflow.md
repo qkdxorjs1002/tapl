@@ -35,7 +35,9 @@ TAPL derives the record mode rather than asking you to choose it:
 - **Lightweight:** Fast, non-durable Answer/Investigation/Analysis/Planning; no PLAN or TASK records required.
 - **Planned:** durable work and all Standard/Strict requests; explicit PLAN/TASK records carry execution.
 
-Creating a plan can promote a lightweight run to planned without changing its work type or rigor. Authoring detail (`precise`, `normal`, `minimal`) changes record verbosity and task grouping; it does not change rigor, approval, required evidence, or completion rules. See [authoring detail](../guides/authoring-detail.md).
+Creating a plan can promote a lightweight run to planned without changing its work type or rigor. The default authoring detail is `auto`: Fast → `minimal`, Standard → `normal`, Strict → `precise`; an explicit `precise`, `normal`, or `minimal` stays fixed. With no active RUN, `auto` falls back to `normal` while classification and approval gates remain in force. Detail governs required records only: Fast lightweight work still creates no PLAN/TASK. It changes prose and grouping, preserving risk, recovery, verification, approval, ownership, and delegation requirements. See [authoring detail](../guides/authoring-detail.md).
+
+After an upward mode change, refresh policy with `tapl_get_next` and review the current PLAN and unfinished TASK evidence against the new rigor and effective detail. Validation and policy are reevaluated; completed and archived records are not automatically rewritten or repartitioned.
 
 ## One request, one or more topics
 
@@ -63,7 +65,7 @@ For sequential execution, start a dependency-ready task immediately before work 
 | Blocked | Cannot proceed; preserve the blocker and concrete next action |
 | Skipped | Intentionally omitted or superseded; preserve the reason |
 
-Do not mark unverified work completed. Task grouping follows the configured authoring detail and the work's risk, dependencies, and ownership.
+Do not mark unverified work completed. Task grouping follows the effective authoring detail and the work's risk, dependencies, and ownership.
 
 Parallel execution uses an atomic batch dispatch. Eligible tasks share a plan and parallel group, use a real SubAgent executor, have completed dependencies, and own exclusive paths. The root verifies the dispatch manifest, starts actual agents, and settles each execution with its exact `execution_id`. Interrupted or unstarted batches require recovery/cancellation before retrying. A database batch does not launch or terminate an external agent by itself. See [SubAgents](../guides/subagents.md).
 

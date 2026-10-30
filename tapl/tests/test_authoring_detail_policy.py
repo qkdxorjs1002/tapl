@@ -38,16 +38,15 @@ def codes(result):
     return {issue["code"] for issue in result["issues"]}
 
 
-def test_precise_preserves_default_policy_and_validation():
-    assert prompt.mcp_server_instructions() == prompt.mcp_server_instructions(authoring_detail="precise")
-    assert prompt.template_variables() == prompt.template_variables(authoring_detail="precise")
-    assert prompt.task_granularity_guidance() == "Split every independent edit, migration, and verification step."
-    state = {"active_run": {"record_mode": "planned"}, "plans": [{"stable_id": "PLAN-001"}],
+def test_precise_preserves_explicit_policy_and_validation():
+    precise = "precise"
+    assert prompt.task_granularity_guidance(authoring_detail=precise) == "Split every independent edit, migration, and verification step."
+    assert prompt.template_variables(authoring_detail=precise)["plan_detail_guidance"] == prompt.plan_detail_guidance(authoring_detail=precise)
+    state = {"active_run": {"record_mode": "planned", "workflow_mode": "strict"},
+             "plans": [{"stable_id": "PLAN-001"}],
              "tasks": [{"stable_id": "TASK-001", "spec_id": "PLAN-001", "status": "Pending"}]}
-    assert validation.validate_workflow_state(state, include_guidance=True) == validation.validate_workflow_state(
-        state, include_guidance=True, authoring_detail="precise",
-    )
     assert "task_granularity_too_coarse" in codes(validation.validate_workflow_state(state))
+    assert "task_granularity_too_coarse" in codes(validation.validate_workflow_state(state, authoring_detail=precise))
 
 
 def test_lower_policy_replaces_verbose_requirements_without_count_or_length_targets():
@@ -56,8 +55,8 @@ def test_lower_policy_replaces_verbose_requirements_without_count_or_length_targ
     assert len(policies["minimal"]) < len(policies["normal"]) < len(policies["precise"])
     for detail in ("normal", "minimal"):
         policy = policies[detail]
-        assert prompt.task_granularity_guidance() not in policy
-        assert prompt.custom_fields_guidance() not in policy
+        assert prompt.task_granularity_guidance(authoring_detail="precise") not in policy
+        assert prompt.custom_fields_guidance(authoring_detail="precise") not in policy
         assert prompt.task_format_guidance(authoring_detail=detail) in policy
         assert "Routine root work needs no advisory filler" in policy
         assert "explicit user confirmation" in policy
@@ -77,7 +76,7 @@ def test_lower_policy_replaces_verbose_requirements_without_count_or_length_targ
 
 def test_lower_delegation_guidance_does_not_require_routine_root_metadata():
     settings = config.SubagentsConfig(setup_complete=True, enabled=True)
-    precise = prompt.subagent_current_guidance(settings)
+    precise = prompt.subagent_current_guidance(settings, authoring_detail="precise")
     for detail in ("normal", "minimal"):
         selected = prompt.subagent_current_guidance(settings, authoring_detail=detail)
         assert "Routine root work needs no advisory filler" in selected
@@ -92,7 +91,7 @@ def test_lower_levels_accept_coherent_task_and_do_not_cap_many_tasks(detail):
     task = {"stable_id": "TASK-001", "status": "Pending"}
     assert validation.validate_task_granularity(plans, [task], authoring_detail=detail) == []
     assert validation.validate_task_granularity(plans, [task] * 100, authoring_detail=detail) == []
-    assert validation.validate_task_granularity(plans, [task])[0]["severity"] == "error"
+    assert validation.validate_task_granularity(plans, [task], authoring_detail="precise")[0]["severity"] == "error"
 
 
 @pytest.mark.parametrize("detail", ["normal", "minimal"])
@@ -104,7 +103,7 @@ def test_lower_levels_preserve_required_content_approval_ownership_and_dependenc
     task = state["tasks"][0]
     task.update(status="In Progress", execution_mode="parallel", executor_kind="subagent",
                 owned_paths=[], depends_on=["TASK-999"], verification="")
-    baseline = validation.validate_workflow_state(deepcopy(state))
+    baseline = validation.validate_workflow_state(deepcopy(state), authoring_detail="precise")
     lower = validation.validate_workflow_state(deepcopy(state), authoring_detail=detail)
     assert lower["issues"] == [item for item in baseline["issues"] if item["code"] != "task_granularity_too_coarse"]
     found = codes(lower)

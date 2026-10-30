@@ -193,6 +193,7 @@ def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
         "review-memory": "tapl_finish_run",
         "archive-run": "tapl_finish_archive",
         "inspect-status": "tapl_get_status",
+        "refresh-authoring-policy": "tapl_get_next",
     }
     recommendations: list[dict[str, Any]] = []
     for recommendation in payload.get("recommendations") or []:
@@ -309,6 +310,11 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
     }
     if payload.get("session_id"):
         receipt["session_id"] = payload["session_id"]
+    for key in ("authoring_policy", "policy_refresh_required"):
+        if key in payload:
+            receipt[key] = payload[key]
+    if payload.get("recommendations"):
+        receipt["recommendations"] = mcp_next_recommendations(payload)["recommendations"]
     if receipt["operation"] == "subagents_configure":
         for key in ("path", "changed", "subagents", "subagent_guidance"):
             if key in payload:
@@ -385,8 +391,12 @@ async def call_application_write(
 
     result = await call_application(method, *args, session_id=session_id, require_session=True, **kwargs)
     receipt = mcp_write_receipt(result, operation=operation)
+    refresh_actions = receipt.get("recommendations", []) if receipt.get("policy_refresh_required") else []
     try:
         next_payload = await call_application(application.get_next_actions, session_id=session_id)
+        for key in ("authoring_policy", "state_summary"):
+            if key in next_payload:
+                receipt[key] = next_payload[key]
         receipt["recommendations"] = mcp_next_recommendations(next_payload).get(
             "recommendations", []
         )
@@ -398,6 +408,11 @@ async def call_application_write(
                 "reason": "The write succeeded but the next-action lookup failed; inspect current state.",
                 "tool": "tapl_get_status",
             }
+        ]
+    if refresh_actions:
+        receipt["recommendations"] = refresh_actions + [
+            item for item in receipt["recommendations"]
+            if item.get("name") not in {action.get("name") for action in refresh_actions}
         ]
     return receipt
 

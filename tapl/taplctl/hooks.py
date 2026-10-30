@@ -74,12 +74,14 @@ def _handle_event(
 ) -> dict[str, Any]:
     resolved_settings = tapl_settings or tapl_config.TaplConfig(path="", exists=False)
     authoring_detail = resolved_settings.workflow.authoring_detail
+    authoring_policy: dict[str, Any] | None = None
     tool_name = tool or infer_tool_name(payload)
     message = ""
     block = False
     context_packet: dict[str, Any] | None = None
     record_run_id: str | None = None
     archive: sqlite3.Row | None = None
+    policy_update: dict[str, Any] = {}
 
     if event == "UserPromptSubmit":
         db.ensure_active_run(conn, request_summary=db.DEFAULT_REQUEST_SUMMARY)
@@ -91,16 +93,19 @@ def _handle_event(
             settings=resolved_settings,
             payload=payload,
         )
+        authoring_policy = context_packet["authoring_policy"]
         message = combine_messages(message, tapl_context.format_context(context_packet))
 
     if event == "PreToolUse" and is_durable_tool(tool_name, payload):
-        active = db.active_run(conn)
-        task_count = db.active_task_count(conn)
+        state = db.status_payload(conn)
+        active = state.get("active_run")
+        authoring_policy = tapl_config.authoring_policy(authoring_detail, (active or {}).get("workflow_mode"))
+        task_count = len(state.get("tasks") or [])
         if not active or task_count == 0:
             message = tapl_prompt.durable_edit_requires_plan_message()
             block = mode == "enforce"
         else:
-            check = validation.validate_plan_task_execute(conn, authoring_detail=authoring_detail)
+            check = validation.validate_workflow_state(state, authoring_detail=authoring_detail)
             issue_message = validation.format_issues(check)
             if issue_message:
                 message = combine_messages(message, issue_message)
@@ -113,6 +118,7 @@ def _handle_event(
     if event == "Stop":
         state = db.status_payload(conn)
         active = state.get("active_run")
+        authoring_policy = tapl_config.authoring_policy(authoring_detail, (active or {}).get("workflow_mode"))
         if active:
             record_run_id = active["id"]
         remaining = state.get("incomplete_tasks", 0)
@@ -149,7 +155,20 @@ def _handle_event(
                 message,
                 tapl_prompt.archived_completed_run_message(str(archive["slug"])),
             )
+            next_run = db.active_run(conn)
+            next_policy = tapl_config.authoring_policy(
+                authoring_detail, next_run["workflow_mode"] if next_run is not None else None,
+            )
+            policy_update = tapl_prompt.authoring_policy_update(authoring_policy, next_policy)
+            authoring_policy = next_policy
+            if policy_update.get("policy_refresh_required"):
+                message = combine_messages(message, policy_update["recommendations"][0]["reason"])
 
+    if authoring_policy is None:
+        active = db.active_run(conn)
+        authoring_policy = tapl_config.authoring_policy(
+            authoring_detail, active["workflow_mode"] if active is not None else None,
+        )
     db.record_event(
         conn,
         event_type=event,
@@ -165,8 +184,10 @@ def _handle_event(
         "event": event,
         "session_id": db.connection_session_id(conn),
         "mode": mode,
+        "authoring_policy": authoring_policy,
         "tool": tool_name,
         "message": message,
+        **policy_update,
     }
     if context_packet is not None:
         outcome["context"] = context_packet

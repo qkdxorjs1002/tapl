@@ -9,10 +9,11 @@ import pytest
 from taplctl import db, mcp_server, prompt
 
 
-def _workspace(tmp_path):
+def _workspace(tmp_path, *, detail="auto"):
     (tmp_path / ".git").mkdir()
     db.initialize_workspace(tmp_path)
     (tmp_path / ".tapl/config.toml").write_text(
+        f'[workflow]\nauthoring_detail="{detail}"\n'
         "[recall]\nenabled=false\n[subagents]\nenabled=false\nsetup_complete=true\n",
         encoding="utf-8",
     )
@@ -21,7 +22,7 @@ def _workspace(tmp_path):
 
 def test_actual_mcp_policy_and_tool_schemas_include_readable_record_guidance(tmp_path):
     async def exercise():
-        async with Client(mcp_server.create_server(workspace_root=_workspace(tmp_path))) as client:
+        async with Client(mcp_server.create_server(workspace_root=_workspace(tmp_path, detail="precise"))) as client:
             entry = (await client.call_tool("tapl_get_next", {})).structured_content
             policy = entry["workflow_policy"]
             assert "including tool arguments and custom-field descriptions" in policy
@@ -35,7 +36,7 @@ def test_actual_mcp_policy_and_tool_schemas_include_readable_record_guidance(tmp
             for guidance in (
                 prompt.structured_record_guidance(),
                 prompt.markdown_record_guidance(),
-                prompt.plan_format_guidance(),
+                prompt.plan_format_guidance(authoring_detail="precise"),
             ):
                 assert guidance in policy
             assert "${record_writing_guidance}" not in policy

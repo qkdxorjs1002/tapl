@@ -17,12 +17,14 @@ optional FINDING and transition history, without TAPL MCP or hooks.
 the 15 TAPL runs passed core workflow checks, and the five file-history runs passed structural record checks.
 The [policy and audit excerpt](#authoring-detail-file-history) below describes the file-history requirements and procedural exceptions.
 
-Values below are **medians of five samples per condition**; percentages compare with **`tapl + precise` (default)**.
+`precise` was the default in the measured beta3 release. The current `auto` default has not been measured in this comparison, including its mode-based selection; these results do not establish its performance.
+
+Values below are **medians of five samples per condition**; percentages compare with **`tapl + precise` (beta3 baseline)**.
 PLAN/TASK counts are observed counts, not limits. Percentage changes are not shown for N/A measurements.
 
 | Condition | Observed PLAN / TASK | Body characters | Authoring argument bytes | Total input tokens¹ | Output tokens | Elapsed time² |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `tapl + precise` (default) | 1 / 3 | 2,227 | 5,257 | 348,705 | 5,607 | 167.7 s |
+| `tapl + precise` (beta3 baseline) | 1 / 3 | 2,227 | 5,257 | 348,705 | 5,607 | 167.7 s |
 | `tapl + normal` | 1 / 2 | 1,646 (−26.1%) | 2,758 (−47.5%) | 347,300 (−0.4%) | 4,638 (−17.3%) | 129.9 s (−22.6%) |
 | `tapl + minimal` | 1 / 1–2 | 1,290 (−42.1%) | 2,168 (−58.8%) | 364,056 (+4.4%) | 4,031 (−28.1%) | 125.0 s (−25.5%) |
 | Without TAPL + AGENTS history (`agents-history`) | 1 / 3–4 | 6,323 (+183.9%) | N/A | 210,919 (−39.5%) | 9,077 (+61.9%) | 184.9 s (+10.3%) |

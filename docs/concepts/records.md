@@ -83,7 +83,7 @@ Metadata is included in history search text. Preserve readable descriptions and 
 
 ## Selection metadata depends on authoring detail
 
-At the default `precise` detail, executable tasks maintain these canonical JSON objects at design and before dispatch, updating them if settlement changes the decision:
+At effective `precise` detail (explicitly selected or resolved by `auto` in Strict mode), executable tasks maintain these canonical JSON objects at design and before dispatch, updating them if settlement changes the decision:
 
 | Key | Contents |
 | --- | --- |

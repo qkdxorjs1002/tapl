@@ -70,8 +70,8 @@ taplctl config unset recall.enabled
 
 ## 작업 흐름 보기
 
-PLAN·TASK 작성 상세도는 `정확하게(precise, 기본)`·`보통(normal)`·`최소(minimal)`로 선택할 수 있습니다.
-보통·최소는 고정 개수나 길이 제한 없이 본문과 불필요한 TASK 분할을 줄입니다.
+PLAN·TASK 작성 상세도는 기본 `auto`로 Fast는 `minimal`, Standard는 `normal`, Strict는 `precise`를 사용합니다.
+수준을 직접 지정하면 모드와 관계없이 유지하며, 고정 개수나 분량 목표를 두지 않습니다.
 
 ```sh
 taplctl config set workflow.authoring_detail normal
@@ -79,7 +79,7 @@ taplctl config set workflow.authoring_detail normal
 taplctl config unset workflow.authoring_detail
 ```
 
-옵션별 동작과 설정 범위는 [설정 가이드](docs/guides/authoring-detail.ko.md),
+옵션별 동작과 설정 범위는 [작성 상세도 가이드](docs/guides/authoring-detail.ko.md),
 실측 비교는 [벤치마크](docs/reference/benchmarks.ko.md)를 참고하세요.
 
 Codex에게 평소처럼 요청하세요.

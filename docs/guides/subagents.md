@@ -121,7 +121,7 @@ custom field before the runtime spawns that SubAgent. To change the bias, set
 set `enabled = false`. This does not remove delegation instructions from another
 source such as `AGENTS.md`.
 
-With `workflow.authoring_detail = "precise"`, executable-task decisions use these canonical custom fields throughout the lifecycle:
+With effective `precise` detail (explicitly selected or resolved by `auto` in Strict mode), executable-task decisions use these canonical custom fields throughout the lifecycle:
 
 - `Task Profile` records the selected profile (or no match) and match reason.
 - `Task Characteristics` records independence, required context, risk,

@@ -10,9 +10,11 @@
 
 응답은 구조화된 객체입니다. 코드 모드에서는 필요한 도구를 정확한 이름으로 함께 탐색하고 전체 도구 목록은 출력하지 않습니다. `structuredContent`를 한 번 출력하고 필요할 때만 텍스트를 파싱해 대체합니다. envelope의 두 표현을 모두 출력하지 않습니다. 쓰기 응답은 현재 권고와 축약 검증을 제공합니다. 차단 오류는 모두 남기며 생략한 경고 수는 `omitted_issue_count`로 알립니다.
 
+런타임 상태·진입·context·검증과 해당 쓰기 응답은 선택한 세션의 `authoring_policy={configured,effective,workflow_mode}`를 제공합니다. `config.workflow.authoring_detail`은 기본 `auto`를 포함한 설정 선택값을 유지합니다. 자동 상세도는 Fast → `minimal`, Standard → `normal`, Strict → `precise`이며 활성 RUN이 없으면 `workflow_mode=null`과 `normal`을 사용합니다. 직접 지정한 수준은 고정됩니다. [작성 상세도](../guides/authoring-detail.ko.md)를 참고하세요.
+
 PLAN ID는 `PLAN-001` 또는 legacy `SPEC-001`, TASK ID는 `TASK-001` 형태로 세 자리 이상의 숫자를 사용합니다. 작업의 `spec_id`는 해당 주제의 기존 계획을 가리킵니다. 구조화된 계획·작업 필드를 전달하면 애플리케이션이 병합하고 Markdown으로 렌더링합니다. 생략한 계획 필드는 유지합니다.
 
-`custom_fields`는 검색 가능한 영속 메타데이터용 JSON 객체입니다. 키와 값 타입을 보존합니다. 기존 키는 병합하며 최상위 값 `null`은 해당 키를 삭제합니다. 기본 `precise`에서는 모든 실행 작업에 아래 표준 객체를 사용합니다. `normal`·`minimal`의 일반 root 작업은 형식적인 판단 메타데이터를 생략할 수 있지만, 모델 선택·프로필 예외의 선택 근거와 표준 필드에 없는 지속적 사실은 기록합니다.
+`custom_fields`는 검색 가능한 영속 메타데이터용 JSON 객체입니다. 키와 값 타입을 보존합니다. 기존 키는 병합하며 최상위 값 `null`은 해당 키를 삭제합니다. 유효 상세도가 `precise`이면(직접 지정하거나 Strict 모드의 `auto`로 결정되면) 모든 실행 작업에 아래 표준 객체를 사용합니다. `normal`·`minimal`의 일반 root 작업은 형식적인 판단 메타데이터를 생략할 수 있지만, 모델 선택·프로필 예외의 선택 근거와 표준 필드에 없는 지속적 사실은 기록합니다.
 
 ```json
 {
@@ -48,9 +50,11 @@ PLAN ID는 `PLAN-001` 또는 legacy `SPEC-001`, TASK ID는 `TASK-001` 형태로 
 
 MCP 초기화는 짧은 진입 안내를 제공합니다. 단순하지 않거나 불확실한 작업을 시작하기 전에 `tapl_get_next`를 **한 번** 호출해 전체 `workflow_policy`, `subagent_guidance`, `config`를 유지합니다. SessionStart bootstrap과 hook 진입은 같은 호출을 공유합니다. 일반 진입에서는 모델 목록 인자를 생략합니다. `state_summary`에는 RUN 식별·분류, 결과 기록 여부, 작업·대기·배치 수, 실행 승인이 들어 있습니다. 부족한 상세나 조회 권고가 있을 때만 `tapl_get_status`를 사용합니다.
 
-`policy_revision`은 정책·위임 지침·설정의 정확한 내용을 나타냅니다. 세 내용 전체가 현재 문맥에 남아 있을 때만 `known_policy_revision`을 전달합니다. 일치하면 바뀌지 않은 정책 필드를 생략하지만 상태·권고와 요청된 완전한 모델 목록 비교는 새로 반환합니다. 모르는 revision이나 내용 변경 시 전체 정책을 반환합니다. 새 세션, 문맥 압축 후, 내용 보존이 불확실할 때는 생략합니다. 상태 캐시나 승인 근거가 아닙니다.
+`policy_revision`은 정책·위임 지침·설정과 `authoring_policy`의 정확한 내용을 나타내므로 RUN 모드가 바뀌면 이전 묶음은 유효하지 않습니다. 해당 revision의 정책·지침·설정 전체가 현재 문맥에 남아 있을 때만 `known_policy_revision`을 전달합니다. 쓰기 응답에서 새 revision만 받았다고 전체 정책을 조회한 것은 아닙니다. 일치하면 바뀌지 않은 정책 필드를 생략하지만 상태·권고와 요청된 완전한 모델 목록 비교는 새로 반환합니다. 모르는 revision이나 내용 변경 시 전체 정책을 반환합니다. 새 세션, 문맥 압축 후, 내용 보존이 불확실할 때는 생략합니다. 상태 캐시나 승인 근거가 아닙니다.
 
 사용자가 요청한 설정 비교에서는 고정 역할 모델까지 포함한 **현재 위임 도구의 전체 모델 목록**과 `catalog_complete=true`를 전달합니다. 검증된 빈 목록은 제거를 확인할 수 있습니다. 기본값 `false`에서는 전달된 목록을 불완전하게 취급하고(`comparison_status="incomplete"`) 변경을 추론하거나 재설정을 요청하지 않습니다. 부족한 live 항목을 저장 설정으로 채우지 마세요. 설정 확인은 실제 사용자 답변이나 정확한 변경 요청이어야 하며 시간 초과는 확인이 아닙니다. 모델은 provider API 목록이 아닌 현재 위임 도구가 노출한 값이어야 합니다. 빈 `models`는 비활성일 때만 허용하며 `profiles=[]`는 권고 프로필을 끕니다.
+
+RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌면 쓰기 응답은 `policy_refresh_required=true`·`authoring_policy`와 최우선 `tapl_get_next` 권고를 유지합니다. 정책을 다시 조회한 뒤 현재 PLAN·미완료 TASK의 근거를 새 엄격도에 맞게 보완합니다. 완료·보관 기록은 자동으로 다시 쓰지 않습니다. 필수 근거와 Strict typed 필드 경고는 [작성 상세도](../guides/authoring-detail.ko.md#선택-예시와-검증)를 참고하세요.
 
 상태 검증은 트랜잭션상 일관된 스냅샷 하나를 사용합니다. 성공한 쓰기 응답의 권고를 바로 따르세요. 쓰기·읽기 전용 상태 조회·Stop hook 때문에 진입 호출을 반복할 필요는 없습니다. 실패·잘린 응답, 정책·문맥 유실, 다른 주체에 의한 워크플로 변경 가능성이 있으면 새로 읽습니다.
 
@@ -104,7 +108,7 @@ MCP 초기화는 짧은 진입 안내를 제공합니다. 단순하지 않거나
 
 ## 순차 수명주기 예제
 
-다음은 기본 `precise` 작성에 따른 순서대로 호출할 MCP 개요이며 무조건 실행하는 셸 명령이나 스크립트가 아닙니다. `call(name, arguments)`는 호스트의 MCP 호출을 뜻합니다. `sid`는 실제 hook 식별자로 바꿉니다. 정책·관련 이력을 확인하고 계획을 확정하기 전에 사용자 확인을 받으세요. 실제 실행 승인이 있을 때만 승인을 기록하고 완료 필드에는 구체적 검증 근거를 넣습니다.
+다음은 `taplctl config set workflow.authoring_detail precise`로 `precise`를 직접 선택한 MCP 호출 순서 개요이며 무조건 실행하는 셸 명령이나 스크립트가 아닙니다. `call(name, arguments)`는 호스트의 MCP 호출을 뜻합니다. `sid`는 실제 hook 식별자로 바꿉니다. 정책·관련 이력을 확인하고 계획을 확정하기 전에 사용자 확인을 받으세요. 실제 실행 승인이 있을 때만 승인을 기록하고 완료 필드에는 구체적 검증 근거를 넣습니다.
 
 ```javascript
 const sid = "<hook session_id>";
@@ -114,6 +118,8 @@ const run = await call("tapl_summarize_run", {
   summary: "오래된 CLI 예제를 수정하고 문서를 검증합니다.",
   work_type: "implementation", workflow_mode: "standard"
 });
+// 분류 응답이 권고하면 전체 정책을 다시 조회합니다.
+if (run.policy_refresh_required) await call("tapl_get_next", {});
 await call("tapl_search_history", { query: "CLI documentation example" });
 // 사용자가 계획을 확인한 뒤:
 await call("tapl_apply_plan", {
@@ -128,7 +134,7 @@ await call("tapl_apply_plan", {
   validation: "명령 도움말, 번역, 링크, git diff --check를 확인합니다.",
   approval_needs: "저장소 편집 전 명시적 사용자 승인이 필요합니다."
 });
-// 기본 precise 작성에서는 실행 작업마다 앞의 표준 custom_fields를 포함합니다.
+// precise를 직접 선택한 이 예제에서는 실행 작업마다 앞의 표준 custom_fields를 포함합니다.
 await call("tapl_create_task", {
   task_id: "TASK-001", title: "예제 갱신", spec_id: "PLAN-001",
   goal: "현재 CLI 인자를 사용합니다.", action: "양언어 예제를 편집합니다.",

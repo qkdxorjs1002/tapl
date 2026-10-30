@@ -511,8 +511,10 @@ class TaplRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(
                 summarized.structured_content["recommendations"][0]["tool"],
-                "tapl_finish_run",
+                "tapl_get_next",
             )
+            self.assertTrue(summarized.structured_content["policy_refresh_required"])
+            self.assertIn("tapl_finish_run", [action["tool"] for action in summarized.structured_content["recommendations"]])
             self.assertEqual(
                 finished.structured_content["recommendations"][0]["tool"],
                 "tapl_finish_archive",
@@ -800,7 +802,7 @@ class TaplRuntimeTests(unittest.TestCase):
 
     def test_mcp_server_instructions_are_compact_and_keep_adaptive_policy(self) -> None:
         instructions = tapl_prompt.mcp_server_instructions(
-            subagents=tapl_config.SubagentsConfig(setup_complete=True)
+            subagents=tapl_config.SubagentsConfig(setup_complete=True), authoring_detail="precise",
         )
 
         # Includes readable record examples, memory and lossless compact reads.
@@ -1109,7 +1111,7 @@ class TaplRuntimeTests(unittest.TestCase):
                     action="Implement the change.",
                     verification="The implementation is present.",
                 )
-                coarse_issues = tapl_validation.validate_plan_task_execute(conn)["issues"]
+                coarse_issues = tapl_validation.validate_plan_task_execute(conn, authoring_detail="precise")["issues"]
 
                 tapl_db.upsert_task(
                     conn,
@@ -1121,7 +1123,7 @@ class TaplRuntimeTests(unittest.TestCase):
                     action="Run the targeted test.",
                     verification="The targeted test passes.",
                 )
-                split_issues = tapl_validation.validate_plan_task_execute(conn)["issues"]
+                split_issues = tapl_validation.validate_plan_task_execute(conn, authoring_detail="precise")["issues"]
             finally:
                 conn.close()
 

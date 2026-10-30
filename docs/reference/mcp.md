@@ -10,9 +10,11 @@ Pass the current Codex hook **`session_id` on every call**, including reads. Mos
 
 Tool responses are structured objects. In code mode, discover the needed tools together by exact name without printing the full tool catalog. Emit `structuredContent` once, falling back to parsed text when necessary; do not print both envelope copies. Write receipts include current recommendations and compact validation. All blocking errors are retained; omitted warnings are counted in `omitted_issue_count`.
 
+Runtime status, entry, context, validation and applicable write receipts expose `authoring_policy={configured,effective,workflow_mode}` for the selected session. `config.workflow.authoring_detail` keeps the configured value, including the default `auto`. Automatic detail maps Fast → `minimal`, Standard → `normal`, Strict → `precise`, falling back to `normal` with `workflow_mode=null` when no RUN is active. Explicit levels remain fixed. See [Authoring detail](../guides/authoring-detail.md).
+
 PLAN IDs match `PLAN-001` or legacy `SPEC-001` with at least three digits; TASK IDs match `TASK-001` with at least three digits. A task's `spec_id` identifies its topic's existing plan. Send structured plan/task fields; the application merges them and renders Markdown. Omitted plan fields are preserved.
 
-`custom_fields` is a JSON object for durable searchable metadata. Preserve key names and value types. Existing keys merge; a top-level `null` value deletes that key. With default `precise` authoring, every executable task uses the canonical objects below. `normal` and `minimal` allow ordinary root work to omit advisory filler, while retaining selection metadata for model choices or profile overrides and durable facts absent from standard fields:
+`custom_fields` is a JSON object for durable searchable metadata. Preserve key names and value types. Existing keys merge; a top-level `null` value deletes that key. With effective `precise` authoring (explicit or `auto` in Strict mode), every executable task uses the canonical objects below. `normal` and `minimal` allow ordinary root work to omit advisory filler, while retaining selection metadata for model choices or profile overrides and durable facts absent from standard fields:
 
 ```json
 {
@@ -48,9 +50,11 @@ When choosing a model, add `model`, `reasoning_effort`, and `model_reason` to `E
 
 MCP initialization delivers a short entry gate. Before non-trivial or uncertain work, call `tapl_get_next` **once** and retain its complete `workflow_policy`, `subagent_guidance`, and `config`. SessionStart bootstrap and hook entry share that call. Ordinary entry omits model catalog arguments. `state_summary` includes RUN identity/classification, record presence, task/queue/batch counts, and execution approval. Use `tapl_get_status` only for missing details or an inspection recommendation.
 
-A `policy_revision` covers the exact policy, guidance, and config. Send `known_policy_revision` only while all three remain in current context. A matching revision omits unchanged policy fields but still returns fresh state/recommendations and requested complete catalog comparisons. Unknown revisions or changed content return full policy. Omit it in a new session, after compaction, or whenever retention is uncertain. It is neither a state cache nor approval evidence.
+A `policy_revision` covers the exact policy, guidance, config and `authoring_policy`, so RUN mode changes invalidate the old bundle. Send `known_policy_revision` only while the complete policy, guidance and config for that revision remain in current context. A new revision returned in a write receipt alone does not mean its full policy was loaded. A matching revision omits unchanged policy fields but still returns fresh state/recommendations and requested complete catalog comparisons. Unknown revisions or changed content return full policy. Omit it in a new session, after compaction, or whenever retention is uncertain. It is neither a state cache nor approval evidence.
 
 For a user-requested settings comparison, supply the **complete live delegation-tool catalog**, including fixed-role models, and `catalog_complete=true`. A verified empty catalog can establish removal. Default `false` treats any supplied catalog as incomplete (`comparison_status="incomplete"`), infers no changes, and does not request reconfiguration. Never fill missing live entries from saved settings. Setup confirmation must be a real user answer or exact requested change; timeout is not confirmation. Models must be exposed by the current delegation tool, not inferred from a provider API catalog. Empty `models` is allowed only when disabled; `profiles=[]` disables advisory profiles.
+
+When a RUN summary, split, archive or other RUN transition changes mode or effective detail, its receipt preserves `policy_refresh_required=true`, `authoring_policy` and a highest-priority `tapl_get_next` recommendation. Refresh policy, then supplement the current PLAN and unfinished TASK evidence for the new rigor. Completed/archived records are not automatically rewritten. Required evidence and Strict typed-field warnings are described in [Authoring detail](../guides/authoring-detail.md#selection-example-and-verification).
 
 State validation uses one transactionally consistent snapshot. Reuse successful write recommendations directly: writes, read-only status checks, and Stop hooks do not require another entry call. Refresh after failure/truncation, policy/context loss, or possible workflow changes by another actor.
 
@@ -104,7 +108,7 @@ Parallel tasks require `execution_mode="parallel"`, `executor_kind="subagent"`, 
 
 ## Sequential lifecycle example
 
-The following is an ordered MCP call outline using default `precise` authoring, not a shell command or a script to run blindly. `call(name, arguments)` means your host's MCP invocation. Replace `sid` with the actual hook identity. Load policy, inspect relevant history, and obtain the user's plan confirmation before finalizing a plan. Record approval only if execution was actually authorized. Use concrete evidence for completion fields.
+The following is an ordered MCP call outline with `precise` explicitly selected using `taplctl config set workflow.authoring_detail precise`, not a shell command or a script to run blindly. `call(name, arguments)` means your host's MCP invocation. Replace `sid` with the actual hook identity. Load policy, inspect relevant history, and obtain the user's plan confirmation before finalizing a plan. Record approval only if execution was actually authorized. Use concrete evidence for completion fields.
 
 ```javascript
 const sid = "<hook session_id>";
@@ -114,6 +118,8 @@ const run = await call("tapl_summarize_run", {
   summary: "Correct an outdated CLI example and verify the documentation.",
   work_type: "implementation", workflow_mode: "standard"
 });
+// Refresh the complete policy when the classification receipt requests it.
+if (run.policy_refresh_required) await call("tapl_get_next", {});
 await call("tapl_search_history", { query: "CLI documentation example" });
 // After the user confirms the plan:
 await call("tapl_apply_plan", {
@@ -128,7 +134,7 @@ await call("tapl_apply_plan", {
   validation: "Compare command help, translations, links and git diff --check.",
   approval_needs: "Explicit user authorization before repository edits."
 });
-// Default precise authoring: include the canonical custom_fields on each executable task.
+// Explicit precise authoring: include the canonical custom_fields on each executable task.
 await call("tapl_create_task", {
   task_id: "TASK-001", title: "Update the examples", spec_id: "PLAN-001",
   goal: "Use current CLI arguments.", action: "Edit both language examples.",

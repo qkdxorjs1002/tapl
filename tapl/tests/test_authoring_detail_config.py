@@ -21,7 +21,7 @@ class AuthoringDetailConfigTests(unittest.TestCase):
             code = cli.main(arguments)
         return code, stdout.getvalue(), stderr.getvalue()
 
-    def test_default_is_precise_for_direct_and_loaded_config(self) -> None:
+    def test_default_is_auto_for_direct_and_loaded_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "missing.toml"
             for settings in (
@@ -30,10 +30,10 @@ class AuthoringDetailConfigTests(unittest.TestCase):
                 config.from_mapping({"workflow": {}}, path=path),
             ):
                 with self.subTest(settings=settings):
-                    self.assertEqual(settings.workflow.authoring_detail, "precise")
+                    self.assertEqual(settings.workflow.authoring_detail, "auto")
                     self.assertEqual(
                         settings.as_dict()["workflow"],
-                        {"authoring_detail": "precise"},
+                        {"authoring_detail": "auto"},
                     )
             self.assertFalse(path.exists())
             with self.assertRaises(FrozenInstanceError):
@@ -56,7 +56,7 @@ class AuthoringDetailConfigTests(unittest.TestCase):
                 )
         for value in ("", "brief", "verbose"):
             with self.subTest(value=value), self.assertRaisesRegex(
-                ValueError, "must be one of: precise, normal, minimal"
+                ValueError, "must be one of: auto, precise, normal, minimal"
             ):
                 config.from_mapping(
                     {"workflow": {"authoring_detail": value}}, path="config.toml"
@@ -86,7 +86,7 @@ class AuthoringDetailConfigTests(unittest.TestCase):
                         config_editor.set_value(path, "workflow.authoring_detail", value).changed
                     )
             self.assertTrue(config_editor.unset_value(path, "workflow.authoring_detail").changed)
-            self.assertEqual(config.load(path).workflow.authoring_detail, "precise")
+            self.assertEqual(config.load(path).workflow.authoring_detail, "auto")
             self.assertEqual(config.load(path).search.mode, "word")
             self.assertFalse(config_editor.unset_value(path, "workflow.authoring_detail").changed)
 
@@ -111,7 +111,7 @@ class AuthoringDetailConfigTests(unittest.TestCase):
             code, output, error = self.run_cli(
                 [*prefix, "get", "workflow.authoring_detail"]
             )
-            self.assertEqual((code, output, error), (0, "precise\n", ""))
+            self.assertEqual((code, output, error), (0, "auto\n", ""))
             self.assertFalse(path.exists())
             code, output, error = self.run_cli(
                 [*prefix, "set", "workflow.authoring_detail", '"MINIMAL"', "--json"]
@@ -133,7 +133,7 @@ class AuthoringDetailConfigTests(unittest.TestCase):
             self.assertTrue(json.loads(output)["changed"])
             self.assertEqual(
                 self.run_cli([*prefix, "get", "workflow.authoring_detail"]),
-                (0, "precise\n", ""),
+                (0, "auto\n", ""),
             )
 
     def test_path_precedence_keeps_single_file_selection_without_merging(self) -> None:
@@ -164,9 +164,9 @@ class AuthoringDetailConfigTests(unittest.TestCase):
                 repo_config.parent.mkdir()
                 repo_config.write_text('[search]\nmode = "word"\n')
                 self.assertEqual(get()["path"], str(repo_config))
-                self.assertEqual(get()["value"], "precise")
+                self.assertEqual(get()["value"], "auto")
                 self.assertEqual(get(explicit)["value"], "normal")
-                self.assertEqual(get(root / "absent.toml")["value"], "precise")
+                self.assertEqual(get(root / "absent.toml")["value"], "auto")
                 code, output, error = self.run_cli(
                     ["config", "set", "workflow.authoring_detail", "normal", "--json"]
                 )

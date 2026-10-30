@@ -1,8 +1,9 @@
 [workflow]
-# PLAN/TASK authoring detail: "precise" (current behavior), "normal", or "minimal".
+# PLAN/TASK authoring detail: "auto" (default), "precise", "normal", or "minimal".
+# Auto follows RUN mode: Fast=minimal, Standard=normal, Strict=precise; no RUN=normal.
 # Lower levels reduce prose and unnecessary task splitting without count or length caps.
 # Approval, ownership, dependency and verification requirements still apply.
-authoring_detail = "precise"
+authoring_detail = "auto"
 
 [recall]
 # Automatic capture, recall, and reinforcement. Manual memory management remains available.
