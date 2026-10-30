@@ -540,17 +540,14 @@ The next full MCP policy lookup delivers the new detail setting and a changed `p
 
 #### Reference benchmark
 
-On 2026-10-29, the same SQLite rollback bug fix was run five times per option in 15 independent Morae VMs,
-using TAPL `2.14.0-beta3` (`2.14.0b3`), Codex CLI `0.159.0`, and model `gpt-6.1-sol` with `high` reasoning.
-The prompt and initial code were identical; Strict mode and enforcing hooks were enabled, recall and subagents disabled.
-On 2026-10-30, five more independent VMs ran the same fix without TAPL MCP, hooks or workflow instructions.
-All 20 samples passed functional checks; the 15 TAPL samples also passed core workflow checks,
-and the five without TAPL passed the absence checks after correcting a project-trust detection error.
-`no-tapl` is an experimental comparison condition, not a configuration value.
-Five further VMs on 2026-10-30 used only an AGENTS.md policy to keep file-based RUN/PLAN/TASK,
-optional FINDING and transition history (`agents-history`). All 25 samples passed functional checks.
-The five file-history samples passed structural record checks; procedural exceptions are reported below.
-`agents-history` is also a comparison condition, not a configuration value.
+The same SQLite rollback bug fix was measured on 2026-10-29–30 in five independent Morae VMs per condition
+(25 runs), using TAPL `2.14.0-beta3` (`2.14.0b3`), Codex CLI `0.159.0`, and `gpt-6.1-sol` with `high` reasoning.
+All conditions shared the work request and initial code. TAPL conditions used Strict mode and enforcing hooks,
+with recall and subagents disabled. `no-tapl` omitted TAPL-specific instructions, MCP and hooks;
+`agents-history` added only an AGENTS.md policy for file-based RUN/PLAN/TASK, optional FINDING and transition history.
+These two comparison conditions are not configuration values. All 25 runs passed functional checks;
+the 15 TAPL runs passed core workflow checks, and the five file-history runs passed structural record checks.
+The [policy and audit excerpt](#authoring-detail-file-history) below describes the file-history requirements and procedural exceptions.
 
 Values below are **medians of five samples per condition**; percentages compare with **`tapl + precise` (default)**.
 PLAN/TASK counts are observed counts, not limits. Percentage changes are not shown for N/A measurements.
@@ -575,13 +572,6 @@ The plain no-tapl condition has no PLAN/TASK records; agents-history has measure
 N/A does not mean a measured zero. File-history body counts exclude the first ID/title heading;
 RUN/FINDING/HISTORY sizes are preserved separately. MCP argument and typed/custom JSON measurements are N/A.
 
-The AGENTS policy was the only
-instruction change from no-tapl; the work prompt and initial code were identical. It required substantive
-fields, approval evidence, task transitions and archive preservation, with no count or length limits.
-Trace review confirmed plans/tasks before implementation in all five samples. Four archived before settling
-the final TASK; one also replaced earlier HISTORY lines while correcting timestamps. One sample had neither exception.
-Structural checks passing is therefore distinct from observing every procedural requirement.
-
 The file-history samples produced more PLAN/TASK text than precise (6,323 vs 2,227 characters).
 Policy wording, formatting, decomposition and actual recorded content differ, so token differences cannot
 be attributed solely to MCP versus file writing. This policy does not replicate TAPL's enforcement or all product features.
@@ -593,7 +583,32 @@ The no-tapl samples were collected later, rather than randomized together with t
 time and cache effects cannot be separated from condition effects. Their prompts omit only TAPL-specific
 instructions, and the initial code hashes match. They do not measure the value of TAPL's workflow records.
 
-This section publishes aggregate measurements and their limitations. Raw conversations and individual records are private.
+<a id="authoring-detail-file-history"></a>
+
+#### File-history policy and audit excerpt
+
+The AGENTS.md policy required the following, without fixed count or length limits:
+
+- Before implementation, write a RUN with request, mode and approval; a finalized PLAN with requirements,
+  approach, scope, execution order, risks, rollback and validation; and Pending TASKs with actions and verification.
+- Start each TASK immediately before its action and settle it only after verification. Keep a timestamped
+  transition history, preserving earlier entries, and record findings with their source and impact when relevant.
+- Settle all tasks and record the verified result before archiving the RUN, preserving all record files and references.
+
+Review of the final Markdown and chronological tool traces produced these observations:
+
+| Check | Samples meeting the requirement |
+| --- | ---: |
+| Structural record checks | 5 / 5 |
+| PLAN and TASKs written before implementation | 5 / 5 |
+| All TASKs settled before archive | 1 / 5 |
+| Earlier HISTORY entries preserved | 4 / 5 |
+| No observed procedural exception | 1 / 5 |
+
+Four runs archived before completing the final TASK; one of those also replaced earlier HISTORY lines
+while correcting timestamps. Structural success does not establish full procedural compliance.
+These are observations, not enforcement guarantees. Only aggregate results and this excerpt are published;
+raw conversations, individual records and experiment artifacts are private.
 
 ## Associative memory
 

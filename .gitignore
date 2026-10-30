@@ -1,4 +1,5 @@
 .DS_Store
+/docs/experiments/
 tapl/uv.lock
 /.tapl/*
 !/.tapl/config.toml
