@@ -547,6 +547,10 @@ On 2026-10-30, five more independent VMs ran the same fix without TAPL MCP, hook
 All 20 samples passed functional checks; the 15 TAPL samples also passed core workflow checks,
 and the five without TAPL passed the absence checks after correcting a project-trust detection error.
 `no-tapl` is an experimental comparison condition, not a configuration value.
+Five further VMs on 2026-10-30 used only an AGENTS.md policy to keep file-based RUN/PLAN/TASK,
+optional FINDING and transition history (`agents-history`). All 25 samples passed functional checks.
+The five file-history samples passed structural record checks; procedural exceptions are reported below.
+`agents-history` is also a comparison condition, not a configuration value.
 
 Values below are **medians of five samples per option**; percentages compare with `precise`.
 PLAN/TASK counts are observed counts, not limits.
@@ -557,16 +561,30 @@ PLAN/TASK counts are observed counts, not limits.
 | `normal` | 1 / 2 | 1,646 (−26.1%) | 2,758 (−47.5%) | 347,300 (−0.4%) | 4,638 (−17.3%) |
 | `minimal` | 1 / 1–2 | 1,290 (−42.1%) | 2,168 (−58.8%) | 364,056 (+4.4%) | 4,031 (−28.1%) |
 | Without TAPL (`no-tapl`) | N/A | N/A | N/A | 76,564 | 1,307 |
+| Without TAPL + AGENTS history (`agents-history`) | 1 / 3–4 | 6,323 | N/A | 210,919 | 9,077 |
 
 ¹ Input includes cached input. Median uncached input, calculated per sample as `input_tokens - cached_input_tokens`,
-was **30,881 / 44,706 / 39,160 / 10,363** for precise / normal / minimal / no-tapl. These are separate medians; subtracting column
+was **30,881 / 44,706 / 39,160 / 10,363 / 16,780** for precise / normal / minimal / no-tapl / agents-history. These are separate medians; subtracting column
 medians can give a different result. No prices or billing amounts were calculated.
 
 Body characters count the final stored PLAN/TASK Markdown, including task completion and verification results.
 Authoring argument bytes sum the arguments of completed `tapl_apply_plan` and `tapl_create_task` calls using the same
 UTF-8 JSON serialization, including empty `{}` values; they exclude other tools. These measurements are not token counts.
 Input and output tokens cover the **whole conversation**, including code changes, reasoning, tool discovery and verification.
-Without TAPL there are no PLAN/TASK records; N/A does not mean a measured zero.
+The plain no-tapl condition has no PLAN/TASK records; agents-history has measured Markdown records.
+N/A does not mean a measured zero. File-history body counts exclude the first ID/title heading;
+RUN/FINDING/HISTORY sizes are preserved separately. MCP argument and typed/custom JSON measurements are N/A.
+
+The AGENTS policy was the only
+instruction change from no-tapl; the work prompt and initial code were identical. It required substantive
+fields, approval evidence, task transitions and archive preservation, with no count or length limits.
+Trace review confirmed plans/tasks before implementation in all five samples. Four archived before settling
+the final TASK; one also replaced earlier HISTORY lines while correcting timestamps. One sample had neither exception.
+Structural checks passing is therefore distinct from observing every procedural requirement.
+
+The file-history samples produced more PLAN/TASK text than precise (6,323 vs 2,227 characters).
+Policy wording, formatting, decomposition and actual recorded content differ, so token differences cannot
+be attributed solely to MCP versus file writing. This policy does not replicate TAPL's enforcement or all product features.
 
 Normal and minimal reduced record size and output-token medians in this workload; clear overall input savings were not observed.
 Provider-side caching, tool discovery and additional regression tests varied between samples. One synthetic task with five
