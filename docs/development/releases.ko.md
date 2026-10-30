@@ -117,23 +117,33 @@ codesign --display --verbose=4 /path/to/unpacked/native-library.so
 
 ## VS Code Marketplace
 
-정식 태그는 릴리스 job의 VSIX 검증 후 **`paragonnov.tapl-workflow-viewer`**를 게시합니다. Alpha·beta·RC 태그는 GitHub Release VSIX 자산을 유지하고 Marketplace 게시는 건너뜁니다. 인증은 GitHub OIDC·Microsoft Entra ID를 사용하며 Marketplace PAT를 저장하지 않습니다.
+정식 태그는 릴리스 job의 VSIX 검증 후 **`paragonnov.tapl-workflow-viewer`**를 게시합니다. Alpha·beta·RC 태그는 GitHub Release VSIX 자산을 유지하고 Marketplace 게시는 건너뜁니다. GitHub OIDC로 Marketplace Trusted Publishing에 직접 인증합니다. Azure 구독, Entra application, `azure/login`, `AZURE_*` secret, Marketplace PAT가 필요하지 않습니다.
 
 ### 최초 설정
 
-1. `azure/login`이 사용할 Entra application/service principal 또는 사용자 할당 managed identity를 만들거나 선택합니다.
-2. GitHub federated credential을 추가합니다.
+1. [Marketplace publisher 관리](https://marketplace.visualstudio.com/manage/publishers/)에서 publisher **`paragonnov`**를 열고 **Trusted Publishing** → **Create**를 펼쳐 정책을 등록합니다.
 
    | 필드 | 값 |
    | --- | --- |
-   | Issuer | `https://token.actions.githubusercontent.com` |
-   | Audience | `api://AzureADTokenExchange` |
-   | Subject | `repo:qkdxorjs1002/tapl:environment:vscode-marketplace` |
+   | Policy name | `TAPL release`처럼 용도를 나타내는 이름. |
+   | Repository owner | `qkdxorjs1002` |
+   | Repository | `tapl` |
+   | Workflow | `release.yml` (`.github/workflows` 아래의 파일명). |
+   | Environment | `vscode-marketplace` |
 
-3. GitHub environment **`vscode-marketplace`**를 만들고 신뢰할 릴리스 ref만 허용하도록 배포 branch·tag를 제한합니다. `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`를 environment secret으로 저장합니다.
-4. Entra identity를 Marketplace publisher **`paragonnov`**에 **Contributor**로 추가합니다. Azure DevOps profile/resource ID는 [Microsoft의 보안 자동 게시 절차](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#secure-automated-publishing-to-visual-studio-marketplace)로 확인합니다. [GitHub OIDC와 Azure](https://docs.github.com/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-azure)도 참고하세요.
+2. GitHub environment **`vscode-marketplace`**를 만들고 신뢰할 릴리스 ref만 허용하도록 배포 branch·tag를 제한합니다. 게시 job은 정확히 같은 environment를 참조하고 `contents: read`와 `id-token: write` 권한을 부여해야 합니다. [릴리스 workflow](../../.github/workflows/release.yml)에 이 설정이 선언되어 있습니다.
+3. 비공개 저장소는 정책 생성 후 48시간 안에 첫 토큰 교환을 성공해야 정책이 영구 활성화됩니다. [Microsoft의 Trusted Publishing 설정](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing)을 참고하세요.
 
-Marketplace job은 검증된 정식 VSIX artifact를 받아 `azure/login`으로 인증하고 Marketplace identity를 확인한 뒤 `vsce publish --azure-credential --packagePath ... --skip-duplicate`로 게시합니다. 재실행 시 이미 있는 버전은 성공으로 처리합니다. Entra 토큰 오류는 environment 이름·federated subject·Azure secret 세 개를 확인합니다. 로그인 후 `401`·`403`이면 publisher Contributor 권한 누락이 흔한 원인입니다.
+Marketplace job은 검증된 정식 VSIX artifact를 받아 `vsce publish --oidc --packagePath ... --skip-duplicate`를 실행합니다. 재실행 시 이미 있는 버전은 성공으로 처리합니다. 저장소는 `@vscode/vsce` `^4.1.0`과 Node.js 22 이상을 사용합니다. `vscode-extension`에서 `npm install --package-lock=false --ignore-scripts`를 실행한 뒤 게시 없이 설치된 CLI를 확인할 수 있습니다.
+
+```sh
+npx --no-install vsce --version
+npx --no-install vsce publish --help
+```
+
+`--oidc`를 알 수 없다는 오류는 설치 버전과 lockfile을 확인합니다. 토큰 요청 실패는 job의 `id-token: write` 권한을 확인합니다. 토큰 교환 실패나 `401`·`403`은 정책의 publisher, 저장소 소유자·이름, workflow 파일명, environment가 실행 중인 job과 일치하는지 확인합니다. [CLI의 Trusted Publishing 문서](https://github.com/microsoft/vscode-vsce#trusted-publishing)에 토큰 교환 동작이 설명되어 있습니다. 인증 오류는 PAT fallback 없이 게시를 중단합니다.
+
+로컬 도움말과 workflow 계약 테스트는 CLI 지원·설정을 확인합니다. 실제 토큰 교환과 publisher 권한은 GitHub Actions의 설정된 게시 job 실행으로 검증해야 하며 로컬 검사로는 확인할 수 없습니다.
 
 ## 검증과 관련 문서
 

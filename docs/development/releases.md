@@ -117,23 +117,33 @@ Check `Authority=Developer ID Application: …`, intended `TeamIdentifier`, `Tim
 
 ## VS Code Marketplace
 
-Stable tags publish **`paragonnov.tapl-workflow-viewer`** after the release job validates the VSIX. Alpha/beta/RC tags retain GitHub Release VSIX assets and skip Marketplace publication. Authentication uses GitHub OIDC and Microsoft Entra ID, with no Marketplace PAT stored.
+Stable tags publish **`paragonnov.tapl-workflow-viewer`** after the release job validates the VSIX. Alpha/beta/RC tags retain GitHub Release VSIX assets and skip Marketplace publication. Authentication uses GitHub OIDC directly with Marketplace Trusted Publishing. No Azure subscription, Entra application, `azure/login`, `AZURE_*` secrets, or Marketplace PAT is required.
 
 ### One-time setup
 
-1. Create/select an Entra application/service principal or user-assigned managed identity usable by `azure/login`.
-2. Add its GitHub federated credential:
+1. Open publisher **`paragonnov`** in [Marketplace publisher management](https://marketplace.visualstudio.com/manage/publishers/), select **Trusted Publishing**, expand **Create**, and register a policy:
 
    | Field | Value |
    | --- | --- |
-   | Issuer | `https://token.actions.githubusercontent.com` |
-   | Audience | `api://AzureADTokenExchange` |
-   | Subject | `repo:qkdxorjs1002/tapl:environment:vscode-marketplace` |
+   | Policy name | A descriptive name, such as `TAPL release`. |
+   | Repository owner | `qkdxorjs1002` |
+   | Repository | `tapl` |
+   | Workflow | `release.yml` (filename under `.github/workflows`). |
+   | Environment | `vscode-marketplace` |
 
-3. Create the GitHub environment **`vscode-marketplace`**, restrict deployment branches/tags to trusted release refs, and store `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID` as environment secrets.
-4. Add the Entra identity to Marketplace publisher **`paragonnov`** as **Contributor**. Resolve its Azure DevOps profile/resource ID using [Microsoft's secure automated publishing procedure](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#secure-automated-publishing-to-visual-studio-marketplace). See also [GitHub OIDC to Azure](https://docs.github.com/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-azure).
+2. Create the GitHub environment **`vscode-marketplace`** and restrict deployment branches/tags to trusted release refs. The publishing job must reference that exact environment and grant `contents: read` and `id-token: write`; [the release workflow](../../.github/workflows/release.yml) declares these settings.
+3. For a private repository, complete the first successful token exchange within 48 hours of creating the policy to activate it permanently. See [Microsoft's Trusted Publishing setup](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing).
 
-The Marketplace job downloads the validated stable VSIX artifact, logs in with `azure/login`, checks the authenticated Marketplace identity, and publishes with `vsce publish --azure-credential --packagePath ... --skip-duplicate`. Duplicate versions count as successful on rerun. Entra token failures call for checking the environment name, federated subject, and three Azure secrets. A `401`/`403` after login commonly points to missing publisher Contributor access.
+The Marketplace job downloads the validated stable VSIX artifact and runs `vsce publish --oidc --packagePath ... --skip-duplicate`. Duplicate versions count as successful on rerun. The repository uses `@vscode/vsce` `^4.1.0` with Node.js 22 or later. After `npm install --package-lock=false --ignore-scripts` in `vscode-extension`, inspect the installed CLI without publishing:
+
+```sh
+npx --no-install vsce --version
+npx --no-install vsce publish --help
+```
+
+If `--oidc` is unknown, check the installed version and lockfile. For token acquisition failures, check the job's `id-token: write` permission. For exchange failures or `401`/`403`, compare the policy's publisher, repository owner/name, workflow filename, and environment with the running job. [The CLI's Trusted Publishing documentation](https://github.com/microsoft/vscode-vsce#trusted-publishing) describes the token exchange; authentication errors stop publication without a PAT fallback.
+
+Local help and workflow contract tests check CLI support and configuration. Actual token exchange and publisher authorization require a run of the configured publishing job in GitHub Actions; local checks do not verify them.
 
 ## Validation and related pages
 

@@ -58,7 +58,7 @@
     "@types/react": "18.3.18",
     "@types/react-dom": "18.3.5",
     "@vitejs/plugin-react": "4.3.4",
-    "@vscode/vsce": "^3.0.0",
+    "@vscode/vsce": "^4.1.0",
     "autoprefixer": "10.4.20",
     "daisyui": "4.12.24",
     "esbuild": "0.21.5",

@@ -138,7 +138,7 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
         self.assertIn("create_args+=(--prerelease)", workflow)
         self.assertIn("edit_args+=(--prerelease=false)", workflow)
 
-    def test_marketplace_job_publishes_only_stable_tags_with_entra_id(self) -> None:
+    def test_marketplace_job_publishes_only_stable_tags_with_trusted_publishing(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn("prerelease: ${{ steps.version.outputs.prerelease }}", workflow)
@@ -147,14 +147,19 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
         self.assertIn("if: needs.release.outputs.prerelease == 'false'", workflow)
         self.assertIn("environment: vscode-marketplace", workflow)
         self.assertIn("id-token: write", workflow)
-        self.assertIn("uses: azure/login@v3", workflow)
-        self.assertIn("${{ secrets.AZURE_CLIENT_ID }}", workflow)
-        self.assertIn("${{ secrets.AZURE_TENANT_ID }}", workflow)
-        self.assertIn("${{ secrets.AZURE_SUBSCRIPTION_ID }}", workflow)
-        self.assertIn("--azure-credential", workflow)
+        self.assertIn("--oidc", workflow)
         self.assertIn("--skip-duplicate", workflow)
         self.assertIn("--packagePath", workflow)
-        self.assertNotIn("VSCE_PAT", workflow)
+        for obsolete_authentication in (
+            "azure/login@",
+            "AZURE_",
+            "az rest",
+            "--azure-credential",
+            "VSCE_PAT",
+            "--pat",
+        ):
+            with self.subTest(obsolete_authentication=obsolete_authentication):
+                self.assertNotIn(obsolete_authentication, workflow)
 
         try:
             import yaml
@@ -166,9 +171,30 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
         marketplace_job = parsed["jobs"]["marketplace"]
         self.assertNotIn("if", release_job)
         self.assertEqual(marketplace_job["needs"], "release")
+        self.assertEqual(marketplace_job["if"], "needs.release.outputs.prerelease == 'false'")
         self.assertEqual(marketplace_job["environment"], "vscode-marketplace")
         self.assertEqual(marketplace_job["permissions"]["contents"], "read")
         self.assertEqual(marketplace_job["permissions"]["id-token"], "write")
+
+        steps = {step["name"]: step for step in marketplace_job["steps"]}
+        self.assertEqual(steps["Set up Node.js"]["with"]["node-version"], "22")
+        download = steps["Download validated VSIX"]
+        self.assertEqual(download["uses"], "actions/download-artifact@v4")
+        self.assertEqual(
+            download["with"]["name"],
+            "vscode-marketplace-${{ needs.release.outputs.version }}",
+        )
+        self.assertEqual(download["with"]["path"], "release-dist")
+        publish = steps["Publish VS Code extension to Marketplace"]
+        self.assertEqual(publish["working-directory"], "vscode-extension")
+        self.assertEqual(publish["env"]["TAG_VERSION"], "${{ needs.release.outputs.version }}")
+        self.assertIn("npm exec -- vsce publish", publish["run"])
+        self.assertIn("--oidc", publish["run"])
+        self.assertIn(
+            '--packagePath "../release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix"',
+            publish["run"],
+        )
+        self.assertIn("--skip-duplicate", publish["run"])
 
     def test_workflow_is_valid_yaml_when_pyyaml_is_available(self) -> None:
         try:

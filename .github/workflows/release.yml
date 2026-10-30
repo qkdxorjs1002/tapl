@@ -740,22 +740,6 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Require Marketplace Entra configuration
-        env:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          for variable in AZURE_CLIENT_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID; do
-            if [[ -z "${!variable}" ]]; then
-              echo "Set ${variable} in the vscode-marketplace GitHub environment." >&2
-              exit 1
-            fi
-          done
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -771,25 +755,6 @@ jobs:
           name: vscode-marketplace-${{ needs.release.outputs.version }}
           path: release-dist
 
-      - name: Log in to Azure with GitHub OIDC
-        uses: azure/login@v3
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-
-      - name: Show authenticated Marketplace identity
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          az rest \
-            --method get \
-            --url https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
-            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
-            --query '{id:id,displayName:displayName}' \
-            --output json
-
       - name: Publish VS Code extension to Marketplace
         working-directory: vscode-extension
         env:
@@ -799,6 +764,6 @@ jobs:
           set -euo pipefail
 
           npm exec -- vsce publish \
-            --azure-credential \
+            --oidc \
             --packagePath "../release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix" \
             --skip-duplicate
