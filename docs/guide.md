@@ -543,29 +543,37 @@ The next full MCP policy lookup delivers the new detail setting and a changed `p
 On 2026-10-29, the same SQLite rollback bug fix was run five times per option in 15 independent Morae VMs,
 using TAPL `2.14.0-beta3` (`2.14.0b3`), Codex CLI `0.159.0`, and model `gpt-6.1-sol` with `high` reasoning.
 The prompt and initial code were identical; Strict mode and enforcing hooks were enabled, recall and subagents disabled.
-All 15 samples passed functional and core TAPL workflow checks.
+On 2026-10-30, five more independent VMs ran the same fix without TAPL MCP, hooks or workflow instructions.
+All 20 samples passed functional checks; the 15 TAPL samples also passed core workflow checks,
+and the five without TAPL passed the absence checks after correcting a project-trust detection error.
+`no-tapl` is an experimental comparison condition, not a configuration value.
 
 Values below are **medians of five samples per option**; percentages compare with `precise`.
 PLAN/TASK counts are observed counts, not limits.
 
-| Option | Observed PLAN / TASK | Body characters | Authoring argument bytes | Total input tokens¹ | Output tokens |
+| Condition | Observed PLAN / TASK | Body characters | Authoring argument bytes | Total input tokens¹ | Output tokens |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `precise` (default) | 1 / 3 | 2,227 | 5,257 | 348,705 | 5,607 |
 | `normal` | 1 / 2 | 1,646 (−26.1%) | 2,758 (−47.5%) | 347,300 (−0.4%) | 4,638 (−17.3%) |
 | `minimal` | 1 / 1–2 | 1,290 (−42.1%) | 2,168 (−58.8%) | 364,056 (+4.4%) | 4,031 (−28.1%) |
+| Without TAPL (`no-tapl`) | N/A | N/A | N/A | 76,564 | 1,307 |
 
 ¹ Input includes cached input. Median uncached input, calculated per sample as `input_tokens - cached_input_tokens`,
-was **30,881 / 44,706 / 39,160** for precise / normal / minimal. These are separate medians; subtracting column
+was **30,881 / 44,706 / 39,160 / 10,363** for precise / normal / minimal / no-tapl. These are separate medians; subtracting column
 medians can give a different result. No prices or billing amounts were calculated.
 
 Body characters count the final stored PLAN/TASK Markdown, including task completion and verification results.
 Authoring argument bytes sum the arguments of completed `tapl_apply_plan` and `tapl_create_task` calls using the same
 UTF-8 JSON serialization, including empty `{}` values; they exclude other tools. These measurements are not token counts.
 Input and output tokens cover the **whole conversation**, including code changes, reasoning, tool discovery and verification.
+Without TAPL there are no PLAN/TASK records; N/A does not mean a measured zero.
 
 Normal and minimal reduced record size and output-token medians in this workload; clear overall input savings were not observed.
 Provider-side caching, tool discovery and additional regression tests varied between samples. One synthetic task with five
 repeats per option does not establish a general quality, speed or cost guarantee.
+The no-tapl samples were collected later, rather than randomized together with the original 15;
+time and cache effects cannot be separated from condition effects. Their prompts omit only TAPL-specific
+instructions, and the initial code hashes match. They do not measure the value of TAPL's workflow records.
 
 This section publishes aggregate measurements and their limitations. Raw conversations and individual records are private.
 
