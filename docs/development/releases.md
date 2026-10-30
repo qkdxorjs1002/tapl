@@ -119,6 +119,8 @@ Check `Authority=Developer ID Application: …`, intended `TeamIdentifier`, `Tim
 
 Stable tags publish **`paragonnov.tapl-workflow-viewer`** after the release job validates the VSIX. Alpha/beta/RC tags retain GitHub Release VSIX assets and skip Marketplace publication. Authentication uses GitHub OIDC directly with Marketplace Trusted Publishing. No Azure subscription, Entra application, `azure/login`, `AZURE_*` secrets, or Marketplace PAT is required.
 
+The extension icon at `vscode-extension/resources/icon.png` is derived from `assets/readme/tapl-logo.png`. Keep both dimensions at or below **1024 pixels**, preserving the logo's aspect ratio and transparency. Release preflight checks the PNG referenced by the extension manifest before building; a successful local VSIX build alone does not establish Marketplace acceptance.
+
 ### One-time setup
 
 1. Open publisher **`paragonnov`** in [Marketplace publisher management](https://marketplace.visualstudio.com/manage/publishers/), select **Trusted Publishing**, expand **Create**, and register a policy:

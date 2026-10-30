@@ -119,6 +119,8 @@ codesign --display --verbose=4 /path/to/unpacked/native-library.so
 
 정식 태그는 릴리스 job의 VSIX 검증 후 **`paragonnov.tapl-workflow-viewer`**를 게시합니다. Alpha·beta·RC 태그는 GitHub Release VSIX 자산을 유지하고 Marketplace 게시는 건너뜁니다. GitHub OIDC로 Marketplace Trusted Publishing에 직접 인증합니다. Azure 구독, Entra application, `azure/login`, `AZURE_*` secret, Marketplace PAT가 필요하지 않습니다.
 
+확장 아이콘 `vscode-extension/resources/icon.png`는 `assets/readme/tapl-logo.png`에서 만듭니다. 로고 비율과 투명도를 유지하면서 가로·세로를 각각 **1024픽셀 이하**로 맞추세요. 릴리스 사전 검사는 빌드 전에 확장 manifest가 참조하는 PNG를 확인합니다. 로컬 VSIX 빌드 성공만으로 Marketplace 승인까지 확인되는 것은 아닙니다.
+
 ### 최초 설정
 
 1. [Marketplace publisher 관리](https://marketplace.visualstudio.com/manage/publishers/)에서 publisher **`paragonnov`**를 열고 **Trusted Publishing** → **Create**를 펼쳐 정책을 등록합니다.

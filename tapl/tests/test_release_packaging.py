@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -115,6 +116,24 @@ class PythonPackagingContractTests(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+
+class VsCodeMarketplaceAssetTests(unittest.TestCase):
+    def test_manifest_icon_is_a_png_within_marketplace_dimensions(self) -> None:
+        package = json.loads(VSCODE_PACKAGE.read_text(encoding="utf-8"))
+        icon = VSCODE_PACKAGE.parent / package["icon"]
+        with icon.open("rb") as icon_file:
+            header = icon_file.read(24)
+
+        self.assertEqual(header[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(header[12:16], b"IHDR")
+        self.assertEqual(len(header), 24)
+        width, height = struct.unpack(">II", header[16:24])
+        for dimension in (width, height):
+            self.assertGreater(dimension, 0)
+            self.assertLessEqual(
+                dimension, 1024, "Marketplace icon dimensions must not exceed 1024 pixels"
+            )
 
 
 class HomebrewFormulaUpdaterTests(unittest.TestCase):

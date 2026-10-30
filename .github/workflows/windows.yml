@@ -57,6 +57,9 @@ jobs:
       - name: Test version-bound Windows release assets
         run: python -m unittest -v tapl.tests.test_release_packaging.WindowsInstallerAssetTests
 
+      - name: Validate Marketplace icon dimensions
+        run: python -m unittest -v tapl.tests.test_release_packaging.VsCodeMarketplaceAssetTests
+
       - name: Build actual TAPL wheel
         run: python -m pip wheel --no-deps --wheel-dir dist ./tapl
 
