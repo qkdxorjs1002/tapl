@@ -484,14 +484,18 @@ def create_server(
         strategy: Annotated[Literal["conservative", "balanced", "aggressive"], Field(description="Delegation bias selected from the user's preference.")],
         models: Annotated[dict[str, list[str]], Field(description="Chosen model IDs and reasoning efforts verified against the current session's delegation tool. Empty is allowed only when disabled.")],
         available_models: Annotated[dict[str, list[str]], Field(description="Full current delegation-tool catalog, including unselected models, saved as the last user-confirmed snapshot for change detection.")],
-        preference: Annotated[str, Field(description="Concise user preference, such as quality, speed, cost, or specific model constraints.")] = "",
+        preference: Annotated[str, Field(description="Concise English summary prepared by the calling agent from the confirmed user preferences. Preserve priorities, constraints, and exact model IDs; do not copy the reply verbatim or invent preferences. Catalog-only keep preserves existing text.")] = "",
         profiles: Annotated[list[dict[str, Any]] | None, Field(description="Optional ordered task profiles with allowlisted model/effort candidates. Omit for model-neutral profiles; [] disables profiles.")] = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
-        """Save the user's setup answer atomically to the effective .tapl/config.toml.
+        """Save confirmed SubAgent preferences atomically to the effective .tapl/config.toml.
 
         Use the entry response's exact config path. Ask about SubAgent use and preferences first;
-        the answer authorizes this config write without a separate workflow or approval prompt. Use only models and
+        the answer authorizes this config write without a separate workflow or approval prompt. For setup or
+        requested preference updates, the calling agent summarizes preference in concise English, preserving
+        priorities, constraints, and exact model IDs instead of copying the reply verbatim. TAPL stores the supplied
+        text without translating it; catalog-only keep preserves existing text. Keep the conversation in the user's language.
+        Use only models and
         efforts exposed by the current delegation tool, never a provider API catalog or guesses.
         If that catalog is unavailable, keep setup pending and work on the root agent. Preserve
         existing choices unless the user requests an update. Returned settings and guidance

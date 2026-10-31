@@ -20,7 +20,7 @@ preference = ""
 ```
 
 첫 번째 구체적인 TAPL 요청 시 agent는 현재 runtime이 제공하는 model ID와 reasoning
-effort를 확인한 뒤 SubAgent 사용 여부와 preference를 묻습니다. 답변은 현재 적용되는
+effort를 확인한 뒤 SubAgent 사용 여부와 preference를 묻습니다. 확인된 설정은 현재 적용되는
 설정 파일에 저장되고 setup이 완료됩니다. 이 과정에서 TAPL은 provider API를
 호출하거나 외부 model 목록을 포함하지 않습니다. `enabled = true`는 setup 완료 후에만
 효력이 있습니다. runtime catalog를 확인할 수 없으면 setup은 pending으로 남고 work는
@@ -28,6 +28,8 @@ root agent가 처리합니다. 답변을 받은 뒤 agent는 `tapl_configure_sub
 그 답변 자체가 user confirmation입니다. 명시적 model allowlist가 있거나
 `enabled = false`인 기존 configuration은 완료 상태를 유지하고 user가 업데이트할 때까지
 선택을 보존합니다. 새 model 설정은 user가 요청할 때에만 적용됩니다.
+
+최초 설정과 사용자가 요청한 선호 변경에서 에이전트는 우선순위와 제약을 간결한 영어로 요약해 `subagents.preference`에 저장하고 정확한 모델 ID를 보존합니다. 답변을 원문 그대로 복사하거나 밝히지 않은 선호를 추가하지 않으며 대화는 사용자 언어로 유지합니다. TAPL은 번역 서비스를 호출하지 않고 에이전트가 전달한 요약을 저장합니다. 기존 문구도 읽을 수 있고 모델 목록만 갱신하는 **유지** 선택은 해당 문구를 보존합니다. 저장 키는 [설정](configuration.ko.md)을 보세요.
 
 사용자 답변 뒤에는 전체 모델 목록도 `subagents.available_models`에 저장합니다.
 일반 `tapl_get_next` 진입에서는 모델 목록 인자를 생략하고 저장된 선호를 사용합니다.

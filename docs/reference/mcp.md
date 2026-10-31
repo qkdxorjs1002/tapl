@@ -46,7 +46,7 @@ When choosing a model, add `model`, `reasoning_effort`, and `model_reason` to `E
 | `tapl_get_status` | None | `full=false`, `include_events=false`, `events_limit=12` (0–100). Details for inspection/resume/recovery; `full=true` includes record bodies. |
 | `tapl_validate_state` | None | Validates plan detail, task contracts, dependencies, execution order, and approval. |
 | `tapl_get_context` | None | `event="Manual"` selects lifecycle guidance. |
-| `tapl_configure_subagents` | `user_confirmed`, `enabled`, `strategy`, `models`, `available_models` | `preference=""`, `profiles`. Saves confirmed setup to the effective config path. `strategy`: `conservative`, `balanced`, `aggressive`. |
+| `tapl_configure_subagents` | `user_confirmed`, `enabled`, `strategy`, `models`, `available_models` | `preference=""`, `profiles`. Saves confirmed settings to the effective config path; the agent supplies an [English preference summary](../guides/subagents.md#first-use-setup). `strategy`: `conservative`, `balanced`, `aggressive`. |
 
 MCP initialization delivers a short entry gate. Before non-trivial or uncertain work, call `tapl_get_next` **once** and retain its complete `workflow_policy`, `subagent_guidance`, and `config`. SessionStart bootstrap and hook entry share that call. Ordinary entry omits model catalog arguments. `state_summary` includes RUN identity/classification, record presence, task/queue/batch counts, and execution approval. Use `tapl_get_status` only for missing details or an inspection recommendation.
 

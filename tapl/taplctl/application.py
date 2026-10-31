@@ -280,7 +280,7 @@ class WorkflowApplication:
         preference: str = "",
         available_models: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
-        """Save the user's actual setup answer at the effective config path."""
+        """Save confirmed preferences with an agent-authored summary at the effective config path."""
 
         if user_confirmed is not True:
             raise WorkflowApplicationError("Ask the user before saving SubAgent preferences; no answer is not confirmation.")

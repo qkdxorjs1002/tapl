@@ -980,7 +980,8 @@ def mcp_server_instructions(
             "Use the entry response's current settings. Ordinary entry requires no catalog comparison.\n\n"
             + (subagent_delegation_guidance(settings, include_exploration=False, authoring_detail=authoring_detail) if settings.setup_complete else
                "Setup pending: on the first concrete user request follow the entry response to ask preferences, then "
-               "save the actual answer with `tapl_configure_subagents`. Until setup completes use the root agent.")
+               "save the confirmed preferences with `tapl_configure_subagents`, summarizing `preference` in concise English "
+               "rather than copying the user's reply verbatim. Until setup completes use the root agent.")
         ),
     )
 
@@ -1280,7 +1281,12 @@ def subagent_setup_guidance() -> str:
         "catalog. If unavailable, defer setup and continue on the root agent. Use request_user_input when available. "
         "Wait for the actual answer; no answer or timeout is not confirmation. Do not repeat a pending question. "
         "After the answer, use `tapl_configure_subagents` with user_confirmed=true to save enabled, preference, "
-        "strategy, models, the full available_models catalog and optional profiles; no second confirmation is needed. Until then use the root agent, "
+        "strategy, models, the full available_models catalog and optional profiles; no second confirmation is needed. "
+        "The calling agent must summarize `preference` in concise English rather than copy the user's reply verbatim, "
+        "preserving priorities, constraints, and exact model IDs without inventing preferences. "
+        "Keep the conversation in the user's language; TAPL stores the supplied summary without translating it. "
+        "Apply this summary rule when the user requests preference updates too; catalog-only keep preserves existing text. "
+        "Until then use the root agent, "
         "and settle or recover any already active batch first. Preserve completed settings unless the user asks "
         "to update them; new model releases do not overwrite choices."
     )

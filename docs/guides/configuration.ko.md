@@ -62,7 +62,7 @@ taplctl config set viewer.allowed_origins '["https://viewer.example.invalid"]'
 | `subagents.enabled` | Boolean; 실제 위임에는 설정 완료도 필요 | `true` |
 | `subagents.strategy` | `conservative`, `balanced`, `aggressive` | `aggressive` |
 | `subagents.setup_complete` | Boolean | 새 설정은 `false`; 생략했을 때 비어 있지 않은 모델 허용 목록이 있거나 위임이 꺼져 있으면 `true` 추론 |
-| `subagents.preference` | TOML 문자열 | `""` |
+| `subagents.preference` | TOML 문자열; [최초 설정·선호 변경](subagents.ko.md#최초-설정) 시 에이전트가 영어로 요약 | `""` |
 | `subagents.models.<model-id>` | reasoning effort 문자열의 비어 있지 않은 고유 배열 | 사전 지정 모델 조합 없음 |
 | `subagents.profiles` | 순서 있는 TOML inline table 배열; `[]`로 profile 비활성화 | candidate가 빈 모델 중립 profile 4개 |
 

@@ -62,7 +62,7 @@ These canonical keys are accepted by `config set` and `config unset`. Runtime de
 | `subagents.enabled` | Boolean; effective delegation also needs completed setup | `true` |
 | `subagents.strategy` | `conservative`, `balanced`, `aggressive` | `aggressive` |
 | `subagents.setup_complete` | Boolean | `false` for a fresh config; inferred `true` if omitted with a nonempty model allowlist or disabled delegation |
-| `subagents.preference` | TOML string | `""` |
+| `subagents.preference` | TOML string; agent-authored English summary during [setup or preference updates](subagents.md#first-use-setup) | `""` |
 | `subagents.models.<model-id>` | Nonempty array of unique reasoning-effort strings | No predefined model pairs |
 | `subagents.profiles` | Ordered TOML inline tables; `[]` disables profiles | Four model-neutral profiles with empty candidates |
 

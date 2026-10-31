@@ -25,7 +25,7 @@ preference = ""
 
 On the first concrete TAPL request, the agent checks the model IDs and reasoning
 efforts exposed by its current runtime, then asks whether to use SubAgents and
-what preferences to apply. It saves the answer in the resolved
+what preferences to apply. It saves the confirmed settings in the resolved
 configuration file and marks setup complete. TAPL never calls a provider API or
 ships an external model list for this step. `enabled = true` takes effect only
 after setup is complete. If the runtime catalog is unavailable, setup remains
@@ -34,6 +34,8 @@ with `tapl_configure_subagents`; the answer itself is the user confirmation.
 Existing configurations with an explicit model allowlist or `enabled = false`
 remain complete and retain their choices; new model settings apply only when
 the user requests an update.
+
+For setup and requested preference updates, the agent writes `subagents.preference` as a concise English summary of your priorities and constraints, preserving exact model IDs. It does not copy your reply verbatim or add unstated preferences; the conversation stays in your language. TAPL stores the summary supplied by the agent without calling a translation service. Existing text remains readable, and catalog-only **keep** preserves it. See [Configuration](configuration.md) for the stored key.
 
 After your answer, TAPL also records the full runtime catalog in `subagents.available_models`.
 Ordinary `tapl_get_next` entry omits catalog arguments and uses saved preferences.

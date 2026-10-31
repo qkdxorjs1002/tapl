@@ -28,11 +28,15 @@ def test_first_use_requires_an_answer_and_does_not_create_a_config(tmp_path: Pat
     path = root / ".tapl/config.toml"
     next_action = app.get_next(catalog_complete=True, available_models={"future-runtime": ["careful"]})
     assert next_action["recommendations"][0]["name"] == "configure-subagents"
+    assert "`preference` in concise English" in next_action["workflow_policy"]
+    assert "without inventing preferences" in next_action["subagent_guidance"]
+    assert "catalog-only keep preserves existing text" in next_action["subagent_guidance"]
     assert not path.exists()
     session = app.get_context(event="SessionStart")
     assert "first concrete user request" in " ".join(session["workflow_guidance"])
     request = app.get_context(event="UserPromptSubmit")
     assert "Wait for the actual answer" in " ".join(request["workflow_guidance"])
+    assert "rather than copy the user's reply verbatim" in " ".join(request["workflow_guidance"])
     assert "Only after the user completes setup" in " ".join(request["workflow_guidance"])
     with pytest.raises(WorkflowApplicationError, match="Ask the user"):
         app.configure_subagents(
@@ -47,6 +51,8 @@ def test_first_use_requires_an_answer_and_does_not_create_a_config(tmp_path: Pat
 def test_model_catalog_changes_are_read_only_and_keep_acknowledges_them(tmp_path: Path) -> None:
     root, app = fresh_workspace(tmp_path)
     catalog = {"future-runtime": ["careful", "quick"], "small-runtime": ["quick"]}
+    # Retain legacy non-English preference text during catalog-only keep.
+    # Storage accepts existing text; the calling agent authors new summaries.
     selection = dict(
         user_confirmed=True, enabled=True, strategy="balanced",
         models={"future-runtime": ["careful"]}, preference="품질 우선", profiles=[],
@@ -68,6 +74,7 @@ def test_model_catalog_changes_are_read_only_and_keep_acknowledges_them(tmp_path
     assert updated["recommendations"][0]["name"] == "review-subagent-models"
     assert path.read_bytes() == original
     app.configure_subagents(**selection, available_models=current)
+    assert config.load(path).subagents.preference == "품질 우선"
     assert not app.get_next(catalog_complete=True, available_models=current)["model_changes"]["changed"]
     assert app.get_status()["config"]["subagents"]["models"] == selection["models"]
     assert config.load(path).subagents.profiles == ()
@@ -139,7 +146,7 @@ def test_disabled_choice_is_complete_and_legacy_allowlists_are_preserved(tmp_pat
     root, app = fresh_workspace(tmp_path)
     app.configure_subagents(
         user_confirmed=True, enabled=False, strategy="conservative", models={},
-        available_models={}, preference="root만 사용", profiles=[],
+        available_models={}, preference="Use the root agent only.", profiles=[],
     )
     assert app.get_status()["config"]["subagents"]["setup_complete"]
     assert not any(item["name"] in {"configure-subagents", "review-subagent-models"}
@@ -180,12 +187,18 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
 
     async def exercise() -> None:
         async with Client(server) as client:
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            setup = tools["tapl_configure_subagents"]
+            preference_description = setup.input_schema["properties"]["preference"]["description"]
+            assert "Concise English summary prepared by the calling agent" in preference_description
+            assert "exact model IDs" in preference_description
+            assert "without translating it" in setup.description
             before = await client.call_tool("tapl_get_next", {})
             assert before.structured_content["recommendations"][0]["tool"] == "request_user_input"
             args = dict(
                 user_confirmed=False, enabled=True, strategy="balanced",
                 models={"runtime-a": ["high"]}, available_models={"runtime-a": ["high"]},
-                preference="quality", profiles=[],
+                preference="Prioritize quality. Use runtime-a.", profiles=[],
             )
             rejected = await client.call_tool("tapl_configure_subagents", args)
             assert rejected.is_error
@@ -196,6 +209,7 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
             assert saved.structured_content["operation"] == "subagents_configure"
             assert "runtime-a[high]" in saved.structured_content["subagent_guidance"]
             assert saved.structured_content["subagents"]["available_models"] == args["available_models"]
+            assert config.load(root / ".tapl/config.toml").subagents.preference == args["preference"]
             # Read-only helper policy becomes available in the same MCP session before
             # any plan, executable task, batch, or execution approval exists.
             helper_contract = prompt.subagent_exploration_guidance()

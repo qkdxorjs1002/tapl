@@ -190,7 +190,7 @@ EDITABLE_CONFIG_KEYS = (
     EditableConfigKey(
         "subagents.preference",
         "STRING",
-        "Free-form user preference recorded during SubAgent setup.",
+        "User preference summary; agents use concise English for setup and requested preference updates.",
     ),
     EditableConfigKey(
         "subagents.models.<model-id>",

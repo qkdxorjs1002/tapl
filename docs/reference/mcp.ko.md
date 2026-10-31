@@ -46,7 +46,7 @@ PLAN ID는 `PLAN-001` 또는 legacy `SPEC-001`, TASK ID는 `TASK-001` 형태로 
 | `tapl_get_status` | 없음 | `full=false`, `include_events=false`, `events_limit=12` (0–100). 조회·재개·복구용 상세이며 `full=true`는 기록 본문도 포함합니다. |
 | `tapl_validate_state` | 없음 | 계획 상세, 작업 계약, 의존성, 실행 순서, 승인을 검증합니다. |
 | `tapl_get_context` | 없음 | `event="Manual"`로 수명주기 지침을 선택합니다. |
-| `tapl_configure_subagents` | `user_confirmed`, `enabled`, `strategy`, `models`, `available_models` | `preference=""`, `profiles`. 확인받은 설정을 적용 설정 경로에 저장합니다. `strategy`: `conservative`, `balanced`, `aggressive`. |
+| `tapl_configure_subagents` | `user_confirmed`, `enabled`, `strategy`, `models`, `available_models` | `preference=""`, `profiles`. 확인받은 설정을 적용 설정 경로에 저장하며 에이전트가 [영문 선호 요약](../guides/subagents.ko.md#최초-설정)을 전달합니다. `strategy`: `conservative`, `balanced`, `aggressive`. |
 
 MCP 초기화는 짧은 진입 안내를 제공합니다. 단순하지 않거나 불확실한 작업을 시작하기 전에 `tapl_get_next`를 **한 번** 호출해 전체 `workflow_policy`, `subagent_guidance`, `config`를 유지합니다. SessionStart bootstrap과 hook 진입은 같은 호출을 공유합니다. 일반 진입에서는 모델 목록 인자를 생략합니다. `state_summary`에는 RUN 식별·분류, 결과 기록 여부, 작업·대기·배치 수, 실행 승인이 들어 있습니다. 부족한 상세나 조회 권고가 있을 때만 `tapl_get_status`를 사용합니다.
 
