@@ -22,6 +22,24 @@ If the starting folder has no database, choose a folder containing `.tapl/tapl.d
 
 RUN tabs select the session whose records you inspect. Archives and history let you revisit earlier work; the memory view links a reusable cue back to its original evidence. Changing the selected RUN does not transfer its ownership.
 
+## Database access and protected services
+
+Viewer data requests open the selected database with SQLite `mode=ro` and `query_only`, using a read transaction per connection. They do not create a database, change journal mode, migrate the schema, or update metadata. A service can start without `~/.tapl/tapl.db`; do not require it in a startup check. A successful page load or `revision` response confirms the web server or file metadata, not that SQLite queries succeed.
+
+The database must match the installed TAPL schema. If migration is required, run this outside the protected Viewer service, with write access to the database directory, then refresh:
+
+```sh
+taplctl --db /path/to/workspace/.tapl/tapl.db init
+```
+
+This command can create migration backups beside the database. A newer-than-supported schema requires upgrading TAPL instead; the Viewer never downgrades a database.
+
+For systemd services using `ProtectSystem=strict` or `ProtectHome=read-only`, the service user needs read and directory traversal access to the workspace. SQLite WAL databases also need readable existing `tapl.db-wal` and `tapl.db-shm` files, or permission to create them in the database directory. With usable sidecars, the Viewer reads committed WAL changes while another process writes, without taking a database write lock. Uncommitted changes stay invisible.
+
+When all writers close, SQLite can remove the sidecars. A WAL database without them can therefore fail in a fully read-only directory. Keep a trusted writer connection open with usable sidecars, or allow writes only to the selected `.tapl` directory with systemd `ReadWritePaths=/path/to/workspace/.tapl`. Do not create sidecars by hand or use `immutable=1` against a live database: it bypasses SQLite's change detection and can miss committed WAL data. See [SQLite's read-only WAL requirements](https://www.sqlite.org/wal.html#read_only_databases).
+
+Confirmed [RUN discard](#discard-a-run) uses the separate write API and still needs directory write access. A service with only read access can inspect records but cannot discard RUNs. Optional semantic search may also need its model cache; see [Search](search.md) for provider configuration and BM25 fallback.
+
 ## Discard a RUN
 
 Click **×** on the RUN tab. In the dialog, type or paste the **full RUN ID** exactly as displayed. This is the RUN identifier, not `PLAN-001`, a session ID, or a shortened hash. Confirmation remains disabled unless case and whitespace also match. Cancel or Escape changes nothing.
@@ -81,7 +99,7 @@ An origin contains only an HTTP(S) scheme, host, and optional port; paths, crede
 
 ## Verification and related pages
 
-The browser and VS Code use the same React screens and protocol types. Browser HTTP origin/workspace checks are covered in `tapl/tests/test_viewer.py` and `test_viewer_discard.py`; discard lifecycle checks are in `test_run_discard.py`. Shared UI confirmation and routing checks live in `vscode-extension/tests`.
+The browser and VS Code use the same React screens and protocol types. Browser HTTP origin/workspace checks are covered in `tapl/tests/test_viewer.py` and `test_viewer_discard.py`; database permissions, schema compatibility and WAL snapshots are covered in `test_viewer_readonly.py`. Discard lifecycle checks are in `test_run_discard.py`. Shared UI confirmation and routing checks live in `vscode-extension/tests`.
 
 - [VS Code extension](vscode.md) for editor workspace routing and prerequisites.
 - [Configuration](configuration.md) for configuration scope and effective values.

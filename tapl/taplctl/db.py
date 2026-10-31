@@ -156,6 +156,58 @@ def connect(path: Path | str | None = None, *, session_id: str | None = None) ->
     return conn
 
 
+class ReadOnlySchemaError(sqlite3.DatabaseError):
+    """A database needs initialization, migration, or a different TAPL version."""
+
+
+def connect_readonly(
+    path: Path | str, *, session_id: str | None = None,
+) -> sqlite3.Connection:
+    """Read an existing, current-schema database in one WAL-aware snapshot.
+
+    Never initialize, migrate, change journal mode, or update metadata. SQLite
+    still needs readable WAL/SHM sidecars (or permission to create them). Do not
+    use immutable=1 here: another process may be committing to this database.
+    Closing the connection releases the read transaction.
+    """
+    owner = sessions.normalize_session_id(session_id) if session_id is not None else sessions.current_session_id()
+    uri = Path(path).expanduser().resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(
+        uri, uri=True, timeout=SQLITE_BUSY_TIMEOUT_MS / 1_000, factory=WorkflowConnection,
+    )
+    conn.tapl_session_id = owner
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("BEGIN")
+        has_meta = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'"
+        ).fetchone()
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone() if has_meta else None
+        guidance = "Run `taplctl --db <database-path> init` with write access before viewing."
+        if row is None:
+            raise ReadOnlySchemaError(f"Database has no TAPL schema version. {guidance}")
+        try:
+            version = int(row["value"])
+        except (TypeError, ValueError) as exc:
+            raise ReadOnlySchemaError("Database schema_version is not a valid integer.") from exc
+        if version < SCHEMA_VERSION:
+            raise ReadOnlySchemaError(
+                f"Database schema version {version} requires migration to {SCHEMA_VERSION}. {guidance}"
+            )
+        if version > SCHEMA_VERSION:
+            raise ReadOnlySchemaError(
+                f"Database schema version {version} is newer than supported version {SCHEMA_VERSION}. "
+                "Upgrade TAPL before viewing this database."
+            )
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     conn.execute(
         """

@@ -28,6 +28,8 @@ taplctl config get
 | --- | --- |
 | Viewer asks for a workspace | Choose a folder that already contains `.tapl/tapl.db`, or initialize the intended folder with `taplctl init --workspace-root /path/to/workspace`. A login service may start outside your repository. |
 | Port 8000 is in use | Stop the matching Homebrew service or run `taplctl viewer --port 9000`. Multiple formula services use the same default port. |
+| Viewer page opens but data reads fail | Check workspace read/traversal access and SQLite WAL/SHM sidecars. A protected WAL directory may need permission to create missing sidecars. See [Database access](viewer.md#database-access-and-protected-services). |
+| Viewer reports a schema mismatch | Migrate an older DB with write access outside the Viewer service, or upgrade TAPL for a newer DB. See [Database access](viewer.md#database-access-and-protected-services). |
 | Proxy or tunnel shows `Origin is not allowed.` | Allow the exact public HTTP(S) origin with `--allowed-origin` or `viewer.allowed_origins`, then restart the service. An origin has no path. See [Viewer](viewer.md#reverse-proxies-and-tunnels). |
 | RUN discard confirmation stays disabled | Enter or paste the full displayed RUN ID with exact case and whitespace. Cancelling leaves all records unchanged. |
 | VS Code cannot start MCP | Check `tapl-mcp` is available. Set `taplWorkflow.taplMcpPath` to its executable path if needed. The extension starts the server itself; it does not connect to the browser service. |

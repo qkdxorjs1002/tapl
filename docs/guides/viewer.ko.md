@@ -22,6 +22,24 @@ taplctl viewer --port 9000
 
 RUN 탭에서 살펴볼 세션을 선택합니다. 아카이브와 이력 검색으로 이전 작업을 찾고, 메모리 화면에서 재사용 단서의 원본 근거로 이동할 수 있습니다. RUN을 선택해도 소유권은 바뀌지 않습니다.
 
+## DB 접근과 보호된 서비스
+
+Viewer 데이터 요청은 선택한 DB를 SQLite `mode=ro`와 `query_only`로 열고 연결마다 읽기 트랜잭션을 사용합니다. DB 생성, 저널 모드 변경, 스키마 마이그레이션, 메타데이터 갱신을 수행하지 않습니다. 서비스는 `~/.tapl/tapl.db` 없이 시작할 수 있으므로 시작 검사에서 해당 파일을 필수로 요구하지 마세요. 페이지나 `revision` 응답 성공은 웹서버 또는 파일 메타데이터 확인 결과이며 SQLite 조회 성공을 보장하지 않습니다.
+
+DB는 설치된 TAPL의 스키마와 일치해야 합니다. 마이그레이션이 필요하면 보호된 Viewer 서비스 밖에서 DB 디렉터리에 쓰기 권한이 있는 사용자로 다음 명령을 실행한 뒤 새로고침하세요.
+
+```sh
+taplctl --db /path/to/workspace/.tapl/tapl.db init
+```
+
+이 명령은 DB 옆에 마이그레이션 백업을 만들 수 있습니다. 지원 버전보다 새로운 스키마는 TAPL을 업그레이드해야 합니다. Viewer는 DB를 다운그레이드하지 않습니다.
+
+systemd의 `ProtectSystem=strict` 또는 `ProtectHome=read-only`를 쓰면 서비스 사용자에게 워크스페이스의 읽기·디렉터리 탐색 권한이 필요합니다. SQLite WAL DB는 읽을 수 있는 기존 `tapl.db-wal`·`tapl.db-shm` 파일이 있거나 DB 디렉터리에 이를 생성할 권한도 필요합니다. 사용 가능한 보조 파일이 있으면 다른 프로세스가 쓰는 동안에도 DB 쓰기 잠금을 잡지 않고 WAL의 커밋된 변경을 조회합니다. 미커밋 변경은 보이지 않습니다.
+
+모든 쓰기 연결이 닫히면 SQLite가 보조 파일을 제거할 수 있습니다. 따라서 보조 파일이 없는 WAL DB는 완전히 읽기 전용인 디렉터리에서 조회에 실패할 수 있습니다. 신뢰할 수 있는 쓰기 연결과 사용 가능한 보조 파일을 유지하거나, systemd의 `ReadWritePaths=/path/to/workspace/.tapl`로 선택한 `.tapl` 디렉터리만 쓰기를 허용하세요. 보조 파일을 수동 생성하거나 실행 중인 DB에 `immutable=1`을 적용하지 마세요. SQLite의 변경 감지를 우회해 WAL의 커밋된 내용을 놓칠 수 있습니다. [SQLite의 읽기 전용 WAL 조건](https://www.sqlite.org/wal.html#read_only_databases)을 참고하세요.
+
+확인된 [RUN 폐기](#run-폐기)는 별도 쓰기 API를 사용하므로 디렉터리 쓰기 권한이 계속 필요합니다. 읽기 권한만 있는 서비스는 기록을 살펴볼 수 있지만 RUN을 폐기할 수 없습니다. 선택적 의미 검색은 모델 캐시도 필요할 수 있습니다. 제공자 설정과 BM25 대체 동작은 [검색](search.ko.md)을 보세요.
+
 ## RUN 폐기
 
 RUN 탭의 **×**를 누르고 대화상자에 표시된 **전체 RUN ID**를 그대로 입력하거나 붙여 넣습니다. `PLAN-001`, 세션 ID, 축약 해시가 아닌 RUN 식별자입니다. 대소문자와 공백까지 일치해야 확인 버튼이 활성화됩니다. 취소하거나 Escape를 누르면 아무것도 바뀌지 않습니다.
@@ -81,7 +99,7 @@ origin에는 HTTP(S) 스킴, 호스트, 선택적 포트만 넣습니다. 경로
 
 ## 검증과 관련 문서
 
-브라우저와 VS Code는 같은 React 화면과 프로토콜 타입을 사용합니다. 브라우저 HTTP origin·워크스페이스 검사는 `tapl/tests/test_viewer.py`, `test_viewer_discard.py`, 폐기 수명주기는 `test_run_discard.py`에서 검증합니다. 공유 UI의 확인·라우팅 검사는 `vscode-extension/tests`에 있습니다.
+브라우저와 VS Code는 같은 React 화면과 프로토콜 타입을 사용합니다. 브라우저 HTTP origin·워크스페이스 검사는 `tapl/tests/test_viewer.py`, `test_viewer_discard.py`, DB 권한·스키마 호환·WAL 스냅샷은 `test_viewer_readonly.py`, 폐기 수명주기는 `test_run_discard.py`에서 검증합니다. 공유 UI의 확인·라우팅 검사는 `vscode-extension/tests`에 있습니다.
 
 - [VS Code 확장](vscode.ko.md): 에디터 워크스페이스 라우팅과 요구 사항.
 - [설정](configuration.ko.md): 설정 범위와 적용 값.

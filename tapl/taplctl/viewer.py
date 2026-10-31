@@ -130,7 +130,14 @@ class NativeJsonRunner:
         except ViewerError:
             raise
         except (OSError, sqlite3.Error, ValueError) as exc:
-            raise ViewerError(f"Could not read TAPL state: {exc}") from exc
+            message = f"Could not read TAPL state: {exc}"
+            code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
+            if code in {sqlite3.SQLITE_CANTOPEN, sqlite3.SQLITE_READONLY}:
+                message += (
+                    ". Check database and directory read permissions. WAL databases require "
+                    "readable -wal and -shm sidecars, or directory write access to create them."
+                )
+            raise ViewerError(message) from exc
 
     def _run(self, db_path: Path, args: list[str]) -> dict[str, Any]:
         if not args:
@@ -192,7 +199,7 @@ class NativeJsonRunner:
         return config.load(start=self._workspace_for_database(db_path))
 
     def _connection(self, db_path: Path) -> sqlite3.Connection:
-        return db.connect(db_path)
+        return db.connect_readonly(db_path)
 
     def _status(self, db_path: Path, *, full: bool, include_events: bool) -> dict[str, Any]:
         settings = self._settings(db_path)
@@ -428,7 +435,7 @@ class ViewerApplication:
                 WorkflowApplication(workspace, session_id=target).discard_run(
                     run_id=run_id, confirmed=True, confirmation_run_id=confirmation_run_id)
             if selected == target:
-                conn = db.connect(db_path, session_id="")
+                conn = db.connect_readonly(db_path, session_id="")
                 try:
                     remaining = db.active_runs(conn)
                     selected = str(remaining[0]["session_id"]) if remaining else ""
