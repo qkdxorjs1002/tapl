@@ -29,7 +29,7 @@ def test_viewer_selects_independent_runs_and_preserves_ownership(tmp_path):
         assert status["session_id"] == owner
         assert status["active_run"]["id"] == ids[owner]
         assert [plan["title"] for plan in status["plans"]] == [f"Plan {owner}"]
-    with closing(db.connect(root / db.DEFAULT_DB_RELATIVE)) as conn:
+    with closing(db.connect(db.local_db_path(root, create_identity=False))) as conn:
         assert db.active_run(conn) is None
         assert {row["session_id"]: row["id"] for row in db.active_runs(conn)} == ids
 

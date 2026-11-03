@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [한국어](troubleshooting.ko.md)
 
-Start in the working folder where Codex uses TAPL. Workspaces use that folder's `.tapl/tapl.db`; TAPL does not discover a parent database. Installation scope, configuration scope, and active session identity can therefore explain apparently missing records.
+Start in the working folder where Codex uses TAPL. Workspaces use that folder's `.tapl/tapl-{UUID}.db`; TAPL does not discover a parent database. Installation scope, configuration scope, and active session identity can therefore explain apparently missing records.
 
 ## Check runtime and configuration
 
@@ -26,7 +26,7 @@ taplctl config get
 
 | Symptom | Check and remedy |
 | --- | --- |
-| Viewer asks for a workspace | Choose a folder that already contains `.tapl/tapl.db`, or initialize the intended folder with `taplctl init --workspace-root /path/to/workspace`. A login service may start outside your repository. |
+| Viewer asks for a workspace | Choose a folder that already contains `.tapl/tapl-{UUID}.db`, or initialize the intended folder with `taplctl init --workspace-root /path/to/workspace`. A login service may start outside your repository. |
 | Port 8000 is in use | Stop the matching Homebrew service or run `taplctl viewer --port 9000`. Multiple formula services use the same default port. |
 | Viewer page opens but data reads fail | Check workspace read/traversal access and SQLite WAL/SHM sidecars. A protected WAL directory may need permission to create missing sidecars. See [Database access](viewer.md#database-access-and-protected-services). |
 | Viewer reports a schema mismatch | Migrate an older DB with write access outside the Viewer service, or upgrade TAPL for a newer DB. See [Database access](viewer.md#database-access-and-protected-services). |

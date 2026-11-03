@@ -13,11 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from . import memory_search, sessions
+from . import identity, memory_search, sessions
 
 
 SCHEMA_VERSION = 14
-DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"
+DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"  # Legacy filename only.
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
 TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
@@ -79,7 +79,7 @@ def find_workspace_root(start: Path | None = None) -> Path | None:
     """Return the selected folder only when it contains a TAPL database."""
 
     root = find_repo_root(start)
-    return root if (root / DEFAULT_DB_RELATIVE).is_file() else None
+    return root if discover_db_paths(root) else None
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -94,7 +94,7 @@ def find_repo_root(start: Path | None = None) -> Path:
 def initialize_workspace(root: Path | str) -> dict[str, Any]:
     workspace_root = find_repo_root(Path(root))
     workspace_root.mkdir(parents=True, exist_ok=True)
-    db_path = workspace_root / DEFAULT_DB_RELATIVE
+    db_path = default_db_path(workspace_root)
     db_existed = db_path.exists()
     conn = connect(db_path)
     conn.close()
@@ -106,7 +106,102 @@ def initialize_workspace(root: Path | str) -> dict[str, Any]:
 
 
 def default_db_path(start: Path | None = None) -> Path:
-    return find_repo_root(start) / DEFAULT_DB_RELATIVE
+    """Resolve the writable local database, adopting legacy history safely."""
+    path = local_db_path(start, create_identity=True)
+    assert path is not None
+    legacy = path.parent / "tapl.db"
+    if legacy.exists():
+        _migrate_legacy_database(legacy, path)
+    return path
+
+
+def local_db_path(start: Path | None = None, *, create_identity: bool = False) -> Path | None:
+    root = find_repo_root(start)
+    if (root / ".tapl").is_symlink():
+        raise ValueError(f"Refusing symlink TAPL database directory: {root / '.tapl'}")
+    installation = identity.installation_id(create=create_identity)
+    path = root / ".tapl" / f"tapl-{installation}.db" if installation else None
+    if path is not None and path.is_symlink():
+        raise ValueError(f"Refusing symlink local TAPL database: {path}")
+    return path
+
+
+def discover_db_paths(start: Path | None = None) -> list[Path]:
+    """Discover history without creating an identity, database, or directory."""
+    directory = find_repo_root(start) / ".tapl"
+    if directory.is_symlink():
+        raise ValueError(f"Refusing symlink TAPL database directory: {directory}")
+    paths = []
+    for path in [directory / "tapl.db", *directory.glob("tapl-*.db")]:
+        if not path.is_file() or path.is_symlink():
+            continue
+        paths.append(path)
+    return sorted(paths)
+
+
+def _migrate_legacy_database(legacy: Path, target: Path) -> None:
+    """Checkpoint and exclusively validate legacy state before publishing it.
+
+    SQLite journal-mode conversion rejects existing WAL connections, and the
+    exclusive transaction rejects active rollback-mode readers and writers.
+    Old processes must be stopped: they do not participate in our publication
+    lock and could reopen the old filename after connections are closed.
+    """
+    # A directory lock is portable and deliberately never stolen: a process
+    # interrupted mid-migration needs operator inspection before retrying.
+    lock = legacy.parent / ".legacy-migration.lock"
+    try:
+        lock.mkdir()
+    except FileExistsError as exc:
+        raise RuntimeError(
+            f"Legacy TAPL migration is busy: {lock}. Stop old TAPL processes and "
+            "retry; after a crashed migration, inspect both databases before removing the lock."
+        ) from exc
+    try:
+        if not legacy.exists():
+            return
+        if legacy.is_symlink():
+            raise ValueError(f"Refusing symlink legacy database: {legacy}")
+        targets = [Path(str(target) + suffix) for suffix in ("", "-wal", "-shm", "-journal")]
+        if any(path.exists() or path.is_symlink() for path in targets):
+            raise FileExistsError(
+                f"Cannot migrate {legacy}: local database {target} already exists. "
+                "Preserve both files and resolve the collision before retrying."
+            )
+        conn = sqlite3.connect(legacy.as_uri() + "?mode=rw", uri=True, timeout=0)
+        try:
+            conn.execute("PRAGMA busy_timeout = 0")
+            if conn.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                raise sqlite3.DatabaseError(f"Legacy database failed integrity check: {legacy}")
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {"meta", "workflow_runs"} <= tables:
+                raise sqlite3.DatabaseError(f"Legacy database is not a TAPL database: {legacy}")
+            row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+            if row is None or not str(row[0]).isdigit() or int(row[0]) > SCHEMA_VERSION:
+                raise sqlite3.DatabaseError(f"Unsupported legacy TAPL schema in {legacy}")
+            checkpoint = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if checkpoint and checkpoint[0]:
+                raise sqlite3.OperationalError("legacy WAL checkpoint is busy")
+            if conn.execute("PRAGMA journal_mode = DELETE").fetchone()[0].lower() != "delete":
+                raise sqlite3.OperationalError("legacy journal mode is busy")
+            conn.execute("BEGIN EXCLUSIVE")
+        except sqlite3.OperationalError as exc:
+            raise sqlite3.OperationalError(
+                f"Cannot migrate legacy database {legacy}: {exc}. "
+                "Stop old TAPL processes and retry; the legacy database was retained."
+            ) from exc
+        finally:
+            conn.close()
+        # link+unlink is a no-clobber rename on the same filesystem. The source
+        # remains intact if publication fails, including a late target collision.
+        os.link(legacy, target)
+        try:
+            legacy.unlink()
+        except BaseException:
+            target.unlink()
+            raise
+    finally:
+        lock.rmdir()
 
 
 class WorkflowConnection(sqlite3.Connection):

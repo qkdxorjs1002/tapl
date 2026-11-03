@@ -18,13 +18,13 @@ import type { DisplayLayout, AssociativeMemory, MemoryDiagnostics, HostCapabilit
 type NodeKind = 'overview' | 'task' | 'archive' | 'empty';
 type DisplayLanguage = 'auto' | SupportedLocale;
 
-type PanelView =
+type PanelView = (
   | { type: 'overview' | 'debug' }
   | { type: 'archive' | 'archiveEvents'; archiveId: string }
   | { type: 'search'; query: string }
   | { type: 'searchItem'; itemId: number }
   | { type: 'memories'; query: string; offset: number }
-  | { type: 'memory' | 'memorySource'; memoryId: string };
+  | { type: 'memory' | 'memorySource'; memoryId: string }) & { source_db?: string };
 
 const COMMAND_PREFIX = "taplWorkflow";
 const TAPL_DB_WATCH_DEBOUNCE_MS = 2000;
@@ -34,6 +34,7 @@ const LAYOUT_SETTING = "layout";
 let taplMcpClients: TaplMcpClientPool | undefined;
 let selectedWorkspacePath: string | undefined;
 const selectedRunSessions = new Map<string, string>();
+const selectedRunSources = new Map<string, string>();
 
 function localize(key: TranslationKey, params?: TranslationParams): string {
   return translate(displayLocale(), key, params);
@@ -115,7 +116,7 @@ export function activate(context: vscode.ExtensionContext): void {
     for (const root of roots) {
       if (workspaceWatchers.has(root.uri.fsPath)) { continue; }
       const watchers: vscode.Disposable[] = [];
-      for (const pattern of ['.tapl/tapl.db', '.tapl/tapl.db-wal', '.tapl/tapl.db-shm']) {
+      for (const pattern of ['.tapl/tapl.db', '.tapl/tapl.db-wal', '.tapl/tapl.db-shm', '.tapl/tapl-*.db', '.tapl/tapl-*.db-wal', '.tapl/tapl-*.db-shm']) {
         const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, pattern));
         watchers.push(watcher, watcher.onDidChange(debouncedRefresh.schedule), watcher.onDidCreate(debouncedRefresh.schedule), watcher.onDidDelete(debouncedRefresh.schedule));
       }
@@ -277,7 +278,7 @@ class WorkflowWebviewManager {
   }
 
   async openArchive(archive: TaplArchive): Promise<void> {
-    await this.navigate({ type: 'archive', archiveId: archive.id }, { pushHistory: this.panel !== undefined, reveal: true });
+    await this.navigate({ type: 'archive', archiveId: archive.id, source_db: archive.source_db }, { pushHistory: this.panel !== undefined, reveal: true });
   }
 
   resetWorkspace(): void {
@@ -374,7 +375,7 @@ class WorkflowWebviewManager {
 
   private async buildCurrentView(route: PanelView): Promise<WebviewView> {
     if (route.type === 'archive' || route.type === 'archiveEvents') {
-      const detail = await safeArchiveDetail(route.archiveId);
+      const detail = await safeArchiveDetail(route.archiveId, route.source_db);
       return detail.ok ? { type: route.type, archive: detail.value.archive, detail: detail.value } : { type: 'error', message: detail.error };
     }
     if (route.type === 'search') {
@@ -382,7 +383,7 @@ class WorkflowWebviewManager {
       return result.ok ? { type: 'search', search: result.value } : { type: 'error', message: result.error };
     }
     if (route.type === 'searchItem') {
-      return this.itemView(route.itemId);
+      return this.itemView(route.itemId, route.source_db);
     }
     if (route.type === 'memories') {
       const result = await callTaplMcp('tapl_recall', { query: route.query, offset: route.offset, limit: 50 });
@@ -393,15 +394,15 @@ class WorkflowWebviewManager {
         ...(payload.diagnostics ? { diagnostics: payload.diagnostics as unknown as MemoryDiagnostics } : {}) };
     }
     if (route.type === 'memory' || route.type === 'memorySource') {
-      const result = await callTaplMcp('tapl_get_memory', { memory_id: route.memoryId });
+      const result = await callTaplMcp('tapl_get_memory', { memory_id: route.memoryId, ...(route.source_db ? { source_db: route.source_db } : {}) });
       if (!result.ok) { return { type: 'error', message: result.error }; }
       const memory = (result.value.memory ?? null) as AssociativeMemory | null;
       const source = memory?.source_record;
       if (route.type === 'memorySource' && memory?.source_available && source) {
-        if (source.kind === 'item' && source.item) { return this.itemView(source.item.id); }
-        if (source.kind === 'run' && source.run) { return { type: 'memorySource', memoryId: route.memoryId, run: source.run }; }
+        if (source.kind === 'item' && source.item) { return this.itemView(source.item.id, memory.source_db); }
+        if (source.kind === 'run' && source.run) { return { type: 'memorySource', memoryId: route.memoryId, run: source.run, source_db: memory.source_db }; }
       }
-      return { type: 'memory', memoryId: route.memoryId, memory };
+      return { type: 'memory', memoryId: route.memoryId, memory, source_db: memory?.source_db ?? route.source_db };
     }
     const status = await safeStatus({ full: true, includeEvents: route.type === 'debug' });
     if (!status.ok) { return { type: 'error', message: status.error }; }
@@ -412,8 +413,8 @@ class WorkflowWebviewManager {
       : { type: 'error', message: archives.error };
   }
 
-  private async itemView(itemId: number): Promise<WebviewView> {
-    const detail = await safeItemDetail(itemId);
+  private async itemView(itemId: number, sourceDb?: string): Promise<WebviewView> {
+    const detail = await safeItemDetail(itemId, sourceDb);
     if (!detail.ok) { return { type: 'error', message: detail.error }; }
     const item = await enrichTaskDetail(detail.value);
     return { type: 'searchItem', result: searchResultFromItem(item), detail: item };
@@ -436,6 +437,8 @@ class WorkflowWebviewManager {
         const root = getWorkspaceRoot();
         if (root && typeof message.sessionId === 'string' && message.sessionId.length <= 256) {
           selectedRunSessions.set(root.uri.fsPath, message.sessionId);
+          if (typeof message.source_db === "string") selectedRunSources.set(root.uri.fsPath, message.source_db);
+          else selectedRunSources.delete(root.uri.fsPath);
           await this.openOverview();
           await vscode.commands.executeCommand(`${COMMAND_PREFIX}.refresh`);
         }
@@ -456,13 +459,13 @@ class WorkflowWebviewManager {
       case 'archiveEvents':
       case 'openArchive':
         if (typeof message.archiveId === 'string' && message.archiveId) {
-          await this.navigate({ type: message.command === 'archiveEvents' ? 'archiveEvents' : 'archive', archiveId: message.archiveId }, { pushHistory: true });
+          await this.navigate({ type: message.command === 'archiveEvents' ? 'archiveEvents' : 'archive', archiveId: message.archiveId, source_db: typeof message.source_db === "string" ? message.source_db : undefined }, { pushHistory: true });
         }
         return;
       case 'search': if (typeof message.query === 'string') { await this.runSearch(message.query); } return;
       case 'openSearchResult':
         if (typeof message.itemId === 'number' && Number.isInteger(message.itemId) && message.itemId > 0) {
-          await this.navigate({ type: 'searchItem', itemId: message.itemId }, { pushHistory: true });
+          await this.navigate({ type: 'searchItem', itemId: message.itemId, source_db: typeof message.source_db === "string" ? message.source_db : undefined }, { pushHistory: true });
         }
         return;
       case 'memories': {
@@ -476,7 +479,7 @@ class WorkflowWebviewManager {
       case 'openMemory':
       case 'openMemorySource':
         if (this.capabilities.associativeMemory && typeof message.memoryId === 'string' && message.memoryId) {
-          await this.navigate({ type: message.command === 'openMemory' ? 'memory' : 'memorySource', memoryId: message.memoryId }, { pushHistory: true });
+          await this.navigate({ type: message.command === 'openMemory' ? 'memory' : 'memorySource', memoryId: message.memoryId, source_db: typeof message.source_db === "string" ? message.source_db : undefined }, { pushHistory: true });
         }
         return;
     }
@@ -509,7 +512,7 @@ class WorkflowWebviewManager {
     try {
       // Capture both identities before awaiting; writes never consult the selected read owner.
       const result = await callTaplMcp('tapl_discard_run', {
-        run_id: runId, confirmed: true, confirmation_run_id: confirmationRunId, session_id: targetSessionId
+        run_id: runId, confirmed: true, confirmation_run_id: confirmationRunId, session_id: targetSessionId, ...(typeof message.source_db === "string" ? { source_db: message.source_db } : {})
       }, root);
       if (root !== getWorkspaceRoot() || panel !== this.panel || workspace !== root.uri.fsPath) { return; }
       if (!result.ok || result.value.ok === false) {
@@ -518,6 +521,7 @@ class WorkflowWebviewManager {
       }
       if (selectedRunSessions.get(workspace) === targetSessionId) {
         selectedRunSessions.delete(workspace);
+        selectedRunSources.delete(workspace);
       }
       if (generation === this.generation) {
         this.backStack.length = 0;
@@ -581,7 +585,8 @@ async function safeStatus(
     full: options.full ?? false,
     include_events: options.includeEvents ?? false,
     events_limit: options.eventsLimit ?? 12,
-    ...(selectedSession !== undefined ? { session_id: selectedSession } : {})
+    ...(selectedSession !== undefined ? { session_id: selectedSession } : {}),
+    ...(root && selectedRunSources.has(root.uri.fsPath) ? { source_db: selectedRunSources.get(root.uri.fsPath) } : {})
   };
   let result = await callTaplMcp('tapl_get_status', args, root);
   if (!result.ok) {
@@ -592,7 +597,9 @@ async function safeStatus(
     const owner = initial.active_runs[0].session_id;
     if (typeof owner === 'string') {
       selectedRunSessions.set(root.uri.fsPath, owner);
-      result = await callTaplMcp('tapl_get_status', { ...args, session_id: owner }, root);
+      const sourceDb = initial.active_runs[0].source_db;
+      if (sourceDb) selectedRunSources.set(root.uri.fsPath, sourceDb);
+      result = await callTaplMcp('tapl_get_status', { ...args, session_id: owner, ...(sourceDb ? { source_db: sourceDb } : {}) }, root);
       if (!result.ok) { return result; }
     }
   }
@@ -617,8 +624,8 @@ async function safeArchives(limit?: number): Promise<{ ok: true; value: TaplArch
   return { ok: true, value: Array.isArray(payload.archives) ? payload.archives : [] };
 }
 
-async function safeArchiveDetail(archiveId: string): Promise<{ ok: true; value: TaplArchiveDetail } | { ok: false; error: string }> {
-  const result = await callTaplMcp('tapl_get_archive', { archive_id: archiveId });
+async function safeArchiveDetail(archiveId: string, sourceDb?: string): Promise<{ ok: true; value: TaplArchiveDetail } | { ok: false; error: string }> {
+  const result = await callTaplMcp('tapl_get_archive', { archive_id: archiveId, ...(sourceDb ? { source_db: sourceDb } : {}) });
   if (!result.ok) {
     return result;
   }
@@ -645,8 +652,8 @@ async function safeArchiveDetail(archiveId: string): Promise<{ ok: true; value: 
   };
 }
 
-async function safeItemDetail(itemId: number): Promise<{ ok: true; value: TaplItemDetail } | { ok: false; error: string }> {
-  const result = await callTaplMcp('tapl_get_item', { item_id: itemId });
+async function safeItemDetail(itemId: number, sourceDb?: string): Promise<{ ok: true; value: TaplItemDetail } | { ok: false; error: string }> {
+  const result = await callTaplMcp('tapl_get_item', { item_id: itemId, ...(sourceDb ? { source_db: sourceDb } : {}) });
   if (!result.ok) {
     return result;
   }
@@ -668,7 +675,7 @@ async function enrichTaskDetail(detail: TaplItemDetail): Promise<TaplItemDetail>
   if (!status.ok) {
     return detail;
   }
-  const task = status.value.tasks.find((candidate) => candidate.id === detail.id);
+  const task = status.value.tasks.find((candidate) => candidate.id === detail.id && candidate.source_db === detail.source_db);
   if (!task) {
     return detail;
   }
@@ -766,6 +773,7 @@ function searchResultFromItem(item: TaplItemDetail): TaplSearchResult {
     title: item.title,
     status: item.status,
     source: item.source,
+    source_db: item.source_db,
     snippet: item.body || item.raw_text,
     search_source: 'item'
   };

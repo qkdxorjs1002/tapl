@@ -54,6 +54,10 @@ SessionId = Annotated[
     str | None,
     Field(description="Current Codex hook session_id. Pass the same identity on EVERY call, including reads. Omission selects only the isolated legacy namespace.", max_length=256),
 ]
+SourceDb = Annotated[
+    str | None,
+    Field(description="Exact source_db filename returned by history, archive, memory, or run results. Preserve it when following a source pointer; omission selects local history.", min_length=1),
+]
 ApprovalSource = Literal["explicit_user", "request_user_input"]
 WorkType = Literal["answer", "investigation", "analysis", "planning", "implementation", "mixed"]
 WorkflowMode = Literal["fast", "standard", "strict"]
@@ -84,6 +88,7 @@ class MemoryUse(BaseModel):
     revision: int = Field(ge=1, strict=True)
     source_checked: bool = Field(strict=True)
     usage: str = Field(min_length=1, max_length=500)
+    source_db: SourceDb = None
 
 
 class SplitRunRequest(BaseModel):
@@ -449,6 +454,7 @@ def create_server(
         full: Annotated[bool, Field(description="Include full plan, task, and finding bodies.")] = False,
         include_events: Annotated[bool, Field(description="Include recent hook event summaries.")] = False,
         events_limit: Annotated[int, Field(description="Maximum recent events to include.", ge=0, le=100)] = 12,
+        source_db: SourceDb = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Inspect run/task/approval/batch details missing from get_next's state_summary or a write receipt, especially for resume/recovery. Conditional detail lookup, not a mandatory entry or pre-write check; no follow-up get_next is needed solely because this read ran."""
@@ -458,6 +464,7 @@ def create_server(
             full=full,
             include_events=include_events,
             events_limit=events_limit,
+            **compact_payload(source_db=source_db),
         )
 
     @server.tool(name="tapl_get_next", title="Get safest TAPL action", annotations=READ_ONLY)
@@ -547,10 +554,11 @@ def create_server(
     @server.tool(name="tapl_get_memory", title="Read one TAPL memory", annotations=READ_ONLY)
     async def get_memory(
         memory_id: Annotated[str, Field(description="Memory id returned by tapl_recall.", min_length=1)],
+        source_db: SourceDb = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Read a memory and its original source without capture or reinforcement. Deleted or missing memories return null."""
-        return await call_application(application.get_memory, memory_id, session_id=session_id)
+        return await call_application(application.get_memory, memory_id, session_id=session_id, **compact_payload(source_db=source_db))
 
     @server.tool(name="tapl_update_memory", title="Update TAPL memory", annotations=MEMORY_WRITE)
     async def update_memory(
@@ -559,30 +567,33 @@ def create_server(
         note: Annotated[str | None, Field(min_length=1, max_length=240)] = None,
         cue: Annotated[list[str] | None, Field(min_length=3, max_length=5)] = None,
         state: Literal["active", "superseded"] | None = None,
+        source_db: SourceDb = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Edit a memory only on an explicit user request. Use its current revision; surface conflicts for fresh review."""
         return await call_application(application.update_memory, memory_id, session_id=session_id, require_session=True, expected_revision=expected_revision,
-                                      note=note, cue=cue, state=state)
+                                      note=note, cue=cue, state=state, **compact_payload(source_db=source_db))
 
     @server.tool(name="tapl_delete_memory", title="Delete TAPL memory", annotations=MEMORY_WRITE)
     async def delete_memory(
         memory_id: str,
         expected_revision: Annotated[int, Field(ge=1, strict=True)],
+        source_db: SourceDb = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Tombstone a memory only on an explicit user request. Deleted memories cannot be recalled or reinforced."""
-        return await call_application(application.delete_memory, memory_id, session_id=session_id, require_session=True, expected_revision=expected_revision)
+        return await call_application(application.delete_memory, memory_id, session_id=session_id, require_session=True, expected_revision=expected_revision, **compact_payload(source_db=source_db))
 
     @server.tool(name="tapl_get_item", title="Read one TAPL item", annotations=READ_ONLY)
     async def get_item(
         item_id: Annotated[int, Field(description="Numeric item id returned by tapl_search_history.", ge=1)],
         compact: Annotated[bool, Field(description="Omit generated body only when exactly reconstructible from retained canonical fields; preserve custom and raw content.")] = False,
+        source_db: SourceDb = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Read one complete plan, task, or finding when a search snippet is insufficient."""
 
-        payload = await call_application(application.get_item, item_id, session_id=session_id)
+        payload = await call_application(application.get_item, item_id, session_id=session_id, **compact_payload(source_db=source_db))
         return compact_item_payload(payload) if compact else payload
 
     @server.tool(name="tapl_list_archives", title="List TAPL archives", annotations=READ_ONLY)
@@ -597,11 +608,12 @@ def create_server(
     @server.tool(name="tapl_get_archive", title="Read one TAPL archive", annotations=READ_ONLY)
     async def get_archive(
         archive_id: Annotated[str, Field(description="Archive numeric id or stable slug.", min_length=1)],
+        source_db: SourceDb = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Read an archive with its workflow items and events."""
 
-        return await call_application(application.get_archive, archive_id, session_id=session_id)
+        return await call_application(application.get_archive, archive_id, session_id=session_id, **compact_payload(source_db=source_db))
 
     @server.tool(name="tapl_summarize_run", title="Summarize active TAPL run", annotations=WRITE)
     async def summarize_run(
@@ -637,6 +649,7 @@ def create_server(
         confirmed: Annotated[bool, Field(description="Literal true only after the user confirms discard.", strict=True)],
         confirmation_run_id: Annotated[str, Field(description="Full run id typed by the user; must exactly match run_id, including case.", min_length=1, max_length=256, strict=True)],
         session_id: Annotated[str, Field(description="Required explicit owner session; empty string selects a legacy run.", max_length=256, strict=True)],
+        source_db: SourceDb = None,
     ) -> dict[str, Any]:
         """Discard after exact typed confirmation: delete empty runs, archive retained work, and never activate another run."""
 
@@ -646,6 +659,7 @@ def create_server(
             application.discard_run, run_id=run_id, confirmed=confirmed,
             confirmation_run_id=confirmation_run_id,
             session_id=session_id, require_session=False,
+            **compact_payload(source_db=source_db),
         )
 
     @server.tool(name="tapl_split_run", title="Split independent TAPL runs", annotations=WRITE)
@@ -964,7 +978,7 @@ def create_server(
             result, session_id=session_id,
             expected_run_id=expected_run_id,
             memory_candidates=[entry.model_dump(exclude_none=True) for entry in memory_candidates] if memory_candidates is not None else None,
-            memory_uses=[entry.model_dump() for entry in memory_uses] if memory_uses is not None else None,
+            memory_uses=[entry.model_dump(exclude_none=True) for entry in memory_uses] if memory_uses is not None else None,
             memory_review=memory_review.model_dump(exclude_none=True) if memory_review is not None else None,
             operation="run_finish",
         )

@@ -94,7 +94,7 @@ def test_unidentified_mcp_calls_cannot_approve_finish_or_archive_named_run(works
             assert state.structured_content["active_run"]["id"] == run_id
 
     asyncio.run(exercise())
-    with closing(db.connect(workspace / ".tapl/tapl.db", session_id="a")) as conn:
+    with closing(db.connect(db.default_db_path(workspace), session_id="a")) as conn:
         assert db.active_run(conn)["result_summary"] == ""
         assert db.latest_approval(conn) is None
         assert db.list_archives(conn) == []
@@ -142,7 +142,7 @@ def test_shared_application_resolves_context_per_call_and_restores_after_error(w
 
 
 def test_hook_payload_owns_prompt_stop_and_events_without_affecting_other_session(workspace: Path) -> None:
-    path = workspace / ".tapl/tapl.db"
+    path = db.default_db_path(workspace)
     with closing(db.connect(path)) as conn:
         for owner in ("a", "b"):
             result = hooks.handle_event(conn, event="UserPromptSubmit", mode="observe", tool=None,
@@ -176,7 +176,7 @@ def test_hook_payload_owns_prompt_stop_and_events_without_affecting_other_sessio
 
 
 def test_hook_cli_routes_json_payload_session_and_resumes_it(workspace: Path, monkeypatch, capsys) -> None:
-    path = workspace / ".tapl/tapl.db"
+    path = db.default_db_path(workspace)
     ids = {}
     for owner in ("a", "b", "a"):
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({

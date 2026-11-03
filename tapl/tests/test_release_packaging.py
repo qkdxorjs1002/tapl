@@ -110,7 +110,7 @@ class PythonPackagingContractTests(unittest.TestCase):
         env["PYTHONPATH"] = str(TAPL_ROOT)
         return subprocess.run(
             [sys.executable, "-c", statement],
-            cwd=TAPL_ROOT,
+            cwd=Path.cwd(),
             env=env,
             text=True,
             capture_output=True,

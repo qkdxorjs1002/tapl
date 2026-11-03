@@ -31,7 +31,7 @@ def test_native_runner_maps_viewer_reads_to_database_operations() -> None:
         )
 
         runner = viewer.NativeJsonRunner()
-        db_path = workspace / db.DEFAULT_DB_RELATIVE
+        db_path = db.local_db_path(workspace, create_identity=False)
         full_status = runner(db_path, ["status", "--json", "--full"])
         plan = full_status["plans"][0]
         native_viewer = viewer.ViewerApplication(default_workspace=workspace)
@@ -75,7 +75,7 @@ def test_native_viewer_validation_uses_selected_authoring_detail(tmp_path) -> No
     workflow.create_task("TASK-001", "Fix handler", "PLAN-001", "Correct output",
                          "Update handler and regression test", "Run regression test")
     runner = viewer.NativeJsonRunner()
-    path = tmp_path / db.DEFAULT_DB_RELATIVE
+    path = db.local_db_path(tmp_path, create_identity=False)
     for detail in ("normal", "minimal", "precise"):
         (tmp_path / ".tapl/config.toml").write_text(
             f'[workflow]\nauthoring_detail = "{detail}"\n', encoding="utf-8",
@@ -95,7 +95,7 @@ def test_native_viewer_auto_policy_follows_selected_run_snapshot(tmp_path, mode,
     runner = viewer.NativeJsonRunner()
     for args in (["status", "--json"], ["status", "--json", "--full"]):
         with mock.patch.object(db, "status_payload", wraps=db.status_payload) as snapshots:
-            status = runner(tmp_path / db.DEFAULT_DB_RELATIVE, args)
+            status = runner(db.local_db_path(tmp_path, create_identity=False), args)
         assert snapshots.call_count == 1
         assert status["authoring_policy"] == {
             "configured": "auto", "effective": effective, "workflow_mode": mode,
@@ -107,7 +107,7 @@ def test_native_viewer_auto_policy_follows_selected_run_snapshot(tmp_path, mode,
 def test_native_viewer_auto_policy_uses_owner_selection_and_empty_fallback(tmp_path) -> None:
     db.initialize_workspace(tmp_path)
     (tmp_path / ".tapl/config.toml").write_text('[workflow]\nauthoring_detail="auto"\n', encoding="utf-8")
-    path = tmp_path / db.DEFAULT_DB_RELATIVE
+    path = db.local_db_path(tmp_path, create_identity=False)
     runner = viewer.NativeJsonRunner()
     assert runner(path, ["status"])["authoring_policy"] == {
         "configured": "auto", "effective": "normal", "workflow_mode": None,

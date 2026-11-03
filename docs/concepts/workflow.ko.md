@@ -71,11 +71,11 @@ Agent는 요청 결과를 `answer`, `investigation`, `analysis`, `planning`, `im
 
 ## 작업 공간과 세션 경계
 
-Codex 작업 폴더 자체가 `.tapl/tapl.db`를 소유합니다. TAPL은 상위 DB·Git 루트·저장소 표식을 탐색하지 않습니다. `repo/packages/app`의 세션은 `repo/.tapl/tapl.db`가 있어도 `repo/packages/app/.tapl/tapl.db`를 사용합니다. 기존 DB를 이동하거나 합치지 않습니다.
+Codex 작업 폴더는 환경별 `.tapl/tapl-{UUID}.db`에 기록하며 같은 폴더의 `tapl-*.db` 이력을 함께 읽습니다. 상위 DB·Git 루트·저장소 표식은 탐색하지 않습니다. `repo/packages/app`의 세션은 부모 폴더와 별개입니다. 기존 `tapl.db` 이름 이전과 UUID 보존은 [로컬 식별자와 공유 이력](../guides/storage.ko.md)을 참고하세요.
 
 Hook 이벤트에는 존재하는 절대 경로 `cwd`가 필요하며 MCP 서버는 실행 중 시작 작업 폴더에 고정됩니다. Hook DB 재정의는 그 폴더의 DB를 가리켜야 합니다. 관리 CLI는 명시적 DB·작업 공간 선택을 제공합니다. [CLI 참조](../reference/cli.ko.md)를 참고하세요.
 
-모든 MCP 호출에 Codex hook의 `session_id`를 전달해야 합니다. 각 세션은 자신의 RUN·승인·Task·분리 대기열·Stop 처리·아카이브 수명주기를 소유합니다. 같은 세션을 재개하면 그 RUN을 이어가고 새 세션은 다른 세션의 작업을 인수하지 않습니다. 생략하면 격리된 legacy 범위를 선택하며 세션 소유 기록이 생기면 식별자 없는 쓰기는 거부합니다. 기존 세션 미분리 기록은 legacy에 남고 스키마 갱신 전 `.tapl/tapl.db.pre-v14.bak`을 보존합니다.
+모든 MCP 호출에 Codex hook의 `session_id`를 전달해야 합니다. 각 세션은 자신의 RUN·승인·Task·분리 대기열·Stop 처리·아카이브 수명주기를 소유합니다. 같은 세션을 재개하면 그 RUN을 이어가고 새 세션은 다른 세션의 작업을 인수하지 않습니다. 생략하면 격리된 legacy 범위를 선택하며 세션 소유 기록이 생기면 식별자 없는 쓰기는 거부합니다. 기존 세션 미분리 기록은 legacy에 남고 스키마 갱신 전 `.tapl/tapl-{UUID}.db.pre-v14.bak`을 보존합니다.
 
 이력은 작업 공간 전체에서 검색할 수 있지만 활성 워크플로 소유권은 세션별입니다. 작업 파일은 공유하므로 같은 파일의 동시 수정은 조율하거나 별도 worktree를 사용하세요. 세션 소유권과 batch 경로 검사는 파일 시스템 격리가 아닙니다.
 

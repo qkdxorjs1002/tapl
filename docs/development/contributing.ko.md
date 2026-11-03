@@ -12,12 +12,11 @@ Python 패키지는 **Python 3.11+**가 필요하며 런타임 의존성은 `mcp
 
 ```sh
 uv --directory tapl sync --extra test
-uv --directory tapl run --extra test python -m unittest discover -s tests
 uv --directory tapl run --extra test python -m pytest -q tests
 uv --directory tapl build
 ```
 
-저장소에는 unittest와 pytest 함수 방식의 테스트가 함께 있습니다. Unittest discovery만으로 모든 pytest 함수를 실행하지 못합니다. 의미 검색 작업에는 선택 환경을 포함합니다.
+pytest 명령은 unittest와 pytest 함수 방식의 테스트를 모두 실행하고 임시 홈·작업 폴더 격리 fixture를 적용합니다. 의미 검색 작업에는 선택 환경을 포함합니다.
 
 ```sh
 uv --directory tapl sync --extra test --extra semantic

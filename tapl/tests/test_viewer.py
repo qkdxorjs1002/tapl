@@ -235,7 +235,7 @@ allowed_origins = [
                     "revision": "",
                     "workspace": "",
                     "workspaceValid": False,
-                    "message": "Choose a workspace that contains .tapl/tapl.db.",
+                    "message": "Choose a workspace that contains a TAPL database in .tapl/.",
                 },
             )
 
@@ -253,7 +253,7 @@ allowed_origins = [
             self.assertTrue(response["workspaceValid"])
             self.assertEqual(response["message"], "")
 
-            db_path = workspace / tapl_db.DEFAULT_DB_RELATIVE
+            db_path = tapl_db.local_db_path(workspace, create_identity=False)
             resolved_db_path = workspace.resolve() / tapl_db.DEFAULT_DB_RELATIVE
             db_path.unlink()
             invalid = unconfigured.handle_message(

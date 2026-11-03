@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 
-from taplctl import install
+from taplctl import db, install
 from taplctl.application import WorkflowApplication
 
 
@@ -787,7 +787,7 @@ def main(args):
                                          "body": item["body"],
                                          "fields": {field: item[field] for _, field in db.markdown_body_fields(item["kind"])}}
                                         for item in status.get("plans", []) + status.get("tasks", [])]
-            with sqlite3.connect(root / ".tapl/tapl.db") as conn:
+            with sqlite3.connect(db.default_db_path(root)) as conn:
                 scenario["setup_archives"] = conn.execute("SELECT count(*) FROM archives").fetchone()[0]
             if setup_exit != 0 or setup_timeout:
                 setup_errors.append("First context-loss session failed or timed out")
@@ -839,7 +839,7 @@ def main(args):
         structured = result.get("structured_content") or {}
         check(not result.get("isError") and not result.get("is_error") and structured.get("ok") is not False,
               f"MCP error in {call['tool']}")
-    with sqlite3.connect(root / ".tapl/tapl.db") as conn:
+    with sqlite3.connect(db.default_db_path(root)) as conn:
         conn.row_factory = sqlite3.Row
         archives = conn.execute("SELECT count(*) FROM archives").fetchone()[0]
         plans = conn.execute("SELECT count(*) FROM items WHERE kind='plan'").fetchone()[0]
@@ -908,7 +908,7 @@ def main(args):
         if args.condition == "recall":
             check(bool(memory_reviews) and memory_reviews[-1].get("decision") == "skip"
                   and bool(memory_reviews[-1].get("reason")), "Trivial edit did not record a reasoned memory skip")
-    export_evidence_db(root / ".tapl/tapl.db", output / "tapl.db")
+    export_evidence_db(db.default_db_path(root), output / "tapl.db")
     audit = audit_records(output, args.condition)
     errors.extend(audit["errors"])
     result = {"condition": args.condition, "model": args.model, "codex_exit_code": exit_code,

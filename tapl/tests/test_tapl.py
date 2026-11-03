@@ -140,7 +140,7 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
     def test_mcp_tools_expose_typed_high_level_contracts(self) -> None:
-        server = tapl_mcp.create_server(workspace_root=ROOT)
+        server = tapl_mcp.create_server(workspace_root=Path.cwd())
         tools = asyncio.run(server.list_tools())
         by_name = {tool.name: tool for tool in tools}
 
@@ -189,7 +189,7 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
     def test_every_mcp_write_tool_routes_through_compact_receipt_with_next(self) -> None:
-        server = tapl_mcp.create_server(workspace_root=ROOT)
+        server = tapl_mcp.create_server(workspace_root=Path.cwd())
         calls = (
             (
                 "tapl_split_run",
@@ -347,7 +347,7 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertEqual(receipt["active_run"]["workflow_mode"], "standard")
             self.assertEqual(receipt["active_run"]["record_mode"], "planned")
             self.assertNotIn("request_summary", receipt["active_run"])
-            self.assertEqual(receipt["recommendations"][0]["tool"], "tapl_apply_plan")
+            self.assertIn("tapl_apply_plan", [action["tool"] for action in receipt["recommendations"]])
 
     def test_mcp_tools_complete_a_sequential_workflow_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -543,9 +543,9 @@ class TaplRuntimeTests(unittest.TestCase):
             self.assertEqual(tapl_db.find_repo_root(nested_dir), nested_dir.resolve())
             self.assertEqual(
                 tapl_db.default_db_path(nested_dir),
-                nested_dir.resolve() / tapl_db.DEFAULT_DB_RELATIVE,
+                tapl_db.local_db_path(nested_dir),
             )
-            self.assertTrue((workspace / tapl_db.DEFAULT_DB_RELATIVE).is_file())
+            self.assertTrue(any((workspace / ".tapl").glob("tapl-*.db")))
 
             child = tapl_db.initialize_workspace(nested_dir)
             self.assertEqual(child["workspace_root"], str(nested_dir.resolve()))
@@ -567,7 +567,7 @@ class TaplRuntimeTests(unittest.TestCase):
 
             self.assertEqual(
                 tapl_db.default_db_path(child_repo),
-                child_repo.resolve() / tapl_db.DEFAULT_DB_RELATIVE,
+                tapl_db.local_db_path(child_repo),
             )
             self.assertEqual(tapl_db.find_workspace_root(child_repo), child_repo.resolve())
             self.assertEqual(tapl_db.find_workspace_root(sibling), sibling.resolve())
@@ -594,7 +594,7 @@ class TaplRuntimeTests(unittest.TestCase):
             payload = json.loads(initialized.stdout)
             self.assertEqual(payload["workspace_root"], str(workspace.resolve()))
             self.assertEqual(payload["db_action"], "created")
-            self.assertTrue((workspace / tapl_db.DEFAULT_DB_RELATIVE).is_file())
+            self.assertTrue(any((workspace / ".tapl").glob("tapl-*.db")))
             self.assertNotIn("workspace_marker", payload)
             self.assertNotIn("workspace_marker_action", payload)
             self.assertFalse((outside / ".tapl").exists())
@@ -1082,7 +1082,7 @@ class TaplRuntimeTests(unittest.TestCase):
             workspace = Path(tmp) / "workspace"
             (workspace / ".git").mkdir(parents=True)
             tapl_db.initialize_workspace(workspace)
-            conn = tapl_db.connect(workspace / tapl_db.DEFAULT_DB_RELATIVE)
+            conn = tapl_db.connect(tapl_db.default_db_path(workspace))
             try:
                 tapl_db.ensure_active_run(
                     conn,
@@ -2565,7 +2565,7 @@ experimental = true
             )
             self.assertFalse((repo / ".tapl" / "workspace.toml").exists())
             self.assertFalse((repo / ".codex" / "tapl" / "tapl.toml").exists())
-            self.assertTrue((repo / ".tapl" / "tapl.db").exists())
+            self.assertTrue(any((repo / ".tapl").glob("tapl-*.db")))
 
     def test_install_repo_version_upgrade_prompt_can_overwrite_tapl_config(self) -> None:
         class TtyInput(io.StringIO):
@@ -2897,7 +2897,7 @@ keep = true
                     self.assertEqual(user_evidence.read_bytes(), user_evidence_before)
                 self.assertTrue(user_evidence.exists())
                 self.assertEqual(repo_evidence.read_bytes(), repo_evidence_before)
-                self.assertFalse((repo / tapl_db.DEFAULT_DB_RELATIVE).exists())
+                self.assertEqual(tapl_db.discover_db_paths(repo), [])
                 self.assertNotEqual(
                     tapl_install.installed_version(repo / ".tapl" / "version"),
                     __version__,

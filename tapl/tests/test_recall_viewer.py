@@ -10,7 +10,7 @@ from taplctl import db, recall, viewer
 @pytest.fixture
 def memory_workspace(tmp_path):
     db.initialize_workspace(tmp_path)
-    path = tmp_path / db.DEFAULT_DB_RELATIVE
+    path = db.local_db_path(tmp_path, create_identity=False)
     conn = db.connect(path)
     run = db.ensure_active_run(conn, request_summary="SQLite migration")
     db.update_active_run_summary(conn, result_summary="Verified original migration result.")
@@ -35,7 +35,7 @@ def test_memory_list_detail_and_both_original_kinds(memory_workspace):
     listing = app.handle_message({"command": "memories"})
     assert listing["view"]["total"] == 2
     assert listing["view"]["limit"] == 50
-    assert app.handle_message({"command": "memories", "offset": 1})["view"]["memories"][0]["id"] == ids[0]
+    assert [memory["id"] for memory in app.handle_message({"command": "memories", "offset": 1})["view"]["memories"]] == [memory["id"] for memory in listing["view"]["memories"][1:]]
     detail = app.handle_message({"command": "openMemory", "memoryId": ids[0]})["view"]
     assert detail["memory"]["last_reinforced_at"] is None
     run_source = app.handle_message({"command": "openMemorySource", "memoryId": ids[0]})["view"]
@@ -61,7 +61,7 @@ def test_refresh_keeps_query_and_reloads_agent_changes(memory_workspace):
     conn.close()
     for view_type in ("memory", "memorySource"):
         refreshed = app.handle_message({"command": "refresh", "viewType": view_type, "memoryId": ids[0]})["view"]
-        assert refreshed == {"type": "memory", "memoryId": ids[0], "memory": None}
+        assert refreshed == {"type": "memory", "memoryId": ids[0], "memory": None, "source_db": path.name}
 
 
 @pytest.mark.parametrize("payload", [

@@ -22,6 +22,7 @@ type PersistedState = {
   capabilities?: HostCapabilities;
   workspace?: string;
   selectedSessionId?: string;
+  selectedSourceDb?: string;
 };
 
 declare const acquireVsCodeApi: (() => VsCodeApi) | undefined;
@@ -87,12 +88,14 @@ class BrowserApi implements VsCodeApi {
     }
     if (message.command === 'selectWorkspace' || message.command === 'chooseWorkspace') {
       this.state.selectedSessionId = undefined;
+      this.state.selectedSourceDb = undefined;
       this.workspaceGeneration += 1;
       this.autoRefreshPending = false;
       this.refreshDirty = false;
     }
     if (message.command === 'selectRun') {
       this.state.selectedSessionId = message.sessionId;
+      this.state.selectedSourceDb = message.source_db;
     }
     if (message.command === 'back') {
       this.goBack();
@@ -130,7 +133,7 @@ class BrowserApi implements VsCodeApi {
   setState(state: unknown): void {
     const next = isRecord(state) ? state as PersistedState : {};
     const status = next.view?.type === 'overview' || next.view?.type === 'debug' ? next.view.status : undefined;
-    this.state = { ...next, selectedSessionId: status?.session_id ?? this.state.selectedSessionId };
+    this.state = { ...next, selectedSessionId: status?.session_id ?? this.state.selectedSessionId, selectedSourceDb: status?.source_db ?? this.state.selectedSourceDb };
     writeStorage(sessionStorage, SESSION_STATE_KEY, this.state);
     this.scheduleRevisionCheck();
   }
@@ -166,6 +169,7 @@ class BrowserApi implements VsCodeApi {
         ? message.workspace.trim()
         : this.activeWorkspace ?? recentWorkspace;
     const request = {
+      ...(this.state.selectedSourceDb ? { source_db: this.state.selectedSourceDb } : {}),
       ...message,
       ...(this.state.selectedSessionId !== undefined ? { sessionId: this.state.selectedSessionId } : {}),
       workspace: requestWorkspace,
@@ -505,16 +509,16 @@ function refreshContext(
     return { viewType: view.type, query: view.query, offset: view.offset };
   }
   if (view.type === 'memory' || view.type === 'memorySource') {
-    return { viewType: view.type, memoryId: view.memoryId };
+    return { viewType: view.type, memoryId: view.memoryId, source_db: view.source_db };
   }
   if (view.type === 'archive' || view.type === 'archiveEvents') {
-    return { viewType: view.type, archiveId: view.archive.id };
+    return { viewType: view.type, archiveId: view.archive.id, source_db: view.archive.source_db };
   }
   if (view.type === 'search') {
     return { viewType: view.type, query: view.search.query };
   }
   if (view.type === 'searchItem') {
-    return { viewType: view.type, itemId: view.result.id };
+    return { viewType: view.type, itemId: view.result.id, source_db: view.result.source_db };
   }
   return { viewType: view.type };
 }

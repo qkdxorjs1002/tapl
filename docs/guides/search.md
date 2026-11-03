@@ -16,6 +16,8 @@ Example `tapl_search_history` arguments, using the current hook session identity
 
 `query` is 1–500 characters. Explicit MCP `limit` is 1–50; when omitted, `search.max_results` supplies the default. Search summaries are exploration leads. Inspect original item/archive content for evidence and context. Workflow search uses MCP; `taplctl` has no workflow `search` command.
 
+Search covers the working folder's `tapl-*.db` files. Forward each result's `source_db` to detail reads. See [Local identity and shared history](storage.md) for combined ranking, source errors, and sharing boundaries.
+
 ## Choose a search mode
 
 SQLite full-text search is available in every installation. Optional semantic search adds embeddings and a vector index.

@@ -2,7 +2,7 @@
 
 [문서 홈](../README.ko.md) · [English](records.md)
 
-TAPL 기록은 `.tapl/tapl.db`의 구조화된 데이터이며 typed field로부터 읽기 쉬운 Markdown 본문을 생성합니다. Agent는 MCP로 기록을 작성·갱신하고 CLI는 설치를 관리합니다. 이 페이지는 각 기록과 `custom_fields`에 무엇을 넣는지 설명합니다.
+TAPL 기록은 `.tapl/tapl-{UUID}.db`의 구조화된 데이터이며 typed field로부터 읽기 쉬운 Markdown 본문을 생성합니다. Agent는 MCP로 기록을 작성·갱신하고 CLI는 설치를 관리합니다. 이 페이지는 각 기록과 `custom_fields`에 무엇을 넣는지 설명합니다.
 
 ## 표준 필드에 작업 내용 기록
 

@@ -28,6 +28,7 @@ TAPL connects an agent’s planning, approval, execution and verification with d
 | Page | Purpose |
 | --- | --- |
 | [Configuration](guides/configuration.md) | Select user or repository configuration and inspect effective settings. |
+| [Local identity and shared history](guides/storage.md) | Keep a persistent UUID, migrate existing databases, and read peer history. |
 | [Authoring detail](guides/authoring-detail.md) | Use automatic mode-based detail or a fixed level without task or length targets. |
 | [SubAgents](guides/subagents.md) | Configure model preferences and run independent work in parallel. |
 | [Associative memory](guides/memory.md) | Recall, verify and maintain useful lessons across workflows. |

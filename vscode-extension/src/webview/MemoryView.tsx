@@ -8,7 +8,7 @@ type Send = (message: WebviewCommand) => void;
 export function MemoryView({ view, supported, send }: { view: MemoryScreen; supported: boolean; send: Send }): JSX.Element {
   const { t } = useI18n();
   const heading = useRef<HTMLHeadingElement>(null);
-  const identity = view.type === 'memories' ? `memories:${view.query}:${view.offset}` : `${view.type}:${view.memoryId}`;
+  const identity = view.type === 'memories' ? `memories:${view.query}:${view.offset}` : `${view.type}:${view.source_db}:${view.memoryId}`;
   useEffect(() => { heading.current?.focus(); }, [identity]);
   return <>
     <header className="tapl-topbar tapl-memory-header">
@@ -52,8 +52,8 @@ function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memori
       </form>
       {view.diagnostics && <MemoryDiagnosticRows diagnostics={view.diagnostics} />}
       <p className="tapl-muted text-sm m-0" role="status">{t('memoryRange', { start: view.memories.length ? view.offset + 1 : 0, end: view.offset + view.memories.length, total: view.total })}</p>
-      {view.memories.length ? <ul className="tapl-memory-list">{view.memories.map((memory) => <li key={memory.id} className="tapl-memory-row">
-        <button type="button" className="tapl-memory-open" onClick={() => send({ command: 'openMemory', memoryId: memory.id })}>
+      {view.memories.length ? <ul className="tapl-memory-list">{view.memories.map((memory) => <li key={`${memory.source_db}:${memory.id}`} className="tapl-memory-row">
+        <button type="button" className="tapl-memory-open" onClick={() => send({ command: 'openMemory', memoryId: memory.id, source_db: memory.source_db })}>
           <span className="tapl-memory-preview">{memory.note}</span>
           <span className="tapl-memory-source-title">{memory.source.title || memory.source.run_id}</span>
         </button>
@@ -115,7 +115,7 @@ function MemoryDetail({ memory, send }: { memory: AssociativeMemory; send: Send 
     <div className="tapl-memory-origin">
       <span className="tapl-eyebrow">{t('originalSource')}</span>
       <p className="m-0">{memory.source.title || memory.source.run_id}</p>
-      {memory.source_available ? <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'openMemorySource', memoryId: memory.id })}>{t('openOriginalSource')}</button> : <p className="tapl-muted m-0">{t('sourceUnavailable')}</p>}
+      {memory.source_available ? <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'openMemorySource', memoryId: memory.id, source_db: memory.source_db })}>{t('openOriginalSource')}</button> : <p className="tapl-muted m-0">{t('sourceUnavailable')}</p>}
     </div>
   </div></section>;
 }

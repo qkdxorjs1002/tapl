@@ -140,7 +140,10 @@ def install_repo(
     command = resolved_taplctl_command(taplctl_command)
     hooks_path = root / ".codex" / "hooks.json"
     config_path = root / config.CONFIG_RELATIVE
-    db_path = root / db.DEFAULT_DB_RELATIVE
+    db_path = (
+        db.local_db_path(root) or root / ".tapl" / "tapl-<installation-uuid>.db"
+        if dry_run else db.default_db_path(root)
+    )
     version_path = root / VERSION_RELATIVE
     previous_version = installed_version(version_path)
 
@@ -231,10 +234,9 @@ def user_scope_needs_install(home: Path) -> bool:
 
 
 def repo_scope_needs_install(root: Path) -> bool:
-    db_path = root / db.DEFAULT_DB_RELATIVE
     version_path = root / VERSION_RELATIVE
     return (
-        db_path.is_file()
+        bool(db.discover_db_paths(root))
         and scope_has_repo_install(root)
         and managed_install_is_stale(version_path)
     )

@@ -71,11 +71,11 @@ Parallel execution uses an atomic batch dispatch. Eligible tasks share a plan an
 
 ## Workspace and session boundaries
 
-The Codex working folder itself owns `.tapl/tapl.db`. TAPL does not search parent databases, Git roots, or repository markers. A session in `repo/packages/app` uses `repo/packages/app/.tapl/tapl.db`, even when `repo/.tapl/tapl.db` exists. It does not move or merge older databases.
+The Codex working folder records to an environment-specific `.tapl/tapl-{UUID}.db` and reads `tapl-*.db` history there. TAPL does not search parent databases, Git roots, or repository markers. A session in `repo/packages/app` stays separate from its parent folder. See [Local identity and shared history](../guides/storage.md) for existing `tapl.db` migration and UUID persistence.
 
 The hook requires an existing absolute `cwd` in its event; the MCP server stays bound to its startup working folder for its lifetime. A hook database override must identify that folder's database. Administrative CLI commands offer explicit database/workspace selection; see [CLI reference](../reference/cli.md).
 
-Every MCP call must pass the Codex hook's `session_id`. Each session owns its RUN, approval, tasks, split queue, Stop handling, and archive lifecycle. Resuming the same session continues its RUN; a new session does not adopt another session's work. Omission selects an isolated legacy scope, and unidentified writes are rejected after session-owned records exist. Existing pre-session records remain legacy; the schema upgrade first preserves `.tapl/tapl.db.pre-v14.bak`.
+Every MCP call must pass the Codex hook's `session_id`. Each session owns its RUN, approval, tasks, split queue, Stop handling, and archive lifecycle. Resuming the same session continues its RUN; a new session does not adopt another session's work. Omission selects an isolated legacy scope, and unidentified writes are rejected after session-owned records exist. Existing pre-session records remain legacy; the schema upgrade first preserves `.tapl/tapl-{UUID}.db.pre-v14.bak`.
 
 History can be searched across the workspace, while active workflow ownership remains session-scoped. Working files are shared: coordinate simultaneous edits or use separate worktrees. Session ownership and batch path checks are not filesystem isolation.
 

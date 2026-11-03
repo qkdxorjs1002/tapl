@@ -25,7 +25,7 @@ Linux·Windows·시맨틱 검색·프리릴리즈는 [설치 안내](installatio
 
 `repo`는 대상 저장소에서 실행하거나 `--repo /path/to/repository`를 추가하세요. 독립 설치는 [실제 실행 파일 경로](integrations.ko.md#독립-설치의-실행-파일-경로)가 필요할 수 있습니다.
 
-Codex를 재시작하고 요청이 나타나면 설치된 hook을 신뢰하세요. 원하는 작업 폴더를 엽니다. TAPL은 그 정확한 폴더의 `.tapl/tapl.db`를 사용하며 하위 폴더의 이력은 별개입니다.
+Codex를 재시작하고 요청이 나타나면 설치된 hook을 신뢰하세요. 원하는 작업 폴더를 엽니다. TAPL은 그 정확한 폴더의 `.tapl/tapl-{UUID}.db`를 사용하며 하위 폴더의 이력은 별개입니다.
 
 ## 3. 설치 확인
 

@@ -1211,6 +1211,7 @@ def history_search_guidance() -> str:
         "Prefer `tapl_get_item(compact=true)` for structured records; full formatted bodies remain available. "
         "When cues are absent or insufficient, search relevant prior TAPL history with `tapl_search_history` "
         "for decisions, implementation patterns, failures, or tradeoffs; ignore unrelated matches. "
+        "Forward returned `source_db` in source reads and memory uses. "
         "During execution, search again as needed."
     )
 

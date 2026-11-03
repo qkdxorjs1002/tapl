@@ -86,7 +86,7 @@ def test_all_native_reads_bypass_writable_connection(tmp_path):
     db.initialize_workspace(tmp_path)
     workflow.summarize_run("Read archived evidence")
     workflow.apply_plan("PLAN-001", title="Evidence")
-    path = tmp_path / db.DEFAULT_DB_RELATIVE
+    path = db.local_db_path(tmp_path, create_identity=False)
     plan = viewer.run_native_json(path, ["status", "--full"])["plans"][0]
     archive = workflow.finish_archive("readonly-evidence")["archive"]
     commands = [
@@ -180,7 +180,7 @@ def test_missing_wal_sidecars_in_protected_directory_has_actionable_error(tmp_pa
 def test_http_ready_reads_protected_workspace_without_home_database(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     db.initialize_workspace(workspace)
-    path = workspace / db.DEFAULT_DB_RELATIVE
+    path = db.local_db_path(workspace, create_identity=False)
     with closing(sqlite3.connect(path)) as conn:
         conn.execute("PRAGMA journal_mode = DELETE")
     monkeypatch.setenv("HOME", str(tmp_path / "no-home-db"))

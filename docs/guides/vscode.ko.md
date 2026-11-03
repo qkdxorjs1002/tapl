@@ -4,9 +4,11 @@
 
 TAPL Workflow Viewer는 VS Code에 활성 작업·아카이브 트리, 이력 검색, 대시보드를 추가합니다. 지속 연결하는 `tapl-mcp` stdio 클라이언트로 워크스페이스를 읽으며 브라우저 Viewer 서비스는 필요하지 않습니다.
 
+공유 DB의 검색 결과·상세·RUN 선택은 원본을 유지합니다. 다른 환경 RUN의 닫기 동작은 제공하지 않습니다. [로컬 식별자와 공유 이력](storage.ko.md)을 참고하세요.
+
 ## 설치와 열기
 
-VS Code **1.90+**, `.tapl/tapl.db`가 있는 초기화된 워크스페이스, 실행 가능한 `tapl-mcp`가 필요합니다. 먼저 [설치](../getting-started/installation.ko.md)와 [에이전트 연결](../getting-started/integrations.ko.md)을 완료하세요.
+VS Code **1.90+**, `.tapl/tapl-{UUID}.db`가 있는 초기화된 워크스페이스, 실행 가능한 `tapl-mcp`가 필요합니다. 먼저 [설치](../getting-started/installation.ko.md)와 [에이전트 연결](../getting-started/integrations.ko.md)을 완료하세요.
 
 Marketplace에서 `paragonnov.tapl-workflow-viewer`를 설치하거나 [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases)에서 `.vsix`를 받아 **Extensions: Install from VSIX…**를 실행합니다. 초기화한 폴더를 열고 활동 표시줄에서 **TAPL**을 선택한 뒤 **TAPL Workflow: Open TAPL Dashboard**를 실행하세요.
 
@@ -41,7 +43,7 @@ Marketplace에서 `paragonnov.tapl-workflow-viewer`를 설치하거나 [GitHub R
 
 처음에는 VS Code의 첫 번째 워크스페이스 폴더를 사용합니다. 여러 루트가 열린 창에서는 대시보드의 워크스페이스 선택기로 다른 열린 폴더를 고릅니다. 해당 폴더를 작업 디렉터리로 MCP 프로세스를 실행하며 실행 파일 설정도 그 폴더의 값을 적용합니다. DB를 찾기 위해 부모 폴더를 검색하지 않습니다.
 
-연결은 워크스페이스별로 관리합니다. DB·WAL·SHM 파일(`.tapl/tapl.db`, `-wal`, `-shm`) 변경은 짧게 모아서 새로 고침합니다. 실행 파일 설정이 바뀌면 연결을 무효화하고, 워크스페이스가 바뀌면 대시보드 경로를 초기화합니다. RUN 선택은 워크스페이스별로 기억하며 선택한 소유자의 세션을 읽습니다. 늦게 도착한 읽기 결과는 더 최근의 화면 이동이나 워크스페이스 선택을 덮어쓰지 못합니다.
+연결은 워크스페이스별로 관리합니다. DB·WAL·SHM 파일(`.tapl/tapl-*.db`, `-wal`, `-shm`) 변경은 짧게 모아서 새로 고침합니다. 실행 파일 설정이 바뀌면 연결을 무효화하고, 워크스페이스가 바뀌면 대시보드 경로를 초기화합니다. RUN 선택은 워크스페이스별로 기억하며 선택한 소유자의 세션을 읽습니다. 늦게 도착한 읽기 결과는 더 최근의 화면 이동이나 워크스페이스 선택을 덮어쓰지 못합니다.
 
 ## 공유 Viewer와 기능 조건
 

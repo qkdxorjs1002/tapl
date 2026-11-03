@@ -283,7 +283,7 @@ class HookEntrypointTests(unittest.TestCase):
                             before,
                         )
 
-                    self.assertTrue((workspace / hook_cli.db.DEFAULT_DB_RELATIVE).is_file())
+                    self.assertTrue(hook_cli.db.local_db_path(workspace).is_file())
                     settings = hook_cli.tapl_config.load(start=workspace)
                     has_config = evidence in ("config", "config_and_hook")
                     self.assertEqual(Path(settings.path).resolve(), (repo_config if has_config else user_config).resolve())
@@ -295,7 +295,7 @@ class HookEntrypointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
             workspace.mkdir()
-            db_path = workspace / ".tapl" / "tapl.db"
+            db_path = hook_cli.db.local_db_path(workspace, create_identity=True)
             with (
                 mock.patch.object(hook_cli, "_read_stdin_payload", return_value={"cwd": str(workspace)}),
                 mock.patch.object(hook_cli.tapl_config, "load", return_value=mock.sentinel.settings),
@@ -315,7 +315,7 @@ class HookEntrypointTests(unittest.TestCase):
                         "--json",
                     ]
                 )
-            connect.assert_called_once_with(workspace.resolve() / ".tapl" / "tapl.db", session_id="")
+            connect.assert_called_once_with(db_path, session_id="")
 
         self.assertEqual(result, 2)
         self.assertEqual(handler.call_args.kwargs["event"], "PreToolUse")
@@ -381,7 +381,7 @@ class HookEntrypointTests(unittest.TestCase):
                 accepted = hook_cli.main(["--event", "UserPromptSubmit", "--json"])
             self.assertEqual(accepted, 0, output.getvalue())
             self.assertEqual(json.loads(output.getvalue())["workspace"]["workspace_root"], str(child.resolve()))
-            self.assertTrue((child / ".tapl" / "tapl.db").is_file())
+            self.assertTrue(hook_cli.db.local_db_path(child).is_file())
             self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_default_config_uses_selected_folder_or_user_scope(self) -> None:

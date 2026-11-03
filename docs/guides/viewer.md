@@ -4,6 +4,8 @@
 
 The browser Viewer shows active RUNs, plans, tasks, approvals, findings, archives, history search, and associative memories from a local TAPL workspace. Memory lists, searches, details, and original sources are read-only; ask the agent explicitly to edit or delete a memory.
 
+The Viewer reads the folder's `tapl-*.db` files together and preserves the source database through details and refresh. Peer RUNs are viewable but cannot be discarded. Read-only discovery does not create a UUID. See [Local identity and shared history](storage.md).
+
 ## Open a workspace
 
 From the initialized working folder:
@@ -16,25 +18,25 @@ taplctl viewer
 taplctl viewer --port 9000
 ```
 
-Open the printed URL yourself. The command does not launch a browser and stops with `Ctrl+C`. The CLI binds to `127.0.0.1` only. It selects `.tapl/tapl.db` in the starting folder, without searching parent folders. A child directory is a separate workspace when initialized there.
+Open the printed URL yourself. The command does not launch a browser and stops with `Ctrl+C`. The CLI binds to `127.0.0.1` only. It selects `.tapl/tapl-{UUID}.db` in the starting folder, without searching parent folders. A child directory is a separate workspace when initialized there.
 
-If the starting folder has no database, choose a folder containing `.tapl/tapl.db` on the page. The browser remembers its last successful selection. This is useful when a login service starts outside your repository. Selection does not initialize a folder; use `taplctl init --workspace-root /path/to/workspace` first. There is no Viewer `--workspace` option.
+If the starting folder has no database, choose a folder containing `.tapl/tapl-{UUID}.db` on the page. The browser remembers its last successful selection. This is useful when a login service starts outside your repository. Selection does not initialize a folder; use `taplctl init --workspace-root /path/to/workspace` first. There is no Viewer `--workspace` option.
 
 RUN tabs select the session whose records you inspect. Archives and history let you revisit earlier work; the memory view links a reusable cue back to its original evidence. Changing the selected RUN does not transfer its ownership.
 
 ## Database access and protected services
 
-Viewer data requests open the selected database with SQLite `mode=ro` and `query_only`, using a read transaction per connection. They do not create a database, change journal mode, migrate the schema, or update metadata. A service can start without `~/.tapl/tapl.db`; do not require it in a startup check. A successful page load or `revision` response confirms the web server or file metadata, not that SQLite queries succeed.
+Viewer data requests open the selected database with SQLite `mode=ro` and `query_only`, using a read transaction per connection. They do not create a database, change journal mode, migrate the schema, or update metadata. A service can start without `~/.tapl/tapl-{UUID}.db`; do not require it in a startup check. A successful page load or `revision` response confirms the web server or file metadata, not that SQLite queries succeed.
 
 The database must match the installed TAPL schema. If migration is required, run this outside the protected Viewer service, with write access to the database directory, then refresh:
 
 ```sh
-taplctl --db /path/to/workspace/.tapl/tapl.db init
+taplctl --db /path/to/history.db init
 ```
 
 This command can create migration backups beside the database. A newer-than-supported schema requires upgrading TAPL instead; the Viewer never downgrades a database.
 
-For systemd services using `ProtectSystem=strict` or `ProtectHome=read-only`, the service user needs read and directory traversal access to the workspace. SQLite WAL databases also need readable existing `tapl.db-wal` and `tapl.db-shm` files, or permission to create them in the database directory. With usable sidecars, the Viewer reads committed WAL changes while another process writes, without taking a database write lock. Uncommitted changes stay invisible.
+For systemd services using `ProtectSystem=strict` or `ProtectHome=read-only`, the service user needs read and directory traversal access to the workspace. SQLite WAL databases also need readable existing `tapl-{UUID}.db-wal` and `tapl-{UUID}.db-shm` files, or permission to create them in the database directory. With usable sidecars, the Viewer reads committed WAL changes while another process writes, without taking a database write lock. Uncommitted changes stay invisible.
 
 When all writers close, SQLite can remove the sidecars. A WAL database without them can therefore fail in a fully read-only directory. Keep a trusted writer connection open with usable sidecars, or allow writes only to the selected `.tapl` directory with systemd `ReadWritePaths=/path/to/workspace/.tapl`. Do not create sidecars by hand or use `immutable=1` against a live database: it bypasses SQLite's change detection and can miss committed WAL data. See [SQLite's read-only WAL requirements](https://www.sqlite.org/wal.html#read_only_databases).
 

@@ -85,7 +85,7 @@ def test_hook_refreshes_after_workspace_init_before_config_load(
     def refresh(*, start: Path, mode: str) -> list[dict[str, object]]:
         assert start == repo
         assert mode == "enforce"
-        assert (repo / db.DEFAULT_DB_RELATIVE).is_file()
+        assert any((repo / ".tapl").glob("tapl-*.db"))
         events.append("refresh")
         (repo / ".tapl/config.toml").write_text("[search]\nmax_results = 9\n", encoding="utf-8")
         return []
@@ -114,7 +114,7 @@ def test_hook_unmarked_first_use_does_not_enroll_repo(
     with mock.patch.object(Path, "home", return_value=home):
         assert hook_cli.main(["--event", "SessionStart", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["ok"] is True
-    assert (repo / db.DEFAULT_DB_RELATIVE).is_file()
+    assert any((repo / ".tapl").glob("tapl-*.db"))
     assert not (repo / ".codex").exists()
     assert not (repo / ".tapl/version").exists()
     assert not (home / ".codex").exists()
@@ -126,7 +126,7 @@ def test_hook_explicit_path_skips_refresh(
 ) -> None:
     repo = _repo(tmp_path)
     _hook_input(monkeypatch, repo)
-    value = repo / db.DEFAULT_DB_RELATIVE if explicit == "db" else repo / ".tapl/config.toml"
+    value = db.default_db_path(repo) if explicit == "db" else repo / ".tapl/config.toml"
     if explicit == "config":
         value.write_text("[search]\nmax_results = 9\n", encoding="utf-8")
     with mock.patch.object(hook_cli.tapl_install, "auto_install_if_needed") as refresh:

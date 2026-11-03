@@ -265,6 +265,29 @@ def hybrid_results(
     return ordered[:limit]
 
 
+def federated_results(
+    sources: list[tuple[str, list[dict[str, Any]]]], *, limit: int,
+    preserve_score: bool = False,
+) -> list[dict[str, Any]]:
+    """Fuse independent database rankings without comparing their raw scores.
+
+    Equal reciprocal ranks tie by filename and record id. A database-local id
+    never deduplicates a record from a different source.
+    """
+    ranked = []
+    multiple = len(sources) > 1
+    for source_db, records in sources:
+        for rank, record in enumerate(records, 1):
+            item = {**record, "source_db": source_db}
+            score = 1.0 / (60 + rank)
+            if multiple and not preserve_score:
+                item.update({"source_score": item.get("score"), "score": score,
+                             "rank_fusion": "reciprocal_rank"})
+            ranked.append((score, source_db, str(item.get("id", "")), item))
+    ranked.sort(key=lambda entry: (-entry[0], entry[1], entry[2]))
+    return [entry[3] for entry in ranked[:limit]]
+
+
 def add_ranked_results(
     merged: dict[Any, dict[str, Any]],
     results: list[dict[str, Any]],

@@ -6,7 +6,7 @@ Choose the configuration file that controls the current working folder, inspect 
 
 ## Workspace and file selection
 
-A Codex session owns `.tapl/tapl.db` in its exact working folder. Hooks require an existing absolute `cwd` and reject missing or invalid values. A hook `--db` override must name that folder's database. The MCP server stays bound to its startup folder for its lifetime. TAPL does not search parent databases, Git roots or repository markers: `repo/packages/app` uses `repo/packages/app/.tapl/tapl.db` even when `repo/.tapl/tapl.db` exists. Each folder keeps independent history; existing databases are neither moved nor merged. Administrative CLI commands retain explicit `--db` and `--workspace-root` overrides.
+Codex sessions write to `.tapl/tapl-{UUID}.db` in their exact working folder and read other `tapl-*.db` history there. Hooks require an existing absolute `cwd`; a hook `--db` must name that folder's current local database. The MCP server stays bound to its startup folder. Parent databases, Git roots, and repository markers are not searched, so child folders keep separate history. Administrative CLI commands retain explicit `--db` and `--workspace-root` overrides. See [Local identity and shared history](storage.md) for UUID persistence and legacy migration.
 
 Configuration selects **one file**, in this order:
 

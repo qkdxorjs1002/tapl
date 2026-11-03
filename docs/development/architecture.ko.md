@@ -2,7 +2,9 @@
 
 [문서 홈](../README.ko.md) · [English](architecture.md)
 
-TAPL은 정확한 작업 폴더의 `.tapl/tapl.db`에 워크플로 상태를 보관합니다. CLI 관리 명령, MCP 워크플로 도구, Codex hook, Viewer는 Python 애플리케이션·DB 경계를 통해 로컬 상태를 사용합니다. 에이전트가 저장소 작업을 수행하고 TAPL은 그 전후의 워크플로를 기록·검증합니다.
+TAPL은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 워크플로 상태를 보관합니다. CLI 관리 명령, MCP 워크플로 도구, Codex hook, Viewer는 Python 애플리케이션·DB 경계를 통해 로컬 상태를 사용합니다. 에이전트가 저장소 작업을 수행하고 TAPL은 그 전후의 워크플로를 기록·검증합니다.
+
+환경 식별자는 사용자 전역 `~/.tapl/installation_id`에 독립적으로 남습니다. DB 계층이 로컬 쓰기 경로와 기존 이름 이전을 담당하고, `history.py`가 여러 원본의 읽기 전용 조회와 `source_db` 전달을 담당합니다. 자세한 동작은 [저장과 공유 이력](../guides/storage.ko.md)을 참고하세요.
 
 ## 저장소 구성
 

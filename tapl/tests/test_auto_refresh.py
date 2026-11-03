@@ -10,7 +10,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from taplctl import install, uninstall
+from taplctl import db as tapl_db, install, uninstall
 
 
 class AutoRefreshTests(unittest.TestCase):
@@ -139,7 +139,7 @@ class AutoRefreshTests(unittest.TestCase):
         (self.repo / install.INSTALL_STATE_RELATIVE).unlink()
         self.assertEqual(self.refresh()[0]["install"], "repo")
         self.assertFalse((self.repo / ".tapl/config.toml").exists())
-        (self.repo / ".tapl/tapl.db").unlink()
+        tapl_db.default_db_path(self.repo).unlink()
         (self.repo / install.INSTALL_STATE_RELATIVE).unlink()
         before = self.snapshot(self.repo)
         self.assertEqual(self.refresh(), [])

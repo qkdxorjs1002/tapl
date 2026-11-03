@@ -6,7 +6,7 @@
 
 ## 작업 공간과 파일 선택
 
-Codex 세션은 정확한 작업 폴더의 `.tapl/tapl.db`를 사용합니다. Hook은 존재하는 절대 경로 `cwd`가 필요하며 누락되거나 잘못된 값은 거부합니다. Hook의 `--db`도 그 폴더의 DB를 가리켜야 합니다. MCP 서버는 시작 폴더에 수명 전체 동안 고정됩니다. 부모 DB, Git root, 저장소 표식을 탐색하지 않습니다. `repo/packages/app`에서 시작하면 `repo/.tapl/tapl.db`가 있어도 `repo/packages/app/.tapl/tapl.db`를 사용합니다. 폴더별 이력은 독립적이며 기존 DB를 이동하거나 병합하지 않습니다. 관리 CLI는 명시적인 `--db`, `--workspace-root`를 지원합니다.
+Codex 세션은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 기록하고 같은 폴더의 다른 `tapl-*.db` 이력을 읽습니다. Hook은 존재하는 절대 경로 `cwd`가 필요하며, Hook의 `--db`는 그 폴더의 현재 로컬 DB를 가리켜야 합니다. MCP 서버는 시작 폴더에 고정됩니다. 부모 DB·Git 루트·저장소 표식은 탐색하지 않으므로 하위 폴더의 이력은 별개입니다. 관리 CLI는 명시적인 `--db`와 `--workspace-root`를 지원합니다. UUID 보존과 기존 DB 이전은 [로컬 식별자와 공유 이력](storage.ko.md)을 참고하세요.
 
 설정은 다음 순서로 **파일 하나를 선택**합니다.
 

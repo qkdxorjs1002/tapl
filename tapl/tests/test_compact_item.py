@@ -215,7 +215,7 @@ def test_compact_reads_real_stored_records_without_losing_content(tmp_path: Path
                 if original["item"]["kind"] in {"plan", "task"}:
                     del expected["item"]["body"]
                 assert compact == expected
-            with db.connect(tmp_path / ".tapl/tapl.db") as conn:
+            with db.connect(db.default_db_path(tmp_path)) as conn:
                 conn.execute("UPDATE items SET body=? WHERE id=?", ("User-authored extra content", ids[1]))
             custom = (await client.call_tool("tapl_get_item", {"item_id": ids[1], "compact": True})).structured_content
             assert custom == app.get_item(ids[1])

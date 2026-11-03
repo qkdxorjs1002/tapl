@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 
 test('extension uses the shared read-only Viewer protocol and reloads current routes', async () => {
-  const calls = [], messages = [], commands = new Map();
+  const calls = [], messages = [], commands = new Map(), watchedPatterns = [];
   let receive, disposed, revision = 1, deleted = false, oldServer = false, delayed, foldersChanged, watcherCount = 0, unavailable = false, itemSource = false, multiRun = false;
   let diagnostics = { stored_count: 80, matched_count: 51, last_capture_error: {
     run_id: 'r1', slot: 2, code: 'invalid_memory_note', message: '<script>capture failed</script>', created_at: '2026-09-16T00:00:00Z'
@@ -19,14 +19,14 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
       async postMessage(message) { messages.push(message); return true; } } };
   const vscode = {
     Uri: { joinPath(_base, ...parts) { return parts.join('/'); } },
-    TreeItem: class {}, ThemeIcon: class {}, RelativePattern: class {},
+    TreeItem: class {}, ThemeIcon: class {}, RelativePattern: class { constructor(_root, pattern) { this.pattern = pattern; } },
     EventEmitter: class { event() {} fire() {} }, TreeItemCollapsibleState: { None: 0 }, ViewColumn: { One: 1 },
     window: { registerTreeDataProvider() { return disposable; }, createWebviewPanel() { return panel; },
       async showWarningMessage() {}, async showWorkspaceFolderPick() { return folders[1]; } },
     workspace: { workspaceFolders: folders, getConfiguration() { return { get(_key, fallback) { return fallback; } }; },
       onDidChangeConfiguration() { return disposable; },
       onDidChangeWorkspaceFolders(fn) { foldersChanged = fn; return disposable; },
-      createFileSystemWatcher() { watcherCount++; return { ...disposable, onDidChange() { return disposable; }, onDidCreate() { return disposable; }, onDidDelete() { return disposable; } }; } },
+      createFileSystemWatcher(pattern) { watchedPatterns.push(pattern.pattern); watcherCount++; return { ...disposable, onDidChange() { return disposable; }, onDidCreate() { return disposable; }, onDidDelete() { return disposable; } }; } },
     commands: { registerCommand(name, fn) { commands.set(name, fn); return disposable; }, async executeCommand(name) { return commands.get(name)?.(); } },
     env: { language: 'en' }
   };
@@ -48,7 +48,7 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
         if (args.query === 'slow') await new Promise(resolve => { delayed = resolve; });
         return { total: 51, memories: [memory()], ...(diagnostics ? { diagnostics } : {}) };
       }
-      if (name === 'tapl_get_memory') return { memory: deleted ? null : memory() };
+      if (name === 'tapl_get_memory') return { memory: deleted ? null : { ...memory(), ...(args.source_db ? { source_db: args.source_db } : {}) } };
       if (name === 'tapl_get_item') return { item: { id: args.item_id, stable_id: 'TASK-001', kind: 'task', archived: multiRun ? 0 : 1, title: `Item ${revision}` } };
       if (name === 'tapl_get_archive') return { archive: { id: args.archive_id, summary: `Archive ${revision}` }, items: [], events: [] };
       if (name === 'tapl_search_history') return { query: args.query, mode: 'bm25', results: [{ id: 1, title: `Search ${revision}` }] };
@@ -105,6 +105,21 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
     if (expected === 'search') assert.equal(refreshed.search.results[0].title, `Search ${revision}`);
     if (expected === 'searchItem') assert.equal(refreshed.detail[field], `Item ${revision}`);
   }
+  const peerSource = 'tapl-peer.db';
+  for (const open of [
+    { command: 'openArchive', archiveId: 'a1' },
+    { command: 'openSearchResult', itemId: 1 },
+    { command: 'openMemory', memoryId: 'm1' }
+  ]) {
+    deleted = false;
+    await send({ ...open, source_db: peerSource });
+    assert.equal(calls.at(-1).args.source_db, peerSource, 'detail reads retain the selected database');
+    await send({ command: 'refresh' });
+    assert.equal(calls.at(-1).args.source_db, peerSource, 'refresh retains the selected database');
+  }
+  await send({ command: 'openMemorySource', memoryId: 'm1', source_db: peerSource });
+  assert.equal(calls.at(-1).name, 'tapl_get_item');
+  assert.equal(calls.at(-1).args.source_db, peerSource, 'memory original-source item keeps its database');
   diagnostics = undefined;
   assert.equal((await send({ command: 'memories' })).view.diagnostics, undefined, 'older memory hosts omit diagnostics safely');
   receive({ command: 'memories', query: 'slow' });
@@ -122,9 +137,12 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
   unavailable = false;
   await send({ command: 'chooseWorkspace' }); await tick();
   assert.equal(messages.at(-1).workspace, '/work/second');
-  assert.equal(watcherCount, 6);
+  assert.equal(watcherCount, 12);
+  assert.ok(watchedPatterns.includes('.tapl/tapl-*.db'));
+  assert.ok(watchedPatterns.includes('.tapl/tapl-*.db-wal'));
+  assert.ok(watchedPatterns.includes('.tapl/tapl-*.db-shm'));
   folders.push(folder('third')); foldersChanged(); await tick();
-  assert.equal(watcherCount, 9, 'watch newly added workspace folders');
+  assert.equal(watcherCount, 18, 'watch newly added workspace folders');
   folders.splice(1, 1); foldersChanged(); await tick();
   assert.equal(messages.at(-1).workspace, '/work/first');
   assert.equal(panel.title, 'first tapl');

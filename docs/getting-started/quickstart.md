@@ -25,7 +25,7 @@ For Linux, Windows, semantic search, or prereleases, use [installation](installa
 
 Run `repo` in the target repository, or add `--repo /path/to/repository`. Standalone installations may need their [actual executable path](integrations.md#standalone-executable-paths).
 
-Restart Codex, then trust the installed hook when prompted. Open your intended working folder. TAPL uses that exact folder's `.tapl/tapl.db`; a nested folder gets separate history.
+Restart Codex, then trust the installed hook when prompted. Open your intended working folder. TAPL uses that exact folder's `.tapl/tapl-{UUID}.db`; a nested folder gets separate history.
 
 ## 3. Verify setup
 

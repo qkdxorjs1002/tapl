@@ -7,6 +7,8 @@ export type TaplJsonValue = string | number | boolean | null | TaplJsonValue[] |
 };
 
 export interface TaplWorkflowRun {
+  writable?: boolean;
+  source_db?: string;
   id?: string;
   session_id?: string;
   slug?: string;
@@ -19,6 +21,7 @@ export interface TaplWorkflowRun {
 }
 
 export interface TaplStatus {
+  source_db?: string;
   active_run: TaplWorkflowRun | null;
   session_id?: string;
   active_runs?: TaplWorkflowRun[];
@@ -65,6 +68,7 @@ export interface TaplExecutionBatch {
 }
 
 export interface TaplItem {
+  source_db?: string;
   id?: number;
   stable_id: string;
   kind: string;
@@ -93,6 +97,7 @@ export interface TaplExecutionTiming {
 }
 
 export interface TaplArchive {
+  source_db?: string;
   id: string;
   slug: string;
   summary: string;
@@ -105,6 +110,7 @@ export interface TaplArchive {
 }
 
 export interface TaplEvent {
+  source_db?: string;
   event_type: string;
   tool_name?: string;
   mode: string;
@@ -113,6 +119,7 @@ export interface TaplEvent {
 }
 
 export interface TaplSearchResult {
+  source_db?: string;
   id?: number;
   stable_id: string;
   kind: string;
@@ -158,6 +165,7 @@ export interface TaplItemDetail extends TaplItem {
 }
 
 export interface AssociativeMemory {
+  source_db?: string;
   id: string;
   note: string;
   cue: string[];
@@ -195,8 +203,8 @@ export interface MemoryDiagnostics {
 
 export type WebviewView =
   | { type: 'memories'; query: string; offset: number; total: number; limit: number; memories: AssociativeMemory[]; diagnostics?: MemoryDiagnostics }
-  | { type: 'memory'; memoryId: string; memory: AssociativeMemory | null }
-  | { type: 'memorySource'; memoryId: string; run: TaplWorkflowRun }
+  | { type: 'memory'; source_db?: string; memoryId: string; memory: AssociativeMemory | null }
+  | { type: 'memorySource'; source_db?: string; memoryId: string; run: TaplWorkflowRun }
   | { type: 'workspace'; workspace: string; message?: string }
   | { type: 'overview'; status: TaplStatus; archives: TaplArchive[]; searchQuery: string; workspace?: string }
   | { type: 'archive'; archive: TaplArchive; detail?: TaplArchiveDetail }
@@ -220,7 +228,7 @@ export interface RevisionMessage {
   message: string;
 }
 
-export type WebviewCommand =
+export type WebviewCommand = (
   | { command: 'memories'; query?: string; offset?: number }
   | { command: 'openMemory'; memoryId: string }
   | { command: 'openMemorySource'; memoryId: string }
@@ -235,7 +243,7 @@ export type WebviewCommand =
   | { command: 'archiveEvents'; archiveId: string }
   | { command: 'openArchive'; archiveId: string }
   | { command: 'search'; query: string }
-  | { command: 'openSearchResult'; itemId: number };
+  | { command: 'openSearchResult'; itemId: number }) & { source_db?: string };
 
 /** Browser-only request; the VS Code host deliberately never receives this command. */
 export type BrowserApiCommand = WebviewCommand | { command: 'revision'; workspace?: string };

@@ -108,6 +108,8 @@ Before removing executables, [disconnect each installed Codex scope](integration
 
 `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR` override installation and launcher directories. `TAPL_INSTALL_MANIFEST_URL` selects a custom manifest; a release installer still requires a manifest for its own version. The installer verifies the manifest and wheel SHA-256 before use.
 
+The TAPL UUID is stored in `~/.tapl/installation_id` and survives executable removal, `--purge-config`, and `--purge-db`. See [Local identity and shared history](../guides/storage.md) for reinstalls and existing database migration.
+
 ## Update
 
 For Linux and Windows standalone installations:

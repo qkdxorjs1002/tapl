@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [한국어](records.ko.md)
 
-TAPL records are structured data in `.tapl/tapl.db`, with readable Markdown bodies rendered from typed fields. Agents create and update them through MCP; the CLI manages the installation. Use this page to understand what belongs in each record and what belongs in `custom_fields`.
+TAPL records are structured data in `.tapl/tapl-{UUID}.db`, with readable Markdown bodies rendered from typed fields. Agents create and update them through MCP; the CLI manages the installation. Use this page to understand what belongs in each record and what belongs in `custom_fields`.
 
 ## Standard fields carry the work
 

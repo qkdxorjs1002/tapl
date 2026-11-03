@@ -26,7 +26,7 @@ def task(conn, task_id: str, status: str, **extra):
 
 def test_sequential_timing_counts_only_running_intervals_and_surfaces_in_reads() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        conn = db.connect(Path(tmp) / ".tapl" / "tapl.db")
+        conn = db.connect(db.default_db_path(Path(tmp)))
         with at("00:00"):
             db.ensure_active_run(conn)
             db.upsert_plan(conn, plan_id="PLAN-001", title="Plan", status="Finalized")
@@ -173,7 +173,7 @@ def test_new_schema_rejects_a_future_database_version() -> None:
 def test_mcp_reads_preserve_timing_in_status_item_and_archive() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        conn = db.connect(root / ".tapl" / "tapl.db")
+        conn = db.connect(db.default_db_path(root))
         with at("00:00"):
             db.ensure_active_run(conn)
             db.upsert_plan(conn, plan_id="PLAN-001", title="Plan", status="Finalized")

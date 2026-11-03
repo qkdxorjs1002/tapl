@@ -139,7 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--workspace-root",
         type=Path,
         default=None,
-        help="Explicit workspace root where .tapl/tapl.db is initialized.",
+        help="Explicit workspace root where .tapl/tapl-<installation-uuid>.db is initialized.",
     )
     add_agent_output_args(init)
     init.set_defaults(handler=cmd_init)
@@ -387,7 +387,7 @@ def add_uninstall_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--purge-db", action="store_true",
-        help="Also delete this scope's TAPL database and SQLite sidecar files.",
+        help="Delete this scope's local and legacy DBs and sidecars; preserve peers and the installation UUID.",
     )
     add_dry_run_arg(parser)
     add_agent_output_args(parser)
@@ -493,7 +493,9 @@ def cmd_viewer(args: argparse.Namespace) -> int:
     workspace = None if args.db is not None else viewer.existing_workspace()
     selected_db = args.db.expanduser().resolve() if args.db is not None else None
     if workspace is not None:
-        selected_db = workspace / db.DEFAULT_DB_RELATIVE
+        selected_db = db.local_db_path(workspace)
+        if selected_db is None or not selected_db.is_file():
+            selected_db = next(iter(db.discover_db_paths(workspace)), None)
     settings = load_config(args, start=workspace)
     allowed_origins = tuple(
         dict.fromkeys(

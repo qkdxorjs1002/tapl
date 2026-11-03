@@ -107,8 +107,10 @@ def workspace_database(workspace: str | Path) -> tuple[Path, Path]:
     root = Path(workspace).expanduser().resolve()
     if not root.is_dir():
         raise WorkspaceRequired(f"Workspace directory does not exist: {root}")
-    db_path = root / db.DEFAULT_DB_RELATIVE
-    if not db_path.is_file():
+    paths = db.discover_db_paths(root)
+    local = db.local_db_path(root, create_identity=False)
+    db_path = local if local in paths else (paths[0] if paths else root / db.DEFAULT_DB_RELATIVE)
+    if not paths:
         raise WorkspaceRequired(
             f"No tapl database found at {db_path}. Run `taplctl init --workspace-root {root}` first."
         )
@@ -189,7 +191,7 @@ class NativeJsonRunner:
         resolved = db_path.expanduser().resolve()
         if resolved.parent.name == db.DEFAULT_DB_RELATIVE.parent.name:
             workspace = resolved.parent.parent
-            if resolved == workspace / db.DEFAULT_DB_RELATIVE:
+            if resolved in db.discover_db_paths(workspace):
                 return workspace
         return None
 
@@ -391,7 +393,7 @@ class ViewerApplication:
         if self.default_workspace is not None:
             workspace, db_path = workspace_database(self.default_workspace)
             return workspace, db_path
-        raise WorkspaceRequired("Choose a workspace that contains .tapl/tapl.db.")
+        raise WorkspaceRequired("Choose a workspace that contains a TAPL database in .tapl/.")
 
     def handle_message(self, payload: object) -> dict[str, Any]:
         identity = payload.get("sessionId") if isinstance(payload, dict) else None
@@ -430,6 +432,11 @@ class ViewerApplication:
             # Each browser captures its own workspace in the confirmation. The
             # stateless server resolves that explicit target without a default.
             workspace, db_path = workspace_database(raw_workspace.strip())
+            local = db.local_db_path(workspace, create_identity=False)
+            source = payload.get("source_db")
+            if local is None or not local.is_file() or (source is not None and source != local.name):
+                raise ViewerError("Only the local installation database can discard a RUN.")
+            db_path = local
             # The selected read owner is never used to select the mutation target.
             with sessions.session_scope(target):
                 WorkflowApplication(workspace, session_id=target).discard_run(
@@ -469,7 +476,7 @@ class ViewerApplication:
             if payload["command"] == "revision":
                 return {
                     "type": "revision",
-                    "revision": database_revision(db_path),
+                    "revision": self._revision(db_path),
                     "workspace": str(workspace) if workspace else "",
                     "workspaceValid": True,
                     "message": "",
@@ -503,18 +510,90 @@ class ViewerApplication:
             "capabilities": {"associativeMemory": True, "discardRun": True},
         }
 
+    def _sources(self, db_path: Path) -> list[Path]:
+        workspace = NativeJsonRunner._workspace_for_database(db_path)
+        return db.discover_db_paths(workspace) if workspace else [db_path]
+
+    def _revision(self, db_path: Path) -> str:
+        revisions = [(path.name, database_revision(path)) for path in self._sources(db_path)]
+        return hashlib.sha256(json.dumps(revisions).encode()).hexdigest()
+
+    def _read(self, db_path: Path, args: list[str], source_db: object = None) -> dict[str, Any]:
+        sources = self._sources(db_path)
+        if source_db is not None:
+            if not isinstance(source_db, str) or not source_db or Path(source_db).name != source_db:
+                raise ViewerError("Invalid source_db; use an exact discovered database filename.")
+            selected = next((path for path in sources if path.name == source_db and not path.is_symlink()), None)
+            if selected is None:
+                raise ViewerError("Unknown source_db; use an exact discovered database filename.")
+        else:
+            selected = db_path
+        if self.json_runner is not run_native_json:
+            return self.json_runner(selected, args)
+        workspace = NativeJsonRunner._workspace_for_database(db_path)
+        if args[0] == "status":
+            statuses, errors = [], []
+            local = db.local_db_path(workspace, create_identity=False) if workspace else None
+            for path in sources:
+                try:
+                    status = self.json_runner(path, args)
+                    for key in ("plans", "tasks", "findings", "active_runs", "recent_events", "active_batches", "active_executions"):
+                        for item in status.get(key, []):
+                            item["source_db"] = path.name
+                            if key == "active_runs":
+                                item["writable"] = path == local
+                    if status.get("active_run"):
+                        status["active_run"]["source_db"] = path.name
+                        status["active_run"]["writable"] = path == local
+                    status["source_db"] = path.name
+                    statuses.append(status)
+                except (ViewerError, ValueError, sqlite3.Error, OSError) as exc:
+                    errors.append({"source_db": path.name, "error": str(exc)})
+            if not statuses:
+                raise ViewerError(errors[0]["error"] if errors else "No readable TAPL database found.")
+            status = dict(next((entry for entry in statuses if entry["source_db"] == selected.name), statuses[0]))
+            status["active_runs"] = [run for entry in statuses for run in entry.get("active_runs", [])]
+            status["source_errors"] = errors
+            status["local_db"] = local.name if local else None
+            status["counts"] = {**status.get("counts", {}), "archives": sum(entry.get("counts", {}).get("archives", 0) for entry in statuses)}
+            if "--include-events" in args:
+                status["recent_events"] = sorted([event for entry in statuses for event in entry.get("recent_events", [])], key=lambda event: str(event.get("created_at", "")), reverse=True)[:12]
+            return status
+        if workspace is None:
+            return self.json_runner(selected, args)
+        from .history import HistoryReader
+        reader = HistoryReader(workspace, local_db_path=db.local_db_path(workspace, create_identity=False))
+        try:
+            if args[:2] == ["archive", "list"]:
+                limit = NativeJsonRunner._option(args, "--limit")
+                return reader.list_archives(limit=int(limit) if limit else None)
+            if args[:2] == ["archive", "show"]:
+                return reader.get_archive(NativeJsonRunner._option(args, "--id"), source_db=selected.name)
+            if args[:2] == ["item", "show"]:
+                return reader.get_item(int(NativeJsonRunner._option(args, "--id")), source_db=selected.name)
+            if args[0] == "search":
+                return reader.search(args[1])
+            if args[:2] == ["memory", "list"]:
+                return reader.recall(query=NativeJsonRunner._option(args, "--query") or "", limit=50,
+                                     offset=int(NativeJsonRunner._option(args, "--offset") or "0"))
+            if args[:2] == ["memory", "show"]:
+                return reader.get_memory(NativeJsonRunner._option(args, "--id"), source_db=selected.name)
+        except (ValueError, sqlite3.Error, OSError) as exc:
+            raise ViewerError(str(exc)) from exc
+        return self.json_runner(selected, args)
+
     def _build_view(self, payload: dict[str, Any], db_path: Path) -> dict[str, Any]:
         command = str(payload["command"])
         if command in {"ready", "selectWorkspace", "selectRun"}:
-            return self._overview(db_path, search_query="")
+            return self._overview(db_path, search_query="", source_db=payload.get("source_db"))
         if command == "refresh":
             return self._refresh_view(payload, db_path)
         if command == "debug":
-            status = self.json_runner(db_path, ["status", "--json", "--include-events"])
+            status = self._read(db_path, ["status", "--json", "--include-events"], payload.get("source_db"))
             return {"type": "debug", "status": {**DEFAULT_STATUS, **status}}
         if command in {"openArchive", "archiveEvents"}:
             archive_id = self._required_string(payload, "archiveId")
-            detail = self.json_runner(db_path, ["archive", "show", "--id", archive_id, "--json"])
+            detail = self._read(db_path, ["archive", "show", "--id", archive_id, "--json"], payload.get("source_db"))
             archive = detail.get("archive")
             if not isinstance(archive, dict):
                 raise ViewerError("Archive details are unavailable.")
@@ -531,25 +610,26 @@ class ViewerApplication:
             query = self._required_string(payload, "query").strip()
             if not query:
                 raise ViewerError("Enter a search query.")
-            return {"type": "search", "search": self.json_runner(db_path, ["search", query, "--json"])}
+            return {"type": "search", "search": self._read(db_path, ["search", query, "--json"])}
         if command == "memories":
             query, offset = payload.get("query", ""), payload.get("offset", 0)
             if not isinstance(query, str) or len(query) > 500:
                 raise ViewerError("Memory query must be a string of at most 500 characters.")
             if type(offset) is not int or not 0 <= offset <= 1000000:
                 raise ViewerError("Invalid memory offset.")
-            result = self.json_runner(db_path, ["memory", "list", "--query", query, "--offset", str(offset)])
-            return {"type": "memories", **{key: result[key] for key in ("memories", "total", "query", "offset", "limit", "diagnostics") if key in result}}
+            result = self._read(db_path, ["memory", "list", "--query", query, "--offset", str(offset)])
+            return {"type": "memories", **{key: result[key] for key in ("memories", "total", "query", "offset", "limit", "diagnostics", "source_errors") if key in result}}
         if command in {"openMemory", "openMemorySource"}:
             memory_id = self._required_string(payload, "memoryId")
-            memory = self.json_runner(db_path, ["memory", "show", "--id", memory_id]).get("memory")
+            memory_payload = self._read(db_path, ["memory", "show", "--id", memory_id], payload.get("source_db"))
+            memory = memory_payload.get("memory")
             if command == "openMemorySource" and isinstance(memory, dict) and memory.get("source_available"):
                 record = memory.get("source_record") or {}
                 if record.get("kind") == "item" and isinstance(record.get("item"), dict):
-                    return self._build_view({"command": "openSearchResult", "itemId": record["item"]["id"]}, db_path)
+                    return self._build_view({"command": "openSearchResult", "itemId": record["item"]["id"], "source_db": memory.get("source_db")}, db_path)
                 if isinstance(record.get("run"), dict):
-                    return {"type": "memorySource", "memoryId": memory_id, "run": record["run"]}
-            return {"type": "memory", "memoryId": memory_id, "memory": memory}
+                    return {"type": "memorySource", "memoryId": memory_id, "run": record["run"], "source_db": memory.get("source_db")}
+            return {"type": "memory", "memoryId": memory_id, "memory": memory, "source_db": memory.get("source_db") if isinstance(memory, dict) else memory_payload.get("source_db", payload.get("source_db"))}
         if command == "openSearchResult":
             raw_item_id = payload.get("itemId")
             if isinstance(raw_item_id, bool):
@@ -558,12 +638,12 @@ class ViewerApplication:
                 item_id = int(raw_item_id)
             except (TypeError, ValueError) as exc:
                 raise ViewerError("Invalid item id.") from exc
-            detail_payload = self.json_runner(db_path, ["item", "show", "--id", str(item_id), "--json"])
+            detail_payload = self._read(db_path, ["item", "show", "--id", str(item_id), "--json"], payload.get("source_db"))
             detail = detail_payload.get("item")
             if not isinstance(detail, dict):
                 raise ViewerError("Item details are unavailable.")
             if detail.get("kind") == "task":
-                status = self.json_runner(db_path, ["status", "--json", "--full"])
+                status = self._read(db_path, ["status", "--json", "--full"], detail.get("source_db"))
                 matching = next(
                     (
                         item for item in status.get("tasks", [])
@@ -581,6 +661,7 @@ class ViewerApplication:
                 "status": detail.get("status"),
                 "source": detail.get("source"),
                 "search_source": "native",
+                "source_db": detail.get("source_db"),
             }
             return {"type": "searchItem", "result": result, "detail": detail}
         raise ViewerError(f"Unsupported viewer command: {command}")
@@ -601,11 +682,11 @@ class ViewerApplication:
         if view_type in {"memories", "memory", "memorySource"}:
             command = {"memories": "memories", "memory": "openMemory", "memorySource": "openMemorySource"}[view_type]
             return self._build_view({**payload, "command": command}, db_path)
-        return self._overview(db_path, search_query=str(payload.get("query") or ""))
+        return self._overview(db_path, search_query=str(payload.get("query") or ""), source_db=payload.get("source_db"))
 
-    def _overview(self, db_path: Path, *, search_query: str) -> dict[str, Any]:
-        status = self.json_runner(db_path, ["status", "--json", "--full"])
-        archives_payload = self.json_runner(db_path, ["archive", "list", "--json", "--limit", "8"])
+    def _overview(self, db_path: Path, *, search_query: str, source_db: object = None) -> dict[str, Any]:
+        status = self._read(db_path, ["status", "--json", "--full"], source_db)
+        archives_payload = self._read(db_path, ["archive", "list", "--json", "--limit", "8"])
         archives = archives_payload.get("archives")
         return {
             "type": "overview",

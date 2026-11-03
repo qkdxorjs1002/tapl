@@ -18,7 +18,7 @@ Keep asking Codex to work normally. TAPL makes that work visible while it happen
 and recoverable when the conversation ends.
 
 - **Resume with context.** Recover the plan, completed tasks, and remaining work in a later session.
-- **Keep decisions close to the code.** Each Codex session working folder owns its history in `.tapl/tapl.db`.
+- **Keep decisions close to the code.** Each Codex session working folder owns its history in `.tapl/tapl-{UUID}.db`.
 - **See what happened.** Inspect approvals, findings, validation, and lifecycle events.
 - **Search previous work.** Full-text search is included; semantic search is optional.
 - **Recall relevant experience.** Short memory cues point back to earlier work when it becomes useful.
@@ -100,7 +100,7 @@ Each PLAN has its own requirements, approach, and validation; each TASK referenc
 
 Multiple Codex sessions in the same working folder can work concurrently in their own RUNs. Each RUN has one owning session; resuming that session continues its RUN. Approvals, TASKs, split queues, Stop, and archiving remain scoped to that owner. The Viewer lets you select an active RUN or explicitly confirm its discard.
 
-Include the Codex hook's `session_id` on every `tapl_*` MCP call. Older clients that omit it can read only the isolated legacy scope, and unidentified writes are rejected once the workspace contains session-owned records. Existing database RUNs remain in the legacy scope; the schema upgrade first saves `.tapl/tapl.db.pre-v14.bak`. New sessions never automatically take ownership of another session's RUN. Workflow state is isolated, while working files remain shared; coordinate simultaneous edits to the same file or use separate worktrees.
+Include the Codex hook's `session_id` on every `tapl_*` MCP call. Older clients that omit it can read only the isolated legacy scope, and unidentified writes are rejected once the workspace contains session-owned records. New sessions never automatically take ownership of another session's RUN. Workflow state is isolated, while working files remain shared; coordinate simultaneous edits to the same file or use separate worktrees.
 
 <p align="center">
   <img src="assets/readme/workflow-en.gif" width="100%" alt="Illustrative Codex progress messages: start a permission-check investigation, review history, define the scope, trace the call path, record evidence, and archive findings and follow-up work." />
@@ -170,7 +170,7 @@ Run the repository command from the target repository, or specify its path with
 2. **Trust the installed hook** when Codex first asks.
 3. **Open your intended working folder and ask normally.** Codex records the work through TAPL.
 
-TAPL creates `.tapl/tapl.db` in the Codex session working folder. A nested folder
+TAPL records to `.tapl/tapl-{UUID}.db` in the Codex session working folder and reads peer history there. See the [storage guide](docs/guides/storage.md) for the UUID that survives removal and existing database migration. A nested folder
 gets its own history even when a parent folder already has a TAPL database. You do
 not need to write workflow records by hand or learn another set of task-management
 commands.
@@ -247,13 +247,13 @@ flowchart LR
     U[You] --> C[Codex]
     C --> M[tapl-mcp<br/>Workflow tools]
     C --> H[tapl-hook<br/>Context and lifecycle guards]
-    M --> D[(.tapl/tapl.db)]
+    M --> D[(".tapl/tapl-*.db")]
     H --> D
     D --> V[Browser / VS Code viewer]
 ```
 
 **`tapl-mcp`** exposes typed workflow tools. **`tapl-hook`** supplies current state
-and checks lifecycle boundaries. Both use the same local database as the viewers.
+and checks lifecycle boundaries. Writes stay local; history reads also include peer databases.
 
 **`taplctl`** manages installation, configuration, diagnostics, updates, and local
 services. Workflow records go through MCP; the CLI is not a workflow data API.

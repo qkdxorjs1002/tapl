@@ -12,12 +12,11 @@ From the repository root:
 
 ```sh
 uv --directory tapl sync --extra test
-uv --directory tapl run --extra test python -m unittest discover -s tests
 uv --directory tapl run --extra test python -m pytest -q tests
 uv --directory tapl build
 ```
 
-The repository contains both unittest and pytest-style tests. Unittest discovery alone does not execute every pytest function. For semantic work, include the optional environment:
+The pytest command runs both unittest and pytest-style tests and applies the temporary home/working-folder isolation fixtures. For semantic work, include the optional environment:
 
 ```sh
 uv --directory tapl sync --extra test --extra semantic

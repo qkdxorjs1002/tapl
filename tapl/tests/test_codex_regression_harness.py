@@ -202,7 +202,7 @@ def workspace(tmp_path):
 
 
 def export_db(workspace):
-    harness.export_evidence_db(workspace / ".tapl/tapl.db", workspace / "tapl.db")
+    harness.export_evidence_db(harness.db.default_db_path(workspace), workspace / "tapl.db")
 
 
 def test_original_eight_conditions_are_preserved():

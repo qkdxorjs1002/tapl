@@ -108,6 +108,8 @@ Windows는 선택 의존성을 설치하면 로컬 시맨틱 검색을 지원합
 
 `TAPL_INSTALL_ROOT`와 `TAPL_BIN_DIR`로 설치·launcher 위치를 바꿀 수 있습니다. `TAPL_INSTALL_MANIFEST_URL`은 사용자 지정 manifest를 선택하지만, 릴리스 설치 스크립트에는 여전히 자기 버전의 manifest가 필요합니다. 설치 스크립트는 사용 전에 manifest와 wheel SHA-256을 검증합니다.
 
+TAPL 전용 UUID는 `~/.tapl/installation_id`에 보관하며 실행 파일 제거와 `--purge-config`·`--purge-db`에서도 보존합니다. 재설치와 기존 DB 이전은 [로컬 식별자와 공유 이력](../guides/storage.ko.md)을 참고하세요.
+
 ## 업데이트
 
 Linux·Windows 독립 설치에서는 다음 명령을 사용합니다.

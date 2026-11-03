@@ -43,7 +43,7 @@ When choosing a model, add `model`, `reasoning_effort`, and `model_reason` to `E
 | Tool | Required arguments | Optional arguments and behavior |
 | --- | --- | --- |
 | `tapl_get_next` | None | `known_policy_revision`; `available_models`, `catalog_complete=false` for explicit setup/settings checks. Returns policy, config, state summary, and next actions. |
-| `tapl_get_status` | None | `full=false`, `include_events=false`, `events_limit=12` (0–100). Details for inspection/resume/recovery; `full=true` includes record bodies. |
+| `tapl_get_status` | None | Optional `source_db` (exact source filename; omission selects local). `full=false`, `include_events=false`, `events_limit=12` (0–100). Details for inspection/resume/recovery; `full=true` includes record bodies. |
 | `tapl_validate_state` | None | Validates plan detail, task contracts, dependencies, execution order, and approval. |
 | `tapl_get_context` | None | `event="Manual"` selects lifecycle guidance. |
 | `tapl_configure_subagents` | `user_confirmed`, `enabled`, `strategy`, `models`, `available_models` | `preference=""`, `profiles`. Saves confirmed settings to the effective config path; the agent supplies an [English preference summary](../guides/subagents.md#first-use-setup). `strategy`: `conservative`, `balanced`, `aggressive`. |
@@ -60,16 +60,18 @@ State validation uses one transactionally consistent snapshot. Reuse successful 
 
 ## History and memory
 
+Search, lists, and recall read multiple databases in the working folder. Preserve each result's `source_db` in detail reads and `memory_uses`. Foreign updates, deletion, and RUN discard are rejected; foreign memory uses return a read-only skip. A memory use must name its source when the same ID exists in another database. Per-source failures appear in `source_errors`. See [Local identity and shared history](../guides/storage.md).
+
 | Tool | Required arguments | Optional arguments and behavior |
 | --- | --- | --- |
 | `tapl_search_history` | `query` (1–500 characters) | `limit` (1–50; configuration default when omitted). Searches active/archived originals. |
-| `tapl_get_item` | `item_id` (positive integer) | `compact=false`. Reads a plan/task/finding. Compact mode omits generated body only when exactly reconstructible from canonical fields; custom/raw bodies and findings remain intact. |
+| `tapl_get_item` | `item_id` (positive integer) | Optional `source_db` (exact source filename; omission selects local). `compact=false`. Reads a plan/task/finding. Compact mode omits generated body only when exactly reconstructible from canonical fields; custom/raw bodies and findings remain intact. |
 | `tapl_list_archives` | None | `limit` (1–100). Lists recent archives. |
-| `tapl_get_archive` | `archive_id` | Numeric ID as a string or stable slug; returns items and events. |
+| `tapl_get_archive` | `archive_id` | Optional `source_db` (exact source filename; omission selects local). Numeric ID as a string or stable slug; returns items and events. |
 | `tapl_recall` | None | `query=""` (at most 500 characters), `limit=3` (1–50), `offset=0` (nonnegative). Empty query lists memories. No capture/reinforcement. |
-| `tapl_get_memory` | `memory_id` | Returns memory and original source; missing/deleted memory returns null. |
-| `tapl_update_memory` | `memory_id`, `expected_revision` (positive integer) | `note` (1–240 characters), `cue` (3–5 entries), `state` (`active` or `superseded`). Explicit user request only. |
-| `tapl_delete_memory` | `memory_id`, `expected_revision` (positive integer) | Explicit user request only; tombstones the memory so recall/reinforcement cannot use it. |
+| `tapl_get_memory` | `memory_id` | Optional `source_db` (exact source filename; omission selects local). Returns memory and original source; missing/deleted memory returns null. |
+| `tapl_update_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). `note` (1–240 characters), `cue` (3–5 entries), `state` (`active` or `superseded`). Explicit user request only. |
+| `tapl_delete_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). Explicit user request only; tombstones the memory so recall/reinforcement cannot use it. |
 
 Check original evidence from `tapl_get_item` or `tapl_get_archive` before using a recalled hint. Revision conflicts require fresh review before retrying memory edits. `recall.enabled=false` disables automatic recall/capture/review/reinforcement; manual inspection remains available. See [Associative memory](../guides/memory.md) for ranking and maintenance.
 
@@ -85,7 +87,7 @@ Check original evidence from `tapl_get_item` or `tapl_get_archive` before using 
 | `tapl_reject_execution` | `prompt` | Same `source` values; preserves the explicit rejection. |
 | `tapl_finish_run` | `result` | `expected_run_id`, `memory_candidates`, `memory_uses`, `memory_review`; see completion below. |
 | `tapl_finish_archive` | `slug` (1–120 characters) | `summary=""` (at most 2000 characters). After task/batch settlement and completion review. |
-| `tapl_discard_run` | `run_id`, `confirmed`, `confirmation_run_id`, `session_id` | All required; see confirmed discard below. |
+| `tapl_discard_run` | `run_id`, `confirmed`, `confirmation_run_id`, `session_id` | Optional `source_db` (exact source filename; omission selects local). All required; see confirmed discard below. |
 
 `work_type`: `answer`, `investigation`, `analysis`, `planning`, `implementation`, `mixed`. `workflow_mode`: `fast`, `standard`, `strict`. TAPL derives `record_mode`; only Fast non-durable answer/investigation/analysis/planning can be lightweight. Durable or Standard/Strict work uses plans/tasks. Different topics normally receive distinct PLANs in one RUN, not separate RUNs.
 
@@ -179,7 +181,7 @@ await call("tapl_finish_archive", {
 `tapl_finish_run` saves the verified result before a separate archive call. All actionable tasks and active batches must be settled. With any memory arguments, `expected_run_id` must identify the active RUN.
 
 - `memory_candidates`: at most two objects. Each has `slot` (1 or 2), `cue` (3–5 distinct entries), `note` (1–240 characters), `source_run_id`, optional positive `source_item_id`, and optional `replaces_memory_id`. Capture only verified lessons with recurring cues that reduce future exploration. Candidates imply capture.
-- `memory_uses`: at most 50 objects with `memory_id`, positive `revision`, Boolean `source_checked`, and `usage` (1–500 characters). Include only actual use after original-source verification.
+- `memory_uses`: at most 50 objects with `memory_id`, optional `source_db`, positive `revision`, Boolean `source_checked`, and `usage` (1–500 characters). Include only actual use after original-source verification.
 - `memory_review`: `{ "decision": "capture" | "skip", "reason": "..." }`; skip requires a reason of 1–240 characters. Omitting both candidates and review leaves `review_required` when review applies.
 
 Capture failures preserve the work result. Inspect the receipt, retry failed slots once with corrected input, then explicitly skip unresolved failures with a reason before archiving. See [Associative memory](../guides/memory.md).

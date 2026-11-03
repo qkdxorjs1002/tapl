@@ -21,6 +21,8 @@ Hook, status, next-action 조회에서는 기억을 검색하지 않습니다. �
 공백 동치 또는 기존의 의미 있는 단어 2개 일치 기준을 사용하므로, `기억`이나
 `프로젝트` 같은 단어 하나가 더 긴 단서 전체의 일치로 인정되지는 않습니다.
 
+회상과 원문 조회는 같은 작업 폴더의 여러 DB를 참조합니다. 결과의 `source_db`를 상세 조회와 `memory_uses`에도 전달하세요. 다른 환경의 기억은 읽기 전용이며 변경·삭제·강화를 수행하지 않습니다. [공유 이력의 원본 구분](storage.ko.md)을 참고하세요.
+
 ## 완료 시 기억 검토
 
 `tapl_finish_run`의 선택 필드 `memory_candidates`, `memory_uses`,
@@ -79,10 +81,10 @@ taplctl config unset recall.enabled  # 기본값 true 복원
 
 비활성화하면 자동 저장·회상·강화가 중단되지만 수동 조회·수정·삭제는 가능합니다.
 기억 workflow는 MCP를 사용하며 관리 CLI에 별도 workflow 명령을 추가하지 않습니다.
-schema 11 DB를 schema 12로 전환할 때 `.tapl/tapl.db.pre-v12.bak`에 한 번 백업한 뒤
+schema 11 DB를 schema 12로 전환할 때 `.tapl/tapl-{UUID}.db.pre-v12.bak`에 한 번 백업한 뒤
 기존 기억의 검색 색인을 재구축합니다. 원문, revision, 강화 상태와 작업 기록은 유지하며,
 색인 갱신에 실패하면 버전과 색인 변경을 함께 되돌려 재시도할 수 있습니다.
-schema 11보다 오래된 DB는 기존 `.tapl/tapl.db.pre-v11.bak` 백업 절차를 사용합니다.
+schema 11보다 오래된 DB는 기존 `.tapl/tapl-{UUID}.db.pre-v11.bak` 백업 절차를 사용합니다.
 업그레이드할 때는 실행 중인 TAPL 서버를 모두 종료한 뒤 새 버전으로 다시 시작합니다.
 이전 버전으로 되돌릴 때도 서버를 종료한 뒤 해당 백업을 복원하며, 백업 이후의 작업은
 별도로 보존해야 합니다.

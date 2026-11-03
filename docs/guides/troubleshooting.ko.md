@@ -2,7 +2,7 @@
 
 [문서 홈](../README.ko.md) · [English](troubleshooting.md)
 
-Codex가 TAPL을 사용하는 작업 폴더에서 시작하세요. 워크스페이스는 해당 폴더의 `.tapl/tapl.db`를 사용하며 부모 DB를 검색하지 않습니다. 기록이 없어 보인다면 설치 범위, 설정 범위, 활성 세션 식별자도 확인해야 합니다.
+Codex가 TAPL을 사용하는 작업 폴더에서 시작하세요. 워크스페이스는 해당 폴더의 `.tapl/tapl-{UUID}.db`를 사용하며 부모 DB를 검색하지 않습니다. 기록이 없어 보인다면 설치 범위, 설정 범위, 활성 세션 식별자도 확인해야 합니다.
 
 ## 런타임과 설정 확인
 
@@ -26,7 +26,7 @@ taplctl config get
 
 | 증상 | 확인과 해결 |
 | --- | --- |
-| Viewer에서 워크스페이스를 요청함 | `.tapl/tapl.db`가 있는 폴더를 선택하거나 `taplctl init --workspace-root /path/to/workspace`로 의도한 폴더를 초기화합니다. 로그인 서비스는 저장소 밖에서 시작할 수 있습니다. |
+| Viewer에서 워크스페이스를 요청함 | `.tapl/tapl-{UUID}.db`가 있는 폴더를 선택하거나 `taplctl init --workspace-root /path/to/workspace`로 의도한 폴더를 초기화합니다. 로그인 서비스는 저장소 밖에서 시작할 수 있습니다. |
 | 8000 포트 사용 중 | 해당 Homebrew 서비스를 멈추거나 `taplctl viewer --port 9000`을 실행합니다. 여러 formula 서비스가 같은 기본 포트를 사용합니다. |
 | Viewer 페이지는 열리지만 데이터 조회 실패 | 워크스페이스의 읽기·탐색 권한과 SQLite WAL/SHM 보조 파일을 확인합니다. 보호된 WAL 디렉터리에도 없는 보조 파일을 생성할 권한이 필요할 수 있습니다. [DB 접근](viewer.ko.md#db-접근과-보호된-서비스)을 보세요. |
 | Viewer가 스키마 불일치를 안내함 | 구버전 DB는 Viewer 서비스 밖에서 쓰기 권한으로 마이그레이션하고, 신버전 DB는 TAPL을 업그레이드합니다. [DB 접근](viewer.ko.md#db-접근과-보호된-서비스)을 보세요. |

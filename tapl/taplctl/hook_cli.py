@@ -75,7 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tool", default=None, help="Tool name for tool hook events.")
     parser.add_argument(
         "--db", type=Path, default=None,
-        help="Optional DB path; must match the Codex session cwd/.tapl/tapl.db.",
+        help="Optional DB path; must match this installation's local DB in the Codex session cwd.",
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to tapl TOML config.")
     output = parser.add_mutually_exclusive_group()
@@ -97,9 +97,10 @@ def main(argv: list[str] | None = None) -> int:
 def _handle_hook(args: argparse.Namespace) -> int:
     payload = _read_stdin_payload()
     start = _payload_cwd(payload)
-    db_path = start / db.DEFAULT_DB_RELATIVE
+    db_path = db.local_db_path(start, create_identity=True)
     if args.db is not None and args.db.expanduser().resolve() != db_path.resolve():
         raise ValueError(f"Hook --db must match the Codex working directory database: {db_path}")
+    db_path = db.default_db_path(start)
     workspace: dict[str, Any] | None = None
     if args.db is None and args.config is None:
         start, workspace = _initialize_workspace(start)

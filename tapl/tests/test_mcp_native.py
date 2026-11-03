@@ -61,7 +61,7 @@ def test_mcp_pins_starting_cwd_and_explicit_root_to_distinct_databases() -> None
         asyncio.run(exercise())
 
         def summaries(root: Path) -> list[str]:
-            with sqlite3.connect(root / ".tapl" / "tapl.db") as conn:
+            with sqlite3.connect(db.default_db_path(root)) as conn:
                 return [row[0] for row in conn.execute("SELECT request_summary FROM workflow_runs")]
 
         assert summaries(parent) == []

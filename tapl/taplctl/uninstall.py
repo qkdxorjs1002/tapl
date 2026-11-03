@@ -12,7 +12,7 @@ import shlex
 import tomllib
 from typing import Any
 
-from . import config_editor, install
+from . import config_editor, db, install
 from .command_runtime import windows_hook_tokens
 
 
@@ -89,6 +89,9 @@ def _uninstall(
     state_path = root / install.INSTALL_STATE_RELATIVE
     config_path = tapl / "config.toml"
     db_paths = [tapl / name for name in _DB_NAMES]
+    local = db.local_db_path(root)
+    if local is not None:
+        db_paths.extend(Path(str(local) + suffix) for suffix in ("", "-wal", "-shm", "-journal"))
     all_paths = [hooks_path, codex_config, version_path, state_path, config_path, *db_paths]
     _validate_paths(root, codex, tapl, all_paths)
 

@@ -64,7 +64,7 @@ function harness(overrides = {}) {
     } while (dirty);
   }
   const find = (predicate) => nodes().find(predicate);
-  const close = (id = 'run-b') => nodes(find((node) => node.type === 'div' && node.key === id)).find((node) => node.props?.className === 'tapl-run-tab-close');
+  const close = (id = 'run-b', sourceDb) => nodes(find((node) => node.type === 'div' && node.key === `${sourceDb}:${id}`)).find((node) => node.props?.className === 'tapl-run-tab-close');
   render();
   return { render, find, close, commands, opener, props, nodes, cleanup() { for (const slot of slots) slot?.cleanup?.(); delete global.document; delete global.HTMLElement; } };
 }
@@ -126,7 +126,7 @@ test('confirmation targets the clicked unselected RUN exactly once with captured
   assert.ok(h.nodes(dialog(h)).some((node) => node.props?.children === 'Unselected RUN'));
   enterRunId(h);
   const submit = confirm(h).props.onClick; submit(); submit(); h.render();
-  assert.deepEqual(h.commands, [{ command: 'discardRun', runId: 'run-b', targetSessionId: 'owner-b', workspace: '/workspace/a', confirmed: true, confirmationRunId: 'run-b' }]);
+  assert.deepEqual(h.commands, [{ command: 'discardRun', runId: 'run-b', targetSessionId: 'owner-b', workspace: '/workspace/a', confirmed: true, confirmationRunId: 'run-b', source_db: undefined }]);
   assert.equal(confirm(h).props.disabled, true); assert.equal(cancel(h).props.disabled, true);
   h.render({ discardResult: { runId: 'run-b', ok: true }, runs: [runA] });
   assert.equal(dialog(h), undefined); assert.equal(h.props.selectedId, 'run-a');
@@ -217,9 +217,26 @@ test('Cancel, Escape and opening another RUN clear the entered confirmation', ()
 }));
 
 test('arrow, Home and End handlers preserve owner-based selection', () => withHarness({}, (h) => {
-  const tab = h.find((node) => node.props?.id === 'tapl-run-tab-run-b');
+  const tab = h.find((node) => node.props?.id === 'tapl-run-tab-local-run-b');
   const list = h.find((node) => node.props?.role === 'tablist');
   list.ref.current.querySelectorAll = () => [{ focus() {} }, { focus() {} }];
   for (const key of ['Home', 'ArrowRight', 'End']) tab.props.onKeyDown({ key, preventDefault() {} });
-  assert.deepEqual(h.commands, [{ command: 'selectRun', sessionId: 'owner-b' }]);
+  assert.deepEqual(h.commands, [{ command: 'selectRun', sessionId: 'owner-b', source_db: undefined }]);
+}));
+
+
+test('duplicate RUN IDs keep source-specific selection and foreign close controls hidden', () => withHarness({
+  runs: [
+    { ...runA, id: 'same-run', source_db: 'tapl-local.db', writable: true },
+    { ...runB, id: 'same-run', source_db: 'tapl-peer.db', writable: false }
+  ], selectedId: 'same-run', selectedSourceDb: 'tapl-local.db'
+}, (h) => {
+  const tabs = h.nodes().filter(node => node.props?.role === 'tab');
+  assert.equal(tabs.length, 2);
+  assert.equal(tabs.filter(node => node.props['aria-selected']).length, 1);
+  assert.notEqual(tabs[0].props.id, tabs[1].props.id);
+  assert.ok(h.close('same-run', 'tapl-local.db'));
+  assert.equal(h.close('same-run', 'tapl-peer.db'), undefined);
+  tabs[1].props.onClick();
+  assert.deepEqual(h.commands, [{ command: 'selectRun', sessionId: 'owner-b', source_db: 'tapl-peer.db' }]);
 }));

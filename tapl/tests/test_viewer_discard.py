@@ -30,7 +30,7 @@ def request(root, runs, **overrides):
 
 
 def active(root):
-    with closing(db.connect(root / db.DEFAULT_DB_RELATIVE)) as conn:
+    with closing(db.connect(db.local_db_path(root, create_identity=False))) as conn:
         return {row["session_id"]: row["id"] for row in db.active_runs(conn)}
 
 
@@ -43,7 +43,7 @@ def test_discard_unselected_owner_keeps_selected_board_and_archived_history(work
     assert result["view"]["status"]["active_run"]["id"] == runs["a"]
     assert result["view"]["status"]["session_id"] == "a"
     assert active(root) == {"a": runs["a"]}
-    with closing(db.connect(root / db.DEFAULT_DB_RELATIVE)) as conn:
+    with closing(db.connect(db.local_db_path(root, create_identity=False))) as conn:
         assert conn.execute("SELECT status FROM workflow_runs WHERE id=?", (runs["b"],)).fetchone()[0] == "archived"
         assert conn.execute("SELECT COUNT(*) FROM items WHERE run_id=? AND archived=1", (runs["b"],)).fetchone()[0] == 1
 

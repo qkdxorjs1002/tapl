@@ -43,7 +43,7 @@ PLAN ID는 `PLAN-001` 또는 legacy `SPEC-001`, TASK ID는 `TASK-001` 형태로 
 | 도구 | 필수 인자 | 선택 인자와 동작 |
 | --- | --- | --- |
 | `tapl_get_next` | 없음 | `known_policy_revision`; 명시적 설정 확인용 `available_models`, `catalog_complete=false`. 정책·설정·상태 요약·다음 행동을 반환합니다. |
-| `tapl_get_status` | 없음 | `full=false`, `include_events=false`, `events_limit=12` (0–100). 조회·재개·복구용 상세이며 `full=true`는 기록 본문도 포함합니다. |
+| `tapl_get_status` | 없음 | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). `full=false`, `include_events=false`, `events_limit=12` (0–100). 조회·재개·복구용 상세이며 `full=true`는 기록 본문도 포함합니다. |
 | `tapl_validate_state` | 없음 | 계획 상세, 작업 계약, 의존성, 실행 순서, 승인을 검증합니다. |
 | `tapl_get_context` | 없음 | `event="Manual"`로 수명주기 지침을 선택합니다. |
 | `tapl_configure_subagents` | `user_confirmed`, `enabled`, `strategy`, `models`, `available_models` | `preference=""`, `profiles`. 확인받은 설정을 적용 설정 경로에 저장하며 에이전트가 [영문 선호 요약](../guides/subagents.ko.md#최초-설정)을 전달합니다. `strategy`: `conservative`, `balanced`, `aggressive`. |
@@ -60,16 +60,18 @@ RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌�
 
 ## 이력과 메모리
 
+검색·목록·회상은 작업 폴더의 여러 DB를 읽으며 결과의 `source_db`를 상세 조회와 `memory_uses`에도 전달해야 합니다. 다른 DB의 변경·삭제·RUN 폐기는 거절하며, 다른 DB 메모리 사용은 읽기 전용 skip으로 보고합니다. 같은 메모리 ID가 다른 DB에도 있으면 사용 기록에 원본을 명시해야 합니다. 원본별 읽기 실패는 `source_errors`에 표시합니다. [로컬 식별자와 공유 이력](../guides/storage.ko.md)을 참고하세요.
+
 | 도구 | 필수 인자 | 선택 인자와 동작 |
 | --- | --- | --- |
 | `tapl_search_history` | `query` (1–500자) | `limit` (1–50, 생략 시 설정 기본값). 활성·아카이브 원본을 검색합니다. |
-| `tapl_get_item` | `item_id` (양의 정수) | `compact=false`. 계획·작업·발견 사항을 읽습니다. 축약 모드는 표준 필드로 정확히 복원할 수 있는 생성 본문만 생략하며 사용자 지정·raw 본문과 발견 사항은 보존합니다. |
+| `tapl_get_item` | `item_id` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). `compact=false`. 계획·작업·발견 사항을 읽습니다. 축약 모드는 표준 필드로 정확히 복원할 수 있는 생성 본문만 생략하며 사용자 지정·raw 본문과 발견 사항은 보존합니다. |
 | `tapl_list_archives` | 없음 | `limit` (1–100). 최근 아카이브 목록. |
-| `tapl_get_archive` | `archive_id` | 문자열 형태의 숫자 ID 또는 안정된 slug. 항목·이벤트를 반환합니다. |
+| `tapl_get_archive` | `archive_id` | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 문자열 형태의 숫자 ID 또는 안정된 slug. 항목·이벤트를 반환합니다. |
 | `tapl_recall` | 없음 | `query=""` (최대 500자), `limit=3` (1–50), `offset=0` (0 이상). 빈 쿼리는 목록 조회이며 캡처·강화하지 않습니다. |
-| `tapl_get_memory` | `memory_id` | 메모리와 원본을 반환하며 없거나 삭제된 메모리는 null입니다. |
-| `tapl_update_memory` | `memory_id`, `expected_revision` (양의 정수) | `note` (1–240자), `cue` (3–5개), `state` (`active` 또는 `superseded`). 명시적 사용자 요청이 필요합니다. |
-| `tapl_delete_memory` | `memory_id`, `expected_revision` (양의 정수) | 명시적 사용자 요청이 필요하며 tombstone 처리해 회상·강화에서 제외합니다. |
+| `tapl_get_memory` | `memory_id` | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 메모리와 원본을 반환하며 없거나 삭제된 메모리는 null입니다. |
+| `tapl_update_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). `note` (1–240자), `cue` (3–5개), `state` (`active` 또는 `superseded`). 명시적 사용자 요청이 필요합니다. |
+| `tapl_delete_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 명시적 사용자 요청이 필요하며 tombstone 처리해 회상·강화에서 제외합니다. |
 
 회상한 단서를 사용하기 전에 `tapl_get_item` 또는 `tapl_get_archive`로 원본 근거를 확인합니다. 메모리 revision 충돌은 새 내용을 검토한 뒤 재시도해야 합니다. `recall.enabled=false`는 자동 회상·캡처·검토·강화를 끄지만 수동 조회는 유지합니다. 순위와 관리 절차는 [연상 메모리](../guides/memory.ko.md)를 보세요.
 
@@ -85,7 +87,7 @@ RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌�
 | `tapl_reject_execution` | `prompt` | 같은 `source` 값. 명시적 거절을 보존합니다. |
 | `tapl_finish_run` | `result` | `expected_run_id`, `memory_candidates`, `memory_uses`, `memory_review`. 아래 완료 절차 참고. |
 | `tapl_finish_archive` | `slug` (1–120자) | `summary=""` (최대 2000자). 작업·배치 정리와 완료 검토 후 호출합니다. |
-| `tapl_discard_run` | `run_id`, `confirmed`, `confirmation_run_id`, `session_id` | 모두 필수이며 아래 확인된 폐기 참고. |
+| `tapl_discard_run` | `run_id`, `confirmed`, `confirmation_run_id`, `session_id` | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 모두 필수이며 아래 확인된 폐기 참고. |
 
 `work_type`: `answer`, `investigation`, `analysis`, `planning`, `implementation`, `mixed`. `workflow_mode`: `fast`, `standard`, `strict`. TAPL이 `record_mode`를 계산합니다. Fast의 비영속 답변·조사·분석·계획만 lightweight가 될 수 있으며 영속 작업과 Standard/Strict 작업은 계획·작업을 사용합니다. 다른 주제는 보통 RUN을 나누지 않고 하나의 RUN 안에서 별도 PLAN을 만듭니다.
 
@@ -179,7 +181,7 @@ await call("tapl_finish_archive", {
 `tapl_finish_run`은 검증한 결과를 저장하며 아카이브는 별도 호출입니다. 실행할 작업과 활성 배치를 모두 정리해야 합니다. 메모리 인자를 하나라도 사용하면 `expected_run_id`가 활성 RUN을 가리켜야 합니다.
 
 - `memory_candidates`: 최대 두 객체. `slot` (1 또는 2), `cue` (서로 다른 3–5개), `note` (1–240자), `source_run_id`, 선택적 양의 `source_item_id`, 선택적 `replaces_memory_id`를 가집니다. 반복 단서가 있고 향후 탐색을 줄이는 검증된 교훈만 캡처합니다. 후보가 있으면 capture로 간주합니다.
-- `memory_uses`: 최대 50개. `memory_id`, 양의 `revision`, Boolean `source_checked`, `usage` (1–500자)를 가집니다. 원본을 확인한 뒤 실제 사용한 경우만 넣습니다.
+- `memory_uses`: 최대 50개. `memory_id`, 선택적 `source_db`, 양의 `revision`, Boolean `source_checked`, `usage` (1–500자)를 가집니다. 원본을 확인한 뒤 실제 사용한 경우만 넣습니다.
 - `memory_review`: `{ "decision": "capture" | "skip", "reason": "..." }`. skip에는 1–240자의 사유가 필요합니다. 후보와 검토를 모두 생략하면 검토 대상 RUN은 `review_required`로 남습니다.
 
 캡처가 실패해도 작업 결과는 보존합니다. 응답을 확인해 실패한 slot만 입력을 고쳐 한 번 재시도하고, 해결하지 못한 실패는 사유와 함께 명시적으로 skip한 뒤 아카이브합니다. [연상 메모리](../guides/memory.ko.md)를 참고하세요.

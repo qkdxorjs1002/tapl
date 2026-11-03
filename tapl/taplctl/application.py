@@ -11,9 +11,10 @@ from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
+import sqlite3
 from typing import Any, Iterator
 
-from . import config, config_editor, context as tapl_context, db, embeddings, prompt, recall as memory_store, recommendations, sessions, validation
+from . import config, config_editor, context as tapl_context, db, history, prompt, recall as memory_store, recommendations, sessions, validation
 from .prompt import authoring_policy_update
 
 
@@ -29,7 +30,7 @@ class WorkflowApplication:
 
     def __init__(self, workspace_root: Path, session_id: str | None = None) -> None:
         self.workspace_root = workspace_root.expanduser().resolve()
-        self.db_path = self.workspace_root / db.DEFAULT_DB_RELATIVE
+        self.db_path = db.default_db_path(self.workspace_root)
         self.session_id = sessions.normalize_session_id(session_id) if session_id is not None else None
 
     @contextmanager
@@ -42,6 +43,10 @@ class WorkflowApplication:
 
     def _settings(self) -> config.TaplConfig:
         return config.load(start=self.workspace_root)
+
+    def _history(self) -> history.HistoryReader:
+        return history.HistoryReader(self.workspace_root, local_db_path=self.db_path,
+                                     settings=self._settings(), session_id=self.session_id)
 
     @staticmethod
     def _authoring_policy(settings: config.TaplConfig, state: dict[str, Any]) -> dict[str, Any]:
@@ -81,10 +86,27 @@ class WorkflowApplication:
         full: bool = False,
         include_events: bool = False,
         events_limit: int = 12,
+        source_db: str | None = None,
     ) -> dict[str, Any]:
-        with self._connection() as conn:
+        reader = self._history()
+        selected = reader.select_source(source_db) if source_db is not None else self.db_path
+        connection = self._connection() if selected == self.db_path else reader._connection(selected)
+        with connection as conn:
             state = db.status_payload(conn)
             state["session_id"] = db.connection_session_id(conn)
+        source_errors = []
+        runs = []
+        for path in reader.discover_sources():
+            try:
+                if path == selected:
+                    source_runs = state.get("active_runs") or []
+                else:
+                    with reader._connection(path) as conn:
+                        source_runs = db.active_runs(conn)
+                runs.extend({**run, "source_db": path.name, "writable": path == self.db_path}
+                            for run in source_runs)
+            except (sqlite3.Error, OSError, ValueError) as exc:
+                source_errors.append(reader._error(path, exc))
         settings = self._settings()
         authoring_policy = self._authoring_policy(settings, state)
         state["authoring_policy"] = authoring_policy
@@ -102,7 +124,10 @@ class WorkflowApplication:
             "ok": True,
             "session_id": state.get("session_id", ""),
             "schema": state.get("schema") or {},
-            "active_runs": state.get("active_runs") or [],
+            "active_runs": runs,
+            "source_db": selected.name,
+            "writable": selected == self.db_path,
+            "source_errors": source_errors,
             "viewer_capabilities": {"associativeMemory": True, "discardRun": True},
             "memory_review": state["memory_review"] if settings.recall.enabled else {"status": "disabled"},
             "active_run": state.get("active_run"),
@@ -134,6 +159,13 @@ class WorkflowApplication:
                 {key: event[key] for key in event_fields if key in event}
                 for event in state.get("recent_events", [])[: max(events_limit, 0)]
             ]
+        for key in ("active_run",):
+            if payload.get(key):
+                payload[key] = {**payload[key], "source_db": selected.name, "writable": selected == self.db_path}
+        for key in ("plans", "tasks", "findings", "queued_runs", "active_batches", "active_executions", "recent_events"):
+            if key in payload:
+                payload[key] = [{**record, "source_db": selected.name, "writable": selected == self.db_path}
+                                for record in payload[key]]
         return payload
 
     def _next_context(self) -> tuple[dict[str, Any], config.TaplConfig, list[dict[str, str]]]:
@@ -343,41 +375,35 @@ class WorkflowApplication:
             return tapl_context.build_context(conn, event=event, settings=self._settings())
 
     def search_history(self, query: str, *, limit: int | None = None) -> dict[str, Any]:
-        settings = self._settings()
-        selected_limit = limit if limit is not None else settings.search.max_results
-        with self._connection() as conn:
-            payload = embeddings.search(conn, query, limit=selected_limit, search_config=settings.search)
-        return {"ok": True, **payload}
+        return self._history().search(query, limit=limit)
 
     def recall(self, query: str = "", *, limit: int = 3, offset: int = 0) -> dict[str, Any]:
-        with self._connection() as conn:
-            payload = memory_store.recall_memories(conn, query=query, limit=limit, offset=offset)
-        return {"ok": True, **payload}
+        return self._history().recall(query, limit=limit, offset=offset)
 
-    def get_memory(self, memory_id: str) -> dict[str, Any]:
-        with self._connection() as conn:
-            try:
-                memory = memory_store.get_memory(conn, memory_id)
-            except memory_store.MemoryError as exc:
-                if exc.code != "not_found":
-                    raise
-                memory = None
-        return {"ok": True, "memory": memory}
+    def get_memory(self, memory_id: str, *, source_db: str | None = None) -> dict[str, Any]:
+        return self._history().get_memory(memory_id, source_db=source_db)
 
     def update_memory(
         self, memory_id: str, *, expected_revision: int,
         note: str | None = None, cue: list[str] | None = None, state: str | None = None,
+        source_db: str | None = None,
     ) -> dict[str, Any]:
+        self._require_local_memory_source(source_db)
         with self._connection() as conn:
             memory = memory_store.update_memory(
                 conn, memory_id, expected_revision=expected_revision, note=note, cue=cue, state=state,
             )
-        return {"ok": True, "memory": memory}
+        return {"ok": True, "memory": history._memory(memory, self.db_path.name), "source_db": self.db_path.name}
 
-    def delete_memory(self, memory_id: str, *, expected_revision: int) -> dict[str, Any]:
+    def delete_memory(self, memory_id: str, *, expected_revision: int, source_db: str | None = None) -> dict[str, Any]:
+        self._require_local_memory_source(source_db)
         with self._connection() as conn:
             memory = memory_store.delete_memory(conn, memory_id, expected_revision=expected_revision)
-        return {"ok": True, "memory": memory}
+        return {"ok": True, "memory": {**memory, "source_db": self.db_path.name}, "source_db": self.db_path.name}
+
+    def _require_local_memory_source(self, source_db: str | None) -> None:
+        if source_db is not None and self._history().select_source(source_db) != self.db_path:
+            raise WorkflowApplicationError("foreign history is read-only; only local memories may be changed")
 
     @staticmethod
     def _memory_failure(exc: Exception) -> dict[str, Any]:
@@ -387,28 +413,51 @@ class WorkflowApplication:
             "retryable": code not in {"invalid", "conflict", "stale_run", "not_found"},
         }
 
-    def get_item(self, item_id: int) -> dict[str, Any]:
-        with self._connection() as conn:
-            item = db.item_detail(conn, item_id)
-        if item is None:
-            raise WorkflowApplicationError(f"item not found: {item_id}")
-        return {"ok": True, "item": item}
+    def _reinforce_memory(self, conn: Any, run_id: str, use: Any, now: Any) -> dict[str, Any]:
+        memory_store.validate_use(use)
+        selector = use.get("source_db")
+        if selector is None:
+            # An omitted pointer from a foreign emitted hint must never fall
+            # through to a coincidentally identical local memory id.
+            row = conn.execute(
+                "SELECT payload_json FROM events WHERE run_id=? AND event_type='memory_recall_attempted' ORDER BY id DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            emitted = json.loads(row[0]).get("memory_sources", []) if row else []
+            if any(entry.get("memory_id") == use.get("memory_id") and
+                   entry.get("source_db") not in (None, self.db_path.name) for entry in emitted):
+                raise memory_store.MemoryError("Preserve source_db when using a recalled foreign memory")
+            if any(source != self.db_path.name for source in self._history().memory_sources(use.get("memory_id"))):
+                raise memory_store.MemoryError("source_db is required when a memory id exists in foreign history")
+        else:
+            try:
+                path = self._history().select_source(selector)
+            except history.HistoryError as exc:
+                raise memory_store.MemoryError(str(exc)) from exc
+            if path != self.db_path:
+                return {"memory_id": use.get("memory_id"), "source_db": path.name,
+                        "status": "skipped", "reason": "foreign_source_read_only"}
+        result = memory_store._reinforce(conn, run_id, use, now)
+        return {**result, "source_db": self.db_path.name}
+
+    def get_item(self, item_id: int, *, source_db: str | None = None) -> dict[str, Any]:
+        try:
+            return self._history().get_item(item_id, source_db=source_db)
+        except history.HistoryError as exc:
+            raise WorkflowApplicationError(str(exc)) from exc
 
     def list_archives(self, *, limit: int | None = None) -> dict[str, Any]:
         """List archived workflow runs for native viewers and MCP clients."""
 
-        with self._connection() as conn:
-            archives = db.list_archives(conn, limit=limit)
-        return {"ok": True, "archives": archives}
+        return self._history().list_archives(limit=limit)
 
-    def get_archive(self, archive_id: str) -> dict[str, Any]:
+    def get_archive(self, archive_id: str, *, source_db: str | None = None) -> dict[str, Any]:
         """Return one archive and its items/events without a CLI hop."""
 
-        with self._connection() as conn:
-            detail = db.archive_detail(conn, archive_id)
-        if detail is None:
-            raise WorkflowApplicationError(f"archive not found: {archive_id}")
-        return {"ok": True, **detail}
+        try:
+            return self._history().get_archive(archive_id, source_db=source_db)
+        except history.HistoryError as exc:
+            raise WorkflowApplicationError(str(exc)) from exc
 
     def summarize_run(
         self,
@@ -455,6 +504,7 @@ class WorkflowApplication:
                 if settings.recall.enabled:
                     payload["recall"] = memory_store.emit_recall_once(
                         conn, run_id=str(run["id"]), query=recall_query or summary,
+                        recall_reader=lambda **values: self._history().automatic_recall(local_conn=conn, **values),
                     )
                 else:
                     payload["recall"] = {"status": "disabled"}
@@ -509,6 +559,7 @@ class WorkflowApplication:
                     payload["memory"] = memory_store.finish_memories(
                         conn, run_id=run_id, candidates=memory_candidates, uses=memory_uses, review=memory_review,
                         expected_token=checkpoint["attempt_token"],
+                        reinforce_memory=self._reinforce_memory,
                     )
                 except Exception:
                     conn.rollback()
@@ -680,9 +731,11 @@ class WorkflowApplication:
             )
         return {"ok": True, "approval": db.row_to_dict(row)}
 
-    def discard_run(self, *, run_id: str, confirmed: bool, confirmation_run_id: str) -> dict[str, Any]:
+    def discard_run(self, *, run_id: str, confirmed: bool, confirmation_run_id: str, source_db: str | None = None) -> dict[str, Any]:
         """Discard only the explicitly confirmed active run owned by this session."""
         db.validate_discard_confirmation(run_id=run_id, confirmed=confirmed, confirmation_run_id=confirmation_run_id)
+        if source_db is not None and self._history().select_source(source_db) != self.db_path:
+            raise WorkflowApplicationError("foreign history is read-only; only local runs may be discarded")
         settings = self._settings()
         with self._connection() as conn:
             previous_policy = self._authoring_policy(settings, {"active_run": db.workflow_run_to_dict(db.active_run(conn))})

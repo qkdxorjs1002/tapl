@@ -269,15 +269,15 @@ function OverviewView({
   const activeBatches = Array.isArray(status.active_batches) ? status.active_batches : [];
   const activeExecutions = Array.isArray(status.active_executions) ? status.active_executions : [];
   const runs = [...(status.active_runs ?? [])];
-  if (status.active_run && !runs.some((run) => run.id === status.active_run?.id)) {
+  if (status.active_run && !runs.some((run) => run.id === status.active_run?.id && run.source_db === status.active_run?.source_db)) {
     runs.push(status.active_run);
   }
 
   return (
     <>
-      <RunTabs runs={runs} selectedId={status.active_run?.id} workspace={view.workspace} discardSupported={discardSupported} discardResult={discardResult} send={send} />
+      <RunTabs runs={runs} selectedId={status.active_run?.id} selectedSourceDb={status.active_run?.source_db} workspace={view.workspace} discardSupported={discardSupported} discardResult={discardResult} send={send} />
       <div className="tapl-run-panel" id="tapl-run-panel" role="tabpanel"
-        aria-labelledby={status.active_run ? `tapl-run-tab-${status.active_run.id}` : undefined}
+        aria-labelledby={status.active_run ? `tapl-run-tab-${status.active_run.source_db ?? "local"}-${status.active_run.id}` : undefined}
         aria-label={!status.active_run ? t('noActiveRunTitle') : undefined}>
         <header className="tapl-hero">
           <div className="tapl-hero-main">
@@ -360,9 +360,10 @@ function OverviewView({
   );
 }
 
-export function RunTabs({ runs, selectedId, workspace, discardSupported, discardResult, send }: {
+export function RunTabs({ runs, selectedId, selectedSourceDb, workspace, discardSupported, discardResult, send }: {
   runs: TaplWorkflowRun[];
   selectedId?: string;
+  selectedSourceDb?: string;
   workspace?: string;
   discardSupported: boolean;
   discardResult?: RunDiscardResult;
@@ -373,17 +374,17 @@ export function RunTabs({ runs, selectedId, workspace, discardSupported, discard
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const pendingRef = useRef(false);
-  const [target, setTarget] = useState<{ runId: string; targetSessionId: string; workspace: string; title: string } | null>(null);
+  const [target, setTarget] = useState<{ runId: string; targetSessionId: string; workspace: string; title: string; source_db?: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [confirmationRunId, setConfirmationRunId] = useState('');
   const confirmationMatches = target !== null && confirmationRunId === target.runId;
   const confirmationMismatch = confirmationRunId.length > 0 && !confirmationMatches;
   const targetAvailable = target !== null && discardSupported && target.workspace === workspace
-    && runs.some((run) => run.id === target.runId && run.session_id === target.targetSessionId);
-  const focusIndex = Math.max(0, runs.findIndex((run) => run.id === selectedId));
+    && runs.some((run) => run.id === target.runId && run.session_id === target.targetSessionId && run.source_db === target.source_db && run.writable !== false);
+  const focusIndex = Math.max(0, runs.findIndex((run) => (run.id === selectedId && run.source_db === selectedSourceDb)));
   const selectRun = (run: TaplWorkflowRun) => {
-    if (run.id !== selectedId) send({ command: 'selectRun', sessionId: run.session_id ?? '' });
+    if (run.id !== selectedId || run.source_db !== selectedSourceDb) send({ command: 'selectRun', sessionId: run.session_id ?? '', source_db: run.source_db });
   };
 
   useEffect(() => {
@@ -433,7 +434,7 @@ export function RunTabs({ runs, selectedId, workspace, discardSupported, discard
     pendingRef.current = true;
     setPending(true);
     setError('');
-    send({ command: 'discardRun', runId: target.runId, targetSessionId: target.targetSessionId, workspace: target.workspace, confirmed: true, confirmationRunId });
+    send({ command: 'discardRun', runId: target.runId, targetSessionId: target.targetSessionId, workspace: target.workspace, source_db: target.source_db, confirmed: true, confirmationRunId });
   };
 
   return (
@@ -443,11 +444,11 @@ export function RunTabs({ runs, selectedId, workspace, discardSupported, discard
           const title = String(run.request_summary || run.slug || run.id || t('active'));
           const closeLabel = t('closeRun', { title });
           return (
-            <div className="tapl-run-tab-slot" key={run.id} role="presentation">
-              <button id={`tapl-run-tab-${run.id}`} className="tapl-run-tab"
-                type="button" role="tab" aria-selected={run.id === selectedId}
+            <div className="tapl-run-tab-slot" key={`${run.source_db}:${run.id}`} role="presentation">
+              <button id={`tapl-run-tab-${run.source_db ?? "local"}-${run.id}`} className="tapl-run-tab"
+                type="button" role="tab" aria-selected={(run.id === selectedId && run.source_db === selectedSourceDb)}
                 aria-controls="tapl-run-panel" tabIndex={index === focusIndex ? 0 : -1}
-                title={run.session_id ? `${title}\n${run.session_id}` : title}
+                title={[title, run.session_id, run.source_db].filter(Boolean).join("\n")}
                 onClick={() => selectRun(run)}
                 onKeyDown={(event) => {
                   let nextIndex: number;
@@ -465,13 +466,13 @@ export function RunTabs({ runs, selectedId, workspace, discardSupported, discard
                 <span className="tapl-run-tab-title">{title}</span>
                 <span className="tapl-run-tab-session">{run.session_id?.slice(0, 8) || t('active')}</span>
               </button>
-              {discardSupported && workspace && run.id && typeof run.session_id === 'string' ? <button className="tapl-run-tab-close" type="button"
+              {discardSupported && run.writable !== false && workspace && run.id && typeof run.session_id === 'string' ? <button className="tapl-run-tab-close" type="button"
                 aria-label={closeLabel} title={closeLabel} disabled={pending}
                 onClick={() => {
                   if (!workspace || !run.id || typeof run.session_id !== 'string') return;
                   setError('');
                   setConfirmationRunId('');
-                  setTarget({ runId: run.id, targetSessionId: run.session_id, workspace, title });
+                  setTarget({ runId: run.id, targetSessionId: run.session_id, workspace, title, source_db: run.source_db });
                 }}><span aria-hidden="true">×</span></button> : null}
             </div>
           );
@@ -637,7 +638,7 @@ function ArchiveView({
         <button
           className="btn btn-primary btn-sm"
           type="button"
-          onClick={() => send({ command: 'archiveEvents', archiveId: archiveMeta.id })}
+          onClick={() => send({ command: 'archiveEvents', archiveId: archiveMeta.id, source_db: archiveMeta.source_db })}
         >
           {t('hookEvents')}
         </button>
@@ -752,7 +753,7 @@ function SearchItemView({
             ]}
           />
           {detail?.archive_id ? (
-            <button className="btn btn-primary btn-sm mt-3" type="button" onClick={() => send({ command: 'openArchive', archiveId: detail.archive_id as string })}>
+            <button className="btn btn-primary btn-sm mt-3" type="button" onClick={() => send({ command: 'openArchive', archiveId: detail.archive_id as string, source_db: detail.source_db })}>
               {t('openArchive')}
             </button>
           ) : null}
@@ -1121,10 +1122,10 @@ function ArchiveList({ archives, send }: { archives: TaplArchive[]; send: (messa
     <div className="tapl-stack">
       {archives.map((archive) => (
         <button
-          key={archive.id}
+          key={`${archive.source_db}:${archive.id}`}
           className="tapl-item tapl-clickable tapl-archive-button"
           type="button"
-          onClick={() => send({ command: 'openArchive', archiveId: archive.id })}
+          onClick={() => send({ command: 'openArchive', archiveId: archive.id, source_db: archive.source_db })}
         >
           <span className="tapl-archive-title">{archive.slug}</span>
           <span className="tapl-muted mt-1 block text-sm">{conciseText(archive.summary || t('noSummary'), 140)}</span>
@@ -1259,7 +1260,7 @@ function SearchResult({ result, send }: { result: TaplSearchResult; send: (messa
     return <article className="tapl-item tapl-record-card">{content}</article>;
   }
   return (
-    <button className="tapl-item tapl-clickable tapl-record-card" type="button" onClick={() => send({ command: 'openSearchResult', itemId: result.id as number })}>
+    <button className="tapl-item tapl-clickable tapl-record-card" type="button" onClick={() => send({ command: 'openSearchResult', itemId: result.id as number, source_db: result.source_db })}>
       {content}
     </button>
   );

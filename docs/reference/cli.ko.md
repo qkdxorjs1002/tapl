@@ -20,7 +20,7 @@ taplctl [--session-id ID] [--db PATH] [--config PATH] COMMAND ...
 | `--version` | 설치 버전을 출력하고 종료 |
 | `-h`, `--help` | 도움말을 출력하고 종료 |
 
-DB를 명시하지 않으면 DB 사용 명령은 현재 작업 폴더의 `.tapl/tapl.db`를 선택하며 상위 DB를 찾지 않습니다. 설정은 정확한 작업 폴더의 `.tapl/config.toml`, 다음으로 `~/.tapl/config.toml`을 선택합니다. [설정](../guides/configuration.ko.md)을 참고하세요.
+DB를 명시하지 않으면 DB 사용 명령은 현재 작업 폴더의 `.tapl/tapl-{UUID}.db`를 선택하며 상위 DB를 찾지 않습니다. 설정은 정확한 작업 폴더의 `.tapl/config.toml`, 다음으로 `~/.tapl/config.toml`을 선택합니다. [설정](../guides/configuration.ko.md)을 참고하세요.
 
 `init`, `doctor`, `update`, 두 `install`·`uninstall` 범위, 모든 `config` 하위 명령, `reindex`, 공개 `searchd` 하위 명령은 `--json`(구조화 JSON)과 `--agent`(간결한 XML 유사 Agent 출력) 중 **하나**를 받습니다. `viewer`에는 두 출력 옵션이 없습니다. `--dry-run`은 `install`, `uninstall`, `reindex`에만 있으며 해당 명령의 관리 변경을 미리 보여 줍니다. 모든 시작·DB 활동을 읽기 전용으로 바꾸는 공통 모드는 아닙니다.
 
@@ -45,7 +45,7 @@ DB를 명시하지 않으면 DB 사용 명령은 현재 작업 폴더의 `.tapl/
 ```sh
 taplctl init
 taplctl init --workspace-root /path/to/workspace --json
-taplctl --db /path/to/tapl.db init
+taplctl --db /path/to/history.db init
 ```
 
 `--workspace-root PATH`는 해당 폴더의 작업 공간을 명시적으로 초기화합니다. 전역 `--db`와 함께 사용할 수 없습니다. 생략하면 선택한 DB를 열거나 초기화합니다. 초기화는 Codex 연결을 설치하지 않습니다.
@@ -54,7 +54,7 @@ taplctl --db /path/to/tapl.db init
 
 ```sh
 taplctl doctor
-taplctl --db /path/to/tapl.db doctor --json
+taplctl --db /path/to/history.db doctor --json
 ```
 
 TAPL·SQLite 버전, 설정, 선택 DB, 확장 로딩 기능, 스키마와 선택 의존성 상태를 출력합니다. 이 출력은 진단 정보이며 시맨틱 의존성이 없다고 전문 검색까지 사용할 수 없는 것은 아닙니다. 의도한 작업 공간에서 실행하거나 DB를 지정하세요.
@@ -100,11 +100,13 @@ taplctl uninstall user --purge-config --purge-db --dry-run
 | 옵션 | 연결 외 추가 삭제 대상 |
 | --- | --- |
 | `--purge-config` | 선택 범위의 `.tapl/config.toml` |
-| `--purge-db` | 선택 범위의 `.tapl/tapl.db`와 `-wal`·`-shm`·`-journal` 보조 파일 |
+| `--purge-db` | 선택 범위의 현재 로컬 `.tapl/tapl-{UUID}.db`, 기존 `tapl.db`와 해당 `-wal`·`-shm`·`-journal` 보조 파일 |
 
 기본 uninstall은 TAPL MCP 항목·인식되는 hook·설치 버전 표시를 제거합니다. 무관한 Codex 설정·hook, TAPL 설정·DB·백업과 다른 작업 공간은 보존합니다. Purge 옵션은 독립적이므로 두 종류를 모두 지우려는 경우에만 조합하세요. DB 삭제 전 대상 DB를 사용하는 세션을 닫으세요.
 
 `user` 대상은 `--codex-home`(기본 `~/.codex`)을 포함한 홈 디렉터리이며 모든 프로젝트 DB를 지우지 않습니다. 실행 파일과 서비스는 남습니다. 제거하려면 [설치 방법](../getting-started/installation.ko.md)을 따르세요. 보존된 설정만으로 해제한 연결이 다시 활성화되지는 않습니다.
+
+모든 제거 옵션은 `~/.tapl/installation_id`와 다른 환경의 DB를 보존합니다. UUID와 기존 DB 이전은 [로컬 식별자와 공유 이력](../guides/storage.ko.md)을 참고하세요.
 
 ## config
 
@@ -153,7 +155,7 @@ taplctl config unset workflow.authoring_detail
 taplctl viewer
 taplctl viewer --port 9000
 taplctl viewer --allowed-origin https://tapl.example.com
-taplctl --db /path/to/workspace/.tapl/tapl.db viewer
+taplctl --db /path/to/history.db viewer
 ```
 
 `--port PORT` 기본값은 `8000`입니다. `--allowed-origin ORIGIN`을 반복해 HTTP(S) 브라우저 origin을 추가할 수 있으며 CLI 값은 `viewer.allowed_origins`와 합칩니다. 경로 없이 스킴·호스트·선택 포트만 사용합니다.

@@ -4,9 +4,11 @@
 
 TAPL Workflow Viewer adds active-work and archive trees, history search, and a dashboard to VS Code. It reads the workspace through a persistent `tapl-mcp` stdio connection. A running browser Viewer service is not required.
 
+Shared history results, details, and RUN selections preserve their database source. Peer RUNs do not offer the close action. See [Local identity and shared history](storage.md).
+
 ## Install and open
 
-You need VS Code **1.90+**, an initialized workspace containing `.tapl/tapl.db`, and a reachable `tapl-mcp` executable. Follow [Installation](../getting-started/installation.md) and [Agent integration](../getting-started/integrations.md) first.
+You need VS Code **1.90+**, an initialized workspace containing `.tapl/tapl-{UUID}.db`, and a reachable `tapl-mcp` executable. Follow [Installation](../getting-started/installation.md) and [Agent integration](../getting-started/integrations.md) first.
 
 Install `paragonnov.tapl-workflow-viewer` from Marketplace, or download a `.vsix` from [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases) and run **Extensions: Install from VSIX…**. Open the initialized folder, select **TAPL** in the Activity Bar, then run **TAPL Workflow: Open TAPL Dashboard**.
 
@@ -41,7 +43,7 @@ Labels above are the English labels under **TAPL Workflow**; the UI also support
 
 The initial target is the first VS Code workspace folder. In a multi-root window, use the dashboard's workspace picker to choose another open folder. TAPL launches that folder's MCP process with the folder as its working directory and resolves executable settings for that folder. It does not search parent folders for a database.
 
-Connections are pooled by workspace. Database, WAL, and SHM changes (`.tapl/tapl.db`, `-wal`, `-shm`) trigger debounced refreshes. Changing the executable invalidates connections; changing workspace resets the dashboard route. RUN selection is retained per workspace and reads the selected owner's session. A stale read cannot overwrite a newer navigation or workspace selection.
+Connections are pooled by workspace. Database, WAL, and SHM changes (`.tapl/tapl-*.db`, `-wal`, `-shm`) trigger debounced refreshes. Changing the executable invalidates connections; changing workspace resets the dashboard route. RUN selection is retained per workspace and reads the selected owner's session. A stale read cannot overwrite a newer navigation or workspace selection.
 
 ## Shared Viewer and capabilities
 

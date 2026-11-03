@@ -162,7 +162,10 @@ def main():
                     decision = json.loads(output)
                     assert decision["decision"] == "block" and decision["reason"], decision
         # Inspect only the disposable DB, after all processes have released it.
-        connection = sqlite3.connect(repo / ".tapl/tapl.db")
+        identity_path = home / ".tapl/installation_id"
+        installation_id = identity_path.read_text(encoding="utf-8").strip()
+        local_db = repo / ".tapl" / f"tapl-{installation_id}.db"
+        connection = sqlite3.connect(local_db)
         try:
             rows = connection.execute("SELECT payload_json FROM events WHERE event_type = 'UserPromptSubmit'").fetchall()
             assert rows and all(json.loads(row[0])["prompt"] == "유니코드 입력" for row in rows)
@@ -178,10 +181,21 @@ def main():
             assert not (root / ".tapl/version").exists()
             assert not (root / ".tapl/install-state.json").exists()
             assert (root / ".tapl/config.toml").is_file()
-        assert (repo / ".tapl/tapl.db").is_file()
+        assert local_db.is_file()
+        assert identity_path.read_text(encoding="utf-8").strip() == installation_id
         run([str(executable), "doctor", "--json"], cwd=repo, env=env)
         assert not any((root / ".tapl/version").exists() for root in (home, repo))
-    print("Installed-wheel runtime smoke passed: CLI, refresh, MCP stdio, hooks, uninstall")
+        peer = repo / ".tapl/tapl-peer.db"
+        peer.write_bytes(b"peer history sentinel")
+        run([str(executable), "uninstall", "repo", "--purge-config", "--purge-db", "--json"], cwd=repo, env=env)
+        assert not local_db.exists()
+        assert not (repo / ".tapl/config.toml").exists()
+        assert peer.read_bytes() == b"peer history sentinel"
+        assert identity_path.read_text(encoding="utf-8").strip() == installation_id
+        initialized = json.loads(run([str(executable), "init", "--workspace-root", str(repo), "--json"], cwd=repo, env=env))
+        assert Path(initialized["db"]) == local_db and local_db.is_file()
+        assert identity_path.read_text(encoding="utf-8").strip() == installation_id
+    print("Installed-wheel runtime smoke passed: CLI, refresh, MCP stdio, hooks, uninstall, UUID reuse after purge")
 
 
 if __name__ == "__main__":

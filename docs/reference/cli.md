@@ -20,7 +20,7 @@ Put global options before the command. Use `taplctl --help`, `taplctl COMMAND --
 | `--version` | Print the installed version and exit |
 | `-h`, `--help` | Show help and exit |
 
-Without an explicit database, database-using commands select the working folder's `.tapl/tapl.db`, never a parent database. Config selection prefers the exact working folder's `.tapl/config.toml`, then `~/.tapl/config.toml`. See [configuration](../guides/configuration.md).
+Without an explicit database, database-using commands select the working folder's `.tapl/tapl-{UUID}.db`, never a parent database. Config selection prefers the exact working folder's `.tapl/config.toml`, then `~/.tapl/config.toml`. See [configuration](../guides/configuration.md).
 
 `init`, `doctor`, `update`, both `install`/`uninstall` scopes, all `config` subcommands, `reindex`, and public `searchd` subcommands accept **one** of `--json` (structured JSON) or `--agent` (compact XML-like agent output). `viewer` has neither output flag. `--dry-run` is available only on `install`, `uninstall`, and `reindex`; it previews the command's managed changes rather than creating a general read-only mode for all startup/database activity.
 
@@ -45,7 +45,7 @@ Some database/service commands can refresh existing installations before running
 ```sh
 taplctl init
 taplctl init --workspace-root /path/to/workspace --json
-taplctl --db /path/to/tapl.db init
+taplctl --db /path/to/history.db init
 ```
 
 `--workspace-root PATH` initializes that folder's workspace explicitly. It cannot be combined with global `--db`. Without it, TAPL opens/initializes the selected database. Initialization does not install Codex integration.
@@ -54,7 +54,7 @@ taplctl --db /path/to/tapl.db init
 
 ```sh
 taplctl doctor
-taplctl --db /path/to/tapl.db doctor --json
+taplctl --db /path/to/history.db doctor --json
 ```
 
 Reports TAPL and SQLite versions, configuration, selected database, extension-loading capability, schema, and optional dependency availability. The report is diagnostic data; a missing optional semantic dependency does not make full-text search unavailable. Run in the intended workspace or specify its database.
@@ -100,11 +100,13 @@ taplctl uninstall user --purge-config --purge-db --dry-run
 | Option | Deleted in addition to the integration |
 | --- | --- |
 | `--purge-config` | Selected scope's `.tapl/config.toml` |
-| `--purge-db` | Selected scope's `.tapl/tapl.db` and its `-wal`, `-shm`, and `-journal` sidecars |
+| `--purge-db` | Selected scope's current local `.tapl/tapl-{UUID}.db`, legacy `tapl.db`, and their `-wal`, `-shm`, and `-journal` sidecars |
 
 Default uninstall removes TAPL's MCP entry, recognized hooks, and installation version marker. It preserves unrelated Codex settings/hooks, TAPL config, databases, backups, and other workspaces. Purge options are independent; combine them only when both categories should be deleted. Close sessions using the target database before purging it.
 
 For `user`, the target is the home directory containing `--codex-home` (default `~/.codex`); it does not purge every project database. These commands leave executables and services installed. Use the [installation method](../getting-started/installation.md) to remove those. Preserved config does not re-enable an uninstalled integration.
+
+Every removal option preserves `~/.tapl/installation_id` and peer databases. See [Local identity and shared history](../guides/storage.md) for identity persistence and migration.
 
 ## config
 
@@ -153,7 +155,7 @@ Do not copy guessed model IDs into configuration. Use the host's actual delegati
 taplctl viewer
 taplctl viewer --port 9000
 taplctl viewer --allowed-origin https://tapl.example.com
-taplctl --db /path/to/workspace/.tapl/tapl.db viewer
+taplctl --db /path/to/history.db viewer
 ```
 
 `--port PORT` defaults to `8000`. Repeat `--allowed-origin ORIGIN` to allow additional HTTP(S) browser origins; CLI origins combine with `viewer.allowed_origins`. Use an origin's scheme, host, and optional port without a path.

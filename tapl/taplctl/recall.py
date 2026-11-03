@@ -271,6 +271,12 @@ def _budget(payload):
         payload["diagnostics"]["injected_count"] = 0
     if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 1200:
         payload["query"] = ""
+    # Foreign-source failures remain fully visible in manual history reads.
+    # Automatic context has one shared byte budget, including diagnostics.
+    errors = payload.get("source_errors", [])
+    while errors and len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 600:
+        errors.pop()
+        payload["source_errors_omitted"] = payload.get("source_errors_omitted", 0) + 1
     for memory in candidates:
         payload["memories"].append(memory)
         if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 1200:
@@ -284,18 +290,23 @@ def recall_memories(conn, *, query="", current_run_id=None, automatic=False, lim
         return _recall(conn, query=query, current_run_id=current_run_id, automatic=automatic, limit=limit, offset=offset, now=_time(now))
 
 
-def emit_recall_once(conn, *, run_id, query, now=None):
+def emit_recall_once(conn, *, run_id, query, now=None, recall_reader=None):
     now = _time(now)
     with _transaction(conn, write=True):
         _current_run(conn, run_id)
         if conn.execute("SELECT 1 FROM events WHERE run_id=? AND event_type='memory_recall_attempted'", (run_id,)).fetchone():
             return {"status": "already_attempted", "memories": []}
-        result = _recall(conn, query=query, current_run_id=run_id, automatic=True, limit=3, offset=0, now=now)
+        result = (recall_reader(run_id=run_id, query=query, now=now) if recall_reader is not None else
+                  _recall(conn, query=query, current_run_id=run_id, automatic=True, limit=3, offset=0, now=now))
         result["status"] = "recalled" if result["memories"] else "empty"
         _budget(result)
         if not result["memories"]:
             result["status"] = "empty"
-        _event(conn, run_id, "memory_recall_attempted", {"memory_ids": [m["id"] for m in result["memories"]]}, now)
+        _event(conn, run_id, "memory_recall_attempted", {
+            "memory_ids": [m["id"] for m in result["memories"]],
+            "memory_sources": [{"memory_id": m["id"], "source_db": m.get("source_db"),
+                                "source_run_id": m["source"]["run_id"]} for m in result["memories"]],
+        }, now)
         return result
 
 
@@ -380,13 +391,21 @@ def _capture(conn, run_id, candidate, now):
         return {"slot": candidate["slot"], "memory_id": memory_id, "status": "deduplicated" if existing else "captured"}
 
 
-def _reinforce(conn, run_id, use, now):
+def validate_use(use):
     if not isinstance(use, dict):
         raise MemoryError("use must be an object")
     if use.get("source_checked") is not True or not isinstance(use.get("usage"), str) or not use["usage"].strip():
         raise MemoryError("reinforcement requires source_checked=true and actual usage")
     if len(use["usage"]) > 2000:
         raise MemoryError("usage must be at most 2000 characters")
+    if not isinstance(use.get("memory_id"), str) or not use["memory_id"]:
+        raise MemoryError("memory_id must be a nonempty string")
+    if type(use.get("revision")) is not int or use["revision"] < 1:
+        raise MemoryError("expected revision must be a positive integer")
+
+
+def _reinforce(conn, run_id, use, now):
+    validate_use(use)
     with _transaction(conn, write=True):
         _current_run(conn, run_id)
         row = _row(conn, use.get("memory_id"))
@@ -500,12 +519,14 @@ def _identity(kind, entry, index):
         identity["slot"] = entry["slot"]
     elif isinstance(entry, dict) and kind == "use" and isinstance(entry.get("memory_id"), str) and len(entry["memory_id"]) <= 100:
         identity["memory_id"] = entry["memory_id"]
+        if entry.get("source_db") is not None:
+            identity["source_db"] = entry["source_db"]
     else:
         identity["index"] = index
     return identity
 
 
-def finish_memories(conn, *, run_id, candidates=None, uses=None, review=None, expected_token=None, now=None):
+def finish_memories(conn, *, run_id, candidates=None, uses=None, review=None, expected_token=None, now=None, reinforce_memory=None):
     now = _time(now)
     review = validate_review(review, candidates)
     result = {"captures": [], "reinforcements": [], "errors": []}
@@ -527,7 +548,7 @@ def finish_memories(conn, *, run_id, candidates=None, uses=None, review=None, ex
             state.pop("reason", None)
         elif review:
             state.update(review)
-        for kind, entries, maximum, function, output in (("candidate", candidates, 2, _capture, "captures"), ("use", uses, 50, _reinforce, "reinforcements")):
+        for kind, entries, maximum, function, output in (("candidate", candidates, 2, _capture, "captures"), ("use", uses, 50, reinforce_memory or _reinforce, "reinforcements")):
             if entries is None:
                 continue
             malformed = not isinstance(entries, list) or len(entries) > maximum
