@@ -2,7 +2,9 @@
 
 [문서 홈](../README.ko.md) · [English](architecture.md)
 
-TAPL은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 워크플로 상태를 보관합니다. CLI 관리 명령, MCP 워크플로 도구, Codex hook, Viewer는 Python 애플리케이션·DB 경계를 통해 로컬 상태를 사용합니다. 에이전트가 저장소 작업을 수행하고 TAPL은 그 전후의 워크플로를 기록·검증합니다.
+TAPL은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 워크플로 상태를 보관합니다. CLI 관리 명령, MCP 워크플로 도구, 호스트 수명주기 hook, Viewer는 Python 애플리케이션·DB 경계를 통해 로컬 상태를 사용합니다. 에이전트가 저장소 작업을 수행하고 TAPL은 그 전후의 워크플로를 기록·검증합니다.
+
+`clients.py`는 컨텍스트별 호스트 식별과 소유자 검증을 담당합니다. `claude_install.py`는 Claude JSON 연결과 독립 갱신 표식을 관리하며 기존 Codex의 TOML·hook 경로는 유지합니다. Hook·MCP 진입부는 설정과 정책을 클라이언트별로 한정합니다. 공통 DB schema는 변경하지 않고 새 Claude 소유자에 예약 접두사를 사용합니다. [Claude 연결 경계](../getting-started/claude-code.ko.md)를 참고하세요.
 
 환경 식별자는 사용자 전역 `~/.tapl/installation_id`에 독립적으로 남습니다. DB 계층이 로컬 쓰기 경로와 기존 이름 이전을 담당하고, `history.py`가 여러 원본의 읽기 전용 조회와 `source_db` 전달을 담당합니다. 자세한 동작은 [저장과 공유 이력](../guides/storage.ko.md)을 참고하세요.
 

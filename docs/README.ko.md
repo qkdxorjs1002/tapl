@@ -15,6 +15,7 @@ TAPL은 Agent의 계획·승인·실행·검증과 작업 이력을 연결하는
 | [설치](getting-started/installation.ko.md) | 플랫폼별 설치·업데이트·재설치·제거를 안내합니다. |
 | [빠른 시작](getting-started/quickstart.ko.md) | TAPL 설치와 연결 범위를 선택하고 첫 작업을 완료합니다. |
 | [Agent 연결](getting-started/integrations.ko.md) | MCP·hook을 연결하고 Agent에게 설치를 맡기는 방법을 안내합니다. |
+| [Claude Code](getting-started/claude-code.ko.md) | Claude MCP·hook을 연결하고 독립적인 Agent 선호를 설정합니다. |
 
 ## 핵심 개념
 

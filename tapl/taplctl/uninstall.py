@@ -9,21 +9,124 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
+import sqlite3
+import tempfile
 import tomllib
 from typing import Any
 
-from . import config_editor, db, install
+from . import config, config_editor, db, install
 from .command_runtime import windows_hook_tokens
 
 
 _DB_NAMES = ("tapl.db", "tapl.db-wal", "tapl.db-shm", "tapl.db-journal")
 
 
+def purge_protection(
+    root: Path, *, client: str, config_path: Path, db_paths: list[Path],
+    purge_config: bool, purge_db: bool,
+) -> tuple[bool, bool]:
+    """Protect peer settings/history even after that integration was removed."""
+    if not (purge_config or purge_db):
+        return False, False
+    from . import claude_install
+
+    peer_marker = root / (claude_install.VERSION_RELATIVE if client == "codex" else install.VERSION_RELATIVE)
+    if peer_marker.is_file():
+        return purge_config, purge_db
+    peer_config = False
+    if config_path.is_file():
+        value: Any = _parse_toml(config_path.read_text(encoding="utf-8"), config_path)
+        keys = ("clients", "claude-code", "subagents") if client == "codex" else ("subagents",)
+        for key in keys:
+            value = value.get(key) if isinstance(value, dict) else None
+        if client == "claude-code":
+            defaults = tomllib.loads(install.default_config_text()).get("subagents", {})
+        else:
+            from .clients import client_scope
+
+            with client_scope("claude-code"):
+                defaults = config.from_mapping({}, path=config_path).subagents.as_dict()
+        peer_config = isinstance(value, dict) and _custom_settings(value, defaults)
+    databases = [path for path in dict.fromkeys(db_paths) if path.suffix == ".db"]
+    peer_history = purge_db and any(_database_has_peer(path, client=client) for path in databases if path.is_file())
+    return purge_config and peer_config, purge_db and (peer_config or peer_history)
+
+
+def _custom_settings(value: dict[str, Any], defaults: dict[str, Any]) -> bool:
+    """A generated default section alone does not establish a peer install."""
+    for key, current in value.items():
+        if key not in defaults:
+            return True
+        default = defaults[key]
+        if isinstance(current, dict) and isinstance(default, dict):
+            if _custom_settings(current, default):
+                return True
+        elif current != default:
+            return True
+    return False
+
+
+def _database_has_peer(path: Path, *, client: str) -> bool:
+    # Query a disposable copy, including WAL, so --dry-run cannot create or
+    # update SQLite shared-memory sidecars in the selected installation.
+    try:
+        with tempfile.TemporaryDirectory(prefix="tapl-uninstall-") as directory:
+            copied = Path(directory) / "tapl.db"
+            shutil.copyfile(path, copied)
+            for suffix in ("-wal", "-journal"):
+                source = Path(str(path) + suffix)
+                if source.is_file():
+                    shutil.copyfile(source, Path(str(copied) + suffix))
+            conn = sqlite3.connect(copied)
+            try:
+                conn.execute("PRAGMA query_only = ON")
+                for table in ("workflow_runs", "events"):
+                    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+                    if not columns:
+                        continue
+                    if "session_id" not in columns:
+                        # Pre-session records belong to legacy Codex.
+                        if client == "claude-code" and conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
+                            return True
+                        continue
+                    predicate = "=" if client == "codex" else "<>"
+                    row = conn.execute(
+                        f"SELECT 1 FROM {table} WHERE substr(coalesce(session_id, ''), 1, ?) {predicate} ? LIMIT 1",
+                        (len("claude-code:"), "claude-code:"),
+                    ).fetchone()
+                    if row is not None:
+                        return True
+            finally:
+                conn.close()
+    except (OSError, sqlite3.DatabaseError):
+        # Without positive evidence of a peer, retain the established explicit
+        # single-client purge behavior, including damaged legacy databases.
+        return False
+    return False
+
+
 def uninstall_user(
     *, codex_home: Path | None = None, purge_config: bool = False,
     purge_db: bool = False, dry_run: bool = False,
+    claude_home: Path | None = None, client: str = "codex",
 ) -> dict[str, Any]:
     """Disable user integration, retaining settings and data unless purged."""
+    from .clients import resolve_client
+
+    if resolve_client(client) == "claude-code":
+        if codex_home is not None:
+            raise ValueError("--codex-home is only supported with --client codex")
+        selected = Path(os.path.abspath((claude_home or Path.home() / ".claude").expanduser()))
+        root = selected.parent.resolve()
+        from . import claude_install
+
+        return claude_install.uninstall(
+            root, root / selected.name, scope="user", purge_config=purge_config,
+            purge_db=purge_db, dry_run=dry_run,
+        )
+    if claude_home is not None:
+        raise ValueError("--claude-home requires --client claude-code")
     selected = Path(os.path.abspath((codex_home or Path.home() / ".codex").expanduser()))
     # Resolve the containing scope once (including macOS /tmp), but never the
     # .codex directory itself: a linked installation must not redirect edits.
@@ -37,12 +140,22 @@ def uninstall_user(
 def uninstall_repo(
     *, repo: Path | None = None, purge_config: bool = False,
     purge_db: bool = False, dry_run: bool = False,
+    client: str = "codex",
 ) -> dict[str, Any]:
     """Disable integration in this folder without searching parent workspaces."""
     selected = Path(os.path.abspath((repo if repo is not None else Path.cwd()).expanduser()))
     if selected.is_symlink():
         raise ValueError(f"refusing symlink in uninstall scope: {selected}")
     root = selected.resolve()
+    from .clients import resolve_client
+
+    if resolve_client(client) == "claude-code":
+        from . import claude_install
+
+        return claude_install.uninstall(
+            root, root / ".claude", scope="repo", purge_config=purge_config,
+            purge_db=purge_db, dry_run=dry_run,
+        )
     return _uninstall(
         root, root / ".codex", scope="repo",
         purge_config=purge_config, purge_db=purge_db, dry_run=dry_run,
@@ -110,9 +223,13 @@ def _uninstall(
     )
     updates = [(codex_config, original_config, updated_config), (hooks_path, original_hooks, updated_hooks)]
     removals = [version_path, state_path]
-    if purge_config:
+    protect_config, protect_db = purge_protection(
+        root, client="codex", config_path=config_path, db_paths=db_paths,
+        purge_config=purge_config, purge_db=purge_db,
+    )
+    if purge_config and not protect_config:
         removals.append(config_path)
-    if purge_db:
+    if purge_db and not protect_db:
         removals.extend(db_paths)
     files: list[dict[str, str]] = []
     for path, original, updated in updates:
@@ -121,6 +238,9 @@ def _uninstall(
     for path in removals:
         action = "removed" if path.exists() else "missing"
         files.append({"path": str(path), "action": f"would_{action}" if dry_run and action == "removed" else action})
+    if protect_config or protect_db:
+        preserved = ([config_path] if protect_config else []) + (db_paths if protect_db else [])
+        files.extend({"path": str(path), "action": "preserved_shared"} for path in dict.fromkeys(preserved))
     if not dry_run:
         _validate_paths(root, codex, tapl, all_paths)
         for path, original, updated in updates:

@@ -4,6 +4,8 @@
 
 Install TAPL, connect it to Codex, and keep asking for work in your own words. Codex manages the workflow records; you do not need to write PLAN or TASK records by hand.
 
+For Claude Code, use the [Claude connection and Agent guide](claude-code.md). This walkthrough uses the default Codex integration; shared workflow records and Viewer behavior apply to both hosts.
+
 ## 1. Install TAPL
 
 On macOS with Homebrew:

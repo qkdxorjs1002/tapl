@@ -4,9 +4,11 @@
 
 Choose the configuration file that controls the current working folder, inspect effective values, and change supported settings without rewriting unrelated TOML.
 
+Delegation preferences are client-scoped: `[subagents]` belongs to Codex, while `[clients.claude-code.subagents]` belongs to Claude Code. Use `taplctl config get clients.claude-code.subagents --json` to inspect Claude settings and the same explicit prefix with `config set`/`unset`. Within a Claude MCP/hook call, logical `subagents` values resolve to that host. Claude permits empty effort arrays and an explicit inheritance selection; see [the Claude guide](../getting-started/claude-code.md#models-and-agent-execution).
+
 ## Workspace and file selection
 
-Codex sessions write to `.tapl/tapl-{UUID}.db` in their exact working folder and read other `tapl-*.db` history there. Hooks require an existing absolute `cwd`; a hook `--db` must name that folder's current local database. The MCP server stays bound to its startup folder. Parent databases, Git roots, and repository markers are not searched, so child folders keep separate history. Administrative CLI commands retain explicit `--db` and `--workspace-root` overrides. See [Local identity and shared history](storage.md) for UUID persistence and legacy migration.
+Agent sessions write to `.tapl/tapl-{UUID}.db` in their exact working folder and read other `tapl-*.db` history there. Hooks require an existing absolute `cwd`; a hook `--db` must name that folder's current local database. The MCP server stays bound to its startup folder. Parent databases, Git roots, and repository markers are not searched, so child folders keep separate history. Administrative CLI commands retain explicit `--db` and `--workspace-root` overrides. See [Local identity and shared history](storage.md) for UUID persistence and legacy migration.
 
 Configuration selects **one file**, in this order:
 
@@ -80,7 +82,7 @@ taplctl doctor
 
 Inspect the reported source path before changing settings. A malformed selected file fails rather than falling through to another file. Removing a value must still leave the complete configuration valid; for example, completed enabled delegation requires an allowed model pair. `config get` reports defaults and inferred values, so removing a key does not necessarily make its effective value disappear.
 
-The next full MCP policy lookup reflects changed policy settings and returns a changed `policy_revision`. Restart Codex after changing its MCP/hooks integration; restart the Viewer service after changing its origin settings. Installation config merge/overwrite policies concern installation-time file updates, separately from runtime file selection; see [Installation](../getting-started/installation.md).
+The next full MCP policy lookup reflects changed policy settings and returns a changed `policy_revision`. Restart the affected host after changing its MCP/hooks integration; restart the Viewer service after changing its origin settings. Installation config merge/overwrite policies concern installation-time file updates, separately from runtime file selection; see [Installation](../getting-started/installation.md).
 
 ## Related pages
 

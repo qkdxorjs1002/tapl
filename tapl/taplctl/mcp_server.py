@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import __version__, db, install as tapl_install, prompt as tapl_prompt, sessions
 from .application import WorkflowApplication
 from .command_runtime import configure_stdio
+from .clients import client_scope, resolve_client, validate_session_key
 
 
 SERVER_NAME = "tapl_mcp"
@@ -52,7 +53,7 @@ CustomFields = Annotated[
 ]
 SessionId = Annotated[
     str | None,
-    Field(description="Current Codex hook session_id. Pass the same identity on EVERY call, including reads. Omission selects only the isolated legacy namespace.", max_length=256),
+    Field(description="Current host hook session_id. Pass the exact TAPL identity on EVERY call, including reads. Claude Code requires its claude-code: namespaced hook identity; omission is supported only in Codex's isolated legacy namespace.", max_length=256),
 ]
 SourceDb = Annotated[
     str | None,
@@ -153,8 +154,13 @@ async def call_application(
 ) -> dict[str, Any]:
     """Run one synchronous application use case without blocking the MCP loop."""
 
+    application = getattr(method, "__self__", None)
+    client = application_client(application)
+    owner = validate_session_key(session_id, client)
+    if client == "claude-code" and not owner:
+        raise ValueError("session_id is required for every Claude Code TAPL call; pass the exact claude-code: identity from this session's hook")
+
     def invoke() -> dict[str, Any]:
-        application = getattr(method, "__self__", None)
         if require_session and isinstance(application, WorkflowApplication) and not sessions.current_session_id():
             with application._connection() as conn:
                 identified = conn.execute(
@@ -164,28 +170,35 @@ async def call_application(
             if identified:
                 raise ValueError(
                     "session_id is required for writes in this session-aware workspace; "
-                    "pass the current Codex hook session_id on every TAPL call"
+                    "pass the current host hook session_id on every TAPL call"
                 )
         return method(*args, **kwargs)
 
-    with sessions.session_scope(session_id):
+    with client_scope(client), sessions.session_scope(owner):
         result = await asyncio.to_thread(invoke)
         owner = sessions.current_session_id()
         return {**result, "session_id": owner} if owner else result
 
 
-def mcp_next_recommendations(payload: dict[str, Any]) -> dict[str, Any]:
+def application_client(application: Any) -> str:
+    """Use a factory-bound host, while preserving unbound callable adapters."""
+    selected = getattr(application, "tapl_client", None)
+    return resolve_client(selected if isinstance(selected, str) else None)
+
+
+def mcp_next_recommendations(payload: dict[str, Any], *, client: str | None = None) -> dict[str, Any]:
     """Replace command recipes with MCP tool names in MCP-facing output."""
 
+    question_tool = "AskUserQuestion" if resolve_client(client) == "claude-code" else "request_user_input"
     tool_map: dict[str, str | list[str]] = {
-        "configure-subagents": "request_user_input",
-        "review-subagent-models": "request_user_input",
+        "configure-subagents": question_tool,
+        "review-subagent-models": question_tool,
         "classify-request": ["tapl_summarize_run", "tapl_split_run"],
         "summarize-request": "tapl_summarize_run",
         "apply-plan": "tapl_apply_plan",
         "create-task": "tapl_create_task",
         "decide-after-plan": ["tapl_create_task", "tapl_finish_run"],
-        "confirm-after-plan": "request_user_input",
+        "confirm-after-plan": question_tool,
         "approve-execution": "tapl_approve_execution",
         "settle-parallel-task": ["tapl_complete_task", "tapl_block_task", "tapl_skip_task"],
         "recover-parallel-batch": "tapl_recover_batch",
@@ -395,14 +408,15 @@ async def call_application_write(
     """Execute an application write and attach its latest safe MCP action."""
 
     result = await call_application(method, *args, session_id=session_id, require_session=True, **kwargs)
-    receipt = mcp_write_receipt(result, operation=operation)
+    with client_scope(application_client(application)):
+        receipt = mcp_write_receipt(result, operation=operation)
     refresh_actions = receipt.get("recommendations", []) if receipt.get("policy_refresh_required") else []
     try:
         next_payload = await call_application(application.get_next_actions, session_id=session_id)
         for key in ("authoring_policy", "state_summary"):
             if key in next_payload:
                 receipt[key] = next_payload[key]
-        receipt["recommendations"] = mcp_next_recommendations(next_payload).get(
+        receipt["recommendations"] = mcp_next_recommendations(next_payload, client=application_client(application)).get(
             "recommendations", []
         )
     except Exception:
@@ -427,13 +441,25 @@ def create_server(
     workspace_root: Path | None = None,
     instructions: str | None = None,
     refresh_install: bool = False,
+    client: str | None = None,
 ) -> MCPServer[None]:
     """Create a workspace-bound stdio MCP server."""
 
+    with client_scope(resolve_client(client)):
+        return _create_server(workspace_root=workspace_root, instructions=instructions, refresh_install=refresh_install)
+
+
+def _create_server(
+    *, workspace_root: Path | None, instructions: str | None, refresh_install: bool,
+) -> MCPServer[None]:
+    """Keep host policy active while registering tool schemas and help."""
+    selected_client = resolve_client()
     root = resolve_workspace_root(workspace_root)
     if refresh_install:
-        tapl_install.auto_install_if_needed(start=root)
+        refresh_options = {"client": selected_client} if selected_client != "codex" else {}
+        tapl_install.auto_install_if_needed(start=root, **refresh_options)
     application = WorkflowApplication(root)
+    application.tapl_client = selected_client
     server_instructions = instructions
     if server_instructions is None:
         server_instructions = tapl_prompt.mcp_entry_instructions()
@@ -482,7 +508,7 @@ def create_server(
             catalog_complete=catalog_complete,
             known_policy_revision=known_policy_revision,
             workflow_policy=instructions,
-        ))
+        ), client=selected_client)
 
     @server.tool(name="tapl_configure_subagents", title="Save SubAgent preferences", annotations=WRITE)
     async def configure_subagents(
@@ -930,7 +956,7 @@ def create_server(
         source: Annotated[ApprovalSource, Field(description=tapl_prompt.field_help("approval", "source"))] = "explicit_user",
         session_id: SessionId = None,
     ) -> dict[str, Any]:
-        """Record execution approval only after the user explicitly requested execution or confirmed it through request_user_input."""
+        """Record execution approval only after the user explicitly requested execution or confirmed it through the host's question tool."""
 
         return await call_application_write(
             application,

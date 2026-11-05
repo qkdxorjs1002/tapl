@@ -4,6 +4,8 @@
 
 The browser Viewer shows active RUNs, plans, tasks, approvals, findings, archives, history search, and associative memories from a local TAPL workspace. Memory lists, searches, details, and original sources are read-only; ask the agent explicitly to edit or delete a memory.
 
+The same Viewer reads Codex and Claude Code RUNs. Select the owning session explicitly; Claude owners carry the `claude-code:` prefix. See [Claude Code](../getting-started/claude-code.md).
+
 The Viewer reads the folder's `tapl-*.db` files together and preserves the source database through details and refresh. Peer RUNs are viewable but cannot be discarded. Read-only discovery does not create a UUID. See [Local identity and shared history](storage.md).
 
 ## Open a workspace

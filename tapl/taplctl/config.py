@@ -9,10 +9,29 @@ from typing import Any
 import tomllib
 from urllib.parse import urlsplit
 
-from . import db
+from . import clients, db
 
 
 CONFIG_RELATIVE = Path(".tapl") / "config.toml"
+CLAUDE_SUBAGENTS_PREFIX = "clients.claude-code.subagents"
+
+
+def subagents_config_key(client: str | None = None) -> str:
+    """The persistent settings location; legacy settings always belong to Codex."""
+    return CLAUDE_SUBAGENTS_PREFIX if clients.resolve_client(client) == "claude-code" else "subagents"
+
+
+def effective_editable_key(key: str) -> str:
+    """Route logical subagents.* CLI edits to the active host without migration."""
+    if key.startswith("subagents.") and clients.current_client() == "claude-code":
+        return f"clients.claude-code.{key}"
+    return key
+
+
+def _logical_editable_key(key: str) -> str:
+    if key.startswith(CLAUDE_SUBAGENTS_PREFIX + "."):
+        return "subagents." + key.removeprefix(CLAUDE_SUBAGENTS_PREFIX + ".")
+    return key
 
 DEFAULT_SEARCH_MODE = "hybrid"
 DEFAULT_HYBRID_SEMANTIC_RATIO = 0.65
@@ -334,6 +353,7 @@ class SubagentsConfig:
     profiles: tuple[SubagentTaskProfileConfig, ...] = field(
         default_factory=default_subagent_profiles
     )
+    client: str = "codex"
 
     def as_dict(self) -> dict[str, Any]:
         rendered: dict[str, Any] = {
@@ -346,6 +366,12 @@ class SubagentsConfig:
                 for model in self.models
             },
         }
+        if self.client == "claude-code":
+            rendered["selection_semantics"] = {
+                "inherit": "Selection mode, not a catalog model: omit Agent.model; actual model is host-controlled.",
+                "empty_reasoning_efforts": "Unspecified effort: omit Agent.effort; no supported effort is asserted.",
+                "models": "Requested aliases or configured agent models; resolved runtime models may differ.",
+            }
         if self.profiles:
             rendered["profiles"] = [profile.as_dict() for profile in self.profiles]
         if self.available_models is not None:
@@ -388,11 +414,14 @@ class TaplConfig:
     viewer: ViewerConfig = field(default_factory=ViewerConfig)
     recall: RecallConfig = field(default_factory=RecallConfig)
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
+    client: str = "codex"
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "path": self.path,
             "exists": self.exists,
+            **({"client": self.client, "subagents_config_key": subagents_config_key(self.client)}
+               if self.client == "claude-code" else {}),
             "search": self.search.as_dict(),
             "viewer": self.viewer.as_dict(),
             "recall": self.recall.as_dict(),
@@ -515,62 +544,13 @@ def from_mapping(
             "search.searchd_model_idle_timeout_seconds",
         ),
     )
-    subagents_data = table(data, "subagents")
-    subagents_enabled = boolean(
-        setting(
-            subagents_data,
-            "enabled",
-            default=DEFAULT_SUBAGENTS_ENABLED,
-        ),
-        "subagents.enabled",
-    )
-    subagent_strategy = choice(
-        setting(
-            subagents_data,
-            "strategy",
-            default=DEFAULT_SUBAGENT_STRATEGY,
-        ),
-        SUBAGENT_STRATEGIES,
-        "subagents.strategy",
-    )
-    if "setup_complete" in subagents_data:
-        subagent_setup_complete = boolean(
-            subagents_data["setup_complete"],
-            "subagents.setup_complete",
-        )
-    else:
-        raw_models = subagents_data.get("models")
-        subagent_setup_complete = (
-            not subagents_enabled
-            or (isinstance(raw_models, dict) and bool(raw_models))
-        )
-    subagent_preference = string(
-        setting(subagents_data, "preference", default=""),
-        "subagents.preference",
-    )
-    available_models = (
-        parse_subagent_models(subagents_data["available_models"], enabled=False, key="subagents.available_models")
-        if "available_models" in subagents_data else None
-    )
-    if "models" in subagents_data:
-        subagent_models = parse_subagent_models(
-            subagents_data["models"],
-            enabled=subagents_enabled,
-            setup_complete=subagent_setup_complete,
-        )
-    else:
-        subagent_models = parse_subagent_models(
-            {},
-            enabled=subagents_enabled,
-            setup_complete=subagent_setup_complete,
-        )
-    if "profiles" in subagents_data:
-        subagent_profiles = parse_subagent_profiles(
-            subagents_data["profiles"],
-            models=subagent_models,
-        )
-    else:
-        subagent_profiles = default_subagent_profiles(subagent_models)
+    client = clients.current_client()
+    # Validate both independent settings, even when editing the inactive host.
+    codex_subagents = _parse_subagents(table(data, "subagents"), client="codex")
+    client_tables = table(data, "clients")
+    claude_data = table(table(client_tables, "claude-code"), "subagents")
+    claude_subagents = _parse_subagents(claude_data, client="claude-code")
+    subagents = claude_subagents if client == "claude-code" else codex_subagents
     viewer_data = table(data, "viewer")
     viewer = ViewerConfig(
         allowed_origins=origin_array(
@@ -602,22 +582,87 @@ def from_mapping(
             AUTHORING_DETAILS,
             "workflow.authoring_detail",
         )),
-        subagents=SubagentsConfig(
-            enabled=subagents_enabled,
-            strategy=subagent_strategy,
-            setup_complete=subagent_setup_complete,
-            preference=subagent_preference,
-            available_models=available_models,
-            models=subagent_models,
-            profiles=subagent_profiles,
-        ),
+        subagents=subagents,
+        client=client,
     )
 
+
+
+def _parse_subagents(subagents_data: dict[str, Any], *, client: str) -> SubagentsConfig:
+    prefix = subagents_config_key(client)
+    subagents_enabled = boolean(
+        setting(
+            subagents_data,
+            "enabled",
+            default=DEFAULT_SUBAGENTS_ENABLED,
+        ),
+        f"{prefix}.enabled",
+    )
+    subagent_strategy = choice(
+        setting(
+            subagents_data,
+            "strategy",
+            default=DEFAULT_SUBAGENT_STRATEGY,
+        ),
+        SUBAGENT_STRATEGIES,
+        f"{prefix}.strategy",
+    )
+    if "setup_complete" in subagents_data:
+        subagent_setup_complete = boolean(
+            subagents_data["setup_complete"],
+            f"{prefix}.setup_complete",
+        )
+    else:
+        raw_models = subagents_data.get("models")
+        subagent_setup_complete = (
+            not subagents_enabled
+            or (isinstance(raw_models, dict) and bool(raw_models))
+        )
+    subagent_preference = string(
+        setting(subagents_data, "preference", default=""),
+        f"{prefix}.preference",
+    )
+    available_models = (
+        parse_subagent_models(subagents_data["available_models"], enabled=False, key=f"{prefix}.available_models", client=client)
+        if "available_models" in subagents_data else None
+    )
+    if "models" in subagents_data:
+        subagent_models = parse_subagent_models(
+            subagents_data["models"],
+            enabled=subagents_enabled,
+            setup_complete=subagent_setup_complete,
+            key=f"{prefix}.models",
+            client=client,
+        )
+    else:
+        subagent_models = parse_subagent_models(
+            {},
+            enabled=subagents_enabled,
+            setup_complete=subagent_setup_complete,
+            key=f"{prefix}.models",
+            client=client,
+        )
+    if "profiles" in subagents_data:
+        subagent_profiles = parse_subagent_profiles(
+            subagents_data["profiles"],
+            models=subagent_models,
+            key=f"{prefix}.profiles",
+            client=client,
+        )
+    else:
+        subagent_profiles = default_subagent_profiles(subagent_models)
+    return SubagentsConfig(
+        enabled=subagents_enabled, strategy=subagent_strategy,
+        setup_complete=subagent_setup_complete, preference=subagent_preference,
+        available_models=available_models, models=subagent_models,
+        profiles=subagent_profiles, client=client,
+    )
 
 def editable_config_key(key: str) -> EditableConfigKey:
     candidate = key.strip()
     if candidate != key or not candidate:
         raise ValueError("config key must be a non-empty dot-separated key")
+    candidate = _logical_editable_key(candidate)
     for spec in EDITABLE_CONFIG_KEYS:
         if spec.matches(candidate):
             return spec
@@ -629,6 +674,8 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
     """Parse and normalize a CLI value for one editable config key."""
 
     spec = editable_config_key(key)
+    parse_client = "claude-code" if key.startswith(CLAUDE_SUBAGENTS_PREFIX + ".") else clients.current_client()
+    key = _logical_editable_key(key)
     value: Any
     normalized = raw_value.strip().lower().replace("-", "_")
     if key not in {"recall.enabled", "subagents.enabled", "subagents.setup_complete"} and spec.allowed and normalized in spec.allowed:
@@ -671,13 +718,14 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
             value,
             models=None,
             key=key,
+            client=parse_client,
         )
         return [profile.as_dict() for profile in profiles]
     if spec.dynamic_prefix:
         model_name = key.removeprefix(spec.dynamic_prefix)
         if model_name != model_name.strip():
             raise ValueError("subagents.models model names must not have surrounding whitespace")
-        parsed = parse_subagent_models({model_name: value}, enabled=False)
+        parsed = parse_subagent_models({model_name: value}, enabled=False, client=parse_client)
         return list(parsed[0].reasoning_efforts)
     raise AssertionError(f"editable config key has no parser: {key}")
 
@@ -769,7 +817,9 @@ def parse_subagent_models(
     enabled: bool,
     setup_complete: bool = True,
     key: str = "subagents.models",
+    client: str | None = None,
 ) -> tuple[SubagentModelConfig, ...]:
+    claude = clients.resolve_client(client) == "claude-code"
     if not isinstance(value, dict):
         raise ValueError(f"{key} must be a TOML table")
 
@@ -786,9 +836,14 @@ def parse_subagent_models(
 
         if not isinstance(raw_efforts, list):
             raise ValueError(f"{model_key} must be an array of reasoning effort strings")
-        if not raw_efforts:
+        if not raw_efforts and not claude:
             raise ValueError(f"{model_key} must contain at least one reasoning effort")
 
+        if claude and name == "inherit":
+            if key.endswith("available_models"):
+                raise ValueError(f"{model_key}: inherit is a selection mode, not a catalog model")
+            if raw_efforts:
+                raise ValueError(f"{model_key}: inherited selection requires an empty effort array")
         reasoning_efforts: list[str] = []
         seen: set[str] = set()
         for index, raw_effort in enumerate(raw_efforts):
@@ -822,6 +877,7 @@ def parse_subagent_profiles(
     *,
     models: tuple[SubagentModelConfig, ...] | None,
     key: str = "subagents.profiles",
+    client: str | None = None,
 ) -> tuple[SubagentTaskProfileConfig, ...]:
     """Validate ordered advisory task profiles against the model allowlist."""
 
@@ -874,9 +930,10 @@ def parse_subagent_profiles(
                 raw_candidate.get("model"),
                 f"{candidate_key}.model",
             )
-            reasoning_effort = non_empty_string(
-                raw_candidate.get("reasoning_effort"),
-                f"{candidate_key}.reasoning_effort",
+            reasoning_effort = (
+                optional_string(raw_candidate.get("reasoning_effort", ""), f"{candidate_key}.reasoning_effort")
+                if clients.resolve_client(client) == "claude-code" else
+                non_empty_string(raw_candidate.get("reasoning_effort"), f"{candidate_key}.reasoning_effort")
             )
             if allowed_efforts is not None and model_name not in allowed_efforts:
                 raise ValueError(
@@ -885,7 +942,7 @@ def parse_subagent_profiles(
                 )
             if (
                 allowed_efforts is not None
-                and reasoning_effort not in allowed_efforts[model_name]
+                and reasoning_effort not in (allowed_efforts[model_name] or {""})
             ):
                 raise ValueError(
                     f"{candidate_key}.reasoning_effort is not allowed for {model_name}: "

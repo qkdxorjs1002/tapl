@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any
 
 from . import config as tapl_config, db, prompt as tapl_prompt, validation
+from .clients import current_client
 
 
 def external_findings_guidance() -> str:
@@ -28,6 +29,7 @@ def build_context(
         state, authoring_detail=settings.workflow.authoring_detail,
     )
     prompt = prompt_summary(payload or {})
+    helper = current_client() == "claude-code" and bool((payload or {}).get("agent_id"))
     covered_issue_codes = covered_validation_issue_codes(state, plan_task)
     return {
         "ok": True,
@@ -48,15 +50,18 @@ def build_context(
         "config": settings.as_dict(),
         "authoring_policy": authoring_policy,
         "plan_task_execute": plan_task,
-        "instructions": [tapl_prompt.session_routing_guidance()] + instructions(event=event),
-        "workflow_guidance": workflow_guidance(
+        "instructions": [tapl_prompt.session_routing_guidance()] + (
+            ["You are a helper in this parent session. Reuse its session_id for permitted TAPL reads; report your result to the parent. The parent owns run creation, workflow changes, approval, completion, and archival."]
+            if helper else instructions(event=event)
+        ),
+        "workflow_guidance": [] if helper else workflow_guidance(
             event=event,
             state=state,
             prompt=prompt,
             subagents=settings.subagents,
             authoring_detail=settings.workflow.authoring_detail,
         ),
-        "next_actions": (
+        "next_actions": [] if helper else (
             ["Call `tapl_get_next` and ask the first-use SubAgent preference question before delegating."]
             if event != "SessionStart" and event != "Stop" and not settings.subagents.setup_complete
             else []

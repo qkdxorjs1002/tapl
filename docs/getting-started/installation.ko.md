@@ -4,6 +4,8 @@
 
 플랫폼에 맞는 TAPL 실행 파일을 설치한 뒤 [Codex에 연결](integrations.ko.md)합니다. 패키지 설치 방법과 Codex 연결 범위는 별개의 선택입니다. [Agent에게 설치와 연결을 맡길 수도 있습니다](integrations.ko.md#agent에게-tapl-설치-맡기기).
 
+동일한 실행 파일로 [Claude Code도 연결](claude-code.ko.md)합니다. `taplctl install user --client claude-code` 또는 `taplctl install repo --client claude-code`를 사용하며, 클라이언트 선택은 패키지 채널·플랫폼과 별개입니다.
+
 ## 요구사항
 
 - `venv`를 포함한 Python 3.11 이상. Homebrew formula는 `python@3.12`를 사용합니다.

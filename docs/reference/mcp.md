@@ -4,11 +4,13 @@
 
 `tapl-mcp` exposes the workflow application over MCP stdio. Management commands belong to [the CLI](cli.md). This page covers all **30 public tools** registered by [`mcp_server.py`](../../tapl/taplctl/mcp_server.py); the connected server's JSON schema is the authority for exact validation.
 
+Claude Code requires the exact `claude-code:<native-session-id>` hook owner on every call, even reads. Its missing/raw/foreign-client IDs are rejected; the legacy omission behavior below applies only to Codex. Approval source `request_user_input` remains the stable tool-confirmed provenance value, including Claude `AskUserQuestion` answers. Host-specific policy and model setup are described in the [Claude guide](../getting-started/claude-code.md).
+
 ## Common contract
 
-Pass the current Codex hook **`session_id` on every call**, including reads. Most schemas make it optional for compatibility, but omission selects the isolated legacy namespace (`""`), not another session's active RUN. Identity is at most 256 characters without surrounding whitespace or control characters. `tapl_discard_run` requires an explicit owner, including `""` for a legacy RUN.
+Pass the current host hook **`session_id` on every call**, including reads. Most schemas make it optional for compatibility, but omission selects the isolated legacy namespace (`""`), not another session's active RUN. Identity is at most 256 characters without surrounding whitespace or control characters. `tapl_discard_run` requires an explicit owner, including `""` for a legacy RUN.
 
-Tool responses are structured objects. In code mode, discover the needed tools together by exact name without printing the full tool catalog. Emit `structuredContent` once, falling back to parsed text when necessary; do not print both envelope copies. Write receipts include current recommendations and compact validation. All blocking errors are retained; omitted warnings are counted in `omitted_issue_count`.
+Tool responses are structured objects. When the host provides code mode, discover the needed tools together by exact name without printing the full tool catalog. Emit `structuredContent` once, falling back to parsed text when necessary; do not print both envelope copies. Write receipts include current recommendations and compact validation. All blocking errors are retained; omitted warnings are counted in `omitted_issue_count`.
 
 Runtime status, entry, context, validation and applicable write receipts expose `authoring_policy={configured,effective,workflow_mode}` for the selected session. `config.workflow.authoring_detail` keeps the configured value, including the default `auto`. Automatic detail maps Fast → `minimal`, Standard → `normal`, Strict → `precise`, falling back to `normal` with `workflow_mode=null` when no RUN is active. Explicit levels remain fixed. See [Authoring detail](../guides/authoring-detail.md).
 

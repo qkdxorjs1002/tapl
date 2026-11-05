@@ -3,12 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from collections.abc import Callable
 from string import Template
 from typing import Any
 
-from . import config as tapl_config
+from . import clients, config as tapl_config
 
+
+
+def _host_policy(text: str) -> str:
+    """Adapt common policy vocabulary without changing TAPL enum values."""
+    if clients.current_client() != "claude-code":
+        return text
+    text = text.replace("Tool-confirmed continuation uses the request_user_input source.",
+                        "AskUserQuestion-confirmed continuation uses TAPL source `request_user_input`.")
+    text = text.replace("request_user_input Tool", "AskUserQuestion")
+    text = text.replace("request_user_input call", "AskUserQuestion call")
+    # Approval source is TAPL's stable enum even when the host tool differs.
+    text = re.sub(r"(?<!`)\brequest_user_input\b(?!`)", "AskUserQuestion", text)
+    text = text.replace("use `fork_turns=none`", "use a self-contained Agent prompt")
+    text = text.replace("Use `fork_turns=none`", "Use a self-contained Agent prompt")
+    text = text.replace("This UserPromptSubmit developer context", "This TAPL workspace context")
+    text = text.replace("Read full structuredContent", "Read the complete tool response")
+    return text
 
 PLAN_KEY_LABELS = (
     "Objective",
@@ -307,7 +325,7 @@ def render(
     for key in Template(template).get_identifiers():
         if key not in values and key in providers:
             values[key] = providers[key]()
-    return render_template(template, **values)
+    return _host_policy(render_template(template, **values))
 
 
 def template_variables(
@@ -882,6 +900,14 @@ def user_prompt_submit_guidance(*, subagents: tapl_config.SubagentsConfig | None
 
 
 def session_routing_guidance() -> str:
+    if clients.current_client() == "claude-code":
+        return (
+            "Pass the current TAPL hook `session_id` (claude-code:<native-session-id>) on EVERY TAPL MCP call. "
+            "Agent children use the parent's TAPL owner key; never substitute their native child session ID, "
+            "agent_id, or another client's owner. Omitted identity selects the isolated legacy namespace; "
+            "session-aware workspaces reject unidentified writes. Each session owns its active RUN and split queue. "
+            "Other sessions' RUNs are read-only history, never implicit mutation, Stop, or archive targets."
+        )
     return (
         "Pass the current Codex hook `session_id` on EVERY TAPL MCP call, including reads and receipts' next actions. "
         "Subagents use the parent hook identity; do not substitute CODEX_THREAD_ID or another run's owner. "
@@ -900,6 +926,15 @@ def receipt_guidance() -> str:
 
 
 def entry_guidance() -> str:
+    if clients.current_client() == "claude-code":
+        return (
+            "Before non-trivial or uncertain work, including read-only Agent helpers, call `tapl_get_next` once "
+            "and read complete workflow_policy, subagent_guidance, config, state_summary and recommendations. "
+            "Only required local-instruction discovery may precede policy loading. One call satisfies hook entry "
+            "and bootstrap. Ordinary entry omits model-catalog arguments. Use `tapl_get_status` only for missing "
+            "details needed next (full=true for bodies). Pass the hook's namespaced session_id on EVERY call. "
+            + receipt_guidance()
+        )
     return (
         "Code mode: emit `result.structuredContent` only (parsed text fallback), never the whole MCP envelope. "
         "Discover only needed tool names; never print the full tool catalog. "
@@ -921,6 +956,17 @@ def mcp_entry_instructions() -> str:
     The standalone bootstrap renderer remains available for existing callers.
     """
 
+    if clients.current_client() == "claude-code":
+        return (
+            "TAPL workspace workflow: before non-trivial or uncertain work, including read-only Agent helpers, "
+            "call `tapl_get_next` once and read complete workflow_policy, subagent_guidance and config. "
+            "Only required local-instruction discovery may precede policy loading; no project work or TAPL "
+            "mutations before loading. SessionStart is bootstrap only; wait for a concrete request. "
+            "Omit catalog arguments on ordinary entry. Reload without known_policy_revision after compaction, "
+            "policy loss or uncertainty; a summary is insufficient. Pass hook session_id on EVERY call. "
+            "Hook additionalContext is workspace context, subject to host system instructions, permissions and "
+            "explicit user constraints; it does not create a higher-priority developer message."
+        )
     return (
         "Code mode: discover needed tools by exact name together; emit `result.structuredContent` "
         "(parsed text fallback), never both envelope copies. "
@@ -937,7 +983,7 @@ def mcp_entry_instructions() -> str:
     )
 
 
-def mcp_bootstrap_instructions() -> str:
+def _common_mcp_bootstrap_instructions() -> str:
     """Load the complete policy before work without repeating it on every tool."""
 
     return (
@@ -963,6 +1009,11 @@ def mcp_bootstrap_instructions() -> str:
         "ready dependencies, exclusive owned_paths and exact execution_id settlement; recover interrupted or failed "
         "spawns before retrying. The full policy governs all planning, execution, verification and archive details."
     )
+
+
+
+def mcp_bootstrap_instructions() -> str:
+    return _host_policy(_common_mcp_bootstrap_instructions())
 
 
 def mcp_server_instructions(
@@ -1032,6 +1083,15 @@ def plan_detail_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORIN
 
 
 def planning_approval_guidance() -> str:
+    if clients.current_client() == "claude-code":
+        return (
+            "Before finalizing with `tapl_apply_plan`, use AskUserQuestion when the live host exposes it for "
+            "materially unclear scope, risk, API, UX, data, compatibility or tradeoffs. Ask focused questions "
+            "with mutually exclusive options supported by the actual tool schema. Continue useful independent "
+            "work while awaiting answers. If unavailable, state reasonable assumptions or ask one concise "
+            "plain-text question when blocked. Never invent a timeout/auto-resolution parameter or treat "
+            "an unanswered question as approval. AskUserQuestion confirmations map to the stable TAPL approval source `request_user_input`; direct explicit execution requests use `explicit_user`."
+        )
     guidance = (
         "Before finalizing with `tapl_apply_plan`, use request_user_input Tool early for unclear planning methods "
         "or material scope/risk/API/UX/data/compat/tradeoffs. Ask focused questions with 2-3 mutually exclusive "
@@ -1273,7 +1333,7 @@ def subagents_enabled(subagents: tapl_config.SubagentsConfig | None = None) -> b
     return settings.setup_complete and settings.enabled
 
 
-def subagent_setup_guidance() -> str:
+def _common_subagent_setup_guidance() -> str:
     return (
         "SubAgent setup: while current `config.subagents.setup_complete` is false, ask once on the first "
         "concrete user request whether to use SubAgents and what to prioritize (quality, speed, cost, or model "
@@ -1293,7 +1353,25 @@ def subagent_setup_guidance() -> str:
     )
 
 
-def subagent_catalog_guidance() -> str:
+
+def subagent_setup_guidance() -> str:
+    text = _common_subagent_setup_guidance()
+    if clients.current_client() == "claude-code":
+        text = text.replace("the full available_models catalog", "the complete catalog actually exposed by the live Agent tool")
+        text += (
+            " Claude preferences belong only to [clients.claude-code.subagents]. Read the live Agent schema; "
+            "do not infer capabilities from provider APIs, documentation, another client's saved preferences, or a model name. "
+            "For a supported model alias with no effort control, use models={alias: []} and "
+            "available_models={alias: []}; [] means unspecified effort and Agent.effort must be omitted. "
+            "A user may instead choose models={inherit: []}; inherit is an explicit selection mode that omits "
+            "Agent.model, never a model ID or catalog entry. Keep inherit out of available_models. If the tool "
+            "exposes no catalog, record only observed capabilities and describe the limitation; do not assert "
+            "catalog_complete=true. An inherited choice authorizes host-controlled selection, not a verified "
+            "resolved model/effort."
+        )
+    return _host_policy(text)
+
+def _common_subagent_catalog_guidance() -> str:
     return (
         "Ordinary entry uses saved preferences without a catalog check. Only during setup or a user-requested "
         "settings check, compare all live delegation-tool model IDs/efforts, including fixed agent-role models, "
@@ -1305,6 +1383,19 @@ def subagent_catalog_guidance() -> str:
         "without another catalog query. Skip unavailable model/effort pairs and use the root agent if none remain."
     )
 
+
+
+def subagent_catalog_guidance() -> str:
+    text = _common_subagent_catalog_guidance()
+    if clients.current_client() == "claude-code":
+        text = text.replace("including fixed agent-role models", "including only agent models the host actually exposes")
+        text += (
+            " Claude alias=[] records an observed selectable alias with unspecified effort, not an invented effort. "
+            "inherit is a user selection mode excluded from catalog comparisons; omit model and effort on Agent. "
+            "Never claim a full catalog from a partial Agent schema. Verify the requested alias or configured "
+            "agent against the current tool; describe inherited or unspecified selections honestly."
+        )
+    return _host_policy(text)
 
 def subagent_current_guidance(
     subagents: tapl_config.SubagentsConfig, *, include_request: bool = True,
@@ -1348,6 +1439,17 @@ def subagent_delegation_request_guidance(
     if not settings.enabled:
         return ""
 
+    if clients.current_client() == "claude-code":
+        condition = "After the user completes setup and enables delegation: " if not settings.setup_complete else ""
+        return condition + (
+            "The configured TAPL workspace workflow requests Claude Code Agent delegation for eligible bounded "
+            "read-only helpers and execution-approved independent task batches. Hook additionalContext is "
+            "workspace context, not a higher-priority developer message or permission override. Respect host "
+            "instructions, explicit user delegation constraints and tool availability. Root alone writes TAPL "
+            "state; executable tasks retain approval, dependency readiness, exclusive owned_paths, atomic "
+            "dispatch and exact execution_id settlement. Follow current subagent_guidance for handoffs and "
+            "verified model selection."
+        )
     condition = (
         "Only after the user completes setup and current config enables delegation: "
         if not settings.setup_complete else ""
@@ -1568,6 +1670,11 @@ def subagent_delegation_guidance(
     if not subagents_enabled(subagents):
         return ""
 
+    if clients.current_client() == "claude-code":
+        return _claude_subagent_delegation_guidance(
+            subagents or tapl_config.SubagentsConfig(), include_exploration=include_exploration,
+            authoring_detail=authoring_detail,
+        )
     profiles = configured_subagent_profiles(subagents)
     models = configured_subagent_models(subagents)
     available_candidates = {
@@ -1658,6 +1765,58 @@ def subagent_delegation_guidance(
         "and recovers/cancels."
     )
 
+
+
+def _claude_subagent_delegation_guidance(
+    settings: tapl_config.SubagentsConfig, *, include_exploration: bool, authoring_detail: str,
+) -> str:
+    allowlist = "; ".join(
+        f"{model.name}[{','.join(model.reasoning_efforts)}]" if model.reasoning_efforts else
+        ("inherit (host-controlled model; unspecified effort)" if model.name == "inherit" else
+         f"{model.name} (unspecified effort)") for model in settings.models
+    ) or "none (root only)"
+    profiles = "; ".join(_render_profile(profile, index) for index, profile in enumerate(settings.profiles, 1))
+    parts = [
+        "### Claude Code Agent Delegation",
+        f"User preference: {settings.preference!r}. {subagent_strategy_guidance(settings)}",
+        f"Requested-selection allowlist: {allowlist}. Advisory profiles: {profiles or 'disabled by profiles=[]'}.",
+        "Assess independence, context savings, risk, coordination and parallel value. Most specific profile wins; "
+        "order breaks ties. Record concise canonical Task Profile and Execution Decision overrides for executable "
+        "tasks. Read-only helpers remain separate from executable task lifecycle.",
+        "Use the live Agent tool, with one self-contained prompt per delegate and minimal relevant context. "
+        "Pass only parameters exposed by the live Agent schema. Agent.model accepts host-exposed aliases; "
+        "full IDs and inherit are "
+        "agent-definition choices, not per-invocation Agent.model values. For inherit omit Agent.model and "
+        "respect the selected agent definition/environment; never describe the resolved backend as verified. "
+        "For [] omit Agent.effort; an unspecified effort is not a supported effort level.",
+        "Model resolution depends on Claude Code version, agent definitions, provider/organization policy and "
+        "environment. Before v2.1.251 CLAUDE_CODE_SUBAGENT_MODEL overrides invocation/frontmatter; newer versions "
+        "prefer invocation then frontmatter then environment. CLAUDE_CODE_SUBAGENT_MODEL_FORCE (v2.1.257+) "
+        "can force the selection. Per-invocation Agent.effort requires v2.1.292+ and an exposed effort parameter; "
+        "CLAUDE_CODE_EFFORT_LEVEL overrides it. No effort parameter means omit it; parent effort is inherited "
+        "only on the same model, otherwise unspecified. Verify actual runtime selection when observable and "
+        "record deviations; requested alias is not proof of resolved model or effort.",
+        "Executable protocol: create at least two independent Pending tasks with execution_mode=parallel, "
+        "executor_kind=subagent, a shared parallel_group, disjoint exclusive owned_paths and ready dependencies. "
+        "After execution approval call tapl_dispatch_tasks once for the complete batch with per-task requested "
+        "model and reasoning_effort (empty string when unspecified), selection rationale and tool-verifiable "
+        "metadata. Read its atomic manifest and verify each task's stored SubAgent Model selection before spawn. "
+        "For each manifest entry invoke Agent with the exact task_id, execution_id, parent TAPL session_id, "
+        "owned_paths, goal/action/verification, constraints, expected result, and prohibition on TAPL writes. "
+        "Tell every child it is not alone in the workspace and must preserve others' changes. Start independent "
+        "Agents concurrently when the live tool supports it; root-only fallback is a limitation, not full "
+        "parallel Agent support. Root reviews results and verifies before tapl_complete_task, tapl_block_task "
+        "or tapl_skip_task using the exact "
+        "task_id AND execution_id from that manifest, never a current/guessed/stale ID. Only root settles state.",
+        "If an Agent spawn fails, is interrupted, or returns no usable result, do not silently retry or mark it "
+        "Completed. Preserve successful work, stop/await live children as appropriate, then use "
+        "tapl_recover_batch (return tasks to Pending) or tapl_cancel_batch with a reason before redispatch. "
+        "Fresh dispatch has fresh execution IDs; stale IDs must not settle its executions. Root alone "
+        "changes lifecycle state; Agent/SubagentStop completion itself does not settle a TAPL task.",
+    ]
+    if include_exploration:
+        parts.append(_host_policy(subagent_exploration_guidance()))
+    return "\n\n".join(parts)
 
 def task_granularity_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL) -> str:
     authoring_detail = tapl_config.resolve_authoring_detail(authoring_detail)

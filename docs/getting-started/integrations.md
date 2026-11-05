@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [한국어](integrations.ko.md)
 
-TAPL integrates with Codex through the `tapl-mcp` stdio server and `tapl-hook` lifecycle hooks. The installer configures both; `taplctl` handles management commands. This page documents the shipped Codex integration. Other MCP clients do not automatically gain Codex's hook or session behavior.
+TAPL connects Codex and Claude Code through the shared `tapl-mcp` stdio server and host-specific `tapl-hook` lifecycle handling. The commands below use the default Codex client. For Claude installation, hooks, owner IDs and Agent preferences, follow the [Claude Code guide](claude-code.md). Other MCP clients do not automatically gain either host's lifecycle behavior.
 
 ## Ask your agent to install TAPL
 

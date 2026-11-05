@@ -14,7 +14,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
 
-from . import config, config_editor, context as tapl_context, db, history, prompt, recall as memory_store, recommendations, sessions, validation
+from . import clients, config, config_editor, context as tapl_context, db, history, prompt, recall as memory_store, recommendations, sessions, validation
 from .prompt import authoring_policy_update
 
 
@@ -320,10 +320,12 @@ class WorkflowApplication:
         if available_models is not None and enabled:
             observed = config.parse_subagent_models(available_models, enabled=False, key="available_models")
             selected = config.parse_subagent_models(models, enabled=True)
-            pairs = lambda entries: {(item.name, effort) for item in entries for effort in item.reasoning_efforts}
+            pairs = lambda entries: {(item.name, effort) for item in entries for effort in (item.reasoning_efforts or ("",))}
             # Keeping an existing selection is permitted after a model disappears;
             # guidance skips those pairs until the user chooses replacements.
-            if pairs(selected) != pairs(settings.subagents.models) and not pairs(selected) <= pairs(observed):
+            selection = pairs(selected)
+            inherited = {("inherit", "")} if clients.current_client() == "claude-code" else set()
+            if selection != pairs(settings.subagents.models) and not selection <= pairs(observed) | inherited:
                 raise WorkflowApplicationError("New model selections must be present in the current delegation-tool catalog.")
         edited = config_editor.configure_subagents(
             settings.path,
@@ -342,6 +344,8 @@ class WorkflowApplication:
             "operation": "subagents_configure",
             "authoring_policy": authoring_policy,
             "path": edited.path,
+            "client": settings.client,
+            "subagents_config_key": config.subagents_config_key(settings.client),
             "changed": edited.changed,
             "subagents": edited.config.as_dict(),
             "subagent_guidance": prompt.subagent_current_guidance(

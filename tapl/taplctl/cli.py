@@ -162,21 +162,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     install = sub.add_parser("install", help="Install TAPL hooks and repo-local state.")
     install_sub = install.add_subparsers(dest="install_command")
-    install_user = install_sub.add_parser("user", help="Install user-global Codex hooks.")
+    install_user = install_sub.add_parser("user", help="Install user-global client hooks and MCP.")
     install_user.add_argument("--codex-home", type=Path, default=None)
+    install_user.add_argument("--claude-home", type=Path, default=None)
     add_install_common_args(install_user)
     install_user.set_defaults(handler=cmd_install_user)
-    install_repo = install_sub.add_parser("repo", help="Install repo-local Codex hooks and state.")
+    install_repo = install_sub.add_parser("repo", help="Install repo-local client hooks and state.")
     install_repo.add_argument("--repo", type=Path, default=None)
     add_install_common_args(install_repo)
     install_repo.set_defaults(handler=cmd_install_repo)
 
     uninstall = sub.add_parser(
-        "uninstall", help="Remove TAPL's Codex integration, keeping settings and data by default."
+        "uninstall", help="Remove TAPL's selected client integration, keeping settings and data by default."
     )
     uninstall_sub = uninstall.add_subparsers(dest="uninstall_command", required=True)
     uninstall_user = uninstall_sub.add_parser("user", help="Remove user-global TAPL integration.")
     uninstall_user.add_argument("--codex-home", type=Path, default=None)
+    uninstall_user.add_argument("--claude-home", type=Path, default=None)
     add_uninstall_common_args(uninstall_user)
     uninstall_user.set_defaults(handler=cmd_uninstall_user)
     uninstall_repo = uninstall_sub.add_parser("repo", help="Remove TAPL integration in one repository.")
@@ -355,6 +357,7 @@ def add_dry_run_arg(parser: argparse.ArgumentParser) -> None:
 
 
 def add_install_common_args(parser: argparse.ArgumentParser) -> None:
+    add_install_client_arg(parser)
     parser.add_argument(
         "--taplctl-command",
         default=None,
@@ -381,6 +384,7 @@ def add_install_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_uninstall_common_args(parser: argparse.ArgumentParser) -> None:
+    add_install_client_arg(parser)
     parser.add_argument(
         "--purge-config", action="store_true",
         help="Also delete this scope's TAPL config.toml.",
@@ -391,6 +395,13 @@ def add_uninstall_common_args(parser: argparse.ArgumentParser) -> None:
     )
     add_dry_run_arg(parser)
     add_agent_output_args(parser)
+
+
+def add_install_client_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--client", choices=("codex", "claude-code"), default="codex",
+        help="Client integration to change (default: codex).",
+    )
 
 
 def positive_int_arg(value: str) -> int:
@@ -514,6 +525,7 @@ def cmd_viewer(args: argparse.Namespace) -> int:
 def cmd_install_user(args: argparse.Namespace) -> int:
     payload = tapl_install.install_user(
         codex_home=args.codex_home,
+        **({"client": args.client, "claude_home": args.claude_home} if args.client != "codex" or args.claude_home is not None else {}),
         taplctl_command=args.taplctl_command,
         mode=args.mode,
         force=args.force,
@@ -527,6 +539,7 @@ def cmd_install_user(args: argparse.Namespace) -> int:
 def cmd_install_repo(args: argparse.Namespace) -> int:
     payload = tapl_install.install_repo(
         repo=args.repo,
+        **({"client": args.client} if args.client != "codex" else {}),
         taplctl_command=args.taplctl_command,
         mode=args.mode,
         force=args.force,
@@ -540,6 +553,7 @@ def cmd_install_repo(args: argparse.Namespace) -> int:
 def cmd_uninstall_user(args: argparse.Namespace) -> int:
     payload = tapl_uninstall.uninstall_user(
         codex_home=args.codex_home,
+        **({"client": args.client, "claude_home": args.claude_home} if args.client != "codex" or args.claude_home is not None else {}),
         purge_config=args.purge_config, purge_db=args.purge_db, dry_run=args.dry_run,
     )
     emit(payload, args.json, args.agent)
@@ -548,6 +562,7 @@ def cmd_uninstall_user(args: argparse.Namespace) -> int:
 
 def cmd_uninstall_repo(args: argparse.Namespace) -> int:
     payload = tapl_uninstall.uninstall_repo(
+        **({"client": args.client} if args.client != "codex" else {}),
         repo=args.repo, purge_config=args.purge_config, purge_db=args.purge_db, dry_run=args.dry_run,
     )
     emit(payload, args.json, args.agent)
@@ -555,7 +570,16 @@ def cmd_uninstall_repo(args: argparse.Namespace) -> int:
 
 
 def cmd_config_get(args: argparse.Namespace) -> int:
-    settings = load_config(args)
+    key = args.key
+    prefix = "clients.claude-code.subagents"
+    if key == prefix or (key is not None and key.startswith(prefix + ".")):
+        from .clients import client_scope
+
+        with client_scope("claude-code"):
+            settings = load_config(args)
+        key = "subagents" + key[len(prefix):]
+    else:
+        settings = load_config(args)
     values = settings.as_dict()
     path = values.pop("path")
     exists = values.pop("exists")
@@ -567,7 +591,7 @@ def cmd_config_get(args: argparse.Namespace) -> int:
     if args.key is not None:
         if not args.key or args.key != args.key.strip():
             raise ValueError("config key must be a non-empty dot-separated key")
-        remaining = args.key
+        remaining = key
         while isinstance(value, dict):
             # Model IDs can contain dots, so prefer an exact remaining key.
             if remaining in value:

@@ -4,6 +4,8 @@
 
 Codex가 TAPL을 사용하는 작업 폴더에서 시작하세요. 워크스페이스는 해당 폴더의 `.tapl/tapl-{UUID}.db`를 사용하며 부모 DB를 검색하지 않습니다. 기록이 없어 보인다면 설치 범위, 설정 범위, 활성 세션 식별자도 확인해야 합니다.
 
+Claude의 MCP 설정 원본 선택·이름공간 소유자 누락·hook 재로드·Agent 모델·effort는 [Claude Code 문제 해결](../getting-started/claude-code.ko.md#검증과-문제-해결)을 참고하세요. 아래 Codex 예제는 기본 클라이언트를 사용하며, 대응하는 Claude 설치·제거 명령에만 `--client claude-code`를 붙입니다.
+
 ## 런타임과 설정 확인
 
 ```sh

@@ -4,6 +4,8 @@
 
 TAPL preserves a request's intent, plan, approval, execution, evidence, and result in the workspace database. Codex manages the records through MCP while you ask for outcomes normally. The workflow adapts to the request; every answer does not need the same number of records.
 
+Codex and Claude Code share workflow rules and history storage, with separate client/session owners. Claude requires its namespaced owner on every MCP call; see [Claude session ownership](../getting-started/claude-code.md#hooks-and-session-ownership).
+
 ## Records through the lifecycle
 
 | Record or stage | Purpose |

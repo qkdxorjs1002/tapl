@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">tapl</h1>
 <p align="center"><strong>Give your coding agent a memory.</strong></p>
-<p align="center">TAPL keeps your Codex plans, approvals, tasks, findings, and history in a SQLite database in the session working folder.</p>
+<p align="center">TAPL keeps your Codex and Claude Code plans, approvals, tasks, findings, and history in a SQLite database in the session working folder.</p>
 <p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a></p>
 <p align="center">
   <a href="https://github.com/qkdxorjs1002/tapl/releases"><img src="https://img.shields.io/github/v/release/qkdxorjs1002/tapl" alt="Latest stable release" /></a>
@@ -18,11 +18,11 @@ Keep asking Codex to work normally. TAPL makes that work visible while it happen
 and recoverable when the conversation ends.
 
 - **Resume with context.** Recover the plan, completed tasks, and remaining work in a later session.
-- **Keep decisions close to the code.** Each Codex session working folder owns its history in `.tapl/tapl-{UUID}.db`.
+- **Keep decisions close to the code.** Each agent session working folder owns its history in `.tapl/tapl-{UUID}.db`.
 - **See what happened.** Inspect approvals, findings, validation, and lifecycle events.
 - **Search previous work.** Full-text search is included; semantic search is optional.
 - **Recall relevant experience.** Short memory cues point back to earlier work when it becomes useful.
-- **Coordinate parallel tasks.** Track dependencies and exclusive file ownership while Codex manages the agents.
+- **Coordinate parallel tasks.** Track dependencies and exclusive file ownership while the host manages the agents.
 
 <a id="associative-memory"></a>
 
@@ -98,9 +98,9 @@ When one request contains independent topics, Codex keeps one RUN and writes a s
 
 Each PLAN has its own requirements, approach, and validation; each TASK references its topic's PLAN through `spec_id`. Steps, constraints, examples, and tests serving one outcome stay together. Separate RUN lifecycles are used only when explicitly requested.
 
-Multiple Codex sessions in the same working folder can work concurrently in their own RUNs. Each RUN has one owning session; resuming that session continues its RUN. Approvals, TASKs, split queues, Stop, and archiving remain scoped to that owner. The Viewer lets you select an active RUN or explicitly confirm its discard.
+Multiple Codex or Claude Code sessions in the same working folder can work concurrently in their own RUNs. Each RUN has one owning session; resuming that session continues its RUN. Approvals, TASKs, split queues, Stop, and archiving remain scoped to that owner. The Viewer lets you select an active RUN or explicitly confirm its discard.
 
-Include the Codex hook's `session_id` on every `tapl_*` MCP call. Older clients that omit it can read only the isolated legacy scope, and unidentified writes are rejected once the workspace contains session-owned records. New sessions never automatically take ownership of another session's RUN. Workflow state is isolated, while working files remain shared; coordinate simultaneous edits to the same file or use separate worktrees.
+Include the host hook's `session_id` on every `tapl_*` MCP call. Claude Code requires its `claude-code:` identity on every call; the following legacy behavior applies to Codex. Older clients that omit it can read only the isolated legacy scope, and unidentified writes are rejected once the workspace contains session-owned records. New sessions never automatically take ownership of another session's RUN. Workflow state is isolated, while working files remain shared; coordinate simultaneous edits to the same file or use separate worktrees.
 
 <p align="center">
   <img src="assets/readme/workflow-en.gif" width="100%" alt="Illustrative Codex progress messages: start a permission-check investigation, review history, define the scope, trace the call path, record evidence, and archive findings and follow-up work." />
@@ -156,7 +156,7 @@ brew install taplctl
 
 <a id="connection-scope"></a>
 
-Then choose **one** Codex connection scope:
+Then choose **one** Codex connection scope (for Claude Code, add `--client claude-code`; see the [Claude Code guide](docs/getting-started/claude-code.md)):
 
 | Scope | When to choose it | Command |
 | --- | --- | --- |
@@ -244,7 +244,7 @@ For login services, reverse proxies, and the optional VS Code viewer, see
 
 ```mermaid
 flowchart LR
-    U[You] --> C[Codex]
+    U[You] --> C[Codex / Claude Code]
     C --> M[tapl-mcp<br/>Workflow tools]
     C --> H[tapl-hook<br/>Context and lifecycle guards]
     M --> D[(".tapl/tapl-*.db")]
@@ -257,7 +257,7 @@ and checks lifecycle boundaries. Writes stay local; history reads also include p
 
 **`taplctl`** manages installation, configuration, diagnostics, updates, and local
 services. Workflow records go through MCP; the CLI is not a workflow data API.
-TAPL tracks execution ownership and dependencies; the Codex runtime spawns and
+TAPL tracks execution ownership and dependencies; the host runtime spawns and
 manages SubAgents.
 
 ## Documentation

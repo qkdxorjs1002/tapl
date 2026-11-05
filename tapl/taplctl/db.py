@@ -1929,8 +1929,13 @@ def _dispatch_custom_fields_patch(
     changed = False
     model = str(task_metadata.get("model") or "").strip()
     reasoning_effort = str(task_metadata.get("reasoning_effort") or "").strip()
-    if model and reasoning_effort:
-        custom_fields["SubAgent Model"] = f"{model} ({reasoning_effort})"
+    from .clients import current_client
+    claude_selection = current_client() == "claude-code"
+    if model and (reasoning_effort or claude_selection):
+        selection = reasoning_effort or (
+            "model/effort inherited" if model == "inherit" else "effort unspecified"
+        )
+        custom_fields["SubAgent Model"] = f"{model} ({selection})"
         changed = True
 
     task_profile = task_metadata.get("task_profile")
@@ -1999,7 +2004,9 @@ def _dispatch_custom_fields_patch(
         decision_patch.setdefault("executor", "subagent")
         if model:
             decision_patch["model"] = model
-        if reasoning_effort:
+        if reasoning_effort or (model and claude_selection):
+            # A Claude model-only selection clears stale effort from an earlier
+            # attempt without changing legacy incomplete Codex metadata.
             decision_patch["reasoning_effort"] = reasoning_effort
     if "profile_overridden" in task_metadata or "profile_override" in task_metadata:
         decision_patch["profile_overridden"] = task_metadata.get(

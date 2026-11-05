@@ -4,6 +4,8 @@
 
 TAPL을 설치하고 Codex에 연결한 뒤 평소처럼 작업을 요청하세요. Codex가 워크플로 기록을 관리하므로 PLAN이나 TASK를 직접 작성할 필요가 없습니다.
 
+Claude Code는 [Claude 연결·Agent 가이드](claude-code.ko.md)를 참고하세요. 이 빠른 시작은 기본 Codex 통합을 사용하며, 공통 워크플로 기록과 Viewer 동작은 두 호스트에 적용됩니다.
+
 ## 1. TAPL 설치
 
 macOS의 Homebrew에서는 다음과 같이 설치합니다.

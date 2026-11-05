@@ -14,6 +14,7 @@ from . import config as tapl_config
 from . import db, hooks
 from . import install as tapl_install
 from .command_runtime import configure_stdio
+from .clients import CLIENTS, client_scope, current_client, session_key, validate_session_key
 
 
 JSON_HELP = "Print JSON output."
@@ -63,9 +64,10 @@ _AGENT_LIST_ITEM_TAGS = {
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tapl-hook",
-        description="Handle one Codex hook event through TAPL.",
+        description="Handle one client hook event through TAPL.",
     )
-    parser.add_argument("--event", required=True, help="Codex hook event name.")
+    parser.add_argument("--client", choices=CLIENTS, default=None, help="Host client (default: TAPL_CLIENT or codex).")
+    parser.add_argument("--event", required=True, help="Client hook event name.")
     parser.add_argument(
         "--mode",
         choices=("observe", "enforce"),
@@ -75,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tool", default=None, help="Tool name for tool hook events.")
     parser.add_argument(
         "--db", type=Path, default=None,
-        help="Optional DB path; must match this installation's local DB in the Codex session cwd.",
+        help="Optional DB path; must match this installation's local DB in the session cwd.",
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to tapl TOML config.")
     output = parser.add_mutually_exclusive_group()
@@ -88,26 +90,35 @@ def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        return _handle_hook(args)
+        with client_scope(args.client or current_client()):
+            args.resolved_client = current_client()
+            return _handle_hook(args)
     except Exception as exc:
+        if getattr(args, "resolved_client", args.client) == "claude-code":
+            return _emit_claude_error(args, str(exc))
         _emit_error(str(exc), as_json=args.json, as_agent=args.agent)
         return 1
 
 
 def _handle_hook(args: argparse.Namespace) -> int:
     payload = _read_stdin_payload()
+    args.stop_hook_active = payload.get("stop_hook_active") is True
+    if current_client() == "claude-code":
+        hooks.validate_claude_payload(payload, event=args.event, tool=args.tool)
+    owner = validate_session_key(session_key(payload.get("session_id", "")))
     start = _payload_cwd(payload)
     db_path = db.local_db_path(start, create_identity=True)
     if args.db is not None and args.db.expanduser().resolve() != db_path.resolve():
-        raise ValueError(f"Hook --db must match the Codex working directory database: {db_path}")
+        raise ValueError(f"Hook --db must match the working directory database: {db_path}")
     db_path = db.default_db_path(start)
     workspace: dict[str, Any] | None = None
     if args.db is None and args.config is None:
         start, workspace = _initialize_workspace(start)
-        tapl_install.auto_install_if_needed(start=start, mode=args.mode)
+        refresh_options = {"client": "claude-code"} if current_client() == "claude-code" else {}
+        tapl_install.auto_install_if_needed(start=start, mode=args.mode, **refresh_options)
 
     settings = tapl_config.load(args.config, start=start)
-    conn = db.connect(db_path, session_id=payload.get("session_id", ""))
+    conn = db.connect(db_path, session_id=owner)
     try:
         outcome = hooks.handle_event(
             conn,
@@ -123,6 +134,9 @@ def _handle_hook(args: argparse.Namespace) -> int:
     if workspace is not None:
         outcome["workspace"] = workspace
     _emit_outcome(outcome, as_json=args.json, as_agent=args.agent)
+    if current_client() == "claude-code" and not (args.json or args.agent):
+        # Claude's JSON hook protocol is parsed only for a successful command.
+        return 0
     # Codex may launch hooks through PowerShell -Command, which converts native
     # exit code 2 to 1. Windows command hooks use Codex's supported JSON block
     # protocol with exit 0 instead. Explicit diagnostic output keeps its CLI API.
@@ -145,10 +159,10 @@ def _read_stdin_payload() -> dict[str, Any]:
 def _payload_cwd(payload: dict[str, Any]) -> Path:
     value = payload.get("cwd")
     if not isinstance(value, str) or not value.strip() or not Path(value).is_absolute():
-        raise ValueError("Codex hook payload must include an absolute working directory in cwd")
+        raise ValueError("Hook payload must include an absolute working directory in cwd")
     start = Path(value).resolve()
     if not start.is_dir():
-        raise ValueError(f"Codex hook cwd must be an existing directory: {start}")
+        raise ValueError(f"Hook cwd must be an existing directory: {start}")
     return start
 
 
@@ -164,6 +178,11 @@ def _emit_outcome(outcome: dict[str, Any], *, as_json: bool, as_agent: bool) -> 
     if as_agent:
         print(_agent_output(outcome, "tapl_hook_event"))
         return
+    if current_client() == "claude-code":
+        native = claude_hook_output(outcome)
+        if native:
+            _print_json(native)
+        return
     if sys.platform == "win32" and outcome.get("block"):
         _print_json({"decision": "block", "reason": outcome.get("message") or "tapl blocked this hook."})
         return
@@ -178,6 +197,40 @@ def _emit_outcome(outcome: dict[str, Any], *, as_json: bool, as_agent: bool) -> 
         return
     if outcome.get("message"):
         print(outcome["message"], file=sys.stderr if outcome.get("block") else sys.stdout)
+
+
+def claude_hook_output(outcome: dict[str, Any]) -> dict[str, Any]:
+    """Translate workflow advice to Claude's event-specific hook protocol."""
+    event = outcome.get("event")
+    message = outcome.get("message") or ""
+    if event == "Stop":
+        return {"decision": "block", "reason": message or "TAPL work remains."} if outcome.get("block") else {}
+    specific: dict[str, Any] = {"hookEventName": event}
+    if message:
+        specific["additionalContext"] = message
+    if outcome.get("block"):
+        if event == "PreToolUse":
+            # TAPL never grants permissions: successful validation leaves the
+            # host's normal permission checks in control.
+            specific.update(permissionDecision="deny", permissionDecisionReason=message or "TAPL blocked this tool.")
+        elif event == "UserPromptSubmit":
+            return {"decision": "block", "reason": message or "TAPL blocked this prompt."}
+    return {"hookSpecificOutput": specific} if len(specific) > 1 else {}
+
+
+def _emit_claude_error(args: argparse.Namespace, message: str) -> int:
+    if args.json or args.agent:
+        _emit_error(message, as_json=args.json, as_agent=args.agent)
+        return 1
+    print(f"tapl-hook: {message}", file=sys.stderr)
+    if args.mode == "enforce" and args.event in {"PreToolUse", "UserPromptSubmit", "Stop"}:
+        if args.event == "Stop" and getattr(args, "stop_hook_active", False):
+            return 0
+        _print_json(claude_hook_output({"event": args.event, "block": True, "message": f"TAPL hook failed: {message}"}))
+        return 0
+    # Observe failures do not veto a host operation. A non-blocking failure is
+    # still visible through the hook's stderr diagnostics.
+    return 1
 
 
 def _emit_error(message: str, *, as_json: bool, as_agent: bool) -> None:

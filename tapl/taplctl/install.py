@@ -81,12 +81,27 @@ DEPRECATED_TAPL_CONFIG_PATHS = tuple(
 def install_user(
     *,
     codex_home: Path | None = None,
+    claude_home: Path | None = None,
+    client: str = "codex",
     taplctl_command: str | None = None,
     mode: str = DEFAULT_HOOK_MODE,
     force: bool = False,
     dry_run: bool = False,
     tapl_config_policy: str = TAPL_CONFIG_POLICY_PROMPT,
 ) -> dict[str, Any]:
+    from .clients import resolve_client
+
+    if resolve_client(client) == "claude-code":
+        if codex_home is not None:
+            raise ValueError("--codex-home is only supported with --client codex")
+        from . import claude_install
+
+        return claude_install.install_user(
+            claude_home=claude_home, taplctl_command=taplctl_command, mode=mode,
+            force=force, dry_run=dry_run, tapl_config_policy=tapl_config_policy,
+        )
+    if claude_home is not None:
+        raise ValueError("--claude-home requires --client claude-code")
     target = (codex_home or Path.home() / ".codex").expanduser()
     tapl_config_path = config.user_config_path(target.parent)
     command = resolved_taplctl_command(taplctl_command)
@@ -104,7 +119,7 @@ def install_user(
         *remove_deprecated_codex_templates(target, dry_run=dry_run),
         write_tapl_config(
             tapl_config_path,
-            default_config_text(),
+            installation_config_text(tapl_config_path, client="codex"),
             force=force,
             dry_run=dry_run,
             previous_version=previous_version,
@@ -135,7 +150,18 @@ def install_repo(
     dry_run: bool = False,
     tapl_config_policy: str = TAPL_CONFIG_POLICY_PROMPT,
     create_missing_config: bool = True,
+    client: str = "codex",
 ) -> dict[str, Any]:
+    from .clients import resolve_client
+
+    if resolve_client(client) == "claude-code":
+        from . import claude_install
+
+        return claude_install.install_repo(
+            repo=repo, taplctl_command=taplctl_command, mode=mode,
+            force=force, dry_run=dry_run, tapl_config_policy=tapl_config_policy,
+            create_missing_config=create_missing_config,
+        )
     root = db.find_repo_root(repo)
     command = resolved_taplctl_command(taplctl_command)
     hooks_path = root / ".codex" / "hooks.json"
@@ -159,7 +185,7 @@ def install_repo(
         (
             write_tapl_config(
                 config_path,
-                default_config_text(),
+                installation_config_text(config_path, client="codex"),
                 force=force,
                 dry_run=dry_run,
                 previous_version=previous_version,
@@ -191,12 +217,21 @@ def auto_install_if_needed(
     mode: str = DEFAULT_HOOK_MODE,
     home: Path | None = None,
     tapl_config_policy: str = TAPL_CONFIG_POLICY_PROMPT,
+    client: str | None = None,
 ) -> list[dict[str, Any]]:
     """Noninteractively migrate opted-in scopes when managed defaults change.
 
     ``tapl_config_policy`` remains accepted for caller compatibility; automatic
     refresh always merges, regardless of the explicit installation preference.
     """
+    from .clients import resolve_client
+
+    if resolve_client(client) == "claude-code":
+        from . import claude_install
+
+        return claude_install.auto_install_if_needed(
+            start=start, taplctl_command=taplctl_command, mode=mode, home=home,
+        )
     results: list[dict[str, Any]] = []
     home_path = (home or Path.home()).expanduser()
 
@@ -815,6 +850,31 @@ strategy = "{config.DEFAULT_SUBAGENT_STRATEGY}"
 
 {profile_lines}
 """
+
+
+def installation_config_text(path: Path, *, client: str) -> str:
+    """An explicit overwrite can reset only the selected client's preferences."""
+    template = default_config_text()
+    if not path.is_file():
+        return template
+    try:
+        existing = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return template
+    peer_path = ("subagents",) if client == "claude-code" else ("clients", "claude-code", "subagents")
+    value: Any = existing
+    for key in peer_path:
+        if not isinstance(value, dict) or key not in value:
+            return template
+        value = value[key]
+    managed = tomllib.loads(template)
+    current = managed
+    for key in peer_path[:-1]:
+        current = current.setdefault(key, {})
+    if current.get(peer_path[-1]) == value:
+        return template
+    current[peer_path[-1]] = value
+    return dump_toml(managed)
 
 
 def install_static_codex_templates(

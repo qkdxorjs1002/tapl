@@ -2,7 +2,9 @@
 
 [문서 홈](../README.ko.md) · [English](subagents.md)
 
-TAPL은 실행 manifest를 조율하며 Codex/root runtime이 SubAgent를 생성하고 관리합니다. 실행할 TASK는 의존성이 완료되고 파일·디렉터리 소유 범위가 겹치지 않아야 합니다. 순차 작업, 공유 상태, TASK 사이의 결정은 root가 맡습니다. strategy와 profile은 판단을 돕는 선호이며 위임을 강제하지 않습니다.
+TAPL은 실행 manifest를 조율하며 호스트/root runtime이 SubAgent를 생성하고 관리합니다. 실행할 TASK는 의존성이 완료되고 파일·디렉터리 소유 범위가 겹치지 않아야 합니다. 순차 작업, 공유 상태, TASK 사이의 결정은 root가 맡습니다. strategy와 profile은 판단을 돕는 선호이며 위임을 강제하지 않습니다.
+
+같은 선택 설정 파일에서 Codex는 `[subagents]`, Claude Code는 `[clients.claude-code.subagents]`를 사용합니다. 아래 예제는 Codex 키를 사용합니다. Claude는 native `Agent`·`AskUserQuestion`과 호스트별 모델·effort 선택을 사용하며, [Claude Code 모델과 실행](../getting-started/claude-code.ko.md#모델과-agent-실행)을 참고하세요.
 
 ## 최초 설정
 

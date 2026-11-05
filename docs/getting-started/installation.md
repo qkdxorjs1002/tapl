@@ -4,6 +4,8 @@
 
 Install the TAPL executables for your platform, then [connect Codex](integrations.md). Package installation and Codex connection scope are separate choices. You can also [ask your agent to install and connect TAPL](integrations.md#ask-your-agent-to-install-tapl).
 
+The same executables also [connect Claude Code](claude-code.md) with `taplctl install user --client claude-code` or `taplctl install repo --client claude-code`. Client selection is independent of package channel and platform.
+
 ## Requirements
 
 - Python 3.11+ with `venv`; the Homebrew formula uses `python@3.12`.

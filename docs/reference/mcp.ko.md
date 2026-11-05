@@ -4,11 +4,13 @@
 
 `tapl-mcp`는 MCP stdio로 워크플로 애플리케이션을 제공합니다. 관리 명령은 [CLI](cli.ko.md)를 사용합니다. 이 페이지는 [`mcp_server.py`](../../tapl/taplctl/mcp_server.py)에 등록된 **공개 도구 30개 전체**를 다룹니다. 정확한 입력 검증은 연결된 서버의 JSON schema가 기준입니다.
 
+Claude Code는 읽기를 포함해 모든 호출에 정확한 hook 소유자 `claude-code:<native-session-id>`가 필요합니다. 생략·원본 ID·다른 클라이언트 ID를 거부하며, 아래 legacy 생략 동작은 Codex에만 적용됩니다. 승인 source `request_user_input`은 Claude `AskUserQuestion` 응답을 포함한 도구 확인 이력의 기존 값으로 유지합니다. 호스트별 정책·모델 설정은 [Claude 가이드](../getting-started/claude-code.ko.md)를 참고하세요.
+
 ## 공통 계약
 
-읽기를 포함해 **모든 호출에 현재 Codex hook `session_id`**를 전달합니다. 대부분의 schema에서는 호환성을 위해 선택 인자이지만 생략하면 다른 세션의 활성 RUN이 아닌 격리된 legacy 범위(`""`)를 선택합니다. 식별자는 최대 256자이며 앞뒤 공백과 제어 문자를 허용하지 않습니다. `tapl_discard_run`은 legacy RUN의 `""`까지 포함해 소유자를 명시해야 합니다.
+읽기를 포함해 **모든 호출에 현재 호스트 hook `session_id`**를 전달합니다. 대부분의 schema에서는 호환성을 위해 선택 인자이지만 생략하면 다른 세션의 활성 RUN이 아닌 격리된 legacy 범위(`""`)를 선택합니다. 식별자는 최대 256자이며 앞뒤 공백과 제어 문자를 허용하지 않습니다. `tapl_discard_run`은 legacy RUN의 `""`까지 포함해 소유자를 명시해야 합니다.
 
-응답은 구조화된 객체입니다. 코드 모드에서는 필요한 도구를 정확한 이름으로 함께 탐색하고 전체 도구 목록은 출력하지 않습니다. `structuredContent`를 한 번 출력하고 필요할 때만 텍스트를 파싱해 대체합니다. envelope의 두 표현을 모두 출력하지 않습니다. 쓰기 응답은 현재 권고와 축약 검증을 제공합니다. 차단 오류는 모두 남기며 생략한 경고 수는 `omitted_issue_count`로 알립니다.
+응답은 구조화된 객체입니다. 호스트가 코드 모드를 제공한다면 필요한 도구를 정확한 이름으로 함께 탐색하고 전체 도구 목록은 출력하지 않습니다. `structuredContent`를 한 번 출력하고 필요할 때만 텍스트를 파싱해 대체합니다. envelope의 두 표현을 모두 출력하지 않습니다. 쓰기 응답은 현재 권고와 축약 검증을 제공합니다. 차단 오류는 모두 남기며 생략한 경고 수는 `omitted_issue_count`로 알립니다.
 
 런타임 상태·진입·context·검증과 해당 쓰기 응답은 선택한 세션의 `authoring_policy={configured,effective,workflow_mode}`를 제공합니다. `config.workflow.authoring_detail`은 기본 `auto`를 포함한 설정 선택값을 유지합니다. 자동 상세도는 Fast → `minimal`, Standard → `normal`, Strict → `precise`이며 활성 RUN이 없으면 `workflow_mode=null`과 `normal`을 사용합니다. 직접 지정한 수준은 고정됩니다. [작성 상세도](../guides/authoring-detail.ko.md)를 참고하세요.
 

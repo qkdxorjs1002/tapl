@@ -1,0 +1,9 @@
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "tapl-hook --client claude-code --event SessionStart --mode observe"}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "tapl-hook --client claude-code --event UserPromptSubmit --mode observe"}]}],
+    "PreToolUse": [{"matcher": "Bash|Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": "tapl-hook --client claude-code --event PreToolUse --mode observe"}]}],
+    "PostToolUse": [{"matcher": "Bash|Edit|Write|NotebookEdit|WebSearch|WebFetch|mcp__.*", "hooks": [{"type": "command", "command": "tapl-hook --client claude-code --event PostToolUse --mode observe"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "tapl-hook --client claude-code --event Stop --mode observe"}]}]
+  }
+}

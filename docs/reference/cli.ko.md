@@ -4,6 +4,8 @@
 
 `taplctl`은 설치·설정·런타임 확인·인덱싱·로컬 서비스를 관리합니다. Agent는 [MCP 도구](mcp.ko.md)로 워크플로 기록을 생성·실행·검색·조회합니다. 워크플로 명령은 공개 관리 CLI에 포함되지 않습니다.
 
+`install`·`uninstall`은 `--client {codex,claude-code}`를 지원하며 기본값은 `codex`입니다. `user` 형식은 Claude 설정용 `--claude-home PATH`(기본 `~/.claude`)를 받고, `--codex-home`은 Codex 전용입니다. 예: `taplctl install repo --client claude-code --mode enforce`. 공유 purge 보호와 독립 설정은 [Claude 가이드](../getting-started/claude-code.ko.md#연결과-제거)를 참고하세요.
+
 ## 호출과 출력
 
 ```text
@@ -70,12 +72,14 @@ taplctl install repo --repo /path/to/repository --mode enforce
 | 범위 옵션 | 기본값 |
 | --- | --- |
 | `user --codex-home PATH` | `~/.codex` |
+| `user --claude-home PATH` | `~/.claude` (`--client claude-code` 사용) |
 | `repo --repo PATH` | 현재 작업 디렉터리 |
 
 두 범위의 공통 옵션입니다.
 
 | 옵션 | 의미 |
 | --- | --- |
+| `--client {codex,claude-code}` | 연결 대상. 기본값 `codex` |
 | `--taplctl-command COMMAND` | 같은 위치의 `tapl-mcp`·`tapl-hook`을 찾는 기준 실행 파일 |
 | `--mode {observe,enforce}` | Hook 동작. 기본값 `observe` |
 | `--tapl-config-policy {prompt,overwrite,merge}` | 기존 런타임 설정 정책. 기본값 `prompt` |

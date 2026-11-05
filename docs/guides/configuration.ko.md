@@ -4,9 +4,11 @@
 
 현재 작업 폴더에 적용되는 설정 파일을 선택하고 유효값을 확인하며, 다른 TOML 내용을 유지한 채 지원 설정을 변경하는 방법을 안내합니다.
 
+위임 선호는 클라이언트별로 구분합니다. `[subagents]`는 Codex, `[clients.claude-code.subagents]`는 Claude Code 설정입니다. `taplctl config get clients.claude-code.subagents --json`으로 Claude 설정을 읽고 같은 명시적 접두사로 `config set`·`unset`을 사용합니다. Claude MCP·hook 호출의 논리적 `subagents` 값은 해당 호스트로 해석됩니다. Claude는 빈 effort 배열과 명시적 상속 선택을 허용하며, [Claude 가이드](../getting-started/claude-code.ko.md#모델과-agent-실행)를 참고하세요.
+
 ## 작업 공간과 파일 선택
 
-Codex 세션은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 기록하고 같은 폴더의 다른 `tapl-*.db` 이력을 읽습니다. Hook은 존재하는 절대 경로 `cwd`가 필요하며, Hook의 `--db`는 그 폴더의 현재 로컬 DB를 가리켜야 합니다. MCP 서버는 시작 폴더에 고정됩니다. 부모 DB·Git 루트·저장소 표식은 탐색하지 않으므로 하위 폴더의 이력은 별개입니다. 관리 CLI는 명시적인 `--db`와 `--workspace-root`를 지원합니다. UUID 보존과 기존 DB 이전은 [로컬 식별자와 공유 이력](storage.ko.md)을 참고하세요.
+Agent 세션은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 기록하고 같은 폴더의 다른 `tapl-*.db` 이력을 읽습니다. Hook은 존재하는 절대 경로 `cwd`가 필요하며, Hook의 `--db`는 그 폴더의 현재 로컬 DB를 가리켜야 합니다. MCP 서버는 시작 폴더에 고정됩니다. 부모 DB·Git 루트·저장소 표식은 탐색하지 않으므로 하위 폴더의 이력은 별개입니다. 관리 CLI는 명시적인 `--db`와 `--workspace-root`를 지원합니다. UUID 보존과 기존 DB 이전은 [로컬 식별자와 공유 이력](storage.ko.md)을 참고하세요.
 
 설정은 다음 순서로 **파일 하나를 선택**합니다.
 

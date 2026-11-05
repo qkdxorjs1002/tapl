@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tapl": {
+      "type": "stdio",
+      "command": "tapl-mcp",
+      "env": {"TAPL_CLIENT": "claude-code"}
+    }
+  }
+}

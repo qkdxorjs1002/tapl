@@ -2,7 +2,9 @@
 
 [Documentation](../README.md) · [한국어](architecture.ko.md)
 
-TAPL keeps workflow state in the exact working folder's `.tapl/tapl-{UUID}.db`. CLI management, MCP workflow tools, Codex hooks, and Viewers use that local state through Python application/database boundaries. The agent performs repository work; TAPL records and validates the workflow around it.
+TAPL keeps workflow state in the exact working folder's `.tapl/tapl-{UUID}.db`. CLI management, MCP workflow tools, host lifecycle hooks, and Viewers use that local state through Python application/database boundaries. The agent performs repository work; TAPL records and validates the workflow around it.
+
+`clients.py` provides context-local host identity and owner validation. `claude_install.py` manages Claude JSON integration and independent refresh markers; existing Codex management retains its TOML/hooks paths. Hook/MCP entry scopes configuration and policy per client. The shared database schema is unchanged; new Claude owners use a reserved prefix. See [Claude integration boundaries](../getting-started/claude-code.md).
 
 Environment identity persists independently in the user-global `~/.tapl/installation_id`. The database layer resolves local writes and legacy migration; `history.py` combines read-only sources and preserves `source_db`. See [Local identity and shared history](../guides/storage.md).
 

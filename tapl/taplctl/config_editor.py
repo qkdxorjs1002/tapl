@@ -12,7 +12,7 @@ import tempfile
 from typing import Any
 import tomllib
 
-from . import config
+from . import clients, config
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ def set_value(path: Path | str, key: str, raw_value: str) -> ConfigEditResult:
     value = config.parse_editable_value(key, raw_value)
     original = _read(config_path)
     rendered = _render_value(value)
-    target = _key_path(key)
+    target = _key_path(config.effective_editable_key(key))
     prepared = _remove_array_tables(original, target)
     candidate = _replace_or_add(prepared, target, rendered)
     candidate = _preserve_inferred_setup_completion(original, candidate, config_path)
@@ -74,10 +74,17 @@ def unset_value(path: Path | str, key: str) -> ConfigEditResult:
     config.editable_config_key(key)
     config_path = Path(path).expanduser()
     original = _read(config_path)
-    target = _key_path(key)
+    target = _key_path(config.effective_editable_key(key))
     assignments, _ = _scan(original)
     assignment = next((item for item in assignments if item.path == target), None)
     if assignment is None:
+        inline = _edit_inline_ancestor(original, target, None)
+        if inline is not None:
+            candidate = _preserve_inferred_setup_completion(original, inline, config_path)
+            _validate(candidate, config_path)
+            if candidate != original:
+                _atomic_write(config_path, candidate)
+            return ConfigEditResult(str(config_path), key, candidate != original)
         candidate = _remove_array_tables(original, target)
         if candidate != original:
             candidate = _preserve_inferred_setup_completion(
@@ -151,9 +158,10 @@ def configure_subagents(
 
     config_path = Path(path).expanduser()
     original = _read(config_path)
-    prepared, inline_custom = _remove_standard_subagent_settings(original, config_path)
+    target = tuple(config.subagents_config_key().split("."))
+    prepared, inline_custom = _remove_standard_subagent_settings(original, config_path, target=target)
     if inline_custom:
-        prepared = _add_inline_subagent_custom_settings(prepared, inline_custom)
+        prepared = _add_inline_subagent_custom_settings(prepared, inline_custom, target=target)
     candidate = _add_standard_subagent_settings(
         prepared,
         enabled=normalized_enabled,
@@ -161,18 +169,19 @@ def configure_subagents(
         models=normalized_models,
         profiles=normalized_profiles,
         preference=normalized_preference,
+        target=target,
     )
     if normalized_available is not None:
         # An omitted catalog preserves the last confirmed snapshot. Only an
         # actual setup/keep answer may advance it to a newly observed catalog.
         assignments, tables = _scan(candidate)
-        target = ("subagents", "available_models")
-        ranges = [(item.start, item.end) for item in assignments if item.path[:2] == target]
-        ranges.extend((item.start, item.end) for item in tables if item.path[:2] == target)
+        catalog_target = target + ("available_models",)
+        ranges = [(item.start, item.end) for item in assignments if item.path[:len(catalog_target)] == catalog_target]
+        ranges.extend((item.start, item.end) for item in tables if item.path[:len(catalog_target)] == catalog_target)
         candidate = _remove_ranges(candidate, ranges)
-        candidate = _replace_or_add_subagent_setting(candidate, target, _render_value({
+        candidate = _replace_or_add_subagent_setting(candidate, catalog_target, _render_value({
             model.name: list(model.reasoning_efforts) for model in normalized_available
-        }))
+        }), base=target)
     parsed = _parse(candidate, config_path)
     loaded = config.from_mapping(parsed, path=config_path, exists=bool(candidate))
     changed = candidate != original
@@ -185,31 +194,37 @@ def configure_subagents(
     )
 
 
-_STANDARD_SUBAGENT_ASSIGNMENTS = frozenset(
-    {
-        ("subagents", "enabled"),
-        ("subagents", "strategy"),
-        ("subagents", "setup_complete"),
-        ("subagents", "preference"),
-        ("subagents", "models"),
-        ("subagents", "profiles"),
-    }
-)
-
 
 def _remove_standard_subagent_settings(
     text: str,
     path: Path,
+    *, target: tuple[str, ...] = ("subagents",),
 ) -> tuple[str, dict[str, Any]]:
     """Drop standard settings while retaining custom SubAgent settings."""
 
     parsed = _parse(text, path)
+    raw_subagents: Any = parsed
+    for part in target:
+        raw_subagents = raw_subagents.get(part, {}) if isinstance(raw_subagents, dict) else {}
+    custom = {
+        key: value for key, value in raw_subagents.items()
+        if key not in {"enabled", "strategy", "setup_complete", "preference", "models", "profiles"}
+    } if isinstance(raw_subagents, dict) else {}
+    inline = _edit_inline_ancestor(text, target, _render_value(custom))
+    if inline is not None:
+        return inline, {}
+    standard_assignments = {target + (name,) for name in (
+        "enabled", "strategy", "setup_complete", "preference", "models", "profiles",
+    )}
+    nested_targets = {target + ("models",), target + ("profiles",)}
     assignments, tables = _scan(text)
     ranges: list[tuple[int, int]] = []
     inline_custom: dict[str, Any] = {}
     for assignment in assignments:
-        if assignment.path == ("subagents",):
-            raw_subagents = parsed.get("subagents")
+        if assignment.path == target:
+            raw_subagents = parsed
+            for part in target:
+                raw_subagents = raw_subagents.get(part, {}) if isinstance(raw_subagents, dict) else {}
             if isinstance(raw_subagents, dict):
                 inline_custom = {
                     key: value
@@ -225,18 +240,12 @@ def _remove_standard_subagent_settings(
                 }
             ranges.append((assignment.start, assignment.end))
         elif (
-            assignment.path in _STANDARD_SUBAGENT_ASSIGNMENTS
-            or assignment.path[:2] in {
-                ("subagents", "models"),
-                ("subagents", "profiles"),
-            }
+            assignment.path in standard_assignments
+            or assignment.path[:len(target) + 1] in nested_targets
         ):
             ranges.append((assignment.start, assignment.end))
     for table in tables:
-        if table.path[:2] in {
-            ("subagents", "models"),
-            ("subagents", "profiles"),
-        }:
+        if table.path[:len(target) + 1] in nested_targets:
             ranges.append((table.start, table.end))
     return _remove_ranges(text, ranges), inline_custom
 
@@ -255,11 +264,11 @@ def _remove_ranges(text: str, ranges: list[tuple[int, int]]) -> str:
     return text
 
 
-def _add_inline_subagent_custom_settings(text: str, custom: dict[str, Any]) -> str:
+def _add_inline_subagent_custom_settings(text: str, custom: dict[str, Any], *, target: tuple[str, ...] = ("subagents",)) -> str:
     for key, value in custom.items():
         text = _replace_or_add(
             text,
-            ("subagents", key),
+            target + (key,),
             _render_value(value),
         )
     return text
@@ -273,6 +282,7 @@ def _add_standard_subagent_settings(
     models: tuple[config.SubagentModelConfig, ...],
     profiles: tuple[config.SubagentTaskProfileConfig, ...],
     preference: str,
+    target: tuple[str, ...] = ("subagents",),
 ) -> str:
     values = {
         "enabled": enabled,
@@ -284,17 +294,19 @@ def _add_standard_subagent_settings(
     for key, value in values.items():
         text = _replace_or_add_subagent_setting(
             text,
-            ("subagents", key),
+            target + (key,),
             _render_value(value),
+            base=target,
         )
     for model in models:
         text = _replace_or_add_subagent_setting(
             text,
-            ("subagents", "models", model.name),
+            target + ("models", model.name),
             _render_value(list(model.reasoning_efforts)),
+            base=target,
         )
     if not models:
-        text = _ensure_table(text, ("subagents", "models"))
+        text = _ensure_table(text, target + ("models",))
     return text
 
 
@@ -302,15 +314,19 @@ def _replace_or_add_subagent_setting(
     text: str,
     target: tuple[str, ...],
     rendered: str,
+    *, base: tuple[str, ...] = ("subagents",),
 ) -> str:
     """Add a setting without redefining a parent created by dotted keys."""
 
     assignments, tables = _scan(text)
+    inline = _edit_inline_ancestor(text, target, rendered)
+    if inline is not None:
+        return inline
     if any(assignment.path == target for assignment in assignments) or any(
-        table.path == ("subagents",) for table in tables
+        table.path == base for table in tables
     ):
         return _replace_or_add(text, target, rendered)
-    if any(assignment.path[:1] == ("subagents",) for assignment in assignments):
+    if any(assignment.path[:len(base)] == base for assignment in assignments):
         newline = "\r\n" if "\r\n" in text else "\n"
         line = ".".join(_render_key(part) for part in target)
         line = f"{line} = {rendered}{newline}"
@@ -323,6 +339,9 @@ def _replace_or_add_subagent_setting(
 
 
 def _ensure_table(text: str, target: tuple[str, ...]) -> str:
+    inline = _edit_inline_ancestor(text, target, "{}")
+    if inline is not None:
+        return inline
     _, tables = _scan(text)
     if any(table.path == target for table in tables):
         return text
@@ -363,30 +382,21 @@ def _preserve_inferred_setup_completion(
     """
 
     original_data = _parse(original, path)
-    original_subagents = original_data.get("subagents", {})
-    if (
-        not isinstance(original_subagents, dict)
-        or "setup_complete" in original_subagents
-    ):
-        return candidate
-    original_config = config.from_mapping(
-        original_data,
-        path=path,
-        exists=bool(original),
-    )
-    candidate_data = _parse(candidate, path)
-    candidate_subagents = candidate_data.get("subagents", {})
-    if (
-        original_config.subagents.setup_complete
-        and isinstance(candidate_subagents, dict)
-        and "setup_complete" not in candidate_subagents
-        and not config.from_mapping(candidate_data, path=path, exists=bool(candidate)).subagents.setup_complete
-    ):
-        return _replace_or_add_subagent_setting(
-            candidate,
-            ("subagents", "setup_complete"),
-            "true",
-        )
+    for client in clients.CLIENTS:
+        target = tuple(config.subagents_config_key(client).split("."))
+        original_subagents: Any = original_data
+        candidate_subagents: Any = _parse(candidate, path)
+        for part in target:
+            original_subagents = original_subagents.get(part, {}) if isinstance(original_subagents, dict) else {}
+            candidate_subagents = candidate_subagents.get(part, {}) if isinstance(candidate_subagents, dict) else {}
+        if not isinstance(original_subagents, dict) or "setup_complete" in original_subagents:
+            continue
+        if (config._parse_subagents(original_subagents, client=client).setup_complete
+            and isinstance(candidate_subagents, dict) and "setup_complete" not in candidate_subagents
+            and not config._parse_subagents(candidate_subagents, client=client).setup_complete):
+            candidate = _replace_or_add_subagent_setting(
+                candidate, target + ("setup_complete",), "true", base=target,
+            )
     return candidate
 
 
@@ -398,9 +408,10 @@ def _read(path: Path) -> str:
 
 
 def _key_path(key: str) -> tuple[str, ...]:
-    prefix = "subagents.models."
-    if key.startswith(prefix):
-        return ("subagents", "models", key.removeprefix(prefix))
+    for base in ("subagents", config.CLAUDE_SUBAGENTS_PREFIX):
+        prefix = base + ".models."
+        if key.startswith(prefix):
+            return tuple(base.split(".")) + ("models", key.removeprefix(prefix))
     return tuple(key.split("."))
 
 
@@ -409,6 +420,10 @@ def _replace_or_add(text: str, target: tuple[str, ...], rendered: str) -> str:
     assignment = next((item for item in assignments if item.path == target), None)
     if assignment is not None:
         return text[: assignment.value_start] + rendered + text[assignment.value_end :]
+
+    inline = _edit_inline_ancestor(text, target, rendered)
+    if inline is not None:
+        return inline
 
     table_path = target[:-1]
     table = next((item for item in tables if item.path == table_path), None)
@@ -436,6 +451,37 @@ def _replace_or_add(text: str, target: tuple[str, ...], rendered: str) -> str:
         prefix += newline
     header = ".".join(_render_key(part) for part in table_path)
     return f"{prefix}[{header}]{newline}{line}"
+
+
+def _edit_inline_ancestor(text: str, target: tuple[str, ...], rendered: str | None) -> str | None:
+    """Edit a nested inline table without redefining it as a regular table.
+
+    Re-render only the containing value; sibling values and surrounding file
+    comments remain intact. None as the rendered value removes the target key.
+    """
+    assignments, _ = _scan(text)
+    ancestors = [item for item in assignments
+                 if len(item.path) < len(target) and target[:len(item.path)] == item.path]
+    if not ancestors:
+        return None
+    assignment = max(ancestors, key=lambda item: len(item.path))
+    value: Any = tomllib.loads(text)
+    for part in assignment.path:
+        value = value[part]
+    if not isinstance(value, dict):
+        raise ValueError("cannot edit a nested setting inside a non-table TOML value")
+    parent = value
+    for part in target[len(assignment.path):-1]:
+        if part not in parent and rendered is None:
+            return text
+        parent = parent.setdefault(part, {})
+        if not isinstance(parent, dict):
+            raise ValueError("cannot edit a nested setting inside a non-table TOML value")
+    if rendered is None:
+        parent.pop(target[-1], None)
+    else:
+        parent[target[-1]] = tomllib.loads("value = " + rendered)["value"]
+    return text[:assignment.value_start] + _render_value(value) + text[assignment.value_end:]
 
 
 def _scan(text: str) -> tuple[list[_Assignment], list[_Table]]:

@@ -20,10 +20,10 @@
 ## 왜 TAPL인가요?
 
 대화가 길어지거나 세션이 바뀌어도, 작업의 맥락은 세션 작업 폴더에 남아 있어야 합니다.
-TAPL은 Codex의 요청, 계획, 승인, 작업, 발견 사항과 이력을 로컬 SQLite 데이터베이스에 보관합니다.
+TAPL은 Codex와 Claude Code의 요청, 계획, 승인, 작업, 발견 사항과 이력을 로컬 SQLite 데이터베이스에 보관합니다.
 
 - **중단한 곳에서 이어갑니다.** 완료한 일과 남은 일을 다시 설명할 필요가 줄어듭니다.
-- **코드 옆에 기록합니다.** Codex 세션 작업 폴더의 `.tapl/tapl-{UUID}.db`에 작업 상태와 근거가 함께 남습니다.
+- **코드 옆에 기록합니다.** Agent 세션 작업 폴더의 `.tapl/tapl-{UUID}.db`에 작업 상태와 근거가 함께 남습니다.
 - **이전 결정을 찾습니다.** 전문 검색을 기본 제공하며, 시맨틱 검색을 선택할 수 있습니다.
 - **관련 경험을 떠올립니다.** 연상 기억이 과거 작업의 짧은 단서를 제공하고 원본 기록으로 연결합니다.
 - **진행 상황을 확인합니다.** 대화의 단계별 안내와 로컬 viewer로 계획과 작업 상태를 살펴봅니다.
@@ -97,9 +97,9 @@ Codex에게 평소처럼 요청하세요.
 
 각 PLAN은 자체 요구사항·접근 방식·검증을 담고, 각 TASK는 `spec_id`로 해당 주제의 PLAN을 참조합니다. 한 결과를 위한 단계·제약·예시·테스트는 함께 유지합니다. 별도 RUN 수명주기는 사용자가 명시적으로 요청할 때만 나눕니다.
 
-같은 작업 폴더에서 여러 Codex 세션을 열면 각 세션은 자신의 RUN으로 동시에 작업합니다. 한 RUN의 소유 세션은 하나이며, 같은 세션을 재개하면 해당 RUN을 이어갑니다. 다른 세션의 승인·TASK·분할 큐·종료·아카이브에는 영향을 주지 않습니다. Viewer에서는 활성 RUN을 선택해 읽을 수 있습니다.
+같은 작업 폴더에서 Codex 또는 Claude Code 세션을 여러 개 열면 각 세션은 자신의 RUN으로 동시에 작업합니다. 한 RUN의 소유 세션은 하나이며, 같은 세션을 재개하면 해당 RUN을 이어갑니다. 다른 세션의 승인·TASK·분할 큐·종료·아카이브에는 영향을 주지 않습니다. Viewer에서는 활성 RUN을 선택해 읽을 수 있습니다.
 
-Codex hook이 전달하는 `session_id`를 모든 `tapl_*` MCP 호출에 그대로 포함합니다. 식별자를 생략한 기존 클라이언트는 별도 legacy 범위만 조회하며, 세션별 기록이 있는 작업 영역에서 식별자 없는 변경 호출은 거부됩니다. 새 세션이 이전 세션의 RUN 소유권을 자동으로 가져오지는 않습니다. RUN 상태는 분리되지만 작업 파일은 공유되므로 같은 파일의 동시 수정에는 별도 조율이나 worktree가 필요합니다.
+호스트 hook이 전달하는 `session_id`를 모든 `tapl_*` MCP 호출에 그대로 포함합니다. Claude Code는 매번 `claude-code:` 식별자가 필요하며, 다음 legacy 동작은 Codex에 적용됩니다. 식별자를 생략한 기존 클라이언트는 별도 legacy 범위만 조회하며, 세션별 기록이 있는 작업 영역에서 식별자 없는 변경 호출은 거부됩니다. 새 세션이 이전 세션의 RUN 소유권을 자동으로 가져오지는 않습니다. RUN 상태는 분리되지만 작업 파일은 공유되므로 같은 파일의 동시 수정에는 별도 조율이나 worktree가 필요합니다.
 
 <p align="center">
   <img src="assets/readme/workflow-ko.gif" alt="권한 검사 누락 조사 요청이 RUN 분류, HISTORY 검색, PLAN 수립, TASK 조사, FINDING 근거 기록, ARCHIVE 보관으로 진행되는 예시" width="100%" />
@@ -162,7 +162,7 @@ brew install taplctl
 
 <a id="connection-scope"></a>
 
-이어서 Codex 연결 범위를 **하나 선택**하세요.
+이어서 Codex 연결 범위를 **하나 선택**하세요. Claude Code는 `--client claude-code`를 추가하며, [Claude Code 가이드](docs/getting-started/claude-code.ko.md)에서 연결 방법을 확인할 수 있습니다.
 
 | 범위 | 선택 기준 | 명령 |
 | --- | --- | --- |
@@ -176,7 +176,7 @@ brew install taplctl
 2. Codex가 처음 확인을 요청하면 **설치된 hook을 신뢰**합니다.
 3. **원하는 작업 폴더를 열고 평소처럼 작업을 요청**합니다.
 
-TAPL은 Codex 세션 작업 폴더의 `.tapl/tapl-{UUID}.db`에 기록하고 같은 폴더의 다른 DB 이력을 함께 읽습니다. 제거 후에도 유지되는 UUID와 기존 DB 이전은 [저장 가이드](docs/guides/storage.ko.md)를 참고하세요. 상위 폴더에 TAPL DB가 있어도 하위 폴더는 자체 이력을 사용합니다.
+TAPL은 Agent 세션 작업 폴더의 `.tapl/tapl-{UUID}.db`에 기록하고 같은 폴더의 다른 DB 이력을 함께 읽습니다. 제거 후에도 유지되는 UUID와 기존 DB 이전은 [저장 가이드](docs/guides/storage.ko.md)를 참고하세요. 상위 폴더에 TAPL DB가 있어도 하위 폴더는 자체 이력을 사용합니다.
 작업을 기록하기 위한 CLI 명령을 따로 익힐 필요는 없습니다.
 
 최초 설치 후에는 MCP 시작과 hook 진입 시 기존 user/repo 설치를 자동 갱신합니다.
@@ -245,7 +245,7 @@ VS Code에서도 [선택 확장 기능](vscode-extension/README.md)으로 작업
 
 ```mermaid
 flowchart LR
-    A[Codex] --> B[tapl-mcp]
+    A[Codex / Claude Code] --> B[tapl-mcp]
     A --> C[tapl-hook]
     B <--> D[(".tapl/tapl-*.db")]
     C <--> D
@@ -257,7 +257,7 @@ flowchart LR
 - **`taplctl`**은 설치, 진단, 업데이트, 설정과 viewer 등 관리 작업을 담당합니다.
 
 SQLite 데이터베이스가 이 구성 요소들이 공유하는 작업 기록의 기준입니다.
-SubAgent의 생성과 관리는 Codex 런타임이 담당하고, TAPL은 의존성과 실행 범위를 조율합니다.
+SubAgent의 생성과 관리는 호스트 런타임이 담당하고, TAPL은 의존성과 실행 범위를 조율합니다.
 [위임 설정과 프로필](docs/guides/subagents.ko.md)에서 동작을 조정할 수 있습니다.
 
 ## 문서

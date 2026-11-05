@@ -1,4 +1,4 @@
-"""Codex hook event handling for tapl."""
+"""Client hook event handling for tapl."""
 
 from __future__ import annotations
 
@@ -7,9 +7,11 @@ import sqlite3
 from typing import Any
 
 from . import config as tapl_config, context as tapl_context, db, prompt as tapl_prompt, validation
+from .clients import client_scope, current_client, resolve_client, session_key, validate_session_key
 
 
-DURABLE_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit"}
+DURABLE_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
+CLAUDE_EVENTS = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"}
 DURABLE_BASH_HINTS = (
     ">",
     ">>",
@@ -47,12 +49,40 @@ def handle_event(
     tool: str | None,
     payload: dict[str, Any],
     tapl_settings: tapl_config.TaplConfig | None = None,
+    client: str | None = None,
+) -> dict[str, Any]:
+    with client_scope(resolve_client(client)):
+        if current_client() == "claude-code":
+            validate_claude_payload(payload, event=event, tool=tool)
+        return _handle_scoped_event(conn, event=event, mode=mode, tool=tool, payload=payload, tapl_settings=tapl_settings)
+
+
+def validate_claude_payload(payload: dict[str, Any], *, event: str, tool: str | None = None) -> None:
+    """Reject incomplete identities before touching root workflow state."""
+    if event not in CLAUDE_EVENTS:
+        raise ValueError(f"Unsupported Claude Code hook event: {event}")
+    if not isinstance(payload, dict) or not session_key(payload.get("session_id")):
+        raise ValueError("Claude Code hook payload must include a nonempty session_id")
+    if payload.get("hook_event_name", event) != event:
+        raise ValueError("Claude Code hook_event_name does not match --event")
+    if "agent_id" in payload and (not isinstance(payload["agent_id"], str) or not payload["agent_id"].strip()):
+        raise ValueError("Claude Code agent_id must be a nonempty string when supplied")
+    if "stop_hook_active" in payload and not isinstance(payload["stop_hook_active"], bool):
+        raise ValueError("Claude Code stop_hook_active must be a boolean")
+    if event in {"PreToolUse", "PostToolUse"}:
+        if not (tool or infer_tool_name(payload)) or not isinstance(payload.get("tool_input"), dict):
+            raise ValueError("Claude Code tool hook payload must include tool_name and object tool_input")
+
+
+def _handle_scoped_event(
+    conn: sqlite3.Connection, *, event: str, mode: str, tool: str | None,
+    payload: dict[str, Any], tapl_settings: tapl_config.TaplConfig | None,
 ) -> dict[str, Any]:
     # A direct API caller may reuse an initially unscoped connection for
     # several hook payloads. Restore that caller's binding after each event.
     previous_session_id = db.connection_session_id(conn)
     if "session_id" in payload:
-        db.bind_session(conn, payload["session_id"])
+        db.bind_session(conn, validate_session_key(session_key(payload["session_id"])))
     try:
         return _handle_event(
             conn, event=event, mode=mode, tool=tool, payload=payload,
@@ -82,8 +112,11 @@ def _handle_event(
     record_run_id: str | None = None
     archive: sqlite3.Row | None = None
     policy_update: dict[str, Any] = {}
+    claude = current_client() == "claude-code"
+    helper = claude and bool(payload.get("agent_id"))
+    repeated_stop = claude and payload.get("stop_hook_active") is True
 
-    if event == "UserPromptSubmit":
+    if event == "UserPromptSubmit" and not helper:
         db.ensure_active_run(conn, request_summary=db.DEFAULT_REQUEST_SUMMARY)
 
     if event in {"SessionStart", "UserPromptSubmit"}:
@@ -115,7 +148,7 @@ def _handle_event(
     if event == "PostToolUse" and is_external_research_tool(tool_name, payload):
         message = combine_messages(message, tapl_context.external_findings_guidance())
 
-    if event == "Stop":
+    if event == "Stop" and not helper and not repeated_stop:
         state = db.status_payload(conn)
         active = state.get("active_run")
         authoring_policy = tapl_config.authoring_policy(authoring_detail, (active or {}).get("workflow_mode"))
@@ -189,6 +222,8 @@ def _handle_event(
         "message": message,
         **policy_update,
     }
+    if claude:
+        outcome.update(client="claude-code", agent_role="helper" if helper else "root")
     if context_packet is not None:
         outcome["context"] = context_packet
     if archive is not None:
@@ -293,6 +328,7 @@ def summarize_verification(tasks: list[dict[str, Any]]) -> str:
 
 def stop_result_summary(payload: dict[str, Any]) -> str:
     for key in (
+        "last_assistant_message",
         "result",
         "final_result",
         "final_message",

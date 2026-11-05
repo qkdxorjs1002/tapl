@@ -2,11 +2,13 @@
 
 [Documentation](../README.md) · [한국어](subagents.ko.md)
 
-TAPL coordinates execution manifests; the Codex/root runtime creates and manages
+TAPL coordinates execution manifests; the host/root runtime creates and manages
 SubAgents. Executable tasks need completed dependencies and exclusive,
 non-overlapping file or directory ownership. Sequential work, shared state, and
 cross-task decisions remain on root. Strategy and profiles guide the decision;
 they do not force delegation.
+
+Codex uses `[subagents]`; Claude Code uses `[clients.claude-code.subagents]` in the same selected config file. The examples below use Codex keys. Claude uses native `Agent` and `AskUserQuestion`, with host-specific model/effort selection; see [Claude Code models and execution](../getting-started/claude-code.md#models-and-agent-execution).
 
 ## First-use setup
 

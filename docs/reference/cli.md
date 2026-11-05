@@ -4,6 +4,8 @@
 
 `taplctl` manages installation, configuration, runtime inspection, indexing, and local services. Agents create, execute, search, and inspect workflow records through [MCP tools](mcp.md). Workflow commands are not part of the public management CLI.
 
+`install` and `uninstall` support `--client {codex,claude-code}` (default `codex`). The `user` forms accept `--claude-home PATH` for Claude settings (default `~/.claude`); `--codex-home` remains Codex-only. Example: `taplctl install repo --client claude-code --mode enforce`. Shared purge safeguards and independent client settings are described in the [Claude guide](../getting-started/claude-code.md#connect-and-remove).
+
 ## Invocation and output
 
 ```text
@@ -70,12 +72,14 @@ taplctl install repo --repo /path/to/repository --mode enforce
 | Scope option | Default |
 | --- | --- |
 | `user --codex-home PATH` | `~/.codex` |
+| `user --claude-home PATH` | `~/.claude` (with `--client claude-code`) |
 | `repo --repo PATH` | Current working directory |
 
 Both scopes accept:
 
 | Option | Meaning |
 | --- | --- |
+| `--client {codex,claude-code}` | Integration target; default `codex` |
 | `--taplctl-command COMMAND` | Executable used to locate sibling `tapl-mcp` and `tapl-hook` commands |
 | `--mode {observe,enforce}` | Hook behavior; default `observe` |
 | `--tapl-config-policy {prompt,overwrite,merge}` | Existing runtime-config policy; default `prompt` |

@@ -4,6 +4,8 @@
 
 TAPL writes each local environment's records to `.tapl/tapl-{UUID}.db` in the exact working folder. History search, archives, memory recall, and the Viewer also read the other `tapl-*.db` files in that folder. Workflow changes stay in the local database.
 
+Client integration does not create a second workflow database: Codex and Claude Code share the folder’s installation UUID/database and history reader. Claude owner IDs occupy a separate namespace; [client removal safeguards](../getting-started/claude-code.md#connect-and-remove) protect shared settings and history.
+
 ## Persistent installation identity
 
 The first operation needing a default writable database creates a random UUID v4 in `~/.tapl/installation_id`. Concurrent starts reuse one complete value. Every workspace used by that local user environment uses the same UUID suffix; the records themselves stay in each workspace. This identifier is independent of Codex accounts, sessions, and installation IDs.

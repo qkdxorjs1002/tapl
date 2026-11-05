@@ -15,6 +15,7 @@ TAPL connects an agent’s planning, approval, execution and verification with d
 | [Installation](getting-started/installation.md) | Choose a platform and manage updates, reinstalls and removal. |
 | [Quick start](getting-started/quickstart.md) | Install TAPL, choose a scope and complete your first workflow. |
 | [Agent integration](getting-started/integrations.md) | Connect MCP and hooks, or ask an agent to install TAPL. |
+| [Claude Code](getting-started/claude-code.md) | Connect Claude MCP/hooks and configure independent Agent preferences. |
 
 ## Core concepts
 

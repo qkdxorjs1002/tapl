@@ -4,6 +4,8 @@
 
 Start in the working folder where Codex uses TAPL. Workspaces use that folder's `.tapl/tapl-{UUID}.db`; TAPL does not discover a parent database. Installation scope, configuration scope, and active session identity can therefore explain apparently missing records.
 
+For Claude-specific MCP source selection, missing namespaced owners, hook reloads and Agent model/effort behavior, see [Claude Code troubleshooting](../getting-started/claude-code.md#verification-and-troubleshooting). The Codex examples below retain their default client; add `--client claude-code` only to the corresponding Claude install/uninstall command.
+
 ## Check runtime and configuration
 
 ```sh

@@ -2,7 +2,7 @@
 
 [문서 홈](../README.ko.md) · [English](integrations.md)
 
-TAPL은 `tapl-mcp` stdio 서버와 `tapl-hook` 수명주기 hook으로 Codex에 연결합니다. 설치 명령이 둘을 함께 구성하며 `taplctl`은 관리 명령을 담당합니다. 이 페이지는 배포되는 Codex 연결을 설명합니다. 다른 MCP 클라이언트에 Codex의 hook·세션 동작이 자동으로 적용되지는 않습니다.
+TAPL은 공통 `tapl-mcp` stdio 서버와 호스트별 `tapl-hook` 수명주기 처리로 Codex와 Claude Code에 연결합니다. 아래 명령은 기본 Codex 클라이언트를 사용합니다. Claude 설치·hook·소유자 ID·Agent 선호는 [Claude Code 가이드](claude-code.ko.md)를 참고하세요. 다른 MCP 클라이언트에 두 호스트의 수명주기 동작이 자동 적용되지는 않습니다.
 
 ## Agent에게 TAPL 설치 맡기기
 
