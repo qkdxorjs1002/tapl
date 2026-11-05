@@ -78,6 +78,10 @@ taplctl config set clients.claude-code.subagents.strategy balanced
 
 ## 검증과 문제 해결
 
-자동 검사는 설치·제거·갱신, wheel/sdist 템플릿, hook 응답 계약, 소유권 격리, 독립 설정과 두 TASK의 dispatch·정산·복구를 포함합니다. 빌드한 wheel은 morae Linux ARM64 VM에서 설치와 SessionStart 검사도 통과했습니다. 실제 Claude 모델·Agent 대화와 전체 OS·버전 조합은 별도 검증 단계이며 프로토콜 검사만으로 통과했다고 판단하지 않습니다.
+자동 검사는 설치·제거·갱신, wheel/sdist 템플릿, hook 응답 계약, 소유권 격리, 독립 설정과 두 TASK의 dispatch·정산·복구를 포함합니다.
+
+공개된 `2.17.0-beta1` 설치 프로그램과 런타임은 Claude Code `2.1.318`을 사용한 morae Linux ARM64 VM 검증을 통과했습니다. Print 모드의 실제 대화 세 개에서 수정·실행 승인 없는 계획, 승인된 단일 파일 수정, 같은 응답에서 호출되어 서로 다른 파일을 소유하는 native Agent 두 개를 검증했습니다. 정확한 세션 소유권, 파일 내용, 실행 ID별 정산과 완료된 RUN의 아카이브를 확인했으며 계획 RUN은 활성 상태로 유지됐습니다. 다섯 hook 이벤트가 모두 기록됐고, 등록된 enforce hook을 별도로 호출한 미승인 `Write` 요청도 차단됐습니다.
+
+이 대화는 VM 내부의 `bypassPermissions`와 `inherit` 모델 선택을 사용해 Agent model/effort 인자를 생략했습니다. 전체 OS·버전 조합, 대화형 trust 승인, 명시적 모델·effort 선택까지 검증한 것은 아닙니다. 프로토콜 검사만으로 실제 대화 동작을 판단하지 않습니다.
 
 MCP가 연결됐지만 소유자 누락 오류가 나면 새 세션을 시작하고 hook 로드를 확인하세요. 다른 세션 ID를 추측해 사용하지 않습니다. 사용자·저장소 통합이 함께 있으면 Claude의 실제 MCP 설정 원본을 확인하고 원하지 않는 범위를 명시적으로 제거합니다. 실행 파일 경로가 오래됐으면 `--taplctl-command`를 지정해 재설치를 미리 확인하고, JSON/TOML 오류는 표시된 파일을 고친 뒤 갱신하세요. [문제 해결](../guides/troubleshooting.ko.md)을 참고하세요.

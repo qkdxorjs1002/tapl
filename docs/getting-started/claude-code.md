@@ -78,6 +78,10 @@ taplctl config set clients.claude-code.subagents.strategy balanced
 
 ## Verification and troubleshooting
 
-Automatic coverage includes installation/removal/refresh, wheel/sdist templates, hook response contracts, owner isolation, independent settings, and two-task dispatch/settlement/recovery. The built wheel has also passed installation and SessionStart checks in a morae Linux ARM64 VM. Live Claude model/Agent conversations and the full OS/version matrix remain separate validation gates; protocol tests alone do not establish them.
+Automatic coverage includes installation/removal/refresh, wheel/sdist templates, hook response contracts, owner isolation, independent settings, and two-task dispatch/settlement/recovery.
+
+The published `2.17.0-beta1` installer and runtime passed validation in a morae Linux ARM64 VM with Claude Code `2.1.318`. Three real conversations in print mode passed: planning without edits or execution approval, an approved single-file edit, and two native Agents called in the same response with separate file ownership. Checks confirmed exact session owners, file contents, execution-ID settlement and completed RUN archival; the planning RUN remained active. All five hook events were recorded, and a separate call to the registered enforce hook denied an unapproved `Write` request.
+
+These conversations used VM-local `bypassPermissions` and `inherit` model selection, omitting Agent model/effort parameters. They do not cover every OS/version, interactive trust prompts or explicit model/effort selection. Protocol checks alone do not establish live conversation behavior.
 
 If MCP is connected but a call reports a missing owner, start a new session and verify the hooks loaded. Do not guess another session's ID. If user and repository integrations both exist, inspect Claude's effective MCP source and remove the unwanted scope explicitly. For stale executables, preview reinstall with `--taplctl-command`; for invalid JSON/TOML, repair the named file before refresh. See [troubleshooting](../guides/troubleshooting.md).
