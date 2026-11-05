@@ -24,7 +24,7 @@ Executable tasks need actionable goal, action, and verification. Completed tasks
 
 Pass plan/task content through the tool's named arguments. TAPL renders the stored Markdown body from its templates when merging a record. Do not replace structured fields with a manually formatted policy dump or invent CLI workflow commands.
 
-For example, these are illustrative `tapl_create_task` arguments after `PLAN-001` exists; replace the session placeholder with the current Codex hook's identity:
+For example, these are illustrative `tapl_create_task` arguments after `PLAN-001` exists; replace the session placeholder with the current host hook's exact TAPL identity (`claude-code:<native-session-id>` for Claude Code):
 
 ```json
 {
@@ -34,7 +34,7 @@ For example, these are illustrative `tapl_create_task` arguments after `PLAN-001
   "goal": "Resolve the selected configuration file consistently.",
   "action": "Update the parser to preserve an explicit configuration path.",
   "verification": "Run the parser checks for relative and absolute paths.",
-  "session_id": "CURRENT_CODEX_SESSION_ID"
+  "session_id": "CURRENT_TAPL_SESSION_ID"
 }
 ```
 

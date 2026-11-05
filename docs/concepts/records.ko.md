@@ -24,7 +24,7 @@ TAPL 기록은 `.tapl/tapl-{UUID}.db`의 구조화된 데이터이며 typed fiel
 
 계획·Task 내용을 도구의 이름 있는 인자로 전달합니다. TAPL은 기록 병합 시 템플릿으로 저장 Markdown 본문을 만듭니다. 구조화 필드를 직접 꾸민 정책 덤프로 대체하거나 존재하지 않는 CLI 워크플로 명령을 만들지 마세요.
 
-다음은 `PLAN-001`이 존재할 때의 `tapl_create_task` 인자 예시입니다. 세션 자리표시자는 현재 Codex hook의 식별자로 바꿉니다.
+다음은 `PLAN-001`이 존재할 때의 `tapl_create_task` 인자 예시입니다. 세션 자리표시자는 현재 호스트 hook의 정확한 TAPL 식별자로 바꿉니다(Claude Code는 `claude-code:<native-session-id>`).
 
 ```json
 {
@@ -34,7 +34,7 @@ TAPL 기록은 `.tapl/tapl-{UUID}.db`의 구조화된 데이터이며 typed fiel
   "goal": "선택한 설정 파일을 일관되게 해석한다.",
   "action": "명시한 설정 경로를 보존하도록 파서를 수정한다.",
   "verification": "상대·절대 경로에 대한 파서 검사를 실행한다.",
-  "session_id": "CURRENT_CODEX_SESSION_ID"
+  "session_id": "CURRENT_TAPL_SESSION_ID"
 }
 ```
 

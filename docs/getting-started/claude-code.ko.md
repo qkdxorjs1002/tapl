@@ -6,35 +6,19 @@ Claude Code는 TAPL의 공통 워크플로 MCP 도구, 수명주기 검사, 이�
 
 ## 연결과 제거
 
-범위를 하나 선택합니다.
+[설치 안내](installation.ko.md)에서 Claude Code용 채널을 선택한 뒤 연결 범위 하나를 선택합니다.
 
 ```sh
 taplctl install user --client claude-code
 # 또는 대상 작업 폴더에서:
-taplctl install repo --client claude-code --mode enforce
+taplctl install repo --client claude-code
 ```
 
-기본 클라이언트는 계속 `codex`입니다. Claude 설치·제거 명령에는 항상 `--client claude-code`를 붙입니다. 두 범위 모두 `--dry-run`, `--tapl-config-policy`, `--taplctl-command`, `--mode observe|enforce`를 지원합니다. [CLI 옵션](../reference/cli.ko.md#install)을 참고하세요. 설치 기본 모드는 `observe`입니다.
+설치 기본 모드는 `observe`입니다. 차단 검사가 필요하면 `--mode enforce`를 추가합니다. CLI 기본 클라이언트는 `codex`이므로 Claude 설치·제거에는 항상 `--client claude-code`를 붙입니다.
 
-| 범위 | MCP 설정 | 수명주기 hook |
-| --- | --- | --- |
-| 사용자 | `~/.claude.json`의 최상위 `mcpServers.tapl` | `~/.claude/settings.json` |
-| 저장소 | `.mcp.json` | `.claude/settings.json` |
+MCP·hook 파일, 사용자/저장소 범위, 사용자 지정 홈, 실행 파일 경로와 신뢰 절차는 [Agent 연결](integrations.ko.md#연결-범위-선택)에 정리되어 있습니다. `TAPL_CLIENT=claude-code` 환경으로 MCP 서버를 실행하고 `tapl-hook --client claude-code`로 hook을 실행하는 클라이언트 지정은 실행 파일을 옮길 때도 유지합니다.
 
-`install repo --repo PATH`는 작업 폴더를 선택합니다. `install user --claude-home PATH`는 Claude 설정 디렉터리를 선택하며, 그 부모에 `.claude.json`과 `.tapl`이 위치합니다. TAPL의 `repo`는 공유 프로젝트 `.mcp.json`에 기록하므로, `~/.claude.json` 안에 저장되는 Claude의 프로젝트 개인 MCP 범위와 다릅니다.
-
-Claude Code를 재시작하고 MCP·작업 공간 신뢰 절차를 마친 뒤 `/mcp`에서 확인하세요. 설치된 서버는 `TAPL_CLIENT=claude-code` 환경으로 `tapl-mcp`를 실행하고, 다섯 command hook은 `tapl-hook --client claude-code`를 실행합니다. 실행 파일을 옮길 때 이 클라이언트 지정도 유지합니다. [실행 파일 탐색 예제](integrations.ko.md#실행-파일-탐색)에도 클라이언트 옵션을 추가해 적용할 수 있습니다.
-
-```sh
-taplctl uninstall user --client claude-code --dry-run
-taplctl uninstall user --client claude-code
-# 또는:
-taplctl uninstall repo --client claude-code --repo /path/to/workspace
-```
-
-설치는 TAPL 소유 항목을 병합하며 다른 hook·서버·설정을 보존합니다. `--tapl-config-policy overwrite`도 다른 클라이언트의 위임 설정은 보존합니다. 기본 제거는 TAPL 데이터와 설정을 유지합니다. 명시적 purge에서도 다른 클라이언트의 설치 표식·사용자 지정 선호·세션 소유 이력이 있으면 공유 파일을 보존하며 JSON 결과에 `preserved_shared`를 표시합니다. 생성된 기본값만으로는 다른 클라이언트의 사용자 지정 선호로 판단하지 않습니다. [제거 경계](../reference/cli.ko.md#uninstall)를 참고하세요.
-
-자동 갱신은 이전에 설치한 Claude 범위만 검사하며 hook 모드와 로컬 설정 부재를 보존합니다. `.tapl/claude-code.version`과 `.tapl/claude-code.install-state.json`을 사용하고 Codex의 기존 표식은 유지합니다. 한쪽을 제거한 뒤 다른 클라이언트가 시작되어도 제거한 통합을 다시 설치하지 않습니다.
+[자동 갱신](integrations.ko.md#자동-갱신)과 [연결 해제·재연결](integrations.ko.md#연결-해제와-재연결)은 선택한 클라이언트와 범위에만 적용합니다. Claude와 Codex는 별도 설치 표식을 사용하므로 한쪽을 제거한 뒤 다른 클라이언트가 시작되어도 제거한 통합을 다시 설치하지 않습니다. 공유 파일의 purge 보존 조건과 `preserved_shared` 결과는 [제거 경계](../reference/cli.ko.md#uninstall)를 참고하세요.
 
 ## Hook과 세션 소유권
 

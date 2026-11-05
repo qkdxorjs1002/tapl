@@ -2,9 +2,9 @@
 
 [Documentation](../README.md) · [한국어](troubleshooting.ko.md)
 
-Start in the working folder where Codex uses TAPL. Workspaces use that folder's `.tapl/tapl-{UUID}.db`; TAPL does not discover a parent database. Installation scope, configuration scope, and active session identity can therefore explain apparently missing records.
+Start in the working folder where your agent uses TAPL. Workspaces use that folder's `.tapl/tapl-{UUID}.db`; TAPL does not discover a parent database. Installation scope, configuration scope, and active session identity can therefore explain apparently missing records.
 
-For Claude-specific MCP source selection, missing namespaced owners, hook reloads and Agent model/effort behavior, see [Claude Code troubleshooting](../getting-started/claude-code.md#verification-and-troubleshooting). The Codex examples below retain their default client; add `--client claude-code` only to the corresponding Claude install/uninstall command.
+For Claude-specific MCP source selection, missing namespaced owners, hook reloads and Agent model/effort behavior, see [Claude Code troubleshooting](../getting-started/claude-code.md#verification-and-troubleshooting). Install/uninstall commands default to Codex; add `--client claude-code` when managing Claude Code integration.
 
 ## Check runtime and configuration
 
@@ -18,7 +18,7 @@ taplctl config get
 
 | Symptom | Check and remedy |
 | --- | --- |
-| Codex cannot see TAPL tools | Run `taplctl doctor`, repeat the connect command for your installation method and chosen scope in [Agent integration](../getting-started/integrations.md), then restart Codex. |
+| The host cannot see TAPL tools | Run `taplctl doctor`, repeat the connect command for your installation method, client and scope in [Agent integration](../getting-started/integrations.md) or [Claude Code](../getting-started/claude-code.md#connect-and-remove), then restart that host. |
 | `taplctl` is missing after standalone installation | Apply the installer's printed `PATH` export and persist it in your shell profile; reopen the terminal. On Windows, reopen the shell after PATH updates. |
 | Installed version or channel seems wrong | Compare `taplctl --version` with the installer channel and installation metadata. Use Homebrew for Homebrew installs and `taplctl update` for installer-managed installs; see [Installation](../getting-started/installation.md). |
 | Homebrew formula conflicts | Uninstall the installed TAPL formula before choosing `taplctl`, `taplctl-semantic`, or `taplctl-pre`. They provide the same commands. |
@@ -45,7 +45,7 @@ taplctl config get
 | --- | --- |
 | Semantic search falls back to BM25 | Inspect effective search settings and optional semantic dependencies. Use [Search](search.md) for indexing and provider checks. Full-text search does not require the semantic extra. |
 | `searchd` is unavailable on Windows | Use the local semantic provider with optional dependencies, or BM25. The daemon requires Unix sockets. |
-| Current work seems missing through MCP | Pass the same hook `session_id` on every call. Omitted identity selects the isolated legacy namespace. An MCP transport connection is not the conversation identity. |
+| Current work seems missing through MCP | Pass the same hook `session_id` on every call. Codex omission selects the isolated legacy namespace; Claude Code requires the exact `claude-code:` hook owner and rejects omission even for reads. An MCP transport connection is not the conversation identity. |
 | A task cannot start or dispatch | Inspect `tapl_get_next` recommendations and `tapl_validate_state` errors. Confirm the plan, execution approval, completed dependencies, and non-overlapping ownership for parallel tasks. |
 | Parallel completion rejects an execution | Use the exact `execution_id` returned by the active dispatch manifest. After interruption, recover or cancel the original batch before retrying. |
 | Finishing returns `review_required` | Complete memory review for the active RUN, then archive separately. Use `expected_run_id` with memory arguments; see [Associative memory](memory.md). |
@@ -55,6 +55,6 @@ Do not fix lifecycle errors by deleting the database or changing another session
 
 ## Report an unresolved issue
 
-Use [GitHub Issues](https://github.com/qkdxorjs1002/tapl/issues). Include OS, TAPL and VS Code/extension versions when relevant, installation method, executable path, exact reproduction steps, and scoped `doctor` or error output with secrets and private workspace content removed. Report security vulnerabilities through [private vulnerability reporting](https://github.com/qkdxorjs1002/tapl/security/advisories/new).
+Use [GitHub Issues](https://github.com/qkdxorjs1002/tapl/issues). Include OS, TAPL, host client/version and VS Code/extension versions when relevant, installation method, executable path, exact reproduction steps, and scoped `doctor` or error output with secrets and private workspace content removed. Report security vulnerabilities through [private vulnerability reporting](https://github.com/qkdxorjs1002/tapl/security/advisories/new).
 
 These remedies follow the CLI, Viewer, extension support contract, and session/runtime regression tests. [Contributing](../development/contributing.md) lists local validation commands; [Releases](../development/releases.md) covers signing and publishing failures.

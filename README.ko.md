@@ -82,22 +82,22 @@ taplctl config unset workflow.authoring_detail
 옵션별 동작과 설정 범위는 [작성 상세도 가이드](docs/guides/authoring-detail.ko.md),
 실측 비교는 [벤치마크](docs/reference/benchmarks.ko.md)를 참고하세요.
 
-Codex에게 평소처럼 요청하세요.
+Codex나 Claude Code에게 평소처럼 요청하세요.
 
 > 권한 검사 누락의 원인을 조사하고 근거를 정리해줘.
 
-한 요청에 독립적인 주제가 여러 개 있으면 Codex는 하나의 RUN 안에 주제별 PLAN을 모두 작성한 뒤 TASK를 설계합니다. 예를 들어 아래 네 주제를 함께 요청하면 다음처럼 나눕니다.
+한 요청에 독립적인 주제가 여러 개 있으면 Agent는 하나의 RUN 안에 주제별 PLAN을 모두 작성한 뒤 TASK를 설계합니다. 예를 들어 아래 네 주제를 함께 요청하면 다음처럼 나눕니다.
 
 | PLAN | 주제 |
 | --- | --- |
 | PLAN-001 | 불규칙 호스트명 정규식 필터링 |
-| PLAN-002 | 분석용 기본 Codex CLI 환경 |
+| PLAN-002 | 분석용 기본 코딩 Agent CLI 환경 |
 | PLAN-003 | 모델 추론 레벨 설정 |
 | PLAN-004 | 웹 페이지 요소를 통한 광고 탐지 |
 
 각 PLAN은 자체 요구사항·접근 방식·검증을 담고, 각 TASK는 `spec_id`로 해당 주제의 PLAN을 참조합니다. 한 결과를 위한 단계·제약·예시·테스트는 함께 유지합니다. 별도 RUN 수명주기는 사용자가 명시적으로 요청할 때만 나눕니다.
 
-같은 작업 폴더에서 Codex 또는 Claude Code 세션을 여러 개 열면 각 세션은 자신의 RUN으로 동시에 작업합니다. 한 RUN의 소유 세션은 하나이며, 같은 세션을 재개하면 해당 RUN을 이어갑니다. 다른 세션의 승인·TASK·분할 큐·종료·아카이브에는 영향을 주지 않습니다. Viewer에서는 활성 RUN을 선택해 읽을 수 있습니다.
+같은 작업 폴더에서 Codex 또는 Claude Code 세션을 여러 개 열면 각 세션은 자신의 RUN으로 동시에 작업합니다. 한 RUN의 소유 세션은 하나이며, 같은 세션을 재개하면 해당 RUN을 이어갑니다. 다른 세션의 승인·TASK·분할 큐·종료·아카이브에는 영향을 주지 않습니다. Viewer에서는 활성 RUN을 선택해 읽거나 명시적으로 확인한 뒤 폐기할 수 있습니다.
 
 호스트 hook이 전달하는 `session_id`를 모든 `tapl_*` MCP 호출에 그대로 포함합니다. Claude Code는 매번 `claude-code:` 식별자가 필요하며, 다음 legacy 동작은 Codex에 적용됩니다. 식별자를 생략한 기존 클라이언트는 별도 legacy 범위만 조회하며, 세션별 기록이 있는 작업 영역에서 식별자 없는 변경 호출은 거부됩니다. 새 세션이 이전 세션의 RUN 소유권을 자동으로 가져오지는 않습니다. RUN 상태는 분리되지만 작업 파일은 공유되므로 같은 파일의 동시 수정에는 별도 조율이나 worktree가 필요합니다.
 
@@ -132,83 +132,96 @@ Codex에게 평소처럼 요청하세요.
 
 ### Agent에게 설치 맡기기
 
-Codex 같은 코딩 Agent에게 아래 프롬프트를 복사해서 요청하세요.
+Codex나 Claude Code에 아래 프롬프트를 복사해서 요청하세요.
 
 ```text
-TAPL을 설치하고 Codex에 연결해줘.
+TAPL을 설치하고 지금 사용하는 코딩 Agent(Codex 또는 Claude Code)에 연결해줘.
 저장소: https://github.com/qkdxorjs1002/tapl
 설치 가이드: https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/installation.ko.md
+연결 가이드: https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/integrations.ko.md
 
-가이드를 읽고 내 운영체제와 셸, 필수 환경, 기존 설치 여부를 확인해줘.
-다른 채널을 지정하지 않았다면 내 OS에 맞는 공식 방법으로 최신 안정판을 설치해줘.
-연결 범위를 이미 지정하지 않았다면 user(내 Codex 프로젝트 전체)와 repo(대상 저장소만) 중 내가 원하는 범위를 확인해줘.
-선택한 범위에 맞춰 taplctl install user 또는 taplctl install repo를 실행하고, 필요하면 가이드의 운영체제별 실행 파일 경로를 사용해줘.
-기존 TAPL 설정, hook 모드, 워크플로 DB와 다른 Codex 설정은 보존해줘.
-taplctl --version과 taplctl doctor로 설치 결과를 확인해줘.
-설치한 버전과 터미널·Codex 재시작, hook 신뢰 등 내가 마무리할 단계를 알려줘.
+가이드를 읽고 현재 호스트와 내 운영체제·셸, 필수 환경, 기존 설치 여부를 확인해줘. 호스트를 확인할 수 없을 때만 어느 호스트에 연결할지 물어봐줘.
+내 OS에 맞는 공식 방법으로 설치해줘. 다른 채널을 지정하지 않았다면 Codex는 최신 안정판, Claude Code는 최신 게시 릴리스를 사용해줘(Homebrew: taplctl-pre, Windows: -Pre, Linux: 설치 가이드의 릴리스 manifest 선택).
+연결 범위를 이미 지정하지 않았다면 user(이 호스트의 프로젝트 전체)와 repo(대상 저장소만) 중 내가 원하는 범위를 확인해줘.
+선택한 범위에 맞춰 taplctl install user 또는 taplctl install repo를 실행해줘. Claude Code는 --client claude-code를 추가하고 연결된 Claude Code 가이드를 따라줘. 명령의 기본 호스트는 Codex야. 필요하면 가이드의 운영체제별 실행 파일 경로를 사용해줘.
+기존 TAPL 설정, hook 모드, 워크플로 DB와 두 호스트의 다른 설정은 보존해줘.
+taplctl --version과 taplctl doctor로 실행 환경을 확인하고, 새 세션에서 선택한 호스트가 TAPL MCP 도구와 hook 컨텍스트를 읽는지 확인해줘.
+설치한 버전과 터미널·호스트 재시작, 신뢰 등 내가 마무리할 단계를 알려줘. Claude Code는 재시작 후 /mcp도 확인해줘.
 ```
 
-아래 [연결 범위](#connection-scope)와 다른 플랫폼·Windows 프리릴리즈의 [설치 옵션](#설치)을 참고하세요.
+아래 [연결 범위](#connection-scope)와 다른 플랫폼·릴리스 채널의 [설치 옵션](#설치)을 참고하세요.
 
 ### 명령으로 직접 설치하기
 
-macOS에서는 Homebrew로 안정판을 설치합니다.
+macOS에서는 Homebrew tap을 추가한 뒤 호스트에 맞는 formula를 **하나 선택**합니다.
 
 ```sh
 brew tap qkdxorjs1002/tap
+```
+
+```sh
+# Codex: 안정 채널
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
 ```
 
+```sh
+# Claude Code: 최신 게시 채널
+brew trust --formula qkdxorjs1002/tap/taplctl-pre
+brew install taplctl-pre
+```
+
 <a id="connection-scope"></a>
 
-이어서 Codex 연결 범위를 **하나 선택**하세요. Claude Code는 `--client claude-code`를 추가하며, [Claude Code 가이드](docs/getting-started/claude-code.ko.md)에서 연결 방법을 확인할 수 있습니다.
+호스트와 연결 범위를 **하나 선택**하세요. **사용자** 범위는 해당 호스트의 프로젝트 전체에, **저장소** 범위는 대상 저장소에만 적용됩니다.
 
-| 범위 | 선택 기준 | 명령 |
+| 호스트 | 사용자 범위 | 저장소 범위 |
 | --- | --- | --- |
-| 사용자 | 내 Codex 프로젝트 전체에서 사용 | `taplctl install user` |
-| 저장소 | 대상 저장소에서만 사용 | `taplctl install repo` |
+| Codex | `taplctl install user` | `taplctl install repo` |
+| Claude Code | `taplctl install user --client claude-code` | `taplctl install repo --client claude-code` |
 
-저장소 명령은 대상 저장소 디렉터리에서 실행하거나
-`taplctl install repo --repo /path/to/repository`로 경로를 지정하세요.
+명령의 기본 호스트는 Codex입니다. 저장소 명령은 대상 저장소 디렉터리에서 실행하거나
+`--repo /path/to/repository`를 추가하세요. 호스트별 설정은 [Agent 연결](docs/getting-started/integrations.ko.md)과
+[Claude Code 가이드](docs/getting-started/claude-code.ko.md)를 참고하세요.
 
-1. TAPL MCP 서버와 hook을 읽도록 **Codex를 재시작**합니다.
-2. Codex가 처음 확인을 요청하면 **설치된 hook을 신뢰**합니다.
-3. **원하는 작업 폴더를 열고 평소처럼 작업을 요청**합니다.
+1. TAPL MCP 서버와 hook을 읽도록 **선택한 호스트를 재시작**합니다.
+2. **호스트의 신뢰 절차를 완료**합니다. Codex는 설치된 hook의 신뢰를 확인하며, Claude Code는 MCP·작업 폴더 신뢰 절차를 거치고 `/mcp`로 연결을 확인합니다.
+3. **원하는 작업 폴더를 열고 평소처럼 작업을 요청**합니다. Agent가 TAPL로 작업을 기록합니다.
 
 TAPL은 Agent 세션 작업 폴더의 `.tapl/tapl-{UUID}.db`에 기록하고 같은 폴더의 다른 DB 이력을 함께 읽습니다. 제거 후에도 유지되는 UUID와 기존 DB 이전은 [저장 가이드](docs/guides/storage.ko.md)를 참고하세요. 상위 폴더에 TAPL DB가 있어도 하위 폴더는 자체 이력을 사용합니다.
 작업을 기록하기 위한 CLI 명령을 따로 익힐 필요는 없습니다.
 
 최초 설치 후에는 MCP 시작과 hook 진입 시 기존 user/repo 설치를 자동 갱신합니다.
 버전과 배포 템플릿의 변경을 감지해 사용자 설정값을 보존하면서 새 기본값을 추가하고,
-알려진 구형 설정을 마이그레이션합니다. 업데이트마다 `taplctl install user/repo`를
+알려진 구형 설정을 마이그레이션합니다. 업데이트마다 선택한 클라이언트의 설치 명령을
 다시 실행할 필요는 없습니다. 제거한 설치는 다시 활성화하지 않으며, repo 설정이 없으면
-사용자 설정 상속을 유지합니다. Codex가 변경된 연동 설정을 읽어야 할 때는 재시작합니다.
+사용자 설정 상속을 유지합니다. 변경된 연동 설정을 읽어야 할 때는 해당 호스트를 재시작합니다.
 
 작업 중에는 RUN 분류와 함께 계획·실행·검증 단계 진입을 짧은 PLAN/TASK 안내로 표시합니다.
 
 [Linux 설치](docs/getting-started/installation.ko.md)와 [Windows 설치](docs/getting-started/installation.ko.md)는 가이드를 참고하세요.
-설치 후 [운영체제별 Codex 연결 명령](docs/getting-started/integrations.ko.md)을 실행합니다.
+설치 후 [운영체제별 Agent 연결 명령](docs/getting-started/integrations.ko.md)을 실행합니다.
 
 ## 설치
 
 위의 [Agent 설치 프롬프트](#agent-install)를 사용하면 환경 확인부터 TAPL 설치,
-Codex 연결과 검증까지 Agent에게 맡길 수 있습니다. Codex 프로젝트 전체에 연결하려면
-`taplctl install user`, 한 저장소에만 연결하려면 `taplctl install repo`를 선택하세요.
-프롬프트는 연결 전에 이 선택을 확인합니다.
-[연결 범위](#connection-scope)와 [운영체제별 명령](docs/getting-started/integrations.ko.md)을 참고하세요.
+Codex 또는 Claude Code 연결과 검증까지 Agent에게 맡길 수 있습니다.
+[연결 범위](#connection-scope)에서 호스트와 범위를 선택하세요. 프롬프트는 연결 전에
+범위를 확인합니다. [운영체제별 명령](docs/getting-started/integrations.ko.md)도 참고하세요.
 
 | 플랫폼·채널 | 설치 방법 | 안내 |
 | --- | --- | --- |
 | macOS · 안정판 | Homebrew `taplctl` | [전문 검색 포함](docs/getting-started/installation.ko.md) |
 | macOS · 안정판 + 시맨틱 검색 | Homebrew `taplctl-semantic` | [선택 의존성 포함](docs/getting-started/installation.ko.md) |
-| macOS · 프리릴리즈 포함 최신 채널 | Homebrew `taplctl-pre` | [채널 선택](docs/getting-started/installation.ko.md) |
+| macOS · 최신 게시 채널 | Homebrew `taplctl-pre` | [채널 선택](docs/getting-started/installation.ko.md) |
 | Linux · 안정판 기본 | 독립형 셸 설치 스크립트 | [설치 및 경로 설정](docs/getting-started/installation.ko.md) |
 | Windows 10/11 · 안정판 기본 | PowerShell / CMD 스크립트 | [설치 및 경로 설정](docs/getting-started/installation.ko.md) |
 
 Windows의 `-Pre`, `-Semantic`, `-Version TAG`는
 [채널·시맨틱 옵션](docs/getting-started/installation.ko.md)을 참고하세요.
 
+독립형 설치 스크립트는 최신 안정판이 기본입니다. Claude Code는 Windows의 `-Pre` 또는
+설치 가이드의 Linux 릴리스 manifest 선택 방법을 사용합니다.
 Python 3.11 이상이 필요합니다. Homebrew의 세 formula는 서로 충돌하므로 하나만 설치하세요.
 자세한 의존성, 업데이트, 설정은 [설치·운영 가이드](docs/README.ko.md)에서 확인할 수 있습니다.
 
@@ -253,7 +266,7 @@ flowchart LR
 ```
 
 - **`tapl-mcp`**가 워크플로 기록 생성, 조회, 검색과 작업 상태 관리를 수행합니다.
-- **`tapl-hook`**이 Codex의 수명 주기 지점에 현재 상태를 전달하고 실행 승인 경계를 확인합니다.
+- **`tapl-hook`**이 호스트의 수명 주기 지점에 현재 상태를 전달하고 실행 승인 경계를 확인합니다.
 - **`taplctl`**은 설치, 진단, 업데이트, 설정과 viewer 등 관리 작업을 담당합니다.
 
 SQLite 데이터베이스가 이 구성 요소들이 공유하는 작업 기록의 기준입니다.
@@ -263,7 +276,8 @@ SubAgent의 생성과 관리는 호스트 런타임이 담당하고, TAPL은 의
 ## 문서
 
 - [문서 홈](docs/README.ko.md) — 주제별 전체 문서와 탐색
-- [빠른 시작](docs/getting-started/quickstart.ko.md) · [설정](docs/guides/configuration.ko.md) · [VS Code](docs/guides/vscode.ko.md)
+- [빠른 시작](docs/getting-started/quickstart.ko.md) · [Agent 연결](docs/getting-started/integrations.ko.md) · [Claude Code](docs/getting-started/claude-code.ko.md)
+- [설정](docs/guides/configuration.ko.md) · [VS Code](docs/guides/vscode.ko.md)
 - [CLI 참조](docs/reference/cli.ko.md) · [MCP 도구 참조](docs/reference/mcp.ko.md)
 - [GitHub Issues](https://github.com/qkdxorjs1002/tapl/issues) — 버그 신고와 기능 제안
 

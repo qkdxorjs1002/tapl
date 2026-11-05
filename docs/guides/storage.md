@@ -8,7 +8,7 @@ Client integration does not create a second workflow database: Codex and Claude 
 
 ## Persistent installation identity
 
-The first operation needing a default writable database creates a random UUID v4 in `~/.tapl/installation_id`. Concurrent starts reuse one complete value. Every workspace used by that local user environment uses the same UUID suffix; the records themselves stay in each workspace. This identifier is independent of Codex accounts, sessions, and installation IDs.
+The first operation needing a default writable database creates a random UUID v4 in `~/.tapl/installation_id`. Concurrent starts reuse one complete value. Every workspace used by that local user environment uses the same UUID suffix; the records themselves stay in each workspace. This identifier is independent of host accounts, conversation sessions, and client installation IDs.
 
 The identity file is separate from `config.toml`. TAPL removal, including `--purge-config` and `--purge-db`, preserves it. Reinstalling TAPL therefore selects the same database name. Removing executables also leaves this file in place.
 

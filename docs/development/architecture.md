@@ -17,13 +17,14 @@ Environment identity persists independently in the user-global `~/.tapl/installa
 | `mcp_server.py` | MCP stdio schemas/annotations, session routing, async facade, compact responses. |
 | `db.py` | SQLite schema/migrations, ownership, records, task dependencies, execution batches, timing, archives, FTS. |
 | `validation.py`, `recommendations.py` | Workflow contract checks and next-action selection. |
-| `prompt.py`, `context.py`, `.codex/` | Policy/bootstrap text, event-specific guidance, and installable hook templates. |
-| `hook_cli.py`, `hooks.py`, `sessions.py` | Codex lifecycle adapter, event checks, and scoped conversation identity. |
+| `clients.py` | Context-local client selection and cross-client owner validation. |
+| `prompt.py`, `context.py`, `.codex/`, `.claude/` | Client-specific policy/bootstrap text, event guidance, and installable hook templates. |
+| `hook_cli.py`, `hooks.py`, `sessions.py` | Codex and Claude Code lifecycle adapters, event checks, and scoped conversation identity. |
 | `config.py`, `config_editor.py` | Effective settings and validated configuration edits. |
 | `embeddings.py`, `searchd.py` | Optional semantic retrieval and Unix-socket embedding daemon. |
 | `recall.py`, `memory_search.py` | Associative memories, source links, revisions, review/capture, and retrieval. |
 | `viewer.py`, `_viewer/` | Browser HTTP adapter and compiled shared UI. |
-| `install.py`, `updater.py`, `uninstall.py`, `command_runtime.py` | Installation lifecycle and platform command/stdio handling. |
+| `install.py`, `claude_install.py`, `updater.py`, `uninstall.py`, `command_runtime.py` | Client integration lifecycle and platform command/stdio handling. |
 | `vscode-extension/src/` | VS Code workspace/MCP adapters and shared React webview. |
 | `tapl/tests/`, `vscode-extension/tests/`, `.github/` | Regression checks and build/release automation. |
 
@@ -33,7 +34,7 @@ Python filenames without a prefix above are under `tapl/taplctl/`. The Python pa
 
 ```mermaid
 flowchart LR
-  Agent[Codex agent] --> MCP[MCP facade]
+  Agent[Codex / Claude Code] --> MCP[MCP facade]
   Agent --> Hook[Lifecycle hooks]
   MCP --> App[WorkflowApplication]
   Browser[Browser Viewer] --> App
@@ -55,7 +56,7 @@ The schema stores RUNs, common items, plan/task/finding fields, approvals, archi
 
 The database belongs to a working folder, not a Git root inferred from parents. `find_repo_root` resolves only the supplied/current folder. Each initialized subdirectory can therefore own independent history.
 
-`sessions.py` normalizes a hook `session_id` and provides context-local scope; `WorkflowConnection` retains the owner on each connection. A unique index permits one active RUN per session. Omitted identity routes to legacy `""`; it does not adopt another session's RUN. Viewers can list active owners but must explicitly select the correct owner for mutation.
+`sessions.py` normalizes a hook `session_id` and provides context-local scope; `clients.py` validates the client boundary, and `WorkflowConnection` retains the owner on each connection. A unique index permits one active RUN per session. Codex retains its native owner and omitted-identity legacy `""` scope. Claude Code requires the exact `claude-code:<native-session-id>` hook owner on every MCP call, including reads. Neither client adopts another session's RUN. Viewers can list active owners but must explicitly select the correct owner for mutation.
 
 Execution ownership uses persisted batch/execution records and exact `execution_id` checks. These tokens protect settlement against stale agents after cancellation/recovery. They are not time-based leases: there is no separate lease daemon, heartbeat, or automatic TTL expiry. Root records the dispatch selection, spawns the agents, and alone settles TAPL state. `owned_paths` and completed dependencies define the batch contract, not an operating-system file lock.
 
@@ -68,6 +69,8 @@ MCP initialization sends a short bootstrap. `tapl_get_next` supplies authoritati
 Hooks handle `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, and `Stop`. UserPromptSubmit ensures a session-owned RUN. PreToolUse checks durable work for plan/task/approval validity. PostToolUse prompts for decision-relevant findings after external research. Stop checks unfinished work, batches, validation, and archive eligibility. `observe` provides guidance; `enforce` can block the relevant boundary. Hooks record events and render only referenced guidance, without caching settings. A Stop event does not require another entry read.
 
 A hook is a host lifecycle boundary, while MCP is the typed workflow interface. Neither can terminate arbitrary external agents or enforce an OS filesystem sandbox. Host permission controls remain separate.
+
+Hook payloads and responses follow each client's contract. Claude uses event-specific `additionalContext`, write-denial and Stop responses; helper events retain the parent's TAPL owner without starting or stopping a root RUN. The shared workflow checks remain behind both adapters.
 
 ## Search and memory boundaries
 

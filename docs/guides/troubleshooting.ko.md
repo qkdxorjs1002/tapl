@@ -2,9 +2,9 @@
 
 [문서 홈](../README.ko.md) · [English](troubleshooting.md)
 
-Codex가 TAPL을 사용하는 작업 폴더에서 시작하세요. 워크스페이스는 해당 폴더의 `.tapl/tapl-{UUID}.db`를 사용하며 부모 DB를 검색하지 않습니다. 기록이 없어 보인다면 설치 범위, 설정 범위, 활성 세션 식별자도 확인해야 합니다.
+에이전트가 TAPL을 사용하는 작업 폴더에서 시작하세요. 워크스페이스는 해당 폴더의 `.tapl/tapl-{UUID}.db`를 사용하며 부모 DB를 검색하지 않습니다. 기록이 없어 보인다면 설치 범위, 설정 범위, 활성 세션 식별자도 확인해야 합니다.
 
-Claude의 MCP 설정 원본 선택·이름공간 소유자 누락·hook 재로드·Agent 모델·effort는 [Claude Code 문제 해결](../getting-started/claude-code.ko.md#검증과-문제-해결)을 참고하세요. 아래 Codex 예제는 기본 클라이언트를 사용하며, 대응하는 Claude 설치·제거 명령에만 `--client claude-code`를 붙입니다.
+Claude의 MCP 설정 원본 선택·이름공간 소유자 누락·hook 재로드·Agent 모델·effort는 [Claude Code 문제 해결](../getting-started/claude-code.ko.md#검증과-문제-해결)을 참고하세요. 설치·제거 명령의 기본 클라이언트는 Codex이며, Claude Code 연결 관리에는 `--client claude-code`를 붙입니다.
 
 ## 런타임과 설정 확인
 
@@ -18,7 +18,7 @@ taplctl config get
 
 | 증상 | 확인과 해결 |
 | --- | --- |
-| Codex에 TAPL 도구가 보이지 않음 | `taplctl doctor`를 실행하고 [에이전트 연결](../getting-started/integrations.ko.md)에서 설치 방식·선택 범위에 맞는 연결 명령을 다시 실행한 뒤 Codex를 재시작합니다. |
+| 호스트에 TAPL 도구가 보이지 않음 | `taplctl doctor`를 실행하고 [에이전트 연결](../getting-started/integrations.ko.md) 또는 [Claude Code](../getting-started/claude-code.ko.md#연결과-제거)에서 설치 방식·클라이언트·범위에 맞는 연결 명령을 다시 실행한 뒤 해당 호스트를 재시작합니다. |
 | 독립 설치 후 `taplctl`을 찾지 못함 | 설치기가 출력한 `PATH` export를 적용하고 셸 프로필에 저장한 뒤 터미널을 다시 엽니다. Windows도 PATH 갱신 후 셸을 다시 엽니다. |
 | 설치 버전이나 채널이 예상과 다름 | `taplctl --version`을 설치 채널·메타데이터와 비교합니다. Homebrew 설치는 Homebrew로, 설치기 관리 설치는 `taplctl update`로 갱신합니다. [설치](../getting-started/installation.ko.md)를 참고하세요. |
 | Homebrew formula 충돌 | 기존 TAPL formula를 제거한 뒤 `taplctl`, `taplctl-semantic`, `taplctl-pre` 중 하나를 고릅니다. 같은 명령을 제공합니다. |
@@ -45,7 +45,7 @@ taplctl config get
 | --- | --- |
 | 의미 검색이 BM25로 대체됨 | 적용 검색 설정과 선택적 의미 검색 의존성을 확인합니다. 인덱싱·provider 확인은 [검색](search.ko.md)을 보세요. 전문 검색에는 semantic extra가 필요하지 않습니다. |
 | Windows에서 `searchd`를 쓸 수 없음 | 선택 의존성을 갖춘 로컬 의미 검색 provider나 BM25를 사용합니다. 데몬은 Unix 소켓이 필요합니다. |
-| MCP에서 현재 작업이 보이지 않음 | 모든 호출에 같은 hook `session_id`를 전달합니다. 생략하면 격리된 legacy 범위를 선택합니다. MCP 전송 연결 자체는 대화 식별자가 아닙니다. |
+| MCP에서 현재 작업이 보이지 않음 | 모든 호출에 같은 hook `session_id`를 전달합니다. Codex에서 생략하면 격리된 legacy 범위를 선택합니다. Claude Code는 정확한 `claude-code:` hook 소유자가 필요하며 읽기에서도 생략을 거부합니다. MCP 전송 연결 자체는 대화 식별자가 아닙니다. |
 | 작업 시작·dispatch가 거부됨 | `tapl_get_next` 권고와 `tapl_validate_state` 오류를 확인합니다. 계획, 실행 승인, 완료된 의존 작업, 병렬 작업의 겹치지 않는 소유 경로를 확인합니다. |
 | 병렬 작업 완료에서 실행이 거부됨 | 활성 dispatch manifest가 반환한 정확한 `execution_id`를 사용합니다. 중단 후에는 원래 배치를 복구하거나 취소한 뒤 재시도합니다. |
 | 종료 시 `review_required` 반환 | 활성 RUN의 메모리 검토를 완료한 뒤 별도로 아카이브합니다. 메모리 인자와 함께 `expected_run_id`를 사용합니다. [연상 메모리](memory.ko.md)를 보세요. |
@@ -55,6 +55,6 @@ taplctl config get
 
 ## 해결되지 않은 문제 보고
 
-[GitHub Issues](https://github.com/qkdxorjs1002/tapl/issues)에 OS, 관련 TAPL·VS Code·확장 버전, 설치 방식, 실행 파일 경로, 정확한 재현 절차, 필요한 범위의 `doctor`·오류 출력을 첨부합니다. 비밀과 비공개 워크스페이스 내용은 제거하세요. 보안 취약점은 [비공개 취약점 보고](https://github.com/qkdxorjs1002/tapl/security/advisories/new)를 사용합니다.
+[GitHub Issues](https://github.com/qkdxorjs1002/tapl/issues)에 OS, 관련 TAPL·호스트 클라이언트와 버전·VS Code·확장 버전, 설치 방식, 실행 파일 경로, 정확한 재현 절차, 필요한 범위의 `doctor`·오류 출력을 첨부합니다. 비밀과 비공개 워크스페이스 내용은 제거하세요. 보안 취약점은 [비공개 취약점 보고](https://github.com/qkdxorjs1002/tapl/security/advisories/new)를 사용합니다.
 
 이 해결 방법은 CLI·Viewer·확장 지원 계약과 세션·런타임 회귀 테스트를 근거로 합니다. 로컬 검증 명령은 [기여와 검증](../development/contributing.ko.md), 서명·게시 실패는 [릴리스](../development/releases.ko.md)를 보세요.

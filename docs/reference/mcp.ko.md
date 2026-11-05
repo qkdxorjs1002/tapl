@@ -8,7 +8,7 @@ Claude Code는 읽기를 포함해 모든 호출에 정확한 hook 소유자 `cl
 
 ## 공통 계약
 
-읽기를 포함해 **모든 호출에 현재 호스트 hook `session_id`**를 전달합니다. 대부분의 schema에서는 호환성을 위해 선택 인자이지만 생략하면 다른 세션의 활성 RUN이 아닌 격리된 legacy 범위(`""`)를 선택합니다. 식별자는 최대 256자이며 앞뒤 공백과 제어 문자를 허용하지 않습니다. `tapl_discard_run`은 legacy RUN의 `""`까지 포함해 소유자를 명시해야 합니다.
+읽기를 포함해 **모든 호출에 현재 호스트 hook `session_id`**를 전달합니다. 대부분의 schema에서는 호환성을 위해 선택 인자이지만 Codex에서만 생략을 허용하며 다른 세션의 활성 RUN이 아닌 격리된 legacy 범위(`""`)를 선택합니다. Claude Code는 정확한 이름공간 소유자가 필요합니다. 식별자는 최대 256자이며 앞뒤 공백과 제어 문자를 허용하지 않습니다. `tapl_discard_run`은 legacy RUN의 `""`까지 포함해 소유자를 명시해야 합니다.
 
 응답은 구조화된 객체입니다. 호스트가 코드 모드를 제공한다면 필요한 도구를 정확한 이름으로 함께 탐색하고 전체 도구 목록은 출력하지 않습니다. `structuredContent`를 한 번 출력하고 필요할 때만 텍스트를 파싱해 대체합니다. envelope의 두 표현을 모두 출력하지 않습니다. 쓰기 응답은 현재 권고와 축약 검증을 제공합니다. 차단 오류는 모두 남기며 생략한 경고 수는 `omitted_issue_count`로 알립니다.
 
@@ -40,7 +40,7 @@ PLAN ID는 `PLAN-001` 또는 legacy `SPEC-001`, TASK ID는 `TASK-001` 형태로 
 
 ## 진입·조회·설정
 
-공통 `session_id`는 필수인 경우 외에는 표에서 생략합니다.
+공통 `session_id`는 schema상 필수인 경우 외에는 표에서 생략하지만 Claude Code의 모든 호출에는 반드시 필요합니다.
 
 | 도구 | 필수 인자 | 선택 인자와 동작 |
 | --- | --- | --- |
@@ -54,7 +54,7 @@ MCP 초기화는 짧은 진입 안내를 제공합니다. 단순하지 않거나
 
 `policy_revision`은 정책·위임 지침·설정과 `authoring_policy`의 정확한 내용을 나타내므로 RUN 모드가 바뀌면 이전 묶음은 유효하지 않습니다. 해당 revision의 정책·지침·설정 전체가 현재 문맥에 남아 있을 때만 `known_policy_revision`을 전달합니다. 쓰기 응답에서 새 revision만 받았다고 전체 정책을 조회한 것은 아닙니다. 일치하면 바뀌지 않은 정책 필드를 생략하지만 상태·권고와 요청된 완전한 모델 목록 비교는 새로 반환합니다. 모르는 revision이나 내용 변경 시 전체 정책을 반환합니다. 새 세션, 문맥 압축 후, 내용 보존이 불확실할 때는 생략합니다. 상태 캐시나 승인 근거가 아닙니다.
 
-사용자가 요청한 설정 비교에서는 고정 역할 모델까지 포함한 **현재 위임 도구의 전체 모델 목록**과 `catalog_complete=true`를 전달합니다. 검증된 빈 목록은 제거를 확인할 수 있습니다. 기본값 `false`에서는 전달된 목록을 불완전하게 취급하고(`comparison_status="incomplete"`) 변경을 추론하거나 재설정을 요청하지 않습니다. 부족한 live 항목을 저장 설정으로 채우지 마세요. 설정 확인은 실제 사용자 답변이나 정확한 변경 요청이어야 하며 시간 초과는 확인이 아닙니다. 모델은 provider API 목록이 아닌 현재 위임 도구가 노출한 값이어야 합니다. 빈 `models`는 비활성일 때만 허용하며 `profiles=[]`는 권고 프로필을 끕니다.
+사용자가 요청한 설정 비교에서는 고정 역할 모델까지 포함한 **현재 위임 도구의 전체 모델 목록**과 `catalog_complete=true`를 전달합니다. 검증된 빈 목록은 제거를 확인할 수 있습니다. 기본값 `false`에서는 전달된 목록을 불완전하게 취급하고(`comparison_status="incomplete"`) 변경을 추론하거나 재설정을 요청하지 않습니다. 부족한 live 항목을 저장 설정으로 채우지 마세요. 설정 확인은 실제 사용자 답변이나 정확한 변경 요청이어야 하며 시간 초과는 확인이 아닙니다. 모델은 provider API 목록이 아닌 현재 위임 도구가 노출한 값이어야 합니다. Claude Code는 확인받은 `models={inherit: []}` 선택도 지원하며 `available_models`에는 넣지 않습니다. Alias의 `[]`는 effort 미지정입니다. [Claude 모델 선택](../getting-started/claude-code.ko.md#모델과-agent-실행)을 참고하세요. 빈 `models`는 비활성일 때만 허용하며 `profiles=[]`는 권고 프로필을 끕니다.
 
 RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌면 쓰기 응답은 `policy_refresh_required=true`·`authoring_policy`와 최우선 `tapl_get_next` 권고를 유지합니다. 정책을 다시 조회한 뒤 현재 PLAN·미완료 TASK의 근거를 새 엄격도에 맞게 보완합니다. 완료·보관 기록은 자동으로 다시 쓰지 않습니다. 필수 근거와 Strict typed 필드 경고는 [작성 상세도](../guides/authoring-detail.ko.md#선택-예시와-검증)를 참고하세요.
 
@@ -108,7 +108,7 @@ RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌�
 | `tapl_cancel_batch` | `batch_id`, `reason` | `block_tasks=true`; false이면 Pending으로 반환. 활성 실행 취소. |
 | `tapl_recover_batch` | `batch_id`, `reason` | 중단된 활성 작업을 안전한 재시도를 위해 Pending으로 반환. |
 
-병렬 작업은 `execution_mode="parallel"`, `executor_kind="subagent"`, 같은 계획과 비어 있지 않은 `parallel_group`, 완료된 의존 작업, 겹치지 않는 독점 `owned_paths`, 실행 승인이 필요합니다. Root가 원자적으로 dispatch하고 기록된 `SubAgent Model`을 확인한 뒤 실제 에이전트를 생성합니다. `execution_metadata`는 작업 ID별 런타임 선택 객체이며 모델을 선택하면 완전한 `model`/`reasoning_effort` 쌍과 근거를 포함합니다. TAPL 상태 쓰기는 root만 담당하며 각 작업은 manifest의 정확한 **`execution_id`**로 정리합니다. 중단·생성 실패 시 기존 배치를 복구하거나 취소한 뒤 재시도합니다. 안정된 `batch_id`는 같은 RUN·작업 집합의 멱등 재시도에 사용하며 다른 배치를 재사용하는 수단이 아닙니다.
+병렬 작업은 `execution_mode="parallel"`, `executor_kind="subagent"`, 같은 계획과 비어 있지 않은 `parallel_group`, 완료된 의존 작업, 겹치지 않는 독점 `owned_paths`, 실행 승인이 필요합니다. Root가 원자적으로 dispatch하고 기록된 `SubAgent Model`을 확인한 뒤 실제 에이전트를 생성합니다. `execution_metadata`는 작업 ID별 런타임 선택 객체이며 모델을 선택하면 완전한 `model`/`reasoning_effort` 쌍과 근거를 포함합니다. Claude Code의 미지정 effort는 `reasoning_effort=""`, 확인받은 호스트 제어 선택은 `model="inherit"`로 기록하고 해당 native Agent 인자는 생략합니다. TAPL 상태 쓰기는 root만 담당하며 각 작업은 manifest의 정확한 **`execution_id`**로 정리합니다. 중단·생성 실패 시 기존 배치를 복구하거나 취소한 뒤 재시도합니다. 안정된 `batch_id`는 같은 RUN·작업 집합의 멱등 재시도에 사용하며 다른 배치를 재사용하는 수단이 아닙니다.
 
 ## 순차 수명주기 예제
 

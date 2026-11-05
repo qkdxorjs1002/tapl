@@ -52,6 +52,8 @@ uv --directory tapl run --extra test python -m pytest -q tests/test_session_mcp.
 
 Run targeted tests while changing behavior, then the relevant complete suite before reporting completion. Tests that exercise real Codex conversations in an isolated environment must use **morae-mcp**, as required by the project instructions. Local unit tests are not evidence that a real host conversation passed. Do not publish private experiment conversations or tooling as public validation artifacts.
 
+For Claude Code integration changes, check installation, hooks, session ownership and native Agent execution. Keep automated contract checks separate from real conversations; the [Claude Code guide](../getting-started/claude-code.md#verification-and-troubleshooting) records verified conditions and their limits.
+
 Platform checks have different scope. Windows CI parses installer scripts with PowerShell 5.1, tests Python 3.11/3.12, builds a real wheel, and exercises install/update/reinstall/uninstall plus CLI/MCP runtime. macOS signature preservation needs the dedicated Homebrew workflow; a Linux unit test cannot establish Developer ID signatures survived installation. See [Releases](releases.md).
 
 ## Maintain English and Korean documentation

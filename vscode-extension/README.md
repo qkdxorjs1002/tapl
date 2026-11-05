@@ -4,7 +4,7 @@
 </p>
 <h1 align="center">TAPL Workflow Viewer</h1>
 <p align="center"><strong>Your workflow, beside your code.</strong></p>
-<p align="center">Inspect Codex plans, progress, and history from your VS Code workspace.</p>
+<p align="center">Inspect Codex and Claude Code plans, progress, and history from your VS Code workspace.</p>
 <p align="center">
   <a href="#get-started">Get started</a> ·
   <a href="https://github.com/qkdxorjs1002/tapl">TAPL</a> ·
@@ -13,7 +13,7 @@
 
 ## See the work behind the conversation
 
-TAPL keeps workflow state in your repository's `.tapl/tapl.db`. This optional
+TAPL keeps workflow state in your working folder's `.tapl/tapl-{UUID}.db`. This optional
 extension brings that record into a native tree view and a detailed dashboard.
 
 | View | What you can inspect |
@@ -34,11 +34,11 @@ and [install TAPL](https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-s
 You need **VS Code 1.90+**, a reachable **`tapl-mcp`** executable, and a workspace
 initialized by TAPL.
 
-1. [Install TAPL and connect it to Codex](https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/integrations.md).
+1. [Install TAPL and connect Codex or Claude Code](https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/integrations.md).
 2. Install the extension. You can download a `.vsix` from
    [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases) and use
    **Extensions: Install from VSIX…** in the Command Palette.
-3. Open a repository containing `.tapl/tapl.db` and select **TAPL** in the Activity Bar.
+3. Open the working folder containing `.tapl/tapl-{UUID}.db` and select **TAPL** in the Activity Bar.
 4. Run **TAPL Workflow: Open TAPL Dashboard** for the complete workspace view.
 
 If the extension cannot find the MCP executable, set its command name or absolute

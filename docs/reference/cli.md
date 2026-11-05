@@ -34,7 +34,7 @@ Some database/service commands can refresh existing installations before running
 | --- | --- |
 | `init` | Initialize a workspace database |
 | `doctor` | Report runtime, configuration, database, and dependency information |
-| `install user` / `install repo` | Connect or refresh Codex integration |
+| `install user` / `install repo` | Connect or refresh the selected client integration |
 | `uninstall user` / `uninstall repo` | Disconnect; preserve config and data by default |
 | `config get` / `set` / `unset` | Read or edit supported configuration |
 | `viewer` | Serve the browser Viewer on loopback |
@@ -50,7 +50,7 @@ taplctl init --workspace-root /path/to/workspace --json
 taplctl --db /path/to/history.db init
 ```
 
-`--workspace-root PATH` initializes that folder's workspace explicitly. It cannot be combined with global `--db`. Without it, TAPL opens/initializes the selected database. Initialization does not install Codex integration.
+`--workspace-root PATH` initializes that folder's workspace explicitly. It cannot be combined with global `--db`. Without it, TAPL opens/initializes the selected database. Initialization does not install client integration.
 
 ## doctor
 
@@ -89,7 +89,7 @@ Both scopes accept:
 
 `prompt` asks about existing runtime config when the version changes and preserves same-version config. Explicit `merge` adds missing defaults while keeping values; `overwrite` replaces with defaults. Both explicit policies apply even at the same version. `--force` also affects managed templates; use the explicit config policy to choose runtime-config handling.
 
-Choose a user or repository connection scope, restart Codex, and trust the hook when prompted. Package installation is separate. Actual standalone executable paths, automatic refresh, and preservation rules are in [Agent integration](../getting-started/integrations.md).
+Choose a client and user or repository connection scope, restart that host, and complete its hook/MCP trust steps. Package installation is separate. Actual standalone executable paths, automatic refresh, and preservation rules are in [Agent integration](../getting-started/integrations.md).
 
 ## uninstall
 
@@ -99,18 +99,18 @@ taplctl uninstall repo --repo /path/to/repository
 taplctl uninstall user --purge-config --purge-db --dry-run
 ```
 
-`user` accepts `--codex-home PATH`; `repo` accepts `--repo PATH`, with the same defaults as installation. Both accept `--dry-run`, `--json`, `--agent`, and:
+`user` accepts `--codex-home PATH` for Codex or `--claude-home PATH` for Claude Code; `repo` accepts `--repo PATH`, with the same defaults as installation. Both scopes accept `--client {codex,claude-code}` (default `codex`). Both accept `--dry-run`, `--json`, `--agent`, and:
 
 | Option | Deleted in addition to the integration |
 | --- | --- |
 | `--purge-config` | Selected scope's `.tapl/config.toml` |
 | `--purge-db` | Selected scope's current local `.tapl/tapl-{UUID}.db`, legacy `tapl.db`, and their `-wal`, `-shm`, and `-journal` sidecars |
 
-Default uninstall removes TAPL's MCP entry, recognized hooks, and installation version marker. It preserves unrelated Codex settings/hooks, TAPL config, databases, backups, and other workspaces. Purge options are independent; combine them only when both categories should be deleted. Close sessions using the target database before purging it.
+Default uninstall removes TAPL's MCP entry, recognized hooks, and installation version marker. It preserves unrelated client settings/hooks, TAPL config, databases, backups, and other workspaces. Purge options are independent; combine them only when both categories should be deleted. Close sessions using the target database before purging it.
 
-For `user`, the target is the home directory containing `--codex-home` (default `~/.codex`); it does not purge every project database. These commands leave executables and services installed. Use the [installation method](../getting-started/installation.md) to remove those. Preserved config does not re-enable an uninstalled integration.
+For `user`, the target is the home directory containing the selected client settings (`--codex-home`, default `~/.codex`, or `--claude-home`, default `~/.claude`); it does not purge every project database. These commands leave executables and services installed. Use the [installation method](../getting-started/installation.md) to remove those. Preserved config does not re-enable an uninstalled integration.
 
-Every removal option preserves `~/.tapl/installation_id` and peer databases. See [Local identity and shared history](../guides/storage.md) for identity persistence and migration.
+Every removal option preserves `~/.tapl/installation_id` and peer databases. Purge also preserves shared config/data when another client has installation markers, configured delegation preferences, or session ownership; JSON output reports `preserved_shared`. See [Local identity and shared history](../guides/storage.md) for identity persistence and migration.
 
 ## config
 
@@ -133,7 +133,7 @@ taplctl config unset workflow.authoring_detail
 
 `workflow.authoring_detail` defaults to `auto`; `get` returns that configured value. Runtime effective detail is separate, and explicit levels stay fixed across modes. `unset` restores `auto`. See [Authoring detail](../guides/authoring-detail.md) for no-RUN fallback and policy refresh.
 
-Supported keys:
+Supported keys follow. The delegation rows show Codex's `subagents.*` keys; use `clients.claude-code.subagents.*` for Claude Code.
 
 | Key | Value |
 | --- | --- |
@@ -148,7 +148,7 @@ Supported keys:
 | `subagents.enabled`, `subagents.setup_complete` | Boolean |
 | `subagents.strategy` | `conservative`, `balanced`, `aggressive` |
 | `subagents.preference` | String |
-| `subagents.models.<model-id>` | Nonempty, unique TOML array of reasoning-effort strings |
+| `subagents.models.<model-id>` | Unique TOML array of reasoning-effort strings; Codex requires at least one, Claude Code also accepts `[]` |
 | `subagents.profiles` | TOML array of profile inline tables; candidate model/effort pairs must be allowlisted |
 
 Do not copy guessed model IDs into configuration. Use the host's actual delegation-tool catalog and [SubAgent setup](../guides/subagents.md). See [configuration](../guides/configuration.md) for file scope, defaults, and examples.
@@ -200,4 +200,4 @@ taplctl searchd stop
 
 `--socket` overrides `TAPL_SEARCHD_SOCKET`, otherwise `~/.tapl/searchd.sock` is used. `--idle-timeout` is nonnegative and defaults to `search.searchd_model_idle_timeout_seconds` (1800 seconds). It unloads an idle model, not the daemon; `0` disables idle unloading. `--timeout-ms` must be positive; defaults are 15000 ms for startup readiness and 250 ms for status/stop requests. `--no-wait` returns without waiting for readiness.
 
-The daemon requires Unix domain sockets and is unavailable on Windows. Windows can still use local semantic search or full-text fallback. Starting/stopping `searchd` does not start/stop the Viewer or Codex MCP process. See [search](../guides/search.md).
+The daemon requires Unix domain sockets and is unavailable on Windows. Windows can still use local semantic search or full-text fallback. Starting/stopping `searchd` does not start/stop the Viewer or host MCP process. See [search](../guides/search.md).

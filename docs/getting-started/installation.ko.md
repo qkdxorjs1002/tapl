@@ -2,9 +2,9 @@
 
 [문서 홈](../README.ko.md) · [English](installation.md)
 
-플랫폼에 맞는 TAPL 실행 파일을 설치한 뒤 [Codex에 연결](integrations.ko.md)합니다. 패키지 설치 방법과 Codex 연결 범위는 별개의 선택입니다. [Agent에게 설치와 연결을 맡길 수도 있습니다](integrations.ko.md#agent에게-tapl-설치-맡기기).
+플랫폼에 맞는 TAPL 실행 파일을 설치한 뒤 [Codex 또는 Claude Code에 연결](integrations.ko.md)합니다. 패키지 채널·클라이언트·사용자/저장소 연결 범위는 별개의 선택이며 두 클라이언트는 같은 실행 파일을 사용합니다. [Agent에게 설치와 연결을 맡길 수도 있습니다](integrations.ko.md#agent에게-tapl-설치-맡기기).
 
-동일한 실행 파일로 [Claude Code도 연결](claude-code.ko.md)합니다. `taplctl install user --client claude-code` 또는 `taplctl install repo --client claude-code`를 사용하며, 클라이언트 선택은 패키지 채널·플랫폼과 별개입니다.
+현재 공개된 Claude Code 런타임은 Homebrew의 `taplctl-pre`, Windows의 `-Pre`, 아래 Linux의 릴리스 manifest를 선택해 설치합니다. 이 선택은 설치 패키지를 정하며, 이후 연결 명령으로 클라이언트를 선택합니다. Codex는 기본 안정 채널을 사용할 수 있습니다.
 
 ## 요구사항
 
@@ -46,27 +46,40 @@ brew install taplctl-pre
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
 ```
 
-독립 설치 스크립트는 최신 안정 릴리스를 선택합니다. `curl`, `venv`를 포함한 Python 3.11 이상, 설치 디렉터리 쓰기 권한이 필요합니다. 기본 설치 위치는 `${XDG_DATA_HOME:-$HOME/.local/share}/tapl`, 명령 링크 위치는 `${XDG_BIN_HOME:-$HOME/.local/bin}`입니다.
+독립 설치 스크립트는 기본적으로 최신 안정 릴리스를 선택합니다. 공개된 Claude Code 런타임을 설치하려면 해당 릴리스 manifest를 지정합니다.
 
-`TAPL_INSTALL_ROOT`와 `TAPL_BIN_DIR`로 위치를 지정할 수 있으며, 지정하지 않으면 해당 XDG 변수가 적용됩니다. 스크립트는 필요한 `PATH` export를 출력하지만 셸 시작 파일을 수정하거나 Codex hook을 설치하지 않습니다. 출력된 설정을 적용하고 필요하면 영구 설정한 뒤 [Codex를 연결](integrations.ko.md#연결-범위-선택)하세요.
+```sh
+curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh -o /tmp/tapl-install.sh
+TAPL_INSTALL_MANIFEST_URL="https://github.com/qkdxorjs1002/tapl/releases/download/2.17.0-beta1/taplctl-install-manifest.json" sh /tmp/tapl-install.sh
+```
+
+Linux는 `TAPL_INSTALL_MANIFEST_URL`로 특정 릴리스를 선택하며 `-Pre` 옵션은 없습니다. 설치 스크립트에는 `curl`, `venv`를 포함한 Python 3.11 이상, 설치 디렉터리 쓰기 권한이 필요합니다. 기본 설치 위치는 `${XDG_DATA_HOME:-$HOME/.local/share}/tapl`, 명령 링크 위치는 `${XDG_BIN_HOME:-$HOME/.local/bin}`입니다.
+
+`TAPL_INSTALL_ROOT`와 `TAPL_BIN_DIR`로 위치를 지정할 수 있으며, 지정하지 않으면 해당 XDG 변수가 적용됩니다. 스크립트는 필요한 `PATH` export를 출력하지만 셸 시작 파일을 수정하거나 클라이언트를 연결하지 않습니다. 출력된 설정을 적용하고 필요하면 영구 설정한 뒤 [사용할 클라이언트를 연결](integrations.ko.md#연결-범위-선택)하세요.
 
 ## Windows
 
-`main`의 고정 진입 스크립트를 내려받아 실행합니다.
+`main`의 고정 진입 스크립트를 내려받고 클라이언트에 맞는 명령 하나를 선택합니다.
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -OutFile install.ps1
+# Codex:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+# 또는 Claude Code(가장 최근 공개 릴리스):
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Pre
 ```
 
 명령 프롬프트에서도 설치할 수 있습니다.
 
 ```bat
 curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.cmd -o install.cmd
+REM Codex:
 install.cmd
+REM 또는 Claude Code(가장 최근 공개 릴리스):
+install.cmd -Pre
 ```
 
-관리자 권한 없이 사용자 범위로 설치합니다. 기본 루트는 `%LOCALAPPDATA%\tapl`, 실행 launcher는 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다. 사용자 `PATH`를 반영하도록 터미널을 다시 연 뒤 [Codex를 연결](integrations.ko.md#독립-설치의-실행-파일-경로)하세요.
+관리자 권한 없이 사용자 범위로 설치합니다. 기본 루트는 `%LOCALAPPDATA%\tapl`, 실행 launcher는 `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`입니다. 사용자 `PATH`를 반영하도록 터미널을 다시 연 뒤 [사용할 클라이언트를 연결](integrations.ko.md#독립-설치의-실행-파일-경로)하세요.
 
 ### 채널과 시맨틱 의존성
 
@@ -106,7 +119,7 @@ Windows는 선택 의존성을 설치하면 로컬 시맨틱 검색을 지원합
 
 `-Reinstall`과 `-Uninstall`은 함께 사용할 수 없습니다. 이전 버전으로의 전환을 포함해 릴리스를 바꾸려면 진입 스크립트에 `-Version TAG`를 사용하세요. 같은 릴리스를 다시 설치할 때는 `-Reinstall`을 추가합니다. 채널 옵션이 없는 재설치 예제는 기본값인 안정 채널을 사용합니다.
 
-실행 파일을 제거하기 전에 [설치한 Codex 연결 범위를 각각 해제](integrations.ko.md#연결-해제와-재연결)하세요. 제거 시 TAPL 설정, 워크플로 DB와 무관한 파일은 보존합니다. 파일 목록이 없는 구형 설치는 먼저 `-Reinstall`이 필요하며, 관리 파일이 수정되어 있으면 점검을 위해 제거를 중단합니다.
+실행 파일을 제거하기 전에 [설치한 클라이언트와 연결 범위를 각각 해제](integrations.ko.md#연결-해제와-재연결)하세요. 제거 시 TAPL 설정, 워크플로 DB와 무관한 파일은 보존합니다. 파일 목록이 없는 구형 설치는 먼저 `-Reinstall`이 필요하며, 관리 파일이 수정되어 있으면 점검을 위해 제거를 중단합니다.
 
 `TAPL_INSTALL_ROOT`와 `TAPL_BIN_DIR`로 설치·launcher 위치를 바꿀 수 있습니다. `TAPL_INSTALL_MANIFEST_URL`은 사용자 지정 manifest를 선택하지만, 릴리스 설치 스크립트에는 여전히 자기 버전의 manifest가 필요합니다. 설치 스크립트는 사용 전에 manifest와 wheel SHA-256을 검증합니다.
 
@@ -133,7 +146,7 @@ brew upgrade taplctl
 
 `taplctl update`는 Homebrew나 소스 체크아웃을 갱신하지 않습니다. Homebrew 업그레이드·재설치 중 Viewer 서비스가 이미 실행 중인 경우에만 재시작을 시도합니다. 신규 설치나 중지된 서비스는 중지 상태를 유지하며, 수동으로 시작한 MCP stdio와 `searchd` 프로세스는 재시작하지 않습니다.
 
-기존에 연결한 Codex 범위는 MCP 시작과 hook 진입 시 버전이나 배포 템플릿 변경을 감지해 자동 갱신합니다. 설정과 hook 모드를 보존하고 누락 기본값을 병합하며 알려진 구형 키를 정리합니다. 업데이트 뒤 보통 `taplctl install`을 다시 실행할 필요는 없습니다. 호스트 설정을 다시 읽도록 Codex를 재시작하세요. [자동 갱신 범위](integrations.ko.md#자동-갱신)를 참고하세요.
+기존에 연결한 Codex·Claude Code 범위는 MCP 시작과 hook 진입 시 버전이나 배포 템플릿 변경을 감지해 자동 갱신합니다. 설정과 hook 모드를 보존하고 누락 기본값을 병합하며 알려진 구형 키를 정리합니다. 업데이트 뒤 보통 `taplctl install`을 다시 실행할 필요는 없습니다. 호스트 설정을 다시 읽도록 사용 중인 코딩 클라이언트를 재시작하세요. [자동 갱신 범위](integrations.ko.md#자동-갱신)를 참고하세요.
 
 ## 설치 확인과 다음 단계
 

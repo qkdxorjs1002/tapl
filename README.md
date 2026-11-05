@@ -14,7 +14,7 @@
 
 ## Why TAPL?
 
-Keep asking Codex to work normally. TAPL makes that work visible while it happens
+Keep asking Codex or Claude Code to work normally. TAPL makes that work visible while it happens
 and recoverable when the conversation ends.
 
 - **Resume with context.** Recover the plan, completed tasks, and remaining work in a later session.
@@ -87,12 +87,12 @@ Ask for an outcome, in your own words:
 The example below traces the permission-check call path, records the evidence,
 and saves the investigation with its follow-up work.
 
-When one request contains independent topics, Codex keeps one RUN and writes a separate PLAN for each topic before designing TASKs. For example, a request covering these four topics produces:
+When one request contains independent topics, the agent keeps one RUN and writes a separate PLAN for each topic before designing TASKs. For example, a request covering these four topics produces:
 
 | PLAN | Topic |
 | --- | --- |
 | PLAN-001 | Regex filtering for irregular hostnames |
-| PLAN-002 | A default Codex CLI environment for analysis |
+| PLAN-002 | A default coding-agent CLI environment for analysis |
 | PLAN-003 | Model reasoning level settings |
 | PLAN-004 | Ad detection through web page elements |
 
@@ -103,7 +103,7 @@ Multiple Codex or Claude Code sessions in the same working folder can work concu
 Include the host hook's `session_id` on every `tapl_*` MCP call. Claude Code requires its `claude-code:` identity on every call; the following legacy behavior applies to Codex. Older clients that omit it can read only the isolated legacy scope, and unidentified writes are rejected once the workspace contains session-owned records. New sessions never automatically take ownership of another session's RUN. Workflow state is isolated, while working files remain shared; coordinate simultaneous edits to the same file or use separate worktrees.
 
 <p align="center">
-  <img src="assets/readme/workflow-en.gif" width="100%" alt="Illustrative Codex progress messages: start a permission-check investigation, review history, define the scope, trace the call path, record evidence, and archive findings and follow-up work." />
+  <img src="assets/readme/workflow-en.gif" width="100%" alt="Illustrative agent progress messages: start a permission-check investigation, review history, define the scope, trace the call path, record evidence, and archive findings and follow-up work." />
 </p>
 
 [View the still image](assets/readme/workflow-en.png)
@@ -125,52 +125,64 @@ preserve the evidence, and leave a result the next session can use.
 
 ### Ask your agent to install TAPL
 
-Copy this prompt into your coding agent, such as Codex:
+Copy this prompt into Codex or Claude Code:
 
 ```text
-Install TAPL and connect it to Codex.
+Install TAPL and connect it to the coding agent I am using (Codex or Claude Code).
 Repository: https://github.com/qkdxorjs1002/tapl
 Installation guide: https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/installation.md
+Connection guide: https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/integrations.md
 
-Read the guide, detect my OS and shell, and check prerequisites and any existing installation.
-Use the official installation method for my OS and the latest stable release unless I specify another channel.
-Before connecting, confirm my preferred scope unless I already specified it: user (all my Codex projects) or repo (only the target repository).
-Run taplctl install user or taplctl install repo for the chosen scope, using the guide's platform-specific executable path when needed.
-Preserve existing TAPL settings, hook mode, workflow databases, and unrelated Codex settings.
-Verify the result with taplctl --version and taplctl doctor.
-Report the installed version and any remaining terminal/Codex restart and hook-trust steps.
+Read the guides, identify the current host, detect my OS and shell, and check prerequisites and any existing installation. Ask which host to connect only if it cannot be identified.
+Use the official installation method for my OS. Unless I specify another channel, use the latest stable release for Codex or the latest published release for Claude Code (Homebrew: taplctl-pre; Windows: -Pre; Linux: the release manifest from the installation guide).
+Before connecting, confirm my preferred scope unless I already specified it: user (all projects for this host) or repo (only the target repository).
+Run taplctl install user or taplctl install repo for the chosen scope. For Claude Code, add --client claude-code and follow the linked Claude Code guide; Codex is the command default. Use the guide's platform-specific executable path when needed.
+Preserve existing TAPL settings, hook mode, workflow databases, and unrelated settings for both hosts.
+Verify the runtime with taplctl --version and taplctl doctor, then check that the chosen host loads TAPL MCP tools and hook context in a new session.
+Report the installed version and any remaining terminal/host restart and trust steps. For Claude Code, check /mcp after restarting.
 ```
 
 See [connection scopes](#connection-scope) below and [installation options](#installation)
-for other platforms or Windows prerelease testing.
+for other platforms and release channels.
 
 ### Install with commands
 
-On macOS with Homebrew, install the stable release:
+On macOS with Homebrew, add the tap, then choose **one** formula for your host:
 
 ```sh
 brew tap qkdxorjs1002/tap
+```
+
+```sh
+# Codex: stable channel
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
 ```
 
+```sh
+# Claude Code: latest published channel
+brew trust --formula qkdxorjs1002/tap/taplctl-pre
+brew install taplctl-pre
+```
+
 <a id="connection-scope"></a>
 
-Then choose **one** Codex connection scope (for Claude Code, add `--client claude-code`; see the [Claude Code guide](docs/getting-started/claude-code.md)):
+Choose your host and **one** connection scope: **user** applies across that host's projects; **repository** applies only to the target repository.
 
-| Scope | When to choose it | Command |
+| Host | User scope | Repository scope |
 | --- | --- | --- |
-| User | Use TAPL across your Codex projects | `taplctl install user` |
-| Repository | Use TAPL only in the target repository | `taplctl install repo` |
+| Codex | `taplctl install user` | `taplctl install repo` |
+| Claude Code | `taplctl install user --client claude-code` | `taplctl install repo --client claude-code` |
 
-Run the repository command from the target repository, or specify its path with
-`taplctl install repo --repo /path/to/repository`.
+The command default is Codex. Run repository commands from the target repository,
+or add `--repo /path/to/repository`. See [agent integration](docs/getting-started/integrations.md)
+and the [Claude Code guide](docs/getting-started/claude-code.md) for host-specific settings.
 
-1. **Restart Codex** to load the TAPL MCP server and lifecycle hooks.
-2. **Trust the installed hook** when Codex first asks.
-3. **Open your intended working folder and ask normally.** Codex records the work through TAPL.
+1. **Restart the chosen host** to load the TAPL MCP server and lifecycle hooks.
+2. **Complete its trust steps.** Codex asks you to trust the installed hook; Claude Code uses MCP/workspace trust and `/mcp` to check the connection.
+3. **Open your intended working folder and ask normally.** The agent records the work through TAPL.
 
-TAPL records to `.tapl/tapl-{UUID}.db` in the Codex session working folder and reads peer history there. See the [storage guide](docs/guides/storage.md) for the UUID that survives removal and existing database migration. A nested folder
+TAPL records to `.tapl/tapl-{UUID}.db` in the agent session working folder and reads peer history there. See the [storage guide](docs/guides/storage.md) for the UUID that survives removal and existing database migration. A nested folder
 gets its own history even when a parent folder already has a TAPL database. You do
 not need to write workflow records by hand or learn another set of task-management
 commands.
@@ -178,29 +190,28 @@ commands.
 After the first installation, TAPL refreshes existing user/repo integrations at
 MCP startup and hook entry. It detects version and shipped-template changes,
 preserves your settings, adds new defaults, and migrates known obsolete keys.
-You do not need to repeat `taplctl install user` or `taplctl install repo` after
+You do not need to repeat the chosen client’s installation command after
 updates. Uninstalled scopes stay disabled, and a missing repo config continues
-to inherit user settings. Restart Codex when changed host settings need reloading.
+to inherit user settings. Restart the affected host when changed settings need reloading.
 
 During work, TAPL reports planning, execution, and verification with concise
 PLAN/TASK notices alongside the RUN classification.
 
 Using Linux, Windows, or another release channel? Choose an option below and
-follow its [Codex connection command](docs/getting-started/integrations.md).
+follow the [agent connection guide](docs/getting-started/integrations.md).
 
 ## Installation
 
 You can also use the [Agent installation prompt](#agent-install) above to have
-your agent check the environment, install TAPL, connect Codex, and verify setup.
-Choose `taplctl install user` for your Codex projects or `taplctl install repo`
-for one repository. The prompt confirms this choice before connecting.
-See [connection scopes](#connection-scope) and the [platform-specific commands](docs/getting-started/integrations.md).
+your agent check the environment, install TAPL, connect Codex or Claude Code, and verify setup.
+Choose a host and scope using [connection scopes](#connection-scope); the prompt
+confirms the scope before connecting. See the [platform-specific commands](docs/getting-started/integrations.md).
 
 | Platform / channel | Install option | Details |
 | --- | --- | --- |
 | Homebrew · stable | `taplctl` | [Full-text search](docs/getting-started/installation.md) |
 | Homebrew · stable + semantic | `taplctl-semantic` | [Embedding and vector dependencies](docs/getting-started/installation.md) |
-| Homebrew · newest published release | `taplctl-pre` | [May include prereleases](docs/getting-started/installation.md) |
+| Homebrew · newest published release | `taplctl-pre` | [Channel selection](docs/getting-started/installation.md) |
 | Linux | Standalone shell installer | [Setup and paths](docs/getting-started/installation.md) |
 | Windows 10 / 11 | PowerShell / CMD scripts | [Setup and paths](docs/getting-started/installation.md) |
 
@@ -208,7 +219,8 @@ Windows supports `-Pre`, `-Semantic`, and `-Version TAG`; see the
 [channel and semantic options](docs/getting-started/installation.md).
 
 Install only one Homebrew formula at a time; they share the same executables.
-Standalone installers default to the latest stable release. See the guide for
+Standalone installers default to the latest stable release; for Claude Code, use
+`-Pre` (Windows) or select the release manifest on Linux as described in the installation guide. See the guide for
 [requirements](docs/getting-started/installation.md), [updates](docs/getting-started/installation.md), and
 [troubleshooting](docs/guides/troubleshooting.md).
 
@@ -263,7 +275,8 @@ manages SubAgents.
 ## Documentation
 
 - [Documentation home](docs/README.md) — all topics and reading paths
-- [Quick start](docs/getting-started/quickstart.md) · [Configuration](docs/guides/configuration.md) · [VS Code](docs/guides/vscode.md)
+- [Quick start](docs/getting-started/quickstart.md) · [Agent integration](docs/getting-started/integrations.md) · [Claude Code](docs/getting-started/claude-code.md)
+- [Configuration](docs/guides/configuration.md) · [VS Code](docs/guides/vscode.md)
 - [CLI reference](docs/reference/cli.md) · [MCP tool reference](docs/reference/mcp.md)
 - [Issues](https://github.com/qkdxorjs1002/tapl/issues) — report a bug or request a feature
 

@@ -2,9 +2,9 @@
 
 [Documentation](../README.md) · [한국어](installation.ko.md)
 
-Install the TAPL executables for your platform, then [connect Codex](integrations.md). Package installation and Codex connection scope are separate choices. You can also [ask your agent to install and connect TAPL](integrations.md#ask-your-agent-to-install-tapl).
+Install the TAPL executables for your platform, then [connect Codex or Claude Code](integrations.md). Package channel, client, and user/repository connection scope are separate choices. Both clients use the same executables. You can also [ask your agent to install and connect TAPL](integrations.md#ask-your-agent-to-install-tapl).
 
-The same executables also [connect Claude Code](claude-code.md) with `taplctl install user --client claude-code` or `taplctl install repo --client claude-code`. Client selection is independent of package channel and platform.
+For the currently published Claude Code runtime, select `taplctl-pre` on Homebrew, `-Pre` on Windows, or the release manifest shown for Linux below. These select the published package; the subsequent connection command selects the client. Codex can use the stable default.
 
 ## Requirements
 
@@ -46,27 +46,40 @@ All three provide `taplctl`, `tapl-mcp`, and `tapl-hook` and cannot coexist. Uni
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
 ```
 
-The standalone installer selects the latest stable release. It requires `curl`, Python 3.11+ with `venv`, and writable installation directories. It installs under `${XDG_DATA_HOME:-$HOME/.local/share}/tapl` and links the command in `${XDG_BIN_HOME:-$HOME/.local/bin}` by default.
+The standalone installer selects the latest stable release by default. To install the published Claude Code runtime, select its release manifest:
 
-Set `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR` to override those locations; otherwise the corresponding XDG variables apply. The script prints any required `PATH` export but does not edit shell startup files or install Codex hooks. Apply the export and make it persistent if needed, then [connect Codex](integrations.md#choose-a-connection-scope).
+```sh
+curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh -o /tmp/tapl-install.sh
+TAPL_INSTALL_MANIFEST_URL="https://github.com/qkdxorjs1002/tapl/releases/download/2.17.0-beta1/taplctl-install-manifest.json" sh /tmp/tapl-install.sh
+```
+
+Linux selects a specific release through `TAPL_INSTALL_MANIFEST_URL`; it has no `-Pre` flag. The installer requires `curl`, Python 3.11+ with `venv`, and writable installation directories. It installs under `${XDG_DATA_HOME:-$HOME/.local/share}/tapl` and links the command in `${XDG_BIN_HOME:-$HOME/.local/bin}` by default.
+
+Set `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR` to override those locations; otherwise the corresponding XDG variables apply. The script prints any required `PATH` export but does not edit shell startup files or connect either client. Apply the export and make it persistent if needed, then [connect your client](integrations.md#choose-a-connection-scope).
 
 ## Windows
 
-Download the fixed entry script from `main`, then run it:
+Download the fixed entry script from `main`, then choose one command for your client:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.ps1 -OutFile install.ps1
+# Codex:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+# Or, Claude Code (newest published release):
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Pre
 ```
 
 Or use Command Prompt:
 
 ```bat
 curl.exe -fL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.cmd -o install.cmd
+REM Codex:
 install.cmd
+REM Or, Claude Code (newest published release):
+install.cmd -Pre
 ```
 
-Installation is per-user without administrator access. The default root is `%LOCALAPPDATA%\tapl`, with a launcher at `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`. Reopen your terminal to load the updated user `PATH`, then [connect Codex](integrations.md#standalone-executable-paths).
+Installation is per-user without administrator access. The default root is `%LOCALAPPDATA%\tapl`, with a launcher at `%LOCALAPPDATA%\tapl\bin\taplctl.cmd`. Reopen your terminal to load the updated user `PATH`, then [connect your client](integrations.md#standalone-executable-paths).
 
 ### Channels and semantic dependencies
 
@@ -106,7 +119,7 @@ Use the downloaded entry script, with the release/channel options you intend to 
 
 `-Reinstall` and `-Uninstall` cannot be combined. To switch releases, including a downgrade, run the entry script with `-Version TAG`; add `-Reinstall` when reinstalling the same release. Reinstall examples without a channel flag use the stable default.
 
-Before removing executables, [disconnect each installed Codex scope](integrations.md#disconnect-or-reconnect). Removal preserves TAPL settings, workflow databases, and unrelated files. Legacy installations without a file inventory require `-Reinstall` first; modified managed files stop removal for inspection.
+Before removing executables, [disconnect each installed client and scope](integrations.md#disconnect-or-reconnect). Removal preserves TAPL settings, workflow databases, and unrelated files. Legacy installations without a file inventory require `-Reinstall` first; modified managed files stop removal for inspection.
 
 `TAPL_INSTALL_ROOT` and `TAPL_BIN_DIR` override installation and launcher directories. `TAPL_INSTALL_MANIFEST_URL` selects a custom manifest; a release installer still requires a manifest for its own version. The installer verifies the manifest and wheel SHA-256 before use.
 
@@ -133,7 +146,7 @@ brew upgrade taplctl
 
 `taplctl update` does not update Homebrew or source checkouts. During Homebrew upgrade/reinstall, the formula attempts to restart its Viewer service only if already running. A fresh install or stopped service remains stopped. Manually started MCP stdio and `searchd` processes are not restarted.
 
-Existing opted-in Codex integrations refresh at MCP startup and hook entry when the version or shipped templates change. Refresh preserves settings and hook mode, merges missing defaults, and migrates known obsolete keys. Repeating `taplctl install` is normally unnecessary after an update; restart Codex to reload host configuration. See [refresh boundaries](integrations.md#automatic-refresh).
+Existing opted-in Codex and Claude Code integrations refresh at MCP startup and hook entry when the version or shipped templates change. Refresh preserves settings and hook mode, merges missing defaults, and migrates known obsolete keys. Repeating `taplctl install` is normally unnecessary after an update; restart your coding client to reload host configuration. See [refresh boundaries](integrations.md#automatic-refresh).
 
 ## Verify and continue
 

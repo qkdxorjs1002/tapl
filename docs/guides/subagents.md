@@ -10,6 +10,8 @@ they do not force delegation.
 
 Codex uses `[subagents]`; Claude Code uses `[clients.claude-code.subagents]` in the same selected config file. The examples below use Codex keys. Claude uses native `Agent` and `AskUserQuestion`, with host-specific model/effort selection; see [Claude Code models and execution](../getting-started/claude-code.md#models-and-agent-execution).
 
+For Claude Code, an observed alias with `[]` means omit `Agent.effort`. A confirmed `models.inherit = []` selection means omit both `Agent.model` and `Agent.effort`; `inherit` is excluded from `available_models`. Verify observed host capabilities and record any selection limitations rather than treating inheritance as a verified model/effort pair. In Claude dispatch metadata, use `reasoning_effort=""` for unspecified effort.
+
 ## First-use setup
 
 ```toml
@@ -27,11 +29,11 @@ preference = ""
 
 On the first concrete TAPL request, the agent checks the model IDs and reasoning
 efforts exposed by its current runtime, then asks whether to use SubAgents and
-what preferences to apply. It saves the confirmed settings in the resolved
+what preferences to apply, using Codex's `request_user_input` or Claude Code's `AskUserQuestion` when available. It saves the confirmed settings in the resolved
 configuration file and marks setup complete. TAPL never calls a provider API or
 ships an external model list for this step. `enabled = true` takes effect only
-after setup is complete. If the runtime catalog is unavailable, setup remains
-pending and work stays on the root agent. After an answer, the agent records it
+after setup is complete. For Codex, if the runtime catalog is unavailable, setup remains
+pending and work stays on the root agent. Claude Code may use a confirmed inheritance selection with observed capabilities and an explicit catalog limitation; do not claim `catalog_complete=true` without a complete live catalog. After an answer, the agent records it
 with `tapl_configure_subagents`; the answer itself is the user confirmation.
 Existing configurations with an explicit model allowlist or `enabled = false`
 remain complete and retain their choices; new model settings apply only when
@@ -39,11 +41,11 @@ the user requests an update.
 
 For setup and requested preference updates, the agent writes `subagents.preference` as a concise English summary of your priorities and constraints, preserving exact model IDs. It does not copy your reply verbatim or add unstated preferences; the conversation stays in your language. TAPL stores the summary supplied by the agent without calling a translation service. Existing text remains readable, and catalog-only **keep** preserves it. See [Configuration](configuration.md) for the stored key.
 
-After your answer, TAPL also records the full runtime catalog in `subagents.available_models`.
+After your answer, TAPL also records the observed runtime catalog in `subagents.available_models`; use the Claude prefix for Claude Code. Do not claim completeness beyond the live tool's exposed capabilities.
 Ordinary `tapl_get_next` entry omits catalog arguments and uses saved preferences.
 It does not check for new models at the start of each session. Before delegating,
-verify the selected model/effort against the live tool and allowlist; skip
-unavailable pairs and use root if none remain. Saved catalog entries are not
+verify the requested selection against the live tool and the client's allowlist; skip
+unavailable selections and use root if none remain. Claude's confirmed inheritance remains a host-controlled selection, not a catalog model. Saved catalog entries are not
 proof that a model is still available.
 
 Only during setup or a user-requested settings check, compare the entire live
@@ -168,8 +170,8 @@ unresolved questions within the remaining budget.
 
 Before classification, neither root nor scout may edit, run tests, perform external research or history searches, or mutate TAPL state. Root classifies the workflow and writes its records after
 the scout. After classification, applicable source and history rules apply.
-Select only model/effort pairs in both the configured allowlist and live runtime
-catalog. Pending setup, disabled delegation, or no suitable candidate leaves the
+Codex selects only model/effort pairs in both the configured allowlist and live runtime
+catalog. Claude Code checks its own allowlist and observed Agent capabilities, including the confirmed inheritance or unspecified-effort semantics above. Pending setup, disabled delegation, or no suitable candidate leaves the
 lookup on root. Scouting does not bypass execution approval and does not
 promise lower latency or token usage.
 

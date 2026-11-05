@@ -12,7 +12,7 @@ is referenced directly, without external image hosting.
 ## Workflow demo
 
 `workflow-en.gif` and `workflow-ko.gif` show **illustrative public progress
-messages**, not a captured Codex session or private model reasoning. The example
+messages** shared by Codex and Claude Code, not a captured session or private model reasoning. The example
 investigates a permission-check issue, so `Investigation · Strict · Planned` fits
 the scenario. Other requests can use different classifications and fewer stages.
 The investigation records evidence; it does not pretend to implement a fix.

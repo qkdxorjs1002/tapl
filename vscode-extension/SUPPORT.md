@@ -4,7 +4,7 @@
 
 Follow the [troubleshooting guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/troubleshooting.md) for current runtime, workspace, and connection diagnostics.
 
-1. Confirm that the workspace contains `.tapl/tapl.db`.
+1. Confirm that the workspace contains `.tapl/tapl-{UUID}.db`.
 2. Run `tapl-mcp` from a terminal and confirm that the command is available.
 3. If the command is installed outside `PATH`, set
    `taplWorkflow.taplMcpPath` to its absolute path.

@@ -2,7 +2,7 @@
 
 [문서 홈](../README.ko.md) · [English](workflow.md)
 
-TAPL은 요청의 의도, 계획, 승인, 실행, 근거와 결과를 작업 공간 DB에 보존합니다. 사용자는 평소처럼 결과를 요청하고 Codex가 MCP로 기록을 관리합니다. 요청에 맞춰 흐름이 달라지므로 모든 답변에 같은 개수의 기록이 필요한 것은 아닙니다.
+TAPL은 요청의 의도, 계획, 승인, 실행, 근거와 결과를 작업 공간 DB에 보존합니다. 사용자는 평소처럼 결과를 요청하고 연결된 에이전트가 MCP로 기록을 관리합니다. 요청에 맞춰 흐름이 달라지므로 모든 답변에 같은 개수의 기록이 필요한 것은 아닙니다.
 
 Codex와 Claude Code는 워크플로 규칙과 이력 저장을 공유하되 클라이언트·세션 소유권은 분리합니다. Claude는 모든 MCP 호출에 이름공간 소유자가 필요하며, [Claude 세션 소유권](../getting-started/claude-code.ko.md#hook과-세션-소유권)을 참고하세요.
 
@@ -73,11 +73,11 @@ Agent는 요청 결과를 `answer`, `investigation`, `analysis`, `planning`, `im
 
 ## 작업 공간과 세션 경계
 
-Codex 작업 폴더는 환경별 `.tapl/tapl-{UUID}.db`에 기록하며 같은 폴더의 `tapl-*.db` 이력을 함께 읽습니다. 상위 DB·Git 루트·저장소 표식은 탐색하지 않습니다. `repo/packages/app`의 세션은 부모 폴더와 별개입니다. 기존 `tapl.db` 이름 이전과 UUID 보존은 [로컬 식별자와 공유 이력](../guides/storage.ko.md)을 참고하세요.
+에이전트 작업 폴더는 환경별 `.tapl/tapl-{UUID}.db`에 기록하며 같은 폴더의 `tapl-*.db` 이력을 함께 읽습니다. 상위 DB·Git 루트·저장소 표식은 탐색하지 않습니다. `repo/packages/app`의 세션은 부모 폴더와 별개입니다. 기존 `tapl.db` 이름 이전과 UUID 보존은 [로컬 식별자와 공유 이력](../guides/storage.ko.md)을 참고하세요.
 
 Hook 이벤트에는 존재하는 절대 경로 `cwd`가 필요하며 MCP 서버는 실행 중 시작 작업 폴더에 고정됩니다. Hook DB 재정의는 그 폴더의 DB를 가리켜야 합니다. 관리 CLI는 명시적 DB·작업 공간 선택을 제공합니다. [CLI 참조](../reference/cli.ko.md)를 참고하세요.
 
-모든 MCP 호출에 Codex hook의 `session_id`를 전달해야 합니다. 각 세션은 자신의 RUN·승인·Task·분리 대기열·Stop 처리·아카이브 수명주기를 소유합니다. 같은 세션을 재개하면 그 RUN을 이어가고 새 세션은 다른 세션의 작업을 인수하지 않습니다. 생략하면 격리된 legacy 범위를 선택하며 세션 소유 기록이 생기면 식별자 없는 쓰기는 거부합니다. 기존 세션 미분리 기록은 legacy에 남고 스키마 갱신 전 `.tapl/tapl-{UUID}.db.pre-v14.bak`을 보존합니다.
+모든 MCP 호출에 현재 호스트 hook의 정확한 TAPL `session_id`를 전달해야 합니다. Claude Code는 `claude-code:<native-session-id>`를 사용하고 Codex는 기존 세션 식별자를 유지합니다. 각 세션은 자신의 RUN·승인·Task·분리 대기열·Stop 처리·아카이브 수명주기를 소유합니다. 같은 세션을 재개하면 그 RUN을 이어가고 새 세션은 다른 세션의 작업을 인수하지 않습니다. Codex에서만 생략 시 격리된 legacy 범위를 선택하며 세션 소유 기록이 생기면 식별자 없는 쓰기는 거부합니다. Claude Code는 읽기를 포함한 모든 호출에서 생략·원본 ID·다른 클라이언트 식별자를 거부합니다. 기존 세션 미분리 기록은 legacy에 남고 스키마 갱신 전 `.tapl/tapl-{UUID}.db.pre-v14.bak`을 보존합니다.
 
 이력은 작업 공간 전체에서 검색할 수 있지만 활성 워크플로 소유권은 세션별입니다. 작업 파일은 공유하므로 같은 파일의 동시 수정은 조율하거나 별도 worktree를 사용하세요. 세션 소유권과 batch 경로 검사는 파일 시스템 격리가 아닙니다.
 
@@ -87,6 +87,6 @@ Agent는 계획의 검증 기준으로 Task 결과를 확인하고 `tapl_finish_
 
 대기·차단·생략·미검증 작업을 완료로 주장하지 말고 기록에 드러냅니다. 실행할 작업을 정리했거나 RUN이 대체·노후화되었거나 사용자가 아카이브·폐기를 명시적으로 선택하면 아카이브합니다. 계획만 요청한 경우 실행이나 종료를 선택할 때까지 활성 상태를 유지합니다.
 
-`observe` hook은 워크플로 문제를 안내하고 `enforce` hook은 필수 상태 누락·미완료 Task·활성 batch 때문에 영구 변경 도구나 Stop을 차단할 수 있습니다. Hook 설정은 Fast/Standard/Strict와 별개입니다. Viewer는 검증 상태를 표시하고 명시적 확인을 거친 RUN 폐기를 제공하지만 코드의 정확성을 검증하지는 않습니다. [연결](../getting-started/integrations.ko.md)과 [Viewer](../guides/viewer.ko.md)를 참고하세요.
+`observe` hook은 워크플로 문제를 안내하고 `enforce` hook은 필수 상태 누락·미완료 Task·활성 batch 때문에 영구 변경 도구나 Stop을 차단할 수 있습니다. Hook 설정은 Fast/Standard/Strict와 별개입니다. Viewer는 검증 상태를 표시하고 명시적 확인을 거친 RUN 폐기를 제공하지만 코드의 정확성을 검증하지는 않습니다. [에이전트 연결](../getting-started/integrations.ko.md), [Claude Code hook](../getting-started/claude-code.ko.md#hook과-세션-소유권), [Viewer](../guides/viewer.ko.md)를 참고하세요.
 
 첫 실행은 [빠른 시작](../getting-started/quickstart.ko.md), 정확한 수명주기 인자와 검증 도구는 [MCP 참조](../reference/mcp.ko.md)를 참고하세요.

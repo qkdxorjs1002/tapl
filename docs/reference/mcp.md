@@ -8,7 +8,7 @@ Claude Code requires the exact `claude-code:<native-session-id>` hook owner on e
 
 ## Common contract
 
-Pass the current host hook **`session_id` on every call**, including reads. Most schemas make it optional for compatibility, but omission selects the isolated legacy namespace (`""`), not another session's active RUN. Identity is at most 256 characters without surrounding whitespace or control characters. `tapl_discard_run` requires an explicit owner, including `""` for a legacy RUN.
+Pass the current host hook **`session_id` on every call**, including reads. Most schemas make it optional for compatibility, but only Codex permits omission, selecting the isolated legacy namespace (`""`), not another session's active RUN. Claude Code requires its exact namespaced owner. Identity is at most 256 characters without surrounding whitespace or control characters. `tapl_discard_run` requires an explicit owner, including `""` for a legacy RUN.
 
 Tool responses are structured objects. When the host provides code mode, discover the needed tools together by exact name without printing the full tool catalog. Emit `structuredContent` once, falling back to parsed text when necessary; do not print both envelope copies. Write receipts include current recommendations and compact validation. All blocking errors are retained; omitted warnings are counted in `omitted_issue_count`.
 
@@ -40,7 +40,7 @@ When choosing a model, add `model`, `reasoning_effort`, and `model_reason` to `E
 
 ## Entry, inspection, and setup
 
-`session_id` is common and omitted from the tables except where required.
+`session_id` is common and omitted from the tables except where schema-required; it remains mandatory on every Claude Code call.
 
 | Tool | Required arguments | Optional arguments and behavior |
 | --- | --- | --- |
@@ -54,7 +54,7 @@ MCP initialization delivers a short entry gate. Before non-trivial or uncertain 
 
 A `policy_revision` covers the exact policy, guidance, config and `authoring_policy`, so RUN mode changes invalidate the old bundle. Send `known_policy_revision` only while the complete policy, guidance and config for that revision remain in current context. A new revision returned in a write receipt alone does not mean its full policy was loaded. A matching revision omits unchanged policy fields but still returns fresh state/recommendations and requested complete catalog comparisons. Unknown revisions or changed content return full policy. Omit it in a new session, after compaction, or whenever retention is uncertain. It is neither a state cache nor approval evidence.
 
-For a user-requested settings comparison, supply the **complete live delegation-tool catalog**, including fixed-role models, and `catalog_complete=true`. A verified empty catalog can establish removal. Default `false` treats any supplied catalog as incomplete (`comparison_status="incomplete"`), infers no changes, and does not request reconfiguration. Never fill missing live entries from saved settings. Setup confirmation must be a real user answer or exact requested change; timeout is not confirmation. Models must be exposed by the current delegation tool, not inferred from a provider API catalog. Empty `models` is allowed only when disabled; `profiles=[]` disables advisory profiles.
+For a user-requested settings comparison, supply the **complete live delegation-tool catalog**, including fixed-role models, and `catalog_complete=true`. A verified empty catalog can establish removal. Default `false` treats any supplied catalog as incomplete (`comparison_status="incomplete"`), infers no changes, and does not request reconfiguration. Never fill missing live entries from saved settings. Setup confirmation must be a real user answer or exact requested change; timeout is not confirmation. Models must be exposed by the current delegation tool, not inferred from a provider API catalog. Claude Code also supports a confirmed `models={inherit: []}` selection, which is excluded from `available_models`; an alias with `[]` leaves effort unspecified. See [Claude model selection](../getting-started/claude-code.md#models-and-agent-execution). Empty `models` is allowed only when disabled; `profiles=[]` disables advisory profiles.
 
 When a RUN summary, split, archive or other RUN transition changes mode or effective detail, its receipt preserves `policy_refresh_required=true`, `authoring_policy` and a highest-priority `tapl_get_next` recommendation. Refresh policy, then supplement the current PLAN and unfinished TASK evidence for the new rigor. Completed/archived records are not automatically rewritten. Required evidence and Strict typed-field warnings are described in [Authoring detail](../guides/authoring-detail.md#selection-example-and-verification).
 
@@ -108,7 +108,7 @@ Check original evidence from `tapl_get_item` or `tapl_get_archive` before using 
 | `tapl_cancel_batch` | `batch_id`, `reason` | `block_tasks=true`; false returns tasks to Pending. Cancels active executions. |
 | `tapl_recover_batch` | `batch_id`, `reason` | Returns interrupted active tasks to Pending for safe retry. |
 
-Parallel tasks require `execution_mode="parallel"`, `executor_kind="subagent"`, the same plan and nonempty `parallel_group`, completed dependencies, exclusive non-overlapping `owned_paths`, and execution approval. Root dispatches atomically, checks each stored `SubAgent Model`, then spawns actual agents. `execution_metadata` maps task IDs to runtime selection objects, including a complete `model`/`reasoning_effort` pair and rationale when selected. Root alone writes TAPL state and settles each task with its exact manifest **`execution_id`**. On interruption/spawn failure, recover or cancel the batch before retrying. A stable `batch_id` supports idempotent retry for the same RUN/task set; it is not a way to reuse a different batch.
+Parallel tasks require `execution_mode="parallel"`, `executor_kind="subagent"`, the same plan and nonempty `parallel_group`, completed dependencies, exclusive non-overlapping `owned_paths`, and execution approval. Root dispatches atomically, checks each stored `SubAgent Model`, then spawns actual agents. `execution_metadata` maps task IDs to runtime selection objects, including a complete `model`/`reasoning_effort` pair and rationale when selected. For Claude Code, record `reasoning_effort=""` when unspecified and `model="inherit"` for confirmed host-controlled selection; omit the corresponding native Agent parameters. Root alone writes TAPL state and settles each task with its exact manifest **`execution_id`**. On interruption/spawn failure, recover or cancel the batch before retrying. A stable `batch_id` supports idempotent retry for the same RUN/task set; it is not a way to reuse a different batch.
 
 ## Sequential lifecycle example
 

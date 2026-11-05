@@ -34,7 +34,7 @@ DB를 명시하지 않으면 DB 사용 명령은 현재 작업 폴더의 `.tapl/
 | --- | --- |
 | `init` | 작업 공간 DB 초기화 |
 | `doctor` | 런타임·설정·DB·의존성 정보 출력 |
-| `install user` / `install repo` | Codex 연결·갱신 |
+| `install user` / `install repo` | 선택한 클라이언트 연결·갱신 |
 | `uninstall user` / `uninstall repo` | 연결 해제. 기본적으로 설정·데이터 보존 |
 | `config get` / `set` / `unset` | 지원 설정 읽기·수정 |
 | `viewer` | Loopback에서 브라우저 Viewer 제공 |
@@ -50,7 +50,7 @@ taplctl init --workspace-root /path/to/workspace --json
 taplctl --db /path/to/history.db init
 ```
 
-`--workspace-root PATH`는 해당 폴더의 작업 공간을 명시적으로 초기화합니다. 전역 `--db`와 함께 사용할 수 없습니다. 생략하면 선택한 DB를 열거나 초기화합니다. 초기화는 Codex 연결을 설치하지 않습니다.
+`--workspace-root PATH`는 해당 폴더의 작업 공간을 명시적으로 초기화합니다. 전역 `--db`와 함께 사용할 수 없습니다. 생략하면 선택한 DB를 열거나 초기화합니다. 초기화는 클라이언트 연결을 설치하지 않습니다.
 
 ## doctor
 
@@ -89,7 +89,7 @@ taplctl install repo --repo /path/to/repository --mode enforce
 
 `prompt`는 버전 변경 시 기존 런타임 설정 처리를 묻고 같은 버전의 설정은 보존합니다. 명시적 `merge`는 기존 값을 유지하고 누락 기본값을 추가하며 `overwrite`는 기본값으로 교체합니다. 두 명시적 정책은 같은 버전에서도 적용됩니다. `--force`는 관리 템플릿에도 영향을 주며 런타임 설정 처리는 명시적 정책으로 선택할 수 있습니다.
 
-사용자 또는 저장소 연결 범위를 선택하고 Codex를 재시작한 뒤 요청 시 hook을 신뢰하세요. 패키지 설치는 별개입니다. 독립 설치의 실제 실행 경로·자동 갱신·보존 규칙은 [Agent 연결](../getting-started/integrations.ko.md)에 있습니다.
+클라이언트와 사용자 또는 저장소 연결 범위를 선택하고 해당 호스트를 재시작한 뒤 hook·MCP 신뢰 단계를 완료하세요. 패키지 설치는 별개입니다. 독립 설치의 실제 실행 경로·자동 갱신·보존 규칙은 [Agent 연결](../getting-started/integrations.ko.md)에 있습니다.
 
 ## uninstall
 
@@ -99,18 +99,18 @@ taplctl uninstall repo --repo /path/to/repository
 taplctl uninstall user --purge-config --purge-db --dry-run
 ```
 
-`user`는 `--codex-home PATH`, `repo`는 `--repo PATH`를 받으며 기본값은 설치와 같습니다. 두 범위 모두 `--dry-run`, `--json`, `--agent`와 다음 옵션을 받습니다.
+`user`는 Codex용 `--codex-home PATH` 또는 Claude Code용 `--claude-home PATH`를, `repo`는 `--repo PATH`를 받으며 기본값은 설치와 같습니다. 두 범위 모두 `--client {codex,claude-code}`(기본 `codex`)를 지원합니다. 두 범위 모두 `--dry-run`, `--json`, `--agent`와 다음 옵션을 받습니다.
 
 | 옵션 | 연결 외 추가 삭제 대상 |
 | --- | --- |
 | `--purge-config` | 선택 범위의 `.tapl/config.toml` |
 | `--purge-db` | 선택 범위의 현재 로컬 `.tapl/tapl-{UUID}.db`, 기존 `tapl.db`와 해당 `-wal`·`-shm`·`-journal` 보조 파일 |
 
-기본 uninstall은 TAPL MCP 항목·인식되는 hook·설치 버전 표시를 제거합니다. 무관한 Codex 설정·hook, TAPL 설정·DB·백업과 다른 작업 공간은 보존합니다. Purge 옵션은 독립적이므로 두 종류를 모두 지우려는 경우에만 조합하세요. DB 삭제 전 대상 DB를 사용하는 세션을 닫으세요.
+기본 uninstall은 TAPL MCP 항목·인식되는 hook·설치 버전 표시를 제거합니다. 무관한 클라이언트 설정·hook, TAPL 설정·DB·백업과 다른 작업 공간은 보존합니다. Purge 옵션은 독립적이므로 두 종류를 모두 지우려는 경우에만 조합하세요. DB 삭제 전 대상 DB를 사용하는 세션을 닫으세요.
 
-`user` 대상은 `--codex-home`(기본 `~/.codex`)을 포함한 홈 디렉터리이며 모든 프로젝트 DB를 지우지 않습니다. 실행 파일과 서비스는 남습니다. 제거하려면 [설치 방법](../getting-started/installation.ko.md)을 따르세요. 보존된 설정만으로 해제한 연결이 다시 활성화되지는 않습니다.
+`user` 대상은 선택한 클라이언트 설정(`--codex-home`, 기본 `~/.codex`, 또는 `--claude-home`, 기본 `~/.claude`)을 포함한 홈 디렉터리이며 모든 프로젝트 DB를 지우지 않습니다. 실행 파일과 서비스는 남습니다. 제거하려면 [설치 방법](../getting-started/installation.ko.md)을 따르세요. 보존된 설정만으로 해제한 연결이 다시 활성화되지는 않습니다.
 
-모든 제거 옵션은 `~/.tapl/installation_id`와 다른 환경의 DB를 보존합니다. UUID와 기존 DB 이전은 [로컬 식별자와 공유 이력](../guides/storage.ko.md)을 참고하세요.
+모든 제거 옵션은 `~/.tapl/installation_id`와 다른 환경의 DB를 보존합니다. 다른 클라이언트의 설치 표시·설정한 위임 선호·세션 소유권이 있으면 purge도 공통 설정·데이터를 보존하며 JSON의 `preserved_shared`로 알립니다. UUID와 기존 DB 이전은 [로컬 식별자와 공유 이력](../guides/storage.ko.md)을 참고하세요.
 
 ## config
 
@@ -148,10 +148,10 @@ taplctl config unset workflow.authoring_detail
 | `subagents.enabled`, `subagents.setup_complete` | Boolean |
 | `subagents.strategy` | `conservative`, `balanced`, `aggressive` |
 | `subagents.preference` | 문자열 |
-| `subagents.models.<model-id>` | 비어 있지 않고 중복 없는 추론 수준 문자열의 TOML 배열 |
+| `subagents.models.<model-id>` | 중복 없는 추론 수준 문자열의 TOML 배열. Codex는 하나 이상, Claude Code는 `[]`도 허용 |
 | `subagents.profiles` | Profile inline table의 TOML 배열. 후보 모델·추론 수준 쌍은 허용 목록에 있어야 함 |
 
-추측한 모델 ID를 설정에 복사하지 마세요. 호스트의 실제 위임 도구 목록과 [SubAgent 설정](../guides/subagents.ko.md)을 사용합니다. 파일 범위·기본값·예제는 [설정](../guides/configuration.ko.md)을 참고하세요.
+위임 행은 Codex의 `subagents.*` 키이며 Claude Code에는 `clients.claude-code.subagents.*`를 사용합니다. 추측한 모델 ID를 설정에 복사하지 마세요. 호스트의 실제 위임 도구 목록과 [SubAgent 설정](../guides/subagents.ko.md)을 사용합니다. 파일 범위·기본값·예제는 [설정](../guides/configuration.ko.md)을 참고하세요.
 
 ## viewer
 
@@ -200,4 +200,4 @@ taplctl searchd stop
 
 `--socket`은 `TAPL_SEARCHD_SOCKET`보다 우선하며 둘 다 없으면 `~/.tapl/searchd.sock`을 사용합니다. `--idle-timeout`은 0 이상이고 기본값은 `search.searchd_model_idle_timeout_seconds`(1800초)입니다. 데몬을 종료하지 않고 유휴 모델을 해제하며 `0`은 유휴 해제를 끕니다. `--timeout-ms`는 양수이며 기본값은 시작 준비 15000ms, 상태·중지 요청 250ms입니다. `--no-wait`는 준비를 기다리지 않고 반환합니다.
 
-데몬은 Unix domain socket이 필요해 Windows에서는 사용할 수 없습니다. Windows는 로컬 시맨틱 검색이나 전문 검색 fallback을 사용할 수 있습니다. `searchd` 시작·중지는 Viewer나 Codex MCP 프로세스를 시작·중지하지 않습니다. [검색](../guides/search.ko.md)을 참고하세요.
+데몬은 Unix domain socket이 필요해 Windows에서는 사용할 수 없습니다. Windows는 로컬 시맨틱 검색이나 전문 검색 fallback을 사용할 수 있습니다. `searchd` 시작·중지는 Viewer나 호스트 MCP 프로세스를 시작·중지하지 않습니다. [검색](../guides/search.ko.md)을 참고하세요.

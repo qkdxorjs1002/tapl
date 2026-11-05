@@ -27,7 +27,7 @@
 
 ## Agent 연결
 
-[Agent 연결](getting-started/integrations.ko.md)
+[Codex·Claude Code 연결](getting-started/integrations.ko.md) · [Claude Code 설정과 세션 소유권](getting-started/claude-code.ko.md)
 
 
 <a id="viewer"></a>

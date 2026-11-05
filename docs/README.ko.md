@@ -2,7 +2,7 @@
 
 [English](README.md) · **한국어**
 
-TAPL은 Agent의 계획·승인·실행·검증과 작업 이력을 연결하는 워크플로 도구입니다. 목적에 맞는 페이지에서 시작하고 관련 문서로 이어갈 수 있습니다.
+TAPL은 Codex와 Claude Code의 계획·승인·실행·검증과 작업 이력을 연결하는 워크플로 도구입니다. 목적에 맞는 페이지에서 시작하고 관련 문서로 이어갈 수 있습니다.
 
 **처음 사용한다면:** [설치](getting-started/installation.ko.md) → [빠른 시작](getting-started/quickstart.ko.md) → [워크플로](concepts/workflow.ko.md).
 
@@ -13,9 +13,9 @@ TAPL은 Agent의 계획·승인·실행·검증과 작업 이력을 연결하는
 | 페이지 | 내용 |
 | --- | --- |
 | [설치](getting-started/installation.ko.md) | 플랫폼별 설치·업데이트·재설치·제거를 안내합니다. |
-| [빠른 시작](getting-started/quickstart.ko.md) | TAPL 설치와 연결 범위를 선택하고 첫 작업을 완료합니다. |
-| [Agent 연결](getting-started/integrations.ko.md) | MCP·hook을 연결하고 Agent에게 설치를 맡기는 방법을 안내합니다. |
-| [Claude Code](getting-started/claude-code.ko.md) | Claude MCP·hook을 연결하고 독립적인 Agent 선호를 설정합니다. |
+| [빠른 시작](getting-started/quickstart.ko.md) | TAPL 설치 후 호스트와 연결 범위를 선택하고 첫 작업을 완료합니다. |
+| [Agent 연결](getting-started/integrations.ko.md) | Codex·Claude Code의 MCP·hook을 연결하고 Agent에게 설치를 맡기는 방법을 안내합니다. |
+| [Claude Code](getting-started/claude-code.ko.md) | Claude Code의 설정 경로·hook·세션 소유권과 독립적인 Agent 선호를 확인합니다. |
 
 ## 핵심 개념
 
@@ -52,7 +52,7 @@ TAPL은 Agent의 계획·승인·실행·검증과 작업 이력을 연결하는
 | --- | --- |
 | [내부 구조](development/architecture.ko.md) | CLI·MCP·hook·DB·Viewer의 경계를 살펴봅니다. |
 | [기여와 검증](development/contributing.ko.md) | 개발 환경을 준비하고 변경과 문서를 검증합니다. |
-| [릴리스](development/releases.ko.md) | 프리릴리즈·설치 스크립트·서명·확장 배포를 이해합니다. |
+| [릴리스](development/releases.ko.md) | 배포 채널·설치 스크립트·서명·확장 배포를 이해합니다. |
 
 ---
 

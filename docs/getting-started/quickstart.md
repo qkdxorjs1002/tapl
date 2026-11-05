@@ -2,32 +2,36 @@
 
 [Documentation](../README.md) · [한국어](quickstart.ko.md)
 
-Install TAPL, connect it to Codex, and keep asking for work in your own words. Codex manages the workflow records; you do not need to write PLAN or TASK records by hand.
-
-For Claude Code, use the [Claude connection and Agent guide](claude-code.md). This walkthrough uses the default Codex integration; shared workflow records and Viewer behavior apply to both hosts.
+Install TAPL, connect Codex or Claude Code, and keep asking for work in your own words. Your coding agent manages the workflow records; you do not need to write PLAN or TASK records by hand.
 
 ## 1. Install TAPL
 
-On macOS with Homebrew:
+On macOS with Homebrew, choose one formula for your client:
 
 ```sh
 brew tap qkdxorjs1002/tap
+# Codex:
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
+# Or, Claude Code:
+brew trust --formula qkdxorjs1002/tap/taplctl-pre
+brew install taplctl-pre
 ```
 
-For Linux, Windows, semantic search, or prereleases, use [installation](installation.md). To delegate setup, copy the [agent installation prompt](integrations.md#ask-your-agent-to-install-tapl).
+For Linux, Windows, semantic search, and channel selection, use [installation](installation.md). To delegate setup, copy the [agent installation prompt](integrations.md#ask-your-agent-to-install-tapl).
 
 ## 2. Choose one connection scope
 
-| Scope | Use it when | Command |
+| Client | Scope | Command |
 | --- | --- | --- |
-| User | You want TAPL across Codex projects | `taplctl install user` |
-| Repository | You want TAPL only in the target repository | `taplctl install repo` |
+| Codex | User: all your projects | `taplctl install user` |
+| Codex | Repository: target repository only | `taplctl install repo` |
+| Claude Code | User: all your projects | `taplctl install user --client claude-code` |
+| Claude Code | Repository: target repository only | `taplctl install repo --client claude-code` |
 
-Run `repo` in the target repository, or add `--repo /path/to/repository`. Standalone installations may need their [actual executable path](integrations.md#standalone-executable-paths).
+Choose one row. The CLI defaults to Codex when `--client` is omitted. Run `repo` in the target repository, or add `--repo /path/to/repository`. Standalone installations may need their [actual executable path](integrations.md#standalone-executable-paths).
 
-Restart Codex, then trust the installed hook when prompted. Open your intended working folder. TAPL uses that exact folder's `.tapl/tapl-{UUID}.db`; a nested folder gets separate history.
+Restart the selected client and complete its trust steps: Codex hook trust, or Claude Code MCP/workspace trust and `/mcp` verification. See [connection settings](integrations.md#choose-a-connection-scope). Open your intended working folder. TAPL uses that exact folder's `.tapl/tapl-{UUID}.db`; a nested folder gets separate history.
 
 ## 3. Verify setup
 
@@ -46,7 +50,7 @@ For example:
 
 > Investigate why the test command fails, fix the cause, and run the relevant checks.
 
-Codex reads the current TAPL policy and session state, classifies the request, checks relevant history, and plans work where required. An explicit request to fix or test authorizes that scope. Material unresolved scope or tradeoffs can still require clarification.
+Your coding agent reads the current TAPL policy and session state, classifies the request, checks relevant history, and plans work where required. An explicit request to fix or test authorizes that scope. Material unresolved scope or tradeoffs can still require clarification.
 
 You will see a RUN classification such as **Implementation · Standard · Planned**, plus concise planning, execution, and verification notices. The actual classification depends on the work: security/permission changes require Strict rigor; a Fast non-durable answer may need no PLAN or TASK records.
 
@@ -63,14 +67,15 @@ taplctl viewer
 
 Open <http://127.0.0.1:8000>. Inspect the selected RUN, plans, tasks, findings, archives, and memories. The command does not open a browser automatically; press `Ctrl+C` to stop it. Use `taplctl viewer --port 9000` when port 8000 is busy.
 
-For later work, ask Codex to find the relevant previous task or continue the current session's work. Session-owned RUNs remain isolated even in the same folder; working files remain shared. See [workflow boundaries](../concepts/workflow.md#workspace-and-session-boundaries).
+For later work, ask your coding agent to find the relevant previous task or continue the current session's work. Session-owned RUNs remain isolated even in the same folder; working files remain shared. See [workflow boundaries](../concepts/workflow.md#workspace-and-session-boundaries).
 
 ## Next steps and limits
 
 - [Workflow](../concepts/workflow.md): modes, approval, validation, and closure.
 - [Records and metadata](../concepts/records.md): what is stored and how to read it.
+- [Agent integration](integrations.md) and [Claude Code](claude-code.md): connection settings, hooks, session owners, and Claude Agent preferences.
 - [Configuration](../guides/configuration.md): user/workspace settings and defaults.
 - [Viewer](../guides/viewer.md) and [VS Code](../guides/vscode.md): inspect work in either interface.
 - [Troubleshooting](../guides/troubleshooting.md): missing tools, hook trust, paths, and runtime problems.
 
-Existing connected scopes refresh after TAPL updates; reconnecting is normally unnecessary. Restart Codex when host settings need reloading. TAPL's workflow records do not isolate concurrent file edits or replace your version-control workflow.
+Existing connected scopes refresh after TAPL updates; reconnecting is normally unnecessary. Restart your coding client when host settings need reloading. TAPL's workflow records do not isolate concurrent file edits or replace your version-control workflow.

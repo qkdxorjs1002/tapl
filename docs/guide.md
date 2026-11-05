@@ -22,7 +22,7 @@ Find the topic guides in the [documentation home](README.md). This compatibility
 
 ## Agent integration
 
-[Agent integration](getting-started/integrations.md)
+[Codex and Claude Code integration](getting-started/integrations.md) · [Claude Code settings and session ownership](getting-started/claude-code.md)
 
 
 <a id="viewer"></a>

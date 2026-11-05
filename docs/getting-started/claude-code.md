@@ -6,35 +6,19 @@ Claude Code uses TAPL's shared workflow MCP tools, lifecycle checks, history and
 
 ## Connect and remove
 
-Choose one scope:
+Choose the Claude Code channel in [installation](installation.md), then select one connection scope:
 
 ```sh
 taplctl install user --client claude-code
 # Or, inside the intended working folder:
-taplctl install repo --client claude-code --mode enforce
+taplctl install repo --client claude-code
 ```
 
-The default client remains `codex`. Add `--client claude-code` to every Claude install/uninstall command. Both scopes support `--dry-run`, `--tapl-config-policy`, `--taplctl-command` and `--mode observe|enforce`; see [CLI options](../reference/cli.md#install). `observe` is the installation default.
+The installation default is `observe`; add `--mode enforce` for blocking checks. The CLI defaults to `codex`, so always add `--client claude-code` to Claude installation and removal commands.
 
-| Scope | MCP configuration | Lifecycle hooks |
-| --- | --- | --- |
-| User | `~/.claude.json`, top-level `mcpServers.tapl` | `~/.claude/settings.json` |
-| Repository | `.mcp.json` | `.claude/settings.json` |
+See [Agent integration](integrations.md#choose-a-connection-scope) for MCP/hook files, user/repository scopes, custom homes, executable paths and trust steps. Preserve the client binding when moving executables: the MCP server launches with `TAPL_CLIENT=claude-code`, and hooks launch `tapl-hook --client claude-code`.
 
-`install repo --repo PATH` selects a working folder. `install user --claude-home PATH` selects the Claude settings directory; its parent holds `.claude.json` and `.tapl`. This is different from Claude's project-local MCP scope in `~/.claude.json`: TAPL's `repo` command writes the shared project `.mcp.json`.
-
-Restart Claude Code and complete its MCP/workspace trust steps, then check `/mcp`. The installed server launches `tapl-mcp` with `TAPL_CLIENT=claude-code`; the five command hooks launch `tapl-hook --client claude-code`. Keep that client binding when moving an executable. The [executable discovery examples](integrations.md#executable-discovery) also apply with the client option added.
-
-```sh
-taplctl uninstall user --client claude-code --dry-run
-taplctl uninstall user --client claude-code
-# Or:
-taplctl uninstall repo --client claude-code --repo /path/to/workspace
-```
-
-Installation merges TAPL-owned entries while preserving other hooks, servers and settings. Even `--tapl-config-policy overwrite` preserves the other client's delegation settings. Removal keeps TAPL data/config by default. Explicit purge preserves shared files when another client has installation markers, configured preferences or recorded session ownership; JSON output reports `preserved_shared`. Generated defaults alone do not count as configured peer preferences. See [uninstall boundaries](../reference/cli.md#uninstall).
-
-Automatic refresh checks only previously installed Claude scopes, preserving hook mode and a missing local config. It uses `.tapl/claude-code.version` and `.tapl/claude-code.install-state.json`; Codex retains its existing markers. Removing one client does not opt it back in through another client's startup.
+[Automatic refresh](integrations.md#automatic-refresh) and [disconnection/reconnection](integrations.md#disconnect-or-reconnect) apply to the selected client and scope. Claude and Codex have separate installation markers; removing one client does not opt it back in through the other client's startup. For shared-file purge preservation and the `preserved_shared` result, see [uninstall boundaries](../reference/cli.md#uninstall).
 
 ## Hooks and session ownership
 

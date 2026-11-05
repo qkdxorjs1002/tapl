@@ -17,13 +17,14 @@ TAPL은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 워크플로 상태
 | `mcp_server.py` | MCP stdio schema·annotation, 세션 라우팅, 비동기 facade, 축약 응답. |
 | `db.py` | SQLite schema·마이그레이션, 소유권, 기록, 작업 의존성, 실행 배치, 시간, 아카이브, FTS. |
 | `validation.py`, `recommendations.py` | 워크플로 계약 검증과 다음 행동 선택. |
-| `prompt.py`, `context.py`, `.codex/` | 정책·bootstrap 문구, 이벤트별 지침, 설치용 hook 템플릿. |
-| `hook_cli.py`, `hooks.py`, `sessions.py` | Codex 수명주기 어댑터, 이벤트 검사, 대화 식별자 범위. |
+| `clients.py` | 컨텍스트별 클라이언트 선택과 클라이언트 간 소유자 검증. |
+| `prompt.py`, `context.py`, `.codex/`, `.claude/` | 클라이언트별 정책·bootstrap 문구, 이벤트 지침, 설치용 hook 템플릿. |
+| `hook_cli.py`, `hooks.py`, `sessions.py` | Codex·Claude Code 수명주기 어댑터, 이벤트 검사, 대화 식별자 범위. |
 | `config.py`, `config_editor.py` | 적용 설정과 검증된 설정 수정. |
 | `embeddings.py`, `searchd.py` | 선택적 의미 검색과 Unix 소켓 임베딩 데몬. |
 | `recall.py`, `memory_search.py` | 연상 메모리·원본 연결·revision·검토·캡처·검색. |
 | `viewer.py`, `_viewer/` | 브라우저 HTTP 어댑터와 컴파일한 공유 UI. |
-| `install.py`, `updater.py`, `uninstall.py`, `command_runtime.py` | 설치 수명주기와 플랫폼 명령·stdio 처리. |
+| `install.py`, `claude_install.py`, `updater.py`, `uninstall.py`, `command_runtime.py` | 클라이언트 연결 수명주기와 플랫폼 명령·stdio 처리. |
 | `vscode-extension/src/` | VS Code 워크스페이스·MCP 어댑터와 공유 React webview. |
 | `tapl/tests/`, `vscode-extension/tests/`, `.github/` | 회귀 검증과 빌드·릴리스 자동화. |
 
@@ -33,7 +34,7 @@ TAPL은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 워크플로 상태
 
 ```mermaid
 flowchart LR
-  Agent[Codex 에이전트] --> MCP[MCP facade]
+  Agent[Codex / Claude Code] --> MCP[MCP facade]
   Agent --> Hook[수명주기 hook]
   MCP --> App[WorkflowApplication]
   Browser[브라우저 Viewer] --> App
@@ -55,7 +56,7 @@ Schema는 RUN, 공통 항목, 계획·작업·발견 필드, 승인, 아카이�
 
 DB는 부모에서 추론한 Git 루트가 아닌 작업 폴더에 속합니다. `find_repo_root`는 전달된 폴더나 현재 폴더만 해석하므로 초기화한 하위 디렉터리는 독립된 이력을 가질 수 있습니다.
 
-`sessions.py`는 hook `session_id`를 정규화하고 문맥 범위를 제공합니다. `WorkflowConnection`은 연결별 소유자를 유지하며 unique index로 세션마다 활성 RUN 하나를 보장합니다. 식별자를 생략하면 legacy `""`를 선택하며 다른 세션의 RUN을 채택하지 않습니다. Viewer는 활성 소유자 목록을 보여 줄 수 있지만 변경은 올바른 소유자를 명시적으로 선택해야 합니다.
+`sessions.py`는 hook `session_id`를 정규화하고 문맥 범위를 제공합니다. `clients.py`는 클라이언트 경계를 검증하고 `WorkflowConnection`은 연결별 소유자를 유지하며 unique index로 세션마다 활성 RUN 하나를 보장합니다. Codex는 기존 소유자와 식별자 생략 시 legacy `""` 범위를 유지합니다. Claude Code는 읽기를 포함한 모든 MCP 호출에 정확한 `claude-code:<native-session-id>` hook 소유자가 필요합니다. 두 클라이언트 모두 다른 세션의 RUN을 채택하지 않습니다. Viewer는 활성 소유자 목록을 보여 줄 수 있지만 변경은 올바른 소유자를 명시적으로 선택해야 합니다.
 
 실행 소유권은 영속 배치·실행 기록과 정확한 `execution_id` 검사를 사용합니다. 이 토큰은 취소·복구 후 오래된 에이전트의 정리를 방지합니다. 시간 기반 lease는 아니며 별도 lease 데몬·heartbeat·자동 TTL 만료는 없습니다. Root는 dispatch 선택을 기록하고 에이전트를 생성하며 TAPL 상태 정리를 혼자 담당합니다. `owned_paths`와 완료된 의존성은 배치 계약이며 OS 파일 잠금은 아닙니다.
 
@@ -68,6 +69,8 @@ MCP 초기화는 짧은 bootstrap을 전달합니다. `tapl_get_next`는 일반 
 Hook은 `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`을 처리합니다. UserPromptSubmit은 세션 소유 RUN을 보장합니다. PreToolUse는 영속 작업의 계획·작업·승인을 검사합니다. PostToolUse는 외부 조사 후 판단에 필요한 발견 기록을 안내합니다. Stop은 미완료 작업·배치·검증·아카이브 가능 여부를 확인합니다. `observe`은 안내하고 `enforce`는 관련 경계를 차단할 수 있습니다. Hook은 이벤트를 기록하고 참조한 지침만 렌더링하며 설정을 캐시하지 않습니다. Stop 이벤트 때문에 진입 조회를 반복할 필요는 없습니다.
 
 Hook은 호스트 수명주기 경계이고 MCP는 구조화된 워크플로 인터페이스입니다. 둘 다 임의의 외부 에이전트를 종료하거나 OS 파일시스템 sandbox를 강제하지 않습니다. 호스트 권한 제어는 별도입니다.
+
+Hook payload와 응답은 각 클라이언트의 계약을 따릅니다. Claude는 이벤트별 `additionalContext`, 쓰기 거부와 Stop 응답을 사용하며 helper 이벤트는 부모의 TAPL 소유자를 유지하고 root RUN을 시작하거나 종료하지 않습니다. 공통 워크플로 검사는 두 어댑터 뒤에서 동일하게 적용됩니다.
 
 ## 검색과 메모리 경계
 

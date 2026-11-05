@@ -49,7 +49,7 @@ The example origin is a placeholder; replace it with the exact trusted browser o
 
 ## Public configuration keys
 
-These canonical keys are accepted by `config set` and `config unset`. Runtime defaults below can differ from values selected during installation or first-use setup.
+These canonical keys are accepted by `config set` and `config unset`. Runtime defaults below can differ from values selected during installation or first-use setup. The table uses Codex's `subagents.*` keys; the same delegation settings for Claude Code use `clients.claude-code.subagents.*`.
 
 | Key | Type / allowed values | Built-in default |
 | --- | --- | --- |
@@ -65,12 +65,12 @@ These canonical keys are accepted by `config set` and `config unset`. Runtime de
 | `subagents.strategy` | `conservative`, `balanced`, `aggressive` | `aggressive` |
 | `subagents.setup_complete` | Boolean | `false` for a fresh config; inferred `true` if omitted with a nonempty model allowlist or disabled delegation |
 | `subagents.preference` | TOML string; agent-authored English summary during [setup or preference updates](subagents.md#first-use-setup) | `""` |
-| `subagents.models.<model-id>` | Nonempty array of unique reasoning-effort strings | No predefined model pairs |
+| `subagents.models.<model-id>` | Unique reasoning-effort strings; Codex requires a nonempty array, Claude Code also accepts `[]` | No predefined model pairs |
 | `subagents.profiles` | Ordered TOML inline tables; `[]` disables profiles | Four model-neutral profiles with empty candidates |
 
 Read-only/effective values also include `search.hybrid_bm25_ratio` (`1 - hybrid_semantic_ratio`, default `0.35`) and `subagents.available_models` (the saved runtime catalog, or `null` when absent). They are not accepted by `config set`/`unset`. Catalog setup and updates use the agent's `tapl_configure_subagents` workflow. `path` and `exists` describe the selected source in structured output; they are not editable runtime settings.
 
-Profile tables use `name`, optional `description`, `characteristics`, `delegation_bias` (`inherit`, `prefer`, `neutral`, `avoid`) and ordered `candidates` with `model` and `reasoning_effort`. Names must be unique and candidates must belong to the allowlist. User profiles replace built-ins. See [SubAgents](subagents.md) for setup and selection rules.
+Profile tables use `name`, optional `description`, `characteristics`, `delegation_bias` (`inherit`, `prefer`, `neutral`, `avoid`) and ordered `candidates` with `model` and `reasoning_effort`. For Claude Code, omitted or empty `reasoning_effort` means unspecified effort and must match an empty-effort allowlist entry; Codex requires a nonempty effort. Names must be unique and candidates must belong to the allowlist. User profiles replace built-ins. See [SubAgents](subagents.md) for setup and selection rules.
 
 ## Validate and apply
 

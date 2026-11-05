@@ -2,7 +2,7 @@
 
 **English** · [한국어](README.ko.md)
 
-TAPL connects an agent’s planning, approval, execution and verification with durable workflow records. Start with the page that matches your goal and follow its related guides.
+TAPL connects planning, approval, execution and verification in Codex and Claude Code with durable workflow records. Start with the page that matches your goal and follow its related guides.
 
 **New to TAPL?** Follow [Installation](getting-started/installation.md) → [Quick start](getting-started/quickstart.md) → [Workflow](concepts/workflow.md).
 
@@ -13,9 +13,9 @@ TAPL connects an agent’s planning, approval, execution and verification with d
 | Page | Purpose |
 | --- | --- |
 | [Installation](getting-started/installation.md) | Choose a platform and manage updates, reinstalls and removal. |
-| [Quick start](getting-started/quickstart.md) | Install TAPL, choose a scope and complete your first workflow. |
-| [Agent integration](getting-started/integrations.md) | Connect MCP and hooks, or ask an agent to install TAPL. |
-| [Claude Code](getting-started/claude-code.md) | Connect Claude MCP/hooks and configure independent Agent preferences. |
+| [Quick start](getting-started/quickstart.md) | Install TAPL, choose a host and scope, and complete your first workflow. |
+| [Agent integration](getting-started/integrations.md) | Connect Codex or Claude Code MCP and hooks, or ask an agent to install TAPL. |
+| [Claude Code](getting-started/claude-code.md) | Check Claude Code settings paths, hooks, session owners and independent Agent preferences. |
 
 ## Core concepts
 
@@ -52,7 +52,7 @@ TAPL connects an agent’s planning, approval, execution and verification with d
 | --- | --- |
 | [Architecture](development/architecture.md) | Follow the CLI, MCP, hooks, database and Viewer boundaries. |
 | [Contributing and verification](development/contributing.md) | Set up development, validate changes and maintain documentation. |
-| [Releases](development/releases.md) | Understand prereleases, installers, signing and extension publishing. |
+| [Releases](development/releases.md) | Understand release channels, installers, signing and extension publishing. |
 
 ---
 

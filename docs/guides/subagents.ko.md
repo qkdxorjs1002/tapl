@@ -6,6 +6,8 @@ TAPL은 실행 manifest를 조율하며 호스트/root runtime이 SubAgent를 �
 
 같은 선택 설정 파일에서 Codex는 `[subagents]`, Claude Code는 `[clients.claude-code.subagents]`를 사용합니다. 아래 예제는 Codex 키를 사용합니다. Claude는 native `Agent`·`AskUserQuestion`과 호스트별 모델·effort 선택을 사용하며, [Claude Code 모델과 실행](../getting-started/claude-code.ko.md#모델과-agent-실행)을 참고하세요.
 
+Claude Code에서 관찰한 alias의 `[]`는 `Agent.effort`를 생략한다는 뜻입니다. 확인받은 `models.inherit = []` 선택은 `Agent.model`과 `Agent.effort`를 모두 생략하며 `inherit`는 `available_models`에서 제외합니다. 관찰한 호스트 기능을 확인하고 선택 제약을 기록하며 상속을 검증된 모델·effort 조합처럼 취급하지 않습니다. Claude dispatch 메타데이터의 미지정 effort에는 `reasoning_effort=""`를 사용합니다.
+
 ## 최초 설정
 
 ```toml
@@ -22,21 +24,21 @@ preference = ""
 ```
 
 첫 번째 구체적인 TAPL 요청 시 agent는 현재 runtime이 제공하는 model ID와 reasoning
-effort를 확인한 뒤 SubAgent 사용 여부와 preference를 묻습니다. 확인된 설정은 현재 적용되는
+effort를 확인한 뒤 SubAgent 사용 여부와 preference를 묻습니다. 가능하면 Codex의 `request_user_input` 또는 Claude Code의 `AskUserQuestion`을 사용합니다. 확인된 설정은 현재 적용되는
 설정 파일에 저장되고 setup이 완료됩니다. 이 과정에서 TAPL은 provider API를
 호출하거나 외부 model 목록을 포함하지 않습니다. `enabled = true`는 setup 완료 후에만
-효력이 있습니다. runtime catalog를 확인할 수 없으면 setup은 pending으로 남고 work는
-root agent가 처리합니다. 답변을 받은 뒤 agent는 `tapl_configure_subagents`로 저장하며,
+효력이 있습니다. Codex에서 runtime catalog를 확인할 수 없으면 setup은 pending으로 남고 work는
+root agent가 처리합니다. Claude Code는 관찰한 기능과 catalog 제약을 명시하고 확인받은 상속 선택을 사용할 수 있습니다. 전체 live 목록 없이 `catalog_complete=true`로 주장하지 마세요. 답변을 받은 뒤 agent는 `tapl_configure_subagents`로 저장하며,
 그 답변 자체가 user confirmation입니다. 명시적 model allowlist가 있거나
 `enabled = false`인 기존 configuration은 완료 상태를 유지하고 user가 업데이트할 때까지
 선택을 보존합니다. 새 model 설정은 user가 요청할 때에만 적용됩니다.
 
 최초 설정과 사용자가 요청한 선호 변경에서 에이전트는 우선순위와 제약을 간결한 영어로 요약해 `subagents.preference`에 저장하고 정확한 모델 ID를 보존합니다. 답변을 원문 그대로 복사하거나 밝히지 않은 선호를 추가하지 않으며 대화는 사용자 언어로 유지합니다. TAPL은 번역 서비스를 호출하지 않고 에이전트가 전달한 요약을 저장합니다. 기존 문구도 읽을 수 있고 모델 목록만 갱신하는 **유지** 선택은 해당 문구를 보존합니다. 저장 키는 [설정](configuration.ko.md)을 보세요.
 
-사용자 답변 뒤에는 전체 모델 목록도 `subagents.available_models`에 저장합니다.
+사용자 답변 뒤에는 관찰한 런타임 모델 목록도 `subagents.available_models`에 저장하며 Claude Code에는 Claude 접두사를 사용합니다. Live 도구가 노출한 기능을 넘어 완전성을 주장하지 마세요.
 일반 `tapl_get_next` 진입에서는 모델 목록 인자를 생략하고 저장된 선호를 사용합니다.
-매 세션 시작마다 새 모델을 점검하지 않습니다. 위임 직전에는 선택한 model/effort가
-현재 도구와 허용 목록에 모두 있는지 확인하고, 가능한 조합이 없으면 메인에서 진행합니다.
+매 세션 시작마다 새 모델을 점검하지 않습니다. 위임 직전에는 요청한 선택이
+현재 도구와 해당 클라이언트 허용 목록에 맞는지 확인하고, 가능한 선택이 없으면 메인에서 진행합니다. Claude에서 확인받은 상속은 호스트 제어 선택이며 catalog 모델이 아닙니다.
 저장된 모델 목록은 현재 가용성의 근거로 사용하지 않습니다.
 
 최초 설정이나 사용자가 요청한 설정 점검에서만
@@ -139,8 +141,8 @@ mode 분류 전, 요청 자체로 충분하거나 이미 파악한 범위가 충
 중첩 helper는 허용하지 않습니다. root는 요청과 기존 context로 위임 여부를 판단하며,
 이를 결정하려고 전체 scout를 먼저 수행하지 않습니다.
 이 TAPL 지침은 setup이 완료되고 위임이 활성화된 경우에 적용됩니다.
-사용자 선호와 기존 strategy 및 profile을 따르며, 설정된 allowlist와
-현재 runtime catalog에 모두 있는 model/effort 조합만 선택합니다.
+사용자 선호와 기존 strategy 및 profile을 따르며, Codex는 설정된 allowlist와
+현재 runtime catalog에 모두 있는 model/effort 조합만 선택합니다. Claude Code는 자체 허용 목록과 관찰한 Agent 기능을 확인하며 위에서 설명한 확인받은 상속·effort 미지정 의미를 적용합니다.
 setup이 pending이거나 위임이 비활성화되었거나 적절한 runtime candidate가 없으면
 root가 조회합니다.
 

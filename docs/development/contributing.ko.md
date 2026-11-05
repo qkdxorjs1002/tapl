@@ -52,6 +52,8 @@ uv --directory tapl run --extra test python -m pytest -q tests/test_session_mcp.
 
 동작을 수정할 때는 대상 테스트를, 완료 보고 전에는 관련 전체 테스트를 실행합니다. 프로젝트 지침에 따라 격리 환경에서 실제 Codex 대화 테스트가 필요하면 **morae-mcp**을 사용해야 합니다. 로컬 단위 테스트는 실제 호스트 대화 성공의 근거가 아닙니다. 비공개 실험 대화나 도구를 공개 검증 자료로 게시하지 마세요.
 
+Claude Code 연동을 수정하면 설치·hook·세션 소유권과 native Agent 실행을 확인합니다. 자동 계약 검사와 실제 대화는 구분하며, [Claude Code 가이드](../getting-started/claude-code.ko.md#검증과-문제-해결)에서 검증한 조건과 한계를 확인할 수 있습니다.
+
 플랫폼 검증 범위는 다릅니다. Windows CI는 PowerShell 5.1로 설치기 구문을 검사하고 Python 3.11/3.12, 실제 wheel, 설치·업데이트·재설치·제거와 CLI·MCP 런타임을 검증합니다. macOS 서명 보존은 전용 Homebrew workflow가 필요하며 Linux 단위 테스트로 설치 후 Developer ID 서명 보존을 입증할 수 없습니다. [릴리스](releases.ko.md)를 보세요.
 
 ## 영문·국문 문서 유지

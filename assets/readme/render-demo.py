@@ -76,9 +76,9 @@ body {{background:#101b20;color:#e9f1ee;font-family:Arial,"Apple SD Gothic Neo",
 .db {{font-family:Menlo,Consolas,monospace;color:#91cfbc;font-size:13px}}
 </style><body>
 <div class="window"><div class="bar"><i class="light"></i><i class="light"></i><i class="light"></i>
-<span class="bar-title">Codex + TAPL</span><span class="sample">{copy["example"]}</span></div>
+<span class="bar-title">Codex / Claude Code + TAPL</span><span class="sample">{copy["example"]}</span></div>
 <div class="content"><div class="user"><b>YOU</b>{copy["user"]}</div><div class="rows">{rows}</div></div>
-<div class="bottom"><span>{copy["record"]}</span><span class="db">.tapl/tapl.db</span></div></div>
+<div class="bottom"><span>{copy["record"]}</span><span class="db">.tapl/tapl-{{UUID}}.db</span></div></div>
 </body></html>'''
 
 

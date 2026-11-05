@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [한국어](workflow.ko.md)
 
-TAPL preserves a request's intent, plan, approval, execution, evidence, and result in the workspace database. Codex manages the records through MCP while you ask for outcomes normally. The workflow adapts to the request; every answer does not need the same number of records.
+TAPL preserves a request's intent, plan, approval, execution, evidence, and result in the workspace database. The connected agent manages the records through MCP while you ask for outcomes normally. The workflow adapts to the request; every answer does not need the same number of records.
 
 Codex and Claude Code share workflow rules and history storage, with separate client/session owners. Claude requires its namespaced owner on every MCP call; see [Claude session ownership](../getting-started/claude-code.md#hooks-and-session-ownership).
 
@@ -73,11 +73,11 @@ Parallel execution uses an atomic batch dispatch. Eligible tasks share a plan an
 
 ## Workspace and session boundaries
 
-The Codex working folder records to an environment-specific `.tapl/tapl-{UUID}.db` and reads `tapl-*.db` history there. TAPL does not search parent databases, Git roots, or repository markers. A session in `repo/packages/app` stays separate from its parent folder. See [Local identity and shared history](../guides/storage.md) for existing `tapl.db` migration and UUID persistence.
+The agent working folder records to an environment-specific `.tapl/tapl-{UUID}.db` and reads `tapl-*.db` history there. TAPL does not search parent databases, Git roots, or repository markers. A session in `repo/packages/app` stays separate from its parent folder. See [Local identity and shared history](../guides/storage.md) for existing `tapl.db` migration and UUID persistence.
 
 The hook requires an existing absolute `cwd` in its event; the MCP server stays bound to its startup working folder for its lifetime. A hook database override must identify that folder's database. Administrative CLI commands offer explicit database/workspace selection; see [CLI reference](../reference/cli.md).
 
-Every MCP call must pass the Codex hook's `session_id`. Each session owns its RUN, approval, tasks, split queue, Stop handling, and archive lifecycle. Resuming the same session continues its RUN; a new session does not adopt another session's work. Omission selects an isolated legacy scope, and unidentified writes are rejected after session-owned records exist. Existing pre-session records remain legacy; the schema upgrade first preserves `.tapl/tapl-{UUID}.db.pre-v14.bak`.
+Every MCP call must pass the current host hook's exact TAPL `session_id`. Claude Code uses `claude-code:<native-session-id>`; Codex keeps its native session identity. Each session owns its RUN, approval, tasks, split queue, Stop handling, and archive lifecycle. Resuming the same session continues its RUN; a new session does not adopt another session's work. For Codex only, omission selects an isolated legacy scope, and unidentified writes are rejected after session-owned records exist. Claude Code rejects omitted, raw, or foreign-client identities on all calls, including reads. Existing pre-session records remain legacy; the schema upgrade first preserves `.tapl/tapl-{UUID}.db.pre-v14.bak`.
 
 History can be searched across the workspace, while active workflow ownership remains session-scoped. Working files are shared: coordinate simultaneous edits or use separate worktrees. Session ownership and batch path checks are not filesystem isolation.
 
@@ -87,6 +87,6 @@ The agent checks task results against the plan's validation, records the final r
 
 Leave pending, blocked, skipped, or unverified work visible rather than claiming completion. Archive when actionable work is settled, the run is superseded/stale, or the user explicitly chooses archive/discard. A planning-only request remains active until the user chooses execution or closure.
 
-`observe` hooks report workflow issues; `enforce` hooks can block durable tool use or Stop for missing workflow prerequisites, incomplete tasks, or active batches. This hook setting is separate from Fast/Standard/Strict. The Viewer can show validation and provides an explicitly confirmed RUN discard action; it does not validate the correctness of your code. See [integration](../getting-started/integrations.md) and [Viewer](../guides/viewer.md).
+`observe` hooks report workflow issues; `enforce` hooks can block durable tool use or Stop for missing workflow prerequisites, incomplete tasks, or active batches. This hook setting is separate from Fast/Standard/Strict. The Viewer can show validation and provides an explicitly confirmed RUN discard action; it does not validate the correctness of your code. See [agent integration](../getting-started/integrations.md), [Claude Code hooks](../getting-started/claude-code.md#hooks-and-session-ownership), and [Viewer](../guides/viewer.md).
 
 For a practical first run, use [quick start](../getting-started/quickstart.md). For exact lifecycle arguments and validation tools, use the [MCP reference](../reference/mcp.md).
