@@ -973,9 +973,10 @@ function navItem(page, ico, count = "") {
 }
 function renderSidebar() {
   const v = view(),
-    run = currentRun();
+    run = currentRun(),
+    c = counts();
   $("#workspace-nav").innerHTML =
-    navItem("current", "focus") +
+    navItem("current", "focus", `${c.total ? Math.round((c.done / c.total) * 100) : 0}%`) +
     navItem("tasks", "table", taskRecords().length);
   $("#memory-nav").innerHTML =
     navItem("records", "search") + navItem("memories", "book");
