@@ -1,123 +1,499 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { ValueTree } from './workbench/ValueTree';
+import { FormEvent, useEffect, useState } from 'react';
 import type { AssociativeMemory, MemoryDiagnostics, WebviewCommand, WebviewView } from './types';
 import { useI18n } from './i18n';
+import { EmptyState, PageHeading } from './workbench/components';
+import { Icon } from './workbench/Icon';
 
 type MemoryScreen = Extract<WebviewView, { type: 'memories' | 'memory' | 'memorySource' }>;
 type Send = (message: WebviewCommand) => void;
 
-export function MemoryView({ view, supported, send }: { view: MemoryScreen; supported: boolean; send: Send }): JSX.Element {
+export function MemoryView({
+  view,
+  supported,
+  send,
+  back
+}: {
+  view: MemoryScreen;
+  supported: boolean;
+  send: Send;
+  back?: () => void;
+}): JSX.Element {
   const { t } = useI18n();
-  const heading = useRef<HTMLHeadingElement>(null);
-  const identity = view.type === 'memories' ? `memories:${view.query}:${view.offset}` : `${view.type}:${view.source_db}:${view.memoryId}`;
-  useEffect(() => { heading.current?.focus(); }, [identity]);
-  return <>
-    <header className="tapl-topbar tapl-memory-header">
-      <div>
-        <span className="tapl-eyebrow">{t('memories')}</span>
-        <h1 ref={heading} tabIndex={-1} className="m-0 text-2xl font-semibold">{t(view.type === 'memories' ? 'memories' : view.type === 'memory' ? 'memoryDetail' : 'memoryRunSource')}</h1>
-        <p className="tapl-muted m-0">{t('memoryReadOnly')}</p>
+  return (
+    <div className="wb-secondary wb-memory-page">
+      <div className="wb-secondary-titlebar">
+        <PageHeading
+          title={t(view.type === 'memories' ? 'memories' : view.type === 'memory' ? 'memoryDetail' : 'memoryRunSource')}
+          back={back}
+        />
+        {supported && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm btn-square"
+            title={t('refresh')}
+            aria-label={t('refresh')}
+            onClick={() => send({ command: 'refresh' })}
+          >
+            <Icon name="refresh" />
+          </button>
+        )}
       </div>
-      <div className="tapl-command-actions">
-        <button type="button" className="btn btn-secondary btn-sm" data-legacy-back onClick={() => send({ command: 'back' })}>{t('back')}</button>
-        {supported && <button type="button" className="btn btn-primary btn-sm" onClick={() => send({ command: 'refresh' })}>{t('refresh')}</button>}
-      </div>
-    </header>
-    {!supported ? <p role="status" className="tapl-memory-empty">{t('memoryUnsupported')}</p>
-      : view.type === 'memories' ? <MemoryList view={view} send={send} />
-      : view.type === 'memory' ? (view.memory && view.memory.state !== 'deleted' ? <MemoryDetail memory={view.memory} send={send} /> : <p role="status" className="tapl-memory-empty">{t('memoryUnavailable')}</p>)
-      : <section className="tapl-card"><div className="tapl-card-body tapl-memory-detail">
-        <h2 className="m-0 text-xl font-semibold">{view.run.slug || view.run.id}</h2>
-        <h3>{t('request')}</h3><p className="tapl-memory-note">{view.run.request_summary || t('notRecorded')}</p>
-        <h3>{t('result')}</h3><p className="tapl-memory-note">{view.run.result_summary || t('notRecorded')}</p>
-      </div></section>}
-  </>;
+      {!supported ? (
+        <EmptyState title={t('memoryUnsupported')} icon="book" />
+      ) : view.type === 'memories' ? (
+        <MemoryList view={view} send={send} />
+      ) : view.type === 'memory' ? (
+        view.memory && view.memory.state !== 'deleted' ? (
+          <MemoryDetail memory={view.memory} send={send} />
+        ) : (
+          <EmptyState title={t('memoryUnavailable')} icon="book" />
+        )
+      ) : (
+        <MemoryRunSource view={view} />
+      )}
+    </div>
+  );
 }
 
 function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memories' }>; send: Send }): JSX.Element {
   const { t } = useI18n();
   const [query, setQuery] = useState(view.query);
-  useEffect(() => { setQuery(view.query); }, [view.query]);
+  useEffect(() => {
+    setQuery(view.query);
+  }, [view.query]);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     send({ command: 'memories', query: query.trim(), offset: 0 });
   };
   const limit = Math.max(1, view.limit || 20);
-  return <section className="tapl-card" aria-label={t('memories')}>
-    <div className="tapl-card-body tapl-memory-detail">
-      <p className="tapl-muted m-0">{t('memoryIntro')}</p>
-      <form className="tapl-memory-search" role="search" aria-label={t('searchMemories')} onSubmit={submit}>
-        <label htmlFor="memory-query">{t('searchMemories')}</label>
-        <div><input id="memory-query" type="search" maxLength={500} className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchMemories')} />
-          <button className="btn btn-primary" type="submit">{t('search')}</button></div>
-      </form>
+  return (
+    <>
+      <div className="wb-memory-intro">
+        <div className="wb-memory-scope">
+          <span>{t('wbMemoryScope')}</span>
+          <ReadOnlyBadge />
+        </div>
+        <form className="wb-search-box" role="search" aria-label={t('searchMemories')} onSubmit={submit}>
+          <label className="input input-sm">
+            <Icon name="search" />
+            <span className="wb-sr-only">{t('searchMemories')}</span>
+            <input
+              type="search"
+              maxLength={500}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t('searchMemories')}
+              data-wb-focus="memory-query"
+            />
+          </label>
+          <button className="btn btn-sm" type="submit" data-wb-focus="memory-submit">
+            {t('search')}
+          </button>
+        </form>
+      </div>
       {view.diagnostics && <MemoryDiagnosticRows diagnostics={view.diagnostics} />}
-      <p className="tapl-muted text-sm m-0" role="status">{t('memoryRange', { start: view.memories.length ? view.offset + 1 : 0, end: view.offset + view.memories.length, total: view.total })}</p>
-      {view.memories.length ? <ul className="tapl-memory-list">{view.memories.map((memory) => <li key={`${memory.source_db}:${memory.id}`} className="tapl-memory-row">
-        <button type="button" className="tapl-memory-open" onClick={() => send({ command: 'openMemory', memoryId: memory.id, source_db: memory.source_db })}>
-          <span className="tapl-memory-preview">{memory.note}</span>
-          <span className="tapl-memory-source-title">{memory.source.title || memory.source.run_id}</span>
+      <p className="wb-search-context" role="status">
+        {t('memoryRange', {
+          start: view.memories.length ? view.offset + 1 : 0,
+          end: view.offset + view.memories.length,
+          total: view.total
+        })}
+      </p>
+      {view.memories.length ? (
+        <ul className="wb-memory-grid">
+          {view.memories.map((memory) => (
+            <li key={`${memory.source_db ?? ''}:${memory.id}`} className="wb-memory-card">
+              <div className="wb-memory-top">
+                <span className="badge badge-outline badge-sm">
+                  {t(
+                    memory.state === 'active'
+                      ? 'memoryActive'
+                      : memory.state === 'superseded'
+                        ? 'memorySuperseded'
+                        : 'memoryDeleted'
+                  )}
+                </span>
+                <span className="wb-mono">{memory.id}</span>
+              </div>
+              <button
+                type="button"
+                className="wb-memory-open"
+                data-wb-focus={`memory:${memory.source_db ?? ''}:${memory.id}`}
+                onClick={() =>
+                  send({
+                    command: 'openMemory',
+                    memoryId: memory.id,
+                    source_db: memory.source_db
+                  })
+                }
+              >
+                <p>{memory.note}</p>
+                <span className="wb-sr-only">{t('memoryDetail')}</span>
+              </button>
+              <Cues memory={memory} />
+              <MemoryUse memory={memory} compact />
+              <div className="wb-memory-footer">
+                <span title={memory.source.title || memory.source.run_id}>
+                  {memory.source.title || memory.source.run_id}
+                  <small className="wb-mono">
+                    {[memory.source.run_id, memory.source_db].filter(Boolean).join(' · ')}
+                  </small>
+                </span>
+                {memory.source_available ? (
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    type="button"
+                    onClick={() =>
+                      send({
+                        command: 'openMemorySource',
+                        memoryId: memory.id,
+                        source_db: memory.source_db
+                      })
+                    }
+                  >
+                    {t('originalSource')}
+                    <Icon name="arrow" />
+                  </button>
+                ) : (
+                  <span className="wb-memory-source-unavailable">{t('sourceUnavailable')}</span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <EmptyState
+          title={t(view.query ? 'noMemoryMatches' : 'noMemories')}
+          help={view.query ? t('wbNoMatchesHelp') : t('memoryIntro')}
+          icon={view.query ? 'search' : 'book'}
+        >
+          {view.query && (
+            <button
+              className="btn btn-sm"
+              type="button"
+              onClick={() => send({ command: 'memories', query: '', offset: 0 })}
+            >
+              {t('wbReset')}
+            </button>
+          )}
+        </EmptyState>
+      )}
+      <nav className="wb-secondary-pagination" aria-label={t('memories')}>
+        <button
+          className="btn btn-ghost btn-sm"
+          type="button"
+          disabled={view.offset === 0}
+          onClick={() =>
+            send({
+              command: 'memories',
+              query: view.query,
+              offset: Math.max(0, view.offset - limit)
+            })
+          }
+        >
+          <Icon name="back" />
+          {t('previousPage')}
         </button>
-        <Cues memory={memory} />
-        <MemoryUse memory={memory} compact />
-      </li>)}</ul> : <p className="tapl-memory-empty">{t(view.query ? 'noMemoryMatches' : 'noMemories')}</p>}
-      <nav className="tapl-memory-pagination" aria-label={t('memories')}>
-        <button className="btn btn-secondary btn-sm" type="button" disabled={view.offset === 0} onClick={() => send({ command: 'memories', query: view.query, offset: Math.max(0, view.offset - limit) })}>{t('previousPage')}</button>
-        <button className="btn btn-secondary btn-sm" type="button" disabled={view.offset + view.memories.length >= view.total} onClick={() => send({ command: 'memories', query: view.query, offset: view.offset + limit })}>{t('nextPage')}</button>
+        <button
+          className="btn btn-ghost btn-sm"
+          type="button"
+          disabled={view.offset + view.memories.length >= view.total}
+          onClick={() =>
+            send({
+              command: 'memories',
+              query: view.query,
+              offset: view.offset + limit
+            })
+          }
+        >
+          {t('nextPage')}
+          <Icon name="arrow" />
+        </button>
       </nav>
-    </div>
-  </section>;
+    </>
+  );
 }
 
 function MemoryDiagnosticRows({ diagnostics }: { diagnostics: MemoryDiagnostics }): JSX.Element {
   const { t, locale } = useI18n();
   const error = diagnostics.last_capture_error;
-  return <section aria-label={t('memoryDiagnostics')} className="tapl-memory-diagnostics">
-    <dl className="tapl-memory-facts">
-      <div><dt>{t('memoryStoredCount')}</dt><dd>{diagnostics.stored_count}</dd></div>
-      <div><dt>{t('memoryMatchedCount')}</dt><dd>{diagnostics.matched_count}</dd></div>
-      {diagnostics.injected_count !== undefined && <div><dt>{t('memoryInjectedCount')}</dt><dd>{diagnostics.injected_count}</dd></div>}
-    </dl>
-    {error && <div className="tapl-memory-capture-error" role="status">
-      <h2 className="m-0 text-sm font-semibold">{t('memoryLastCaptureError')}</h2>
-      <p className="tapl-memory-note">{error.message}</p>
-      <p className="tapl-muted text-sm m-0">{t('memoryErrorRun', { run: error.run_id })}{error.slot !== undefined ? ` · ${t('memoryErrorSlot', { slot: error.slot })}` : ''} · {error.code} · <time dateTime={error.created_at}>{formatTime(error.created_at, locale)}</time></p>
-      <p className="tapl-muted text-sm m-0">{t('memoryCaptureErrorHelp')}</p>
-    </div>}
-  </section>;
+  return (
+    <section aria-label={t('memoryDiagnostics')} className="wb-memory-diagnostics">
+      <dl className="wb-secondary-counts">
+        <div>
+          <dt>{t('memoryStoredCount')}</dt>
+          <dd>{diagnostics.stored_count}</dd>
+        </div>
+        <div>
+          <dt>{t('memoryMatchedCount')}</dt>
+          <dd>{diagnostics.matched_count}</dd>
+        </div>
+        {diagnostics.injected_count !== undefined && (
+          <div>
+            <dt>{t('memoryInjectedCount')}</dt>
+            <dd>{diagnostics.injected_count}</dd>
+          </div>
+        )}
+      </dl>
+      {error && (
+        <details className="wb-secondary-disclosure wb-memory-capture-error" open>
+          <summary>
+            <Icon name="alert" />
+            {t('memoryLastCaptureError')}
+          </summary>
+          <div className="wb-secondary-disclosure-body" role="status">
+            <p className="wb-secondary-prose">{error.message}</p>
+            <p className="wb-secondary-meta">
+              {t('memoryErrorRun', { run: error.run_id })}
+              {error.slot !== undefined ? ` · ${t('memoryErrorSlot', { slot: error.slot })}` : ''} ·{' '}
+              <code>{error.code}</code> ·{' '}
+              <time dateTime={error.created_at}>{formatTime(error.created_at, locale)}</time>
+            </p>
+            <p className="wb-secondary-meta">{t('memoryCaptureErrorHelp')}</p>
+          </div>
+        </details>
+      )}
+    </section>
+  );
 }
 
-function Cues({ memory }: { memory: AssociativeMemory }): JSX.Element {
+function ReadOnlyBadge(): JSX.Element {
   const { t } = useI18n();
-  return <div className="tapl-memory-cues" aria-label={t('memoryCues')}>{memory.cue.map((cue) => <span key={cue} className={`tapl-memory-cue${memory.matched_cues.includes(cue) ? ' is-matched' : ''}`} title={memory.matched_cues.includes(cue) ? t('matchedCues') : undefined}>{cue}</span>)}</div>;
+  return (
+    <span className="wb-secondary-readonly" title={t('memoryReadOnly')} aria-label={t('memoryReadOnly')}>
+      <Icon name="lock" />
+    </span>
+  );
+}
+
+function Cues({ memory }: { memory: AssociativeMemory }): JSX.Element | null {
+  const { t } = useI18n();
+  if (!memory.cue.length) return null;
+  return (
+    <div className="wb-memory-cues" aria-label={t('memoryCues')}>
+      {memory.cue.map((cue, index) => (
+        <span
+          key={`${cue}:${index}`}
+          className={`badge badge-sm${memory.matched_cues.includes(cue) ? ' is-matched' : ''}`}
+          title={memory.matched_cues.includes(cue) ? t('matchedCues') : undefined}
+        >
+          {cue}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function MemoryUse({ memory, compact = false }: { memory: AssociativeMemory; compact?: boolean }): JSX.Element {
   const { t, locale } = useI18n();
   const ease = memory.strength >= 0.67 ? 'recallEasy' : memory.strength >= 0.33 ? 'recallModerate' : 'recallFaint';
-  return <dl className={`tapl-memory-facts${compact ? ' is-compact' : ''}`}>
-    <div><dt>{t('recallEase')}</dt><dd title={t('recallHelp')} className={`tapl-memory-strength ${ease}`}>{t(ease)}</dd></div>
-    <div><dt>{t('lastMemoryUse')}</dt><dd>{memory.last_reinforced_at ? <time dateTime={memory.last_reinforced_at}>{formatTime(memory.last_reinforced_at, locale)}</time> : t('memoryNeverUsed')}</dd></div>
-  </dl>;
+  return (
+    <dl className={`wb-memory-use${compact ? ' is-compact' : ''}`}>
+      <div>
+        <dt>{t('recallEase')}</dt>
+        <dd title={t('recallHelp')}>{t(ease)}</dd>
+      </div>
+      <div>
+        <dt>{t('lastMemoryUse')}</dt>
+        <dd>
+          {memory.last_reinforced_at ? (
+            <time dateTime={memory.last_reinforced_at}>{formatTime(memory.last_reinforced_at, locale)}</time>
+          ) : (
+            t('memoryNeverUsed')
+          )}
+        </dd>
+      </div>
+    </dl>
+  );
 }
 
 function MemoryDetail({ memory, send }: { memory: AssociativeMemory; send: Send }): JSX.Element {
   const { t, locale } = useI18n();
-  return <section className="tapl-card"><div className="tapl-card-body tapl-memory-detail">
-    <div className="tapl-memory-state">{t(memory.state === 'active' ? 'memoryActive' : memory.state === 'superseded' ? 'memorySuperseded' : 'memoryDeleted')}</div>
-    <p className="tapl-memory-note">{memory.note}</p>
-    <Cues memory={memory} />
-    <MemoryUse memory={memory} />
-    <p className="tapl-muted text-sm m-0">{t('recallHelp')}</p>
-    <dl className="tapl-memory-facts">
-      <div><dt>{t('created')}</dt><dd><time dateTime={memory.created_at}>{formatTime(memory.created_at, locale)}</time></dd></div>
-      <div><dt>{t('memoryContentUpdated')}</dt><dd><time dateTime={memory.updated_at}>{formatTime(memory.updated_at, locale)}</time></dd></div>
-    </dl>
-    <div className="tapl-memory-origin">
-      <span className="tapl-eyebrow">{t('originalSource')}</span>
-      <p className="m-0">{memory.source.title || memory.source.run_id}</p>
-      {memory.source_available ? <button className="btn btn-secondary btn-sm" type="button" onClick={() => send({ command: 'openMemorySource', memoryId: memory.id, source_db: memory.source_db })}>{t('openOriginalSource')}</button> : <p className="tapl-muted m-0">{t('sourceUnavailable')}</p>}
+  return (
+    <div className="wb-secondary-reading">
+      <article className="wb-secondary-document">
+        <div className="wb-secondary-meta">
+          <span className="badge badge-outline badge-sm">
+            {t(memory.state === 'active' ? 'memoryActive' : 'memorySuperseded')}
+          </span>
+          <span className="wb-mono">{memory.id}</span>
+          <ReadOnlyBadge />
+        </div>
+        <p className="wb-memory-note">{memory.note}</p>
+        <Cues memory={memory} />
+        <section className="wb-memory-origin">
+          <h2>{t('originalSource')}</h2>
+          <h3>{memory.source.title || memory.source.run_id}</h3>
+          <p className="wb-secondary-meta wb-mono">
+            {memory.source.run_id}
+            {memory.source.item_id !== null ? ` · ${memory.source.item_id}` : ''}
+            {memory.source.archive_id ? ` · ${memory.source.archive_id}` : ''}
+          </p>
+          {memory.source_available ? (
+            <button
+              className="btn btn-sm"
+              type="button"
+              onClick={() =>
+                send({
+                  command: 'openMemorySource',
+                  memoryId: memory.id,
+                  source_db: memory.source_db
+                })
+              }
+            >
+              {t('openOriginalSource')}
+              <Icon name="arrow" />
+            </button>
+          ) : (
+            <p className="wb-secondary-meta">{t('sourceUnavailable')}</p>
+          )}
+          {memory.source_record && (
+            <details className="wb-secondary-disclosure wb-memory-source-preview" open>
+              <summary>
+                {t('content')}
+                <Icon name="chevron" />
+              </summary>
+              <div className="wb-secondary-disclosure-body">
+                {memory.source_record.kind === 'item' ? (
+                  <>
+                    <h3>{memory.source_record.item.title}</h3>
+                    <p className="wb-secondary-prose">
+                      {memory.source_record.item.body || memory.source_record.item.raw_text || t('notRecorded')}
+                    </p>
+                    <details className="wb-secondary-inspect">
+                      <summary>{t('wbInspect')}</summary>
+                      <ValueTree value={memory.source_record.item} />
+                    </details>
+                  </>
+                ) : (
+                  <>
+                    <h3>{memory.source_record.run.slug || memory.source_record.run.id}</h3>
+                    <h4>{t('request')}</h4>
+                    <p className="wb-secondary-prose">{memory.source_record.run.request_summary || t('notRecorded')}</p>
+                    <h4>{t('result')}</h4>
+                    <p className="wb-secondary-prose">{memory.source_record.run.result_summary || t('notRecorded')}</p>
+                    <details className="wb-secondary-inspect">
+                      <summary>{t('wbInspect')}</summary>
+                      <ValueTree value={memory.source_record.run} />
+                    </details>
+                  </>
+                )}
+              </div>
+            </details>
+          )}
+        </section>
+        <details className="wb-secondary-inspect">
+          <summary>{t('wbAdditionalFields')}</summary>
+          <ValueTree
+            value={{
+              id: memory.id,
+              revision: memory.revision,
+              strength: memory.strength,
+              half_life_days: memory.half_life_days,
+              source_available: memory.source_available,
+              last_reinforced_at: memory.last_reinforced_at
+            }}
+          />
+        </details>
+      </article>
+      <aside className="wb-secondary-properties">
+        <h2>{t('wbProperties')}</h2>
+        <MemoryUse memory={memory} />
+        <dl className="wb-secondary-facts">
+          <div>
+            <dt>{t('created')}</dt>
+            <dd>
+              <time dateTime={memory.created_at}>{formatTime(memory.created_at, locale)}</time>
+            </dd>
+          </div>
+          <div>
+            <dt>{t('memoryContentUpdated')}</dt>
+            <dd>
+              <time dateTime={memory.updated_at}>{formatTime(memory.updated_at, locale)}</time>
+            </dd>
+          </div>
+          <div>
+            <dt>{t('matchedCues')}</dt>
+            <dd>{memory.matched_cues.join(', ') || t('none')}</dd>
+          </div>
+          <div>
+            <dt>{t('wbRevision')}</dt>
+            <dd>{memory.revision}</dd>
+          </div>
+          <div>
+            <dt>{t('wbStrength')}</dt>
+            <dd title={String(memory.strength)}>
+              {new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 }).format(memory.strength)}
+            </dd>
+          </div>
+          <div>
+            <dt>{t('wbHalfLife')}</dt>
+            <dd>{memory.half_life_days}</dd>
+          </div>
+          <div>
+            <dt>{t('source')}</dt>
+            <dd>{t(memory.source.kind === 'item' ? 'records' : 'run')}</dd>
+          </div>
+          {memory.source_db && (
+            <div>
+              <dt>{t('wbSourceDatabase')}</dt>
+              <dd className="wb-mono">{memory.source_db}</dd>
+            </div>
+          )}
+        </dl>
+      </aside>
     </div>
-  </div></section>;
+  );
+}
+
+function MemoryRunSource({ view }: { view: Extract<MemoryScreen, { type: 'memorySource' }> }): JSX.Element {
+  const { t, status } = useI18n();
+  const properties = [
+    [t('run'), view.run.id],
+    [t('wbOwner'), view.run.session_id],
+    [t('status'), status(view.run.status)],
+    [t('wbWorkType'), view.run.work_type],
+    [t('wbWorkflowMode'), view.run.workflow_mode],
+    [t('wbRecordMode'), view.run.record_mode],
+    [t('records'), view.run.record_count],
+    [t('wbSource'), view.source_db ?? view.run.source_db]
+  ];
+  return (
+    <div className="wb-secondary-reading">
+      <article className="wb-secondary-document">
+        <div className="wb-secondary-meta">
+          <span className="wb-mono">{view.run.id}</span>
+          <ReadOnlyBadge />
+        </div>
+        <h2>{view.run.slug || view.run.id}</h2>
+        <h3>{t('request')}</h3>
+        <p className="wb-secondary-prose">{view.run.request_summary || t('notRecorded')}</p>
+        <h3>{t('result')}</h3>
+        <p className="wb-secondary-prose">{view.run.result_summary || t('notRecorded')}</p>
+      </article>
+      <aside className="wb-secondary-properties">
+        <h2>{t('wbProperties')}</h2>
+        <dl className="wb-secondary-facts">
+          {properties.map(
+            ([key, value]) =>
+              value !== undefined &&
+              value !== null &&
+              value !== '' && (
+                <div key={key}>
+                  <dt>{key}</dt>
+                  <dd>{value}</dd>
+                </div>
+              )
+          )}
+        </dl>
+        <details className="wb-secondary-inspect">
+          <summary>{t('wbInspect')}</summary>
+          <ValueTree value={view.run} />
+        </details>
+      </aside>
+    </div>
+  );
 }
 
 function formatTime(value: string, locale: string): string {

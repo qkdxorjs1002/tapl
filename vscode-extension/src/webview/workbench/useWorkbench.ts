@@ -233,6 +233,7 @@ export function useWorkbench({
   };
   const switchRun = (run: TaplWorkflowRun) => {
     const key = runKey(run);
+    if (key === stateRef.current.route.runKey) return;
     const command = commandForRun(run, activeRuns);
     const saved = key === stateRef.current.route.runKey ? stateRef.current.route : visited.current.get(key);
     const route = saved?.page !== 'management' && saved ? saved : { page: 'current' as const, runKey: key };

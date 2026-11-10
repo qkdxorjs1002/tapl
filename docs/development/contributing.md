@@ -41,7 +41,7 @@ To check browser behavior with real Chrome and an isolated database, prepare the
 node --test vscode-extension/tests/browser/workbench.cjs
 ```
 
-`test_workbench_reads.py` covers exact RUNs, the federated library, pagination totals, provenance and read-only boundaries. Browser checks cover RUN switching, TASK details, Back, temporary tabs, language/theme and responsive Explore. These do not replace actual VS Code GUI, high-contrast or screen-reader checks.
+`test_workbench_reads.py` covers exact RUNs, the federated library, pagination totals, provenance and read-only boundaries. Browser checks cover RUN switching, all record kinds, semantic fields, memory/source pages, Back, temporary tabs, language/theme, responsive Explore, workspace validation/cancellation, icon tooltips, distinct status colors, continuous event connectors and compatibility/error/loading screens. Record-detail and secondary-view SSR suites preserve arbitrary nested field values and source-qualified links. These do not replace actual VS Code GUI, high-contrast or screen-reader checks.
 
 ## Choose meaningful checks
 

@@ -104,3 +104,65 @@ test('revision polling refreshes exact selectors and stale pages cannot overwrit
   assert.equal(h.api.getState().selectedSessionId, 'active-owner');
   h.api.setPollingActive(false);
 });
+
+test('workspace modal validation preserves the selected source, exact view and history until success', async () => {
+  const h = harness({ workspace: '/work', selectedSessionId: 'active-owner', selectedSourceDb: 'tapl-local.db', view: records });
+  const before = JSON.stringify(h.api.getState());
+  h.api.postMessage({ command: 'selectWorkspace', workspace: '/invalid' });
+  assert.equal(h.calls.at(-1).request.sessionId, undefined);
+  assert.equal(h.calls.at(-1).request.source_db, undefined);
+  assert.equal(JSON.stringify(h.api.getState()), before, 'validation leaves the current page untouched');
+  await h.resolve({ ...reply({ type: 'workspace', workspace: '/invalid', message: 'No TAPL database' }), workspace: '' });
+  assert.equal(h.messages.at(-1).type, 'workspace:result');
+  assert.equal(h.messages.at(-1).ok, false);
+  assert.equal(JSON.stringify(h.api.getState()), before);
+  h.api.postMessage({ command: 'selectWorkspace', workspace: '/work' });
+  await h.resolve(reply(overview));
+  assert.equal(h.messages.at(-1).ok, true);
+  assert.equal(JSON.stringify(h.api.getState()), before, 'same folder preserves exact record page');
+  h.api.postMessage({ command: 'selectWorkspace', workspace: '/next' });
+  await h.resolve({ ...reply(overview), workspace: '/next' });
+  assert.equal(h.api.getState().workspace, '/next');
+  assert.equal(h.api.getState().view.type, 'overview');
+  assert.equal(h.messages.at(-1).type, 'workspace:result');
+});
+
+test('workspace transport failures stay inline and stale validation cannot replace newer navigation', async () => {
+  const h = harness({ workspace: '/work', selectedSessionId: 'active-owner', view: run });
+  const before = JSON.stringify(h.api.getState());
+  h.api.postMessage({ command: 'selectWorkspace', workspace: '/invalid' });
+  h.pending.shift().reject(new Error('Offline')); await tick(); await tick();
+  assert.equal(h.messages.at(-1).type, 'workspace:result');
+  assert.equal(h.messages.at(-1).message, 'Offline');
+  assert.equal(JSON.stringify(h.api.getState()), before);
+  h.api.postMessage({ command: 'selectWorkspace', workspace: '/other' });
+  h.api.postMessage({ command: 'openRun', runId: 'newer', source_db: 'tapl-peer.db' });
+  await h.resolve({ ...reply(overview), workspace: '/other' });
+  assert.equal(h.api.getState().workspace, '/work');
+  assert.equal(h.messages.at(-1).type, 'workspace:result');
+  assert.equal(h.messages.at(-1).ok, false, 'invalidated latest selection settles its modal');
+  await h.resolve(reply({ ...run, snapshot: { ...run.snapshot, run: { ...run.snapshot.run, id: 'newer' } } }));
+  assert.equal(h.api.getState().view.snapshot.run.id, 'newer');
+});
+
+test('a revision predating folder validation cannot strand the modal or invalidate same-folder success', async () => {
+  for (const revisionFirst of [true, false]) {
+    const h = harness({ workspace: '/work', selectedSessionId: 'active-owner', selectedSourceDb: 'tapl-local.db', view: records });
+    h.api.setPollingActive(true);
+    const poll = [...h.timers.values()].at(-1); assert.ok(poll); poll(); await tick();
+    assert.equal(h.calls.at(-1).request.command, 'revision');
+    h.api.postMessage({ command: 'selectWorkspace', workspace: '/work' });
+    const revision = h.pending.shift(), selection = h.pending.shift();
+    const invalidRevision = { type: 'revision', workspace: '/work', revision: 'old', workspaceValid: false, message: 'Folder was temporarily unavailable' };
+    const resolve = async (request, payload) => { request.resolve({ ok: true, async json() { return payload; } }); await tick(); await tick(); };
+    if (revisionFirst) await resolve(revision, invalidRevision);
+    await resolve(selection, reply(overview));
+    if (!revisionFirst) await resolve(revision, invalidRevision);
+    assert.equal(h.messages.at(-1).type, 'workspace:result');
+    assert.equal(h.messages.at(-1).ok, true);
+    assert.equal(h.api.getState().view.type, 'records');
+    assert.equal(h.api.getState().workspace, '/work');
+    assert.equal(h.api.getState().selectedSessionId, 'active-owner');
+    assert.equal(h.messages.some(message => message.view?.type === 'workspace'), false);
+  }
+});

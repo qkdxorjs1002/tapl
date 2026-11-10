@@ -331,10 +331,10 @@ export function filterTasks(tasks: TaplItem[], filter: string, query: string): T
 export function itemSummary(item: TaplItem): string {
   const goal = item.custom_fields?.goal;
   const body = typeof goal === 'string' ? goal : (item.body ?? '');
-  return body
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/[*_`]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 220);
+  const first =
+    body
+      .replace(/^\s{0,3}#{1,6}\s+.*$/gm, '')
+      .split(/\n\s*\n/)
+      .find((part) => part.trim()) ?? '';
+  return first.replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim().slice(0, 220);
 }

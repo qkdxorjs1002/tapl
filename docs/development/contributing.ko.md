@@ -41,7 +41,7 @@ pnpm --dir vscode-extension run compile
 node --test vscode-extension/tests/browser/workbench.cjs
 ```
 
-`test_workbench_reads.py`는 정확한 RUN·통합 기록·페이지 건수·원본 격리·읽기 전용 경계를 검사합니다. 브라우저 검사는 RUN 전환·TASK 상세·돌아가기·임시 탭·언어·테마·반응형 탐색을 다룹니다. 실제 VS Code GUI·고대비·스크린리더 검사를 대신하지 않습니다.
+`test_workbench_reads.py`는 정확한 RUN·통합 기록·페이지 건수·원본 격리·읽기 전용 경계를 검사합니다. 브라우저 검사는 RUN 전환·전체 기록 종류·의미 필드·기억/원본·돌아가기·임시 탭·언어/테마·반응형 탐색·폴더 검증/취소·아이콘 툴팁·상태색·연속 이벤트선·호환/오류/로딩 화면을 다룹니다. 기록 상세·보조 화면 SSR은 임의 중첩 필드 값과 원본을 포함한 링크를 보존하는지 확인합니다. 실제 VS Code GUI·고대비·스크린리더 검사를 대신하지 않습니다.
 
 ## 의미 있는 검사 선택
 

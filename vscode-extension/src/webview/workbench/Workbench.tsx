@@ -10,9 +10,12 @@ import type {
   TaplSearchResult,
   TaplWorkflowRun,
   WebviewCommand,
-  WebviewView
+  WebviewView,
+  WorkspaceSelectionResult
 } from '../types';
 import { Icon } from './Icon';
+import { IconTooltips, WorkspaceDialog } from './InteractionLayers';
+import { PageLoading } from './SecondaryViews';
 import { Explore } from './Explore';
 import { EmptyState, ItemCount, PageHeading } from './components';
 import { CurrentRun, TaskStatus } from './RunViews';
@@ -27,7 +30,9 @@ export interface WorkbenchProps {
   discardSupported: boolean;
   discardResult?: RunDiscardResult;
   send: (command: WebviewCommand) => void;
-  renderLegacy: (view: WebviewView, send: (command: WebviewCommand) => void) => ReactNode;
+  renderPage: (view: WebviewView, send: (command: WebviewCommand) => void, back?: () => void) => ReactNode;
+  loading?: boolean;
+  workspaceResult?: WorkspaceSelectionResult;
   renderManagement?: (run: TaplWorkflowRun | undefined, context?: TaplRunSnapshot) => ReactNode;
   locale: SupportedLocale;
   onLocaleChange: (locale: SupportedLocale) => void;
@@ -46,6 +51,32 @@ export function Workbench(props: WorkbenchProps): JSX.Element {
 function WorkbenchShell(props: WorkbenchProps): JSX.Element {
   const { t } = useI18n();
   const pageRef = useRef<HTMLElement>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(props.view.type === 'workspace');
+  const stableView = useRef<WebviewView>(
+    props.view.type === 'workspace'
+      ? {
+          type: 'overview',
+          archives: [],
+          searchQuery: '',
+          status: {
+            active_run: null,
+            task_counts: {},
+            incomplete_tasks: 0,
+            plans: [],
+            tasks: [],
+            findings: [],
+            recent_events: [],
+            schema: {}
+          }
+        }
+      : props.view
+  );
+  if (props.view.type !== 'workspace') stableView.current = props.view;
+  const visibleView = props.view.type === 'workspace' ? stableView.current : props.view;
+  useEffect(() => {
+    if (props.view.type === 'workspace' && props.browser) setWorkspaceOpen(true);
+  }, [props.view]);
+
   const sidebarRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
   const languageRef = useRef<HTMLDetailsElement>(null);
@@ -88,6 +119,7 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const navigation = useWorkbench({
     ...props,
+    view: visibleView,
     pageRef,
     sidebarRef,
     onStateChange: (state) => persistRef.current?.({ ...(state as object), theme: themeRef.current })
@@ -195,7 +227,18 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
       {counter != null && <span className="wb-nav-counter">{counter}</span>}
     </button>
   );
-  const shownView = currentLegacy ?? (page === 'legacy' && !isPending ? props.view : undefined);
+  const shownView = currentLegacy ?? (page === 'legacy' && !isPending ? visibleView : undefined);
+  const sendPage = (command: WebviewCommand) => {
+    if (command.command === 'chooseWorkspace') {
+      if (props.browser) {
+        setWorkspaceOpen(true);
+        setMenuOpen(false);
+      } else props.send(command);
+      return;
+    }
+    navigation.wrappedSend(command);
+  };
+
   return (
     <div className="tapl-workbench" data-layout={props.layout} data-mobile={mobile} data-menu-open={menuOpen}>
       <a
@@ -333,7 +376,10 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
                 className="btn btn-ghost btn-xs btn-square"
                 aria-label={t('changeWorkspace')}
                 title={[t('changeWorkspace'), props.workspace].filter(Boolean).join(' · ')}
-                onClick={() => navigation.wrappedSend({ command: 'chooseWorkspace' })}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setWorkspaceOpen(true);
+                }}
                 data-wb-focus="workspace-picker"
               >
                 <Icon name="folder" />
@@ -408,81 +454,93 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
           }
           tabIndex={-1}
         >
-          {page === 'current' &&
-            (isPending && !snapshot ? (
-              <>
-                <PageHeading title={t('wbCurrent')} back={back} />
-                <p className="wb-loading-line" role="status">
-                  {t('wbLoadingRun')}
-                </p>
-              </>
-            ) : (
-              <CurrentRun snapshot={snapshot} title={t('wbCurrent')} open={openItem} back={back} />
-            ))}
-          {page === 'tasks' && (
-            <TaskStatus snapshot={snapshot} prefs={prefs} update={navigation.changePage} open={openItem} back={back} />
-          )}
-          {page === 'records' && (
-            <RecordsView
-              view={currentLegacy?.type === 'records' ? currentLegacy : undefined}
-              prefs={prefs}
-              run={selectedRun}
-              update={navigation.changePage}
-              request={(command) =>
-                navigation.go(
-                  {
-                    page: 'records',
-                    runKey: selectedKey,
-                    view: currentLegacy?.type === 'records' ? currentLegacy : undefined
-                  },
-                  command,
-                  'replace'
-                )
-              }
-              open={openItem}
-              openRun={(run) => openRun(run, true)}
-              back={back}
-              loading={isPending}
-            />
-          )}
-          {page === 'management' && (
+          {props.loading ? (
+            <PageLoading />
+          ) : (
             <>
-              <PageHeading title={t('wbDiscard')} back={back} />
-              {props.renderManagement ? (
-                props.renderManagement(selectedRun, snapshot)
-              ) : (
-                <EmptyState title={t('wbEmptyManagement')} />
+              {page === 'current' &&
+                (isPending && !snapshot ? (
+                  <>
+                    <PageHeading title={t('wbCurrent')} back={back} />
+                    <p className="wb-loading-line" role="status">
+                      {t('wbLoadingRun')}
+                    </p>
+                  </>
+                ) : (
+                  <CurrentRun snapshot={snapshot} title={t('wbCurrent')} open={openItem} back={back} />
+                ))}
+              {page === 'tasks' && (
+                <TaskStatus
+                  snapshot={snapshot}
+                  prefs={prefs}
+                  update={navigation.changePage}
+                  open={openItem}
+                  back={back}
+                />
               )}
-            </>
-          )}
-          {page === 'memories' && !props.memorySupported && (
-            <>
-              <PageHeading title={t('wbMemories')} back={back} />
-              <EmptyState title={t('memoryUnsupported')} icon="book" />
-            </>
-          )}
-          {((page === 'memories' && props.memorySupported) || page === 'legacy') && (
-            <>
-              {back && (
-                <div className="wb-legacy-back">
-                  <button type="button" className="btn btn-sm wb-back" onClick={back}>
-                    <Icon name="back" />
-                    {t('wbBack')}
-                  </button>
-                </div>
+              {page === 'records' && (
+                <RecordsView
+                  view={currentLegacy?.type === 'records' ? currentLegacy : undefined}
+                  prefs={prefs}
+                  run={selectedRun}
+                  update={navigation.changePage}
+                  request={(command) =>
+                    navigation.go(
+                      {
+                        page: 'records',
+                        runKey: selectedKey,
+                        view: currentLegacy?.type === 'records' ? currentLegacy : undefined
+                      },
+                      command,
+                      'replace'
+                    )
+                  }
+                  open={openItem}
+                  openRun={(run) => openRun(run, true)}
+                  back={back}
+                  loading={isPending}
+                />
               )}
-              {isPending && (
-                <p className="wb-loading-line" role="status">
-                  {t('loadingWorkflow')}
-                </p>
+              {page === 'management' && (
+                <>
+                  <PageHeading title={t('wbDiscard')} back={back} />
+                  {props.renderManagement ? (
+                    props.renderManagement(selectedRun, snapshot)
+                  ) : (
+                    <EmptyState title={t('wbEmptyManagement')} />
+                  )}
+                </>
               )}
-              {shownView && (
-                <div className="wb-legacy-view">{props.renderLegacy(shownView, navigation.wrappedSend)}</div>
+              {page === 'memories' && !props.memorySupported && (
+                <>
+                  <PageHeading title={t('wbMemories')} back={back} />
+                  <EmptyState title={t('memoryUnsupported')} icon="book" />
+                </>
+              )}
+              {((page === 'memories' && props.memorySupported) || page === 'legacy') && (
+                <>
+                  {isPending && !shownView && <PageLoading back={back} />}
+                  {shownView && <div className="wb-route-view">{props.renderPage(shownView, sendPage, back)}</div>}
+                </>
               )}
             </>
           )}
         </div>
       </main>
+      {props.browser && (
+        <WorkspaceDialog
+          open={workspaceOpen}
+          workspace={props.view.type === 'workspace' ? props.view.workspace || props.workspace : props.workspace}
+          message={props.view.type === 'workspace' ? props.view.message : undefined}
+          result={props.workspaceResult}
+          submit={(workspace) => props.send({ command: 'selectWorkspace', workspace })}
+          close={() => setWorkspaceOpen(false)}
+          fallbackFocus={() =>
+            mobile ? menuRef.current : document.querySelector<HTMLElement>('[data-wb-focus="workspace-picker"]')
+          }
+        />
+      )}
+      <IconTooltips navigationKey={`${routeIdentity(state.route)}:${props.locale}:${workspaceOpen}`} />
       {mobile && menuOpen && (
         <button
           type="button"

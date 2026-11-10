@@ -1,3 +1,4 @@
+import { translate } from '../i18n';
 import type {
   BrowserApiCommand,
   DisplayLayout,
@@ -60,6 +61,8 @@ class BrowserApi implements VsCodeApi {
   private trailingRefreshIsManual = false;
   private autoRefreshPending = false;
   private discardPending = false;
+  private workspaceSelecting = false;
+  private workspaceSelectionId = 0;
 
   private readonly onVisibilityChange = (): void => {
     if (document.visibilityState === 'visible') {
@@ -70,6 +73,7 @@ class BrowserApi implements VsCodeApi {
   };
 
   postMessage(message: WebviewCommand): void {
+    if (message.command === 'selectWorkspace') { void this.selectWorkspace(message.workspace); return; }
     if (message.command === 'discardRun') {
       const workspace = this.activeWorkspace ?? this.state.workspace ?? readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
       if (this.discardPending || this.state.capabilities?.discardRun !== true || message.confirmed !== true
@@ -86,7 +90,7 @@ class BrowserApi implements VsCodeApi {
       this.pendingNavigation = false;
       this.requestGeneration += 1;
     }
-    if (message.command === 'selectWorkspace' || message.command === 'chooseWorkspace') {
+    if (message.command === 'chooseWorkspace') {
       this.state.selectedSessionId = undefined;
       this.state.selectedSourceDb = undefined;
       this.workspaceGeneration += 1;
@@ -111,6 +115,53 @@ class BrowserApi implements VsCodeApi {
     }
     if (message.command === 'discardRun') this.discardPending = true;
     this.navigate(message);
+  }
+
+  /** Validate a candidate without replacing the page or changing its selected owner. */
+  private async selectWorkspace(candidate: string): Promise<void> {
+    const selection = ++this.workspaceSelectionId;
+    const generation = this.requestGeneration, workspaceGeneration = this.workspaceGeneration;
+    const current = this.activeWorkspace ?? this.state.workspace;
+    this.workspaceSelecting = true;
+    this.clearRevisionTimer();
+    const currentSelection = () => selection === this.workspaceSelectionId && generation === this.requestGeneration
+      && workspaceGeneration === this.workspaceGeneration && current === (this.activeWorkspace ?? this.state.workspace);
+    const settleSuperseded = () => {
+      if (selection === this.workspaceSelectionId) dispatchHostMessage({ type: 'workspace:result', ok: false,
+        message: translate(this.state.locale ?? resolveBrowserLocale(), 'wbWorkspaceSelectionChanged') });
+    };
+    try {
+      const response = await fetch('/api/message', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'selectWorkspace', workspace: candidate.trim(), locale: navigator.language, layout: this.state.layout ?? 'auto' }) });
+      const payload = await response.json() as HostMessage;
+      if (!currentSelection()) { settleSuperseded(); return; }
+      if (!response.ok || payload.type === 'error'
+        || ((payload.type === 'hydrate' || payload.type === 'view:update') && (payload.view.type === 'workspace' || payload.view.type === 'error'))) {
+        const message = payload.type === 'error' ? payload.message
+          : ((payload.type === 'hydrate' || payload.type === 'view:update') && (payload.view.type === 'workspace' || payload.view.type === 'error')) ? payload.view.message : undefined;
+        throw new Error(message || `Viewer request failed (${response.status ?? 'invalid response'}).`);
+      }
+      if ((payload.type !== 'hydrate' && payload.type !== 'view:update') || payload.view.type !== 'overview' || !payload.workspace) {
+        throw new Error('Workspace response was invalid.');
+      }
+      if (payload.workspace === current && this.state.view?.type !== 'workspace') {
+        dispatchHostMessage({ type: 'workspace:result', ok: true, workspace: payload.workspace });
+        return;
+      }
+      this.requestGeneration += 1;
+      this.workspaceGeneration += 1;
+      this.autoRefreshPending = false; this.refreshDirty = false; this.pendingNavigation = false;
+      this.state.selectedSessionId = undefined; this.state.selectedSourceDb = undefined;
+      this.history = []; this.persistHistory();
+      this.setActiveWorkspace(payload.workspace);
+      dispatchHostMessage(payload);
+      dispatchHostMessage({ type: 'workspace:result', ok: true, workspace: payload.workspace });
+    } catch (error) {
+      if (currentSelection()) dispatchHostMessage({ type: 'workspace:result', ok: false, message: error instanceof Error ? error.message : 'Workspace selection failed.' });
+      else settleSuperseded();
+    } finally {
+      if (selection === this.workspaceSelectionId) { this.workspaceSelecting = false; this.scheduleRevisionCheck(); }
+    }
   }
 
   private navigate(message: Exclude<WebviewCommand, { command: 'back' | 'chooseWorkspace' }>, view?: WebviewView): void {
@@ -156,6 +207,7 @@ class BrowserApi implements VsCodeApi {
     message: Exclude<WebviewCommand, { command: 'back' | 'chooseWorkspace' }>,
     options: { background?: boolean; view?: WebviewView } = {}
   ): Promise<boolean> {
+    const selectionEpoch = this.workspaceSelectionId;
     const previous = options.view ?? this.state.view;
     const generation = this.requestGeneration;
     const workspaceGeneration = this.workspaceGeneration;
@@ -186,6 +238,7 @@ class BrowserApi implements VsCodeApi {
         body: JSON.stringify(request)
       });
       const payload = await response.json() as HostMessage;
+      if (options.background && selectionEpoch !== this.workspaceSelectionId) return true;
       if (generation !== this.requestGeneration || workspaceGeneration !== this.workspaceGeneration || activeWorkspace !== this.activeWorkspace) {
         // Resolve an outstanding confirmation without letting its old overview
         // replace a more recent selection. Workspace switches dismiss the dialog.
@@ -271,7 +324,7 @@ class BrowserApi implements VsCodeApi {
   }
 
   private requestRefresh(background: boolean): void {
-    if (this.pendingNavigation || this.state.view?.type === 'workspace') {
+    if (this.workspaceSelecting || this.pendingNavigation || this.state.view?.type === 'workspace') {
       return;
     }
     if (this.refreshInFlight) {
@@ -330,6 +383,7 @@ class BrowserApi implements VsCodeApi {
       return;
     }
     this.revisionInFlight = true;
+    const selectionEpoch = this.workspaceSelectionId;
     const generation = this.requestGeneration;
     const workspaceGeneration = this.workspaceGeneration;
     const request = this.revisionRequest();
@@ -340,6 +394,7 @@ class BrowserApi implements VsCodeApi {
         body: JSON.stringify(request)
       });
       const payload: unknown = await response.json();
+      if (this.workspaceSelecting || selectionEpoch !== this.workspaceSelectionId) return;
       if (generation !== this.requestGeneration || workspaceGeneration !== this.workspaceGeneration || request.workspace !== this.revisionRequest().workspace) {
         return;
       }
@@ -412,6 +467,7 @@ class BrowserApi implements VsCodeApi {
 
   private shouldPoll(): boolean {
     return this.pollingActive
+      && !this.workspaceSelecting
       && !this.pendingNavigation
       && document.visibilityState === 'visible'
       && !!this.state.view

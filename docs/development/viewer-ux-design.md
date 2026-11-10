@@ -62,11 +62,13 @@ RUNs, tasks, owners, records and timestamps are synthetic. The 2/6 completion co
 | --- | --- |
 | Shared shell | `workbench/Workbench.tsx`, fixed desktop shell and responsive drawer |
 | Navigation | `model.ts` and `useWorkbench.ts`, source-qualified RUN identity, Back and per-RUN preferences |
-| Pages | `RunViews.tsx`, `RecordsView.tsx`, `Explore.tsx`; existing record/memory detail rendering in `App.tsx` |
+| Pages | `RunViews.tsx`, `RecordsView.tsx`, `Explore.tsx`; `RecordDetail.tsx`, `MemoryView.tsx` and `SecondaryViews.tsx` reading/support pages |
 | Themes | DaisyUI semantic tokens mapped to existing TAPL/VS Code colors, with retained manual light/dark selection |
 | Hosts | Browser HTTP and VS Code stdio adapters share exact RUN and record-list contracts |
 
 The [Viewer guide](../guides/viewer.md) is the behavior reference; gallery fixtures are not runtime data.
+
+Shipping details follow the prototype hero, reading column, property rail and real related-record rows. Meaningful typed fields are promoted into the body; additional values form a vertical object/array tree. Memory uses note cards and source previews. Workspace selection is a modal, and diagnostics/errors/loading use the same visual system. Icon tooltips and status tokens are shared across pages. Synthetic prototype checks, relationships and metadata are never copied as runtime facts.
 
 ## Ten directions
 

@@ -78,7 +78,7 @@ function TaskFlow({ snapshot, open }: { snapshot: TaplRunSnapshot; open: OpenIte
         {states.map((value) => {
           const tasks = ordered.filter((item) => (item.status ?? '') === value);
           return (
-            <section className="wb-flow-lane" key={value} aria-label={status(value) || t('status')}>
+            <section className="wb-flow-lane" key={value} data-status={value} aria-label={status(value) || t('status')}>
               <header className="wb-flow-heading">
                 <h3>{value ? <StatusMark value={value} /> : t('status')}</h3>
                 <span>

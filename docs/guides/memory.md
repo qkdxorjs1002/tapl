@@ -61,6 +61,10 @@ reviewed run. Older runs with no memory-review event remain archivable, and
 runs with recall disabled are exempt. A stale archived-run retry cannot update
 the next active run.
 
+## Read memories in the Viewer
+
+The shared Viewer lists notes as cards with cue matches and source actions. Details separate the note/source preview from properties and retain the original source database when opening a record or RUN. Recall strength is displayed as a rounded percentage; its exact stored value remains available in Additional fields. This is recall ease, not confidence in correctness. Structured source data uses expandable vertical fields. See [Viewer details](viewer.md#read-details-and-structured-fields).
+
 ## Inspection, updates and deletion
 
 Content edits reset the memory's freshness; verified use can extend its

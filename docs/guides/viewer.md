@@ -28,7 +28,7 @@ RUN tabs select the session whose records you inspect. Archives and history let 
 
 ## Navigate the Viewer
 
-The desktop sidebar and RUN bar stay fixed while the page scrolls. The sidebar scrolls independently on short screens; narrow windows use a navigation drawer. In the web Viewer, the folder icon beside the Workspace heading changes folders. Language and light/dark controls sit beside the text brand; UI language does not translate stored records. VS Code theme tokens supply the initial editor palette; a manual theme choice is retained.
+The desktop sidebar and RUN bar stay fixed while the page scrolls. The sidebar scrolls independently on short screens; narrow windows use a navigation drawer. In the web Viewer, the folder icon beside the Workspace heading opens a folder-selection modal. Cancel, invalid paths and selecting the same folder preserve the current RUN, page, filters and scroll; a validated different folder resets workspace-specific navigation. Language and light/dark controls sit beside the text brand; UI language does not translate stored records. VS Code theme tokens supply the initial editor palette; a manual theme choice is retained.
 
 - **Current RUN** shows recorded work type, workflow mode and record mode in one compact row, horizontal PLAN summaries and horizontal task-status lanes. Missing metadata is omitted. The sidebar shows integer completion percentage; it is calculated from TASK state, not the selected page.
 - **TASK status** filters the full TASK list. Selecting a TASK opens its detailed page; **Back** returns to the preceding filter, query, scroll and focus.
@@ -36,7 +36,15 @@ The desktop sidebar and RUN bar stay fixed while the page scrolls. The sidebar s
 - **Record search** starts with all records and collapsed RUN groups. Switch between all records and the selected RUN, or grouped and flat results. See [Search](search.md#browse-records-in-the-viewer).
 - **Associative memory** retains read-only list, search, detail and original-source inspection. Refresh and Debug controls sit beside Management.
 
-The top bar lists unarchived RUNs. Opening an archived source from records or memory adds one temporary tab at the right; selecting another RUN removes it. Source database and RUN ID remain paired during navigation. Internal links provide Back; direct navigation and reload clear the return trail. Per-RUN filters and theme/language choices persist separately from that trail.
+The top bar lists unarchived RUNs. Opening an archived source from records or memory adds one temporary tab at the right; selecting another RUN removes it. Source database and RUN ID remain paired during navigation. Internal links provide Back. Clicking the already selected RUN tab preserves its page and return trail; switching RUNs, direct sidebar navigation and reload clear the trail. Per-RUN filters and theme/language choices persist separately from that trail.
+
+## Read details and structured fields
+
+PLAN, TASK and FINDING details use a reading column with a separate properties rail. PLAN purpose, requirements, approach, scope, sequence, risks, validation and approval needs appear in the body when recorded. TASK goal, action, result, verification, blocker and next action are likewise visible; FINDING content and impact remain readable. Related-record links use actual references within the source RUN. Generated Markdown that exactly repeats structured fields is shown once.
+
+Ownership, timestamps, status, source database and parent PLAN belong in properties. Additional/custom/execution fields use vertical nested entries with expandable objects and arrays, rather than serialized JSON blocks. Zero, false, null and empty containers remain distinguishable. The same field presentation is used in memory and diagnostics.
+
+Icon-only controls have short localized hover/focus tooltips. Status labels retain text and distinct indicators: slate for pending, blue for in progress, terracotta for blocked, green for completed and violet for skipped. Diagnostics show hook events chronologically with expandable payloads. Loading, errors and unsupported capabilities remain inside the fixed shell.
 
 ## Database access and protected services
 

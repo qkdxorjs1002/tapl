@@ -160,6 +160,19 @@ export interface TaplArchiveDetail {
 }
 
 export interface TaplItemDetail extends TaplItem {
+  created_at?: string;
+  plan_id?: string | null;
+  summary?: string | null;
+  objective?: string | null;
+  requirements_trace?: string | null;
+  selected_approach?: string | null;
+  affected_files?: string | null;
+  execution_order?: string | null;
+  risks?: string | null;
+  validation?: string | null;
+  approval_needs?: string | null;
+  notes?: string | null;
+
   id: number;
   raw_text?: string;
   archived?: number;
@@ -232,7 +245,10 @@ export type WebviewView =
   | { type: 'searchItem'; result: TaplSearchResult; detail?: TaplItemDetail; context?: TaplRunSnapshot }
   | { type: 'error'; message: string };
 
+export type WorkspaceSelectionResult = { type: 'workspace:result'; ok: boolean; message?: string; workspace?: string };
+
 export type HostMessage =
+  | WorkspaceSelectionResult
   | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; discardResult?: RunDiscardResult }
   | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; discardResult?: RunDiscardResult }
   | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout; discardResult?: RunDiscardResult };

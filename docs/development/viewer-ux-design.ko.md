@@ -62,11 +62,13 @@ RUN·작업·담당·기록·시각은 모두 가상 예시입니다. 진행률 
 | --- | --- |
 | 공유 구조 | `workbench/Workbench.tsx`의 고정 PC 구조와 반응형 서랍 |
 | 이동 | `model.ts`·`useWorkbench.ts`의 원본 포함 RUN 식별, 돌아가기와 RUN별 설정 |
-| 페이지 | `RunViews.tsx`·`RecordsView.tsx`·`Explore.tsx`, `App.tsx`의 기존 기록·기억 상세 |
+| 페이지 | `RunViews.tsx`·`RecordsView.tsx`·`Explore.tsx`, `RecordDetail.tsx`·`MemoryView.tsx`·`SecondaryViews.tsx`의 읽기·보조 화면 |
 | 테마 | 기존 TAPL·VS Code 색상에 연결한 DaisyUI 의미 토큰과 수동 라이트/다크 선택 |
 | 호스트 | 정확한 RUN·기록 목록 계약을 공유하는 브라우저 HTTP·VS Code stdio 어댑터 |
 
 동작 기준은 [Viewer 안내](../guides/viewer.ko.md)이며 갤러리 fixture는 실제 데이터가 아닙니다.
+
+실제 상세는 시안의 hero·읽기 본문·속성 패널·실제 연결 기록 행을 따릅니다. 의미 있는 구조화 필드는 본문으로 올리고 추가 값은 수직 객체·배열 트리로 표시합니다. 기억은 문구 카드·원본 미리보기를 사용합니다. 워크스페이스는 모달이며 진단·오류·로딩도 같은 시각 체계를 따릅니다. 아이콘 툴팁과 상태 토큰을 페이지 전체에 공유하며 시안의 가상 검증 항목·관계·메타데이터를 실제 사실처럼 복사하지 않습니다.
 
 ## 열 가지 방향
 
