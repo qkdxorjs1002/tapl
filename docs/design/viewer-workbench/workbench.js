@@ -33,7 +33,6 @@ const copy = {
   skipped: ["건너뜀", "Skipped"],
   complete: ["완료", "Completed"],
   progress: ["작업 완료 비율", "Task completion"],
-  currentFocus: ["진행 중인 작업", "Work in progress"],
   runInfo: ["RUN 정보", "RUN information"],
   workType: ["분류", "Work type"],
   runDifficulty: ["난이도", "Difficulty"],
@@ -48,7 +47,6 @@ const copy = {
 
   flowBoard: ["작업 흐름", "Task flow"],
   emptyLane: ["작업 없음", "No tasks"],
-  taskDetail: ["목적과 검증 조건", "Purpose and verification"],
   blockerTitle: [
     "후속 검증을 기다리게 하는 항목이 있습니다",
     "A blocker is holding up downstream verification",
@@ -77,11 +75,6 @@ const copy = {
   allDoneHelp: [
     "완료 결과와 검증 기록을 TASK 현황에서 확인할 수 있습니다.",
     "Read the results and verification records in TASK status.",
-  ],
-  noActive: ["진행 중인 TASK가 없습니다", "No TASK is currently in progress"],
-  noActiveHelp: [
-    "대기 중인 작업의 선행 조건과 계획을 확인해 보세요.",
-    "Review prerequisites and the plan for pending work.",
   ],
   showTasks: ["TASK 현황 보기", "View TASK status"],
   all: ["전체", "All"],
@@ -155,6 +148,7 @@ const icons = {
   finding: '<circle cx="10" cy="10" r="6"/><path d="m14.5 14.5 6 6M7.5 10.5l1.7 1.7 3.3-3.4"/>',
   languages: '<path d="M3 5h12M9 3v2M5 5c0 6 5 9 8 10M13 5c0 6-5 9-8 10M14 21l4-10 4 10M15.5 18h5"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  close: '<path d="m6 6 12 12M6 18 18 6"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/>',
   moon: '<path d="M20.5 14.5A9 9 0 0 1 9.5 3.5a9 9 0 1 0 11 11z"/>',
   focus:
@@ -624,6 +618,7 @@ function view() {
       memory: null,
       scrolls: {},
       foldScrolls: {},
+      sideScroll: 0,
       flowPosition: 0,
       planPosition: 0,
     });
@@ -759,29 +754,24 @@ document.addEventListener("keydown", (event) => {
   track.scrollTo({ left, behavior: motionPreference.matches ? "auto" : "smooth" });
 });
 function taskOverview() {
-  const items = taskRecords(),
-    active = items.find((x) => x.status === "running");
-  let body;
+  const items = taskRecords();
+  let body = blocker();
   if (!items.length) body = empty("noTasks", "noTasksHelp");
-  else if (!active && items.every((x) => x.status === "done"))
+  else if (items.every((x) => x.status === "done"))
     body = empty(
       "allDone",
       "allDoneHelp",
       "check",
       `<button class="btn btn-primary btn-sm" type="button" data-page="tasks">${t("showTasks")}</button>`,
     );
-  else if (!active)
-    body = `${blocker()}${empty("noActive", "noActiveHelp", "info", `<button class="btn btn-sm" type="button" data-page="tasks">${t("showTasks")}</button>`)}`;
-  else
-    body = `<section class="current-focus" aria-labelledby="focus-title"><div class="section-title"><h2 id="focus-title">${t("currentFocus")}</h2><span class="mono">${active.id}</span></div><article class="card focus-surface"><h3>${esc(tr(active.title))}</h3><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))}</span><button id="focus-${active.id}" class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}</section>`;
   return `${body}${flowBoard(items)}`;
 }
 function runInformation() {
   const run = currentRun();
   const fields = [["work_type", "workType"], ["difficulty", "runDifficulty"], ["workflow_mode", "workflowMode"], ["record_mode", "recordMode"]];
-  return `<section class="run-information" aria-label="${t("runInfo")}"><dl class="run-facts">${fields.map(([field, label]) => {
+  return `<section class="run-information" aria-label="${t("runInfo")}" tabindex="0"><dl class="run-facts">${fields.map(([field, label]) => {
     const [value, explanation] = runFieldInfo[field][run[field]] || runFieldInfo[field].unknown;
-    return `<div data-run-field="${field}"><dt>${t(label)}</dt><dd><strong>${esc(tr(value))}</strong><p>${esc(tr(explanation))}</p></dd></div>`;
+    return `<div data-run-field="${field}" title="${esc(tr(explanation))}"><dt>${t(label)}</dt><dd><strong>${esc(tr(value))}</strong><p class="sr-only">${esc(tr(explanation))}</p></dd></div>`;
   }).join("")}</dl></section>`;
 }
 function planSummaries() {
@@ -935,7 +925,8 @@ const activeMotions = new Set();
 const disclosureMotions = new Set();
 const disclosureState = new WeakMap();
 let pageMotions = [];
-let foldMotion = null;
+let explorerMotion = null;
+const explorer = { kind: null, mode: "pointer", closeTimer: null, suppressedKind: null };
 function tween(element, frames, duration = 240, complete) {
   if (!element || motionPreference.matches || !element.animate) {
     complete?.();
@@ -965,10 +956,9 @@ function tween(element, frames, duration = 240, complete) {
   activeMotions.add(handle);
   return handle;
 }
-function finishFoldMotion() {
-  const previous = foldMotion;
-  foldMotion = null;
-  previous?.finish();
+function finishExplorerMotion() {
+  explorerMotion?.cancel();
+  explorerMotion = null;
 }
 function finishDisclosures() {
   [...disclosureMotions].forEach((handle) => handle.finish());
@@ -1002,55 +992,127 @@ function updateRunIndicator() {
   if (!tabs.hasAttribute("data-indicator-ready"))
     requestAnimationFrame(() => tabs.setAttribute("data-indicator-ready", ""));
 }
-function toggleExplore(kind) {
-  finishFoldMotion();
-  const owner = view(),
-    scroll = $("#page-scroll").scrollTop;
-  const closing = owner.openKind === kind;
-  if (closing && !motionPreference.matches) {
-    const list = $(`#list-${kind}`),
-      trigger = $(`#fold-${kind}`);
-    owner.foldScrolls[list.id] = list.scrollTop;
-    owner.openKind = null;
-    trigger.setAttribute("aria-expanded", "false");
-    list.setAttribute("aria-hidden", "true");
-    list.inert = true;
-    list.classList.add("is-revealing");
-    foldMotion = tween(
-      list,
-      [
-        { height: `${list.clientHeight}px`, opacity: 1 },
-        { height: "0px", opacity: 0 },
-      ],
-      180,
-      () => {
-        if (!list.isConnected || view() !== owner) return;
-        const focus = focusToken();
-        list.hidden = true;
-        renderSidebar();
-        restoreFocus(focus);
-      },
-    );
-  } else {
-    owner.openKind = closing ? null : kind;
-    renderSidebar();
-    $(`#fold-${kind}`).focus({ preventScroll: true });
-    const list = $(`#list-${kind}`);
-    if (!closing) {
-      list.classList.add("is-revealing");
-      foldMotion = tween(
-        list,
-        [
-          { height: "0px", opacity: 0 },
-          { height: `${list.clientHeight}px`, opacity: 1 },
-        ],
-        240,
-        () => list.classList.remove("is-revealing"),
-      );
-    }
-  }
-  $("#page-scroll").scrollTop = scroll;
+function captureExplorerScroll(owner) {
+  const panel = $("#explore-panel"), list = $(".fold-list", panel);
+  if (owner && list && !panel.hidden) owner.foldScrolls[list.id] = list.scrollTop;
 }
+function syncExploreTriggers() {
+  document.querySelectorAll("[data-fold]").forEach((button) => {
+    button.setAttribute("aria-expanded", String(explorer.kind === button.dataset.fold));
+  });
+}
+function positionExplorer() {
+  if (!explorer.kind) return;
+  const panel = $("#explore-panel"), trigger = $(`#fold-${explorer.kind}`);
+  const sidebar = $("#sidebar").getBoundingClientRect(), anchor = trigger.getBoundingClientRect();
+  if ($("#sidebar").inert || anchor.bottom <= sidebar.top || anchor.top >= sidebar.bottom) {
+    closeExplorer();
+    return;
+  }
+  panel.style.width = `${Math.min(336, innerWidth - 24)}px`;
+  const width = panel.getBoundingClientRect().width;
+  const left = sidebar.right + width + 8 <= innerWidth - 12 ? sidebar.right + 8 : 12;
+  const top = Math.max(sidebar.top + 8, Math.min(anchor.top, innerHeight - panel.offsetHeight - 12));
+  panel.style.left = `${left}px`;
+  panel.style.top = `${top}px`;
+}
+function renderExplorer() {
+  const panel = $("#explore-panel");
+  syncExploreTriggers();
+  if (!explorer.kind) { panel.hidden = true; panel.inert = true; return; }
+  const kind = explorer.kind, items = runRecords(currentRun(), kind), v = view();
+  panel.dataset.run = state.run;
+  panel.dataset.kind = kind;
+  panel.hidden = false;
+  panel.inert = false;
+  panel.innerHTML = `<header class="explore-panel-heading"><h2 id="explore-panel-title">${icon(kind.toLowerCase())}${kind}</h2><span>${formatItemCount(items.length)}</span><button id="explore-close" class="btn btn-ghost btn-sm btn-square" type="button" aria-label="${t("close")}">${icon("close")}</button></header><div class="fold-list" id="list-${kind}" aria-labelledby="explore-panel-title">${items.map((r) => `<button type="button" data-record="${r.uid}" ${v.page === "record" && v.record === r.uid ? 'aria-current="true"' : ""}><span class="record-code"><span class="status ${statusColors[r.status]}" aria-hidden="true"></span>${r.id}</span><span class="record-label">${esc(tr(r.title))}</span></button>`).join("") || `<p class="fold-empty">${t("noRecords")}</p>`}</div>`;
+  const list = $(".fold-list", panel);
+  list.scrollTop = v.foldScrolls[list.id] || 0;
+  positionExplorer();
+}
+function openExplorer(kind, mode = "pointer", focusList = false) {
+  clearTimeout(explorer.closeTimer);
+  explorer.suppressedKind = null;
+  if (explorer.kind !== kind) {
+    captureExplorerScroll(view());
+    finishExplorerMotion();
+    explorer.kind = kind;
+    explorer.mode = mode;
+    view().openKind = kind;
+    renderExplorer();
+    explorerMotion = tween($("#explore-panel"), [{opacity: 0, transform: "translateX(-5px)"}, {opacity: 1, transform: "translateX(0)"}], 160);
+  } else if (explorer.mode !== "keyboard" || !$("#explore-panel").contains(document.activeElement)) explorer.mode = mode;
+  if (focusList) {
+    const target = $("#explore-panel [aria-current=true]") || $("#explore-panel [data-record]") || $("#explore-close");
+    target.focus({preventScroll: true});
+    target.scrollIntoView({block: "nearest"});
+  }
+}
+function closeExplorer({returnFocus = false} = {}) {
+  const kind = explorer.kind;
+  const hadFocus = $("#explore-panel").contains(document.activeElement);
+  clearTimeout(explorer.closeTimer);
+  captureExplorerScroll(views.get($("#explore-panel").dataset.run));
+  finishExplorerMotion();
+  explorer.kind = null;
+  if (returnFocus) explorer.suppressedKind = kind;
+  $("#explore-panel").hidden = true;
+  $("#explore-panel").inert = true;
+  syncExploreTriggers();
+  if ((returnFocus || hadFocus) && kind) {
+    const target = $("#sidebar").inert ? $("#menu-toggle") : $(`#fold-${kind}`);
+    target.focus();
+  }
+}
+function scheduleExplorerClose() {
+  clearTimeout(explorer.closeTimer);
+  if (explorer.mode !== "pointer") return;
+  explorer.closeTimer = setTimeout(() => {
+    if (!explorer.kind) return;
+    const trigger = $(`#fold-${explorer.kind}`), panel = $("#explore-panel");
+    if (!trigger.matches(":hover") && !panel.matches(":hover")) closeExplorer();
+  }, 160);
+}
+function toggleExplore(kind, event) {
+  const mode = event.detail === 0 ? "keyboard" : event.pointerType === "touch" || matchMedia("(hover: none)").matches ? "touch" : "pointer";
+  if (explorer.kind === kind && explorer.mode === mode && mode !== "pointer") closeExplorer({returnFocus: true});
+  else openExplorer(kind, mode, mode === "keyboard");
+}
+document.addEventListener("pointerover", (event) => {
+  if (event.pointerType !== "mouse" || matchMedia("(max-width: 800px)").matches) return;
+  const trigger = event.target.closest("[data-fold]");
+  if (trigger && !trigger.contains(event.relatedTarget) && explorer.suppressedKind !== trigger.dataset.fold) openExplorer(trigger.dataset.fold);
+  else if (event.target.closest("#explore-panel")) clearTimeout(explorer.closeTimer);
+});
+document.addEventListener("pointerout", (event) => {
+  const trigger = event.target.closest("[data-fold]");
+  if (trigger && !trigger.contains(event.relatedTarget) && explorer.suppressedKind === trigger.dataset.fold) explorer.suppressedKind = null;
+  if (event.pointerType === "mouse" && event.target.closest("[data-fold], #explore-panel")) scheduleExplorerClose();
+});
+document.addEventListener("focusin", (event) => {
+  if (explorer.kind && explorer.mode === "keyboard" && !event.target.closest("#explore-panel") && event.target.id !== `fold-${explorer.kind}`) closeExplorer();
+});
+document.addEventListener("keydown", (event) => {
+  const trigger = event.target.closest("[data-fold]"), panel = event.target.closest("#explore-panel");
+  if (panel) explorer.mode = "keyboard";
+  if (trigger && ["ArrowRight", "ArrowDown"].includes(event.key)) {
+    event.preventDefault(); openExplorer(trigger.dataset.fold, "keyboard", true);
+  } else if (trigger && event.key === "Tab" && !event.shiftKey && explorer.kind === trigger.dataset.fold) {
+    event.preventDefault(); openExplorer(trigger.dataset.fold, "keyboard", true);
+  } else if (panel && event.key === "ArrowLeft") {
+    event.preventDefault(); closeExplorer({returnFocus: true});
+  } else if (panel && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    const items = [...panel.querySelectorAll("[data-record]")];
+    if (!items.length) return;
+    const index = items.indexOf(document.activeElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : Math.max(0, Math.min(items.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+    event.preventDefault(); items[next].focus();
+  } else if (panel && event.key === "Tab" && event.shiftKey && event.target === panel.querySelector("[data-record]")) {
+    event.preventDefault(); closeExplorer({returnFocus: true});
+  }
+});
+$("#sidebar").addEventListener("scroll", positionExplorer);
+window.addEventListener("resize", positionExplorer);
 function toggleSearchGroup(details) {
   const panel = $(".search-group-body", details);
   const previous = disclosureState.get(details);
@@ -1108,7 +1170,7 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Tab") {
-    finishFoldMotion();
+    finishExplorerMotion();
     finishDisclosures();
   }
 });
@@ -1143,21 +1205,14 @@ function renderSidebar(captureScroll = true) {
     navItem("records", "search") + navItem("memories", "book");
   const folds = $("#record-folds");
   const previous = views.get(folds.dataset.run);
-  if (previous && captureScroll)
-    folds.querySelectorAll(".fold-list:not([hidden])").forEach((list) => {
-      previous.foldScrolls[list.id] = list.scrollTop;
-    });
+  if (previous && captureScroll) {
+    captureExplorerScroll(previous);
+    previous.sideScroll = $("#sidebar").scrollTop;
+  }
   folds.dataset.run = state.run;
-  folds.innerHTML = ["PLAN", "TASK", "FINDING"]
-    .map((kind) => {
-      const items = runRecords(run, kind),
-        open = v.openKind === kind;
-      return `<section class="record-fold ${open ? "is-open" : ""}"><button id="fold-${kind}" class="fold-trigger" type="button" data-fold="${kind}" aria-expanded="${open}" aria-controls="list-${kind}">${icon("chevron").replace('class="icon"', 'class="icon fold-chevron"')}${icon(kind.toLowerCase())}<span>${kind}</span><span class="fold-count">${formatItemCount(items.length)}</span></button><div class="fold-list" id="list-${kind}" role="region" aria-labelledby="fold-${kind}" ${open ? "" : "hidden"}>${items.map((r) => `<button type="button" data-record="${r.uid}" ${v.page === "record" && v.record === r.uid ? 'aria-current="true"' : ""}><span class="record-code"><span class="status ${statusColors[r.status]}" aria-hidden="true"></span>${r.id}</span><span class="record-label">${esc(tr(r.title))}</span></button>`).join("") || `<p class="fold-empty">${t("noRecords")}</p>`}</div></section>`;
-    })
-    .join("");
-  folds.querySelectorAll(".fold-list:not([hidden])").forEach((list) => {
-    list.scrollTop = v.foldScrolls[list.id] || 0;
-  });
+  folds.innerHTML = ["PLAN", "TASK", "FINDING"].map((kind) => `<button id="fold-${kind}" class="fold-trigger" type="button" data-fold="${kind}" ${v.page === "record" && getRecord(v.record)?.kind === kind ? 'aria-current="true"' : ""} aria-haspopup="dialog" aria-expanded="${explorer.kind === kind}" aria-controls="explore-panel">${icon(kind.toLowerCase())}<span>${kind}</span><span class="fold-count">${formatItemCount(runRecords(run, kind).length)}</span>${icon("chevron").replace('class="icon"', 'class="icon explore-chevron"')}</button>`).join("");
+  $("#sidebar").scrollTop = v.sideScroll || 0;
+  renderExplorer();
   $("#discard-open").disabled = !canDiscard(run);
   $("#discard-open").title = t(
     canDiscard(run) ? "permissionOwn" : "permissionOther",
@@ -1230,7 +1285,10 @@ function focusToken() {
     ? {
         key,
         value: el.getAttribute(key),
-        zone: el.closest("#sidebar")
+        exploreKind: el.closest("#explore-panel")?.dataset.kind,
+        zone: el.closest("#explore-panel")
+          ? "#explore-panel"
+          : el.closest("#sidebar")
           ? "#sidebar"
           : el.closest("#page-content")
             ? "#page-content"
@@ -1241,6 +1299,11 @@ function focusToken() {
 }
 function restoreFocus(token) {
   if (!token) return;
+  if (token.zone === "#explore-panel" && $("#explore-panel").hidden) {
+    const target = $("#sidebar").inert ? $("#menu-toggle") : $(`#fold-${token.exploreKind}`);
+    target?.focus({preventScroll: true});
+    return;
+  }
   const zone = $(token.zone);
   const next = [...zone.querySelectorAll(`[${token.key}]`)].find(
     (el) => el.getAttribute(token.key) === token.value,
@@ -1252,7 +1315,7 @@ function restoreFocus(token) {
   }
 }
 function render(options = {}) {
-  finishFoldMotion();
+  finishExplorerMotion();
   finishDisclosures();
   pageMotions.forEach((handle) => handle?.cancel());
   pageMotions = [];
@@ -1285,9 +1348,11 @@ function render(options = {}) {
 function syncResponsiveMenu() {
   const compact = window.matchMedia("(max-width: 800px)").matches;
   $("#sidebar").inert = compact && !state.menuOpen;
+  if ($("#sidebar").inert && explorer.kind) closeExplorer();
   $("#sidebar-scrim").hidden = !compact || !state.menuOpen;
 }
 function closeMenu() {
+  closeExplorer();
   state.menuOpen = false;
   $("#workbench").classList.remove("menu-open");
   $("#sidebar-scrim").hidden = true;
@@ -1295,13 +1360,12 @@ function closeMenu() {
   syncResponsiveMenu();
 }
 function rememberPage() {
-  finishFoldMotion();
+  finishExplorerMotion();
   finishDisclosures();
   const saved = structuredClone(view());
   captureTrackPositions(saved);
-  $("#record-folds")
-    .querySelectorAll(".fold-list:not([hidden])")
-    .forEach((list) => (saved.foldScrolls[list.id] = list.scrollTop));
+  captureExplorerScroll(saved);
+  saved.sideScroll = $("#sidebar").scrollTop;
   if (saved.page === "records")
     saved.searchOpen = [...document.querySelectorAll("details[data-search-run][open]")]
       .map((group) => group.dataset.searchRun);
@@ -1314,7 +1378,7 @@ function rememberPage() {
 }
 function goBack() {
   if (!navigationTrail.length) return;
-  finishFoldMotion();
+  finishExplorerMotion();
   finishDisclosures();
   const previous = navigationTrail.pop();
   state.run = previous.run;
@@ -1363,18 +1427,6 @@ function openRecord(uid) {
   view().openKind = record.kind;
   closeMenu();
   render({ resetScroll: true, focusPage: true, motion: "page" });
-  const list = $(`#list-${record.kind}`);
-  const selected = [...list.querySelectorAll("[data-record]")].find(
-    (element) => element.dataset.record === uid,
-  );
-  if (selected) {
-    const itemBounds = selected.getBoundingClientRect();
-    const listBounds = list.getBoundingClientRect();
-    if (itemBounds.top < listBounds.top)
-      list.scrollTop += itemBounds.top - listBounds.top;
-    else if (itemBounds.bottom > listBounds.bottom)
-      list.scrollTop += itemBounds.bottom - listBounds.bottom;
-  }
   $(`#tab-${state.run}`).scrollIntoView({
     block: "nearest",
     inline: "nearest",
@@ -1398,6 +1450,7 @@ function openDiscard() {
   $("#discard-id").focus();
 }
 document.addEventListener("click", (event) => {
+  if (explorer.kind && !event.target.closest("#explore-panel, [data-fold]")) closeExplorer();
   const languageMenu = $("#language-menu");
   if (languageMenu.open && !languageMenu.contains(event.target))
     languageMenu.open = false;
@@ -1412,7 +1465,8 @@ document.addEventListener("click", (event) => {
   } else if (button.dataset.run) switchRun(button.dataset.run, true);
   else if (button.dataset.page)
     navigate(button.dataset.page, Boolean(button.closest("#page-content")));
-  else if (button.dataset.fold) toggleExplore(button.dataset.fold);
+  else if (button.id === "explore-close") closeExplorer({returnFocus: true});
+  else if (button.dataset.fold) toggleExplore(button.dataset.fold, event);
   else if (button.dataset.record) openRecord(button.dataset.record);
   else if (button.dataset.filter) {
     view().filter = button.dataset.filter;
@@ -1540,7 +1594,10 @@ $("#run-tabs").addEventListener("keydown", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if ($("#language-menu").open) {
+  if (explorer.kind) {
+    closeExplorer({returnFocus: true});
+    event.preventDefault();
+  } else if ($("#language-menu").open) {
     $("#language-menu").open = false;
     $("#language-toggle").focus({ preventScroll: true });
     event.preventDefault();
