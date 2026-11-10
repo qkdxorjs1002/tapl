@@ -10,8 +10,8 @@ The [integrated Viewer concept](../design/viewer-workbench/index.html) combines 
 
 | Area | Structure and behavior |
 | --- | --- |
-| Fixed top bar | RUN navigation tabs use the available space. Switching changes status, Explore and management context to the selected RUN. Arrow keys, Home and End are supported; excess tabs scroll within the tab region. |
-| Upper-left Workspace | Current RUN uses the focus layout from 03; TASK status uses the list and selected detail from 01. Page tabs and sidebar navigation share the same selection. |
+| Fixed top bar | RUN navigation tabs use the available space, showing title, status and ID without session labels. Switching changes status, Explore and management context to the selected RUN. Arrow keys, Home and End are supported; excess tabs scroll within the tab region. |
+| Upper-left Workspace | Current RUN uses the focus layout from 03; TASK status uses the list and selected detail from 01. Page switching is provided only through the sidebar; page tabs and breadcrumbs are omitted. |
 | Upper-left Explore | At most one PLAN, TASK or FINDING fold is open. Its list scrolls independently and retains its position per RUN and kind. Selecting a record displays its objective, requirements, verification, results, related records and extra fields in the page rather than a popup. |
 | Lower-left Memory | Open record search or associative memory. Record search combines PLAN, TASK and FINDING with independent `Selected RUN / All records` scopes and `Group by RUN / Record list` presentation. Associative memory retains read-only workspace lessons, cues and source browsing. |
 | Lower-left Management | `Discard RUN` retains existing semantics: RUNs with records are archived, empty RUNs can be deleted, and confirmation requires the exact RUN ID. The control follows server discard support and RUN `writable`; writable local RUNs from other sessions remain eligible. Read-only peer history disables it. Discard does not stop external agents or processes. **The concept's confirmation button deletes neither real RUNs nor synthetic data.** |
@@ -69,13 +69,13 @@ Sources: [`App.tsx`](../../vscode-extension/src/webview/App.tsx), [`styles.css`]
 | 09 Dependency Lens | Prerequisite and downstream TASK connections | Read conditions from top to bottom | Blocker analysis; graph layout requires separate implementation. |
 | 10 Quiet Outline | Short outline, task list and collapsed records | Single-column progressive disclosure | Reading and keyboard use; needs an auxiliary comparison view. |
 
-The integrated concept **combines 01 and 03 as Workspace tabs**, uses 05 for search, 06 for memory and 08's information structure for record exploration. It does not add all ten as product view options. The dependency view from 09 remains an optional follow-up.
+The integrated concept **combines 01 and 03 as Workspace pages**, uses 05 for search, 06 for memory and 08's information structure for record exploration. It does not add all ten as product view options. The dependency view from 09 remains an optional follow-up.
 
 ## DaisyUI component use
 
 | Responsibility | Components | Composition principle |
 | --- | --- | --- |
-| Workspace and RUN navigation | `menu`, `dropdown`, `breadcrumbs`, `tabs` | Identify location and source; preserve selected state and arrow-key behavior. |
+| Workspace and RUN navigation | `menu`, `dropdown`, `tabs` | Identify location and source; preserve selected state and arrow-key behavior. |
 | TASK summaries and lists | `table`, v5 `list` / `list-row`, `card` | Tables for wide screens, lists for narrow screens; avoid turning every row into a card. |
 | State and progress | `badge`, v5 `status`, `progress`, `steps` | Pair text with color, include actual states such as Skipped, and do not treat task completion percentage as a success verdict. |
 | Search and filters | `input`, `select`, `join`, v5 `fieldset` | Provide labels and selected states; do not put essential actions only in tooltips. |

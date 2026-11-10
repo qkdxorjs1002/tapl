@@ -546,25 +546,6 @@ select {
   min-width: 0;
   outline-offset: -3px;
 }
-.breadcrumbs-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 27px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.breadcrumbs-copy {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.breadcrumbs-copy svg {
-  height: 13px;
-  width: 13px;
-}
 .page-title-row {
   display: flex;
   justify-content: space-between;
@@ -584,25 +565,6 @@ select {
   line-height: 1.9;
   margin-top: 8px;
   max-width: 700px;
-}
-.workspace-tabs {
-  margin: 0 0 25px;
-  display: flex;
-  gap: 24px;
-  border-bottom: 1px solid var(--color-base-300);
-}
-.workspace-tabs .tab {
-  font-size: 12px;
-  padding: 0 1px 13px;
-  height: auto;
-  min-height: 35px;
-  color: var(--muted);
-  border-bottom: 2px solid transparent;
-}
-.workspace-tabs .tab-active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
-  font-weight: 550;
 }
 .run-context {
   display: flex;
@@ -1680,17 +1642,11 @@ select {
   .page-content {
     padding: 24px 22px;
   }
-  .breadcrumbs-bar {
-    margin-bottom: 23px;
-  }
   .page-title-row {
     gap: 12px;
   }
   .page-title-row h1 {
     font-size: 27px;
-  }
-  .workspace-tabs {
-    gap: 22px;
   }
   .sidebar-explore {
     flex-basis: 43%;
@@ -1739,14 +1695,6 @@ select {
   }
   .page-content {
     padding: 21px 17px 30px;
-  }
-  .breadcrumbs-bar {
-    align-items: start;
-    gap: 7px;
-  }
-  .breadcrumbs-copy {
-    gap: 6px;
-    font-size: 10px;
   }
   .page-title-row h1 {
     font-size: 24px;

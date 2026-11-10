@@ -595,21 +595,8 @@ function context() {
   const run = currentRun();
   return `<div class="run-context"><span class="eyebrow">${run.id}</span><span class="context-separator"></span>${chip(t(run.owner), "badge-outline")}<span class="micro muted">${esc(run.source)}</span></div>`;
 }
-function breadcrumb() {
-  const page = view().page;
-  const section =
-    page === "current" || page === "tasks"
-      ? "workspace"
-      : page === "record"
-        ? "explore"
-        : "memory";
-  return `<div class="breadcrumbs-bar"><div class="breadcrumbs-copy"><span>${t(section)}</span>${icon("chevron")}<span>${titleForPage()}</span></div></div>`;
-}
 function pageHeader(heading = "", summary = "") {
-  return `${breadcrumb()}<div class="page-title-row"><div><h1>${esc(heading || titleForPage())}</h1>${summary ? `<p class="page-description">${esc(summary)}</p>` : ""}</div></div>`;
-}
-function workspaceTabs() {
-  return `<div class="workspace-tabs tabs" role="group" aria-label="${t("workspace")}">${["current", "tasks"].map((key) => `<button class="tab ${view().page === key ? "tab-active" : ""}" type="button" aria-pressed="${view().page === key}" data-page="${key}">${t(key)}</button>`).join("")}</div>`;
+  return `<div class="page-title-row"><div><h1>${esc(heading || titleForPage())}</h1>${summary ? `<p class="page-description">${esc(summary)}</p>` : ""}</div></div>`;
 }
 function meter() {
   const c = counts();
@@ -648,7 +635,7 @@ function currentPage() {
     body = `${blocker()}${empty("noActive", "noActiveHelp", "info", `<button class="btn btn-sm" type="button" data-page="tasks">${t("showTasks")}</button>`)}`;
   else
     body = `<div class="run-overview"><section><ul class="steps phase-steps" aria-label="${t("progress")}">${["planStep", "approvalStep", "executionStep", "verificationStep"].map((key, i) => `<li class="step ${i < 3 ? "step-primary" : ""}">${t(key)}</li>`).join("")}</ul><article class="card focus-surface"><div class="eyebrow"><span>${t("currentFocus")}</span><span>${active.id}</span></div><h2>${esc(tr(active.title))}</h2><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))} · ${t(active.status)}</span><button class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}<div class="details-grid">${sectionTitle(t("planSummary"))}${plan ? recButton(plan, `${plan.id} · ${esc(tr(plan.title))}`) : ""}</div></section><aside class="run-aside"><section class="run-aside-section">${sectionTitle(t("upNext"), t("waitsFor"))}${taskQueue(items.filter((x) => x.status === "pending").slice(0, 4))}</section><section class="run-aside-section">${sectionTitle(t("recentDone"), `${counts().done}`)}${taskQueue(items.filter((x) => x.status === "done").slice(0, 3))}</section></aside></div>`;
-  return `${pageHeader(tr(run.title), tr(run.description))}${workspaceTabs()}${context()}${items.length ? meter() : ""}${body}`;
+  return `${pageHeader(tr(run.title), tr(run.description))}${context()}${items.length ? meter() : ""}${body}`;
 }
 function filteredTasks() {
   const v = view();
@@ -667,7 +654,7 @@ function tasksPage() {
       items.find((x) => x.uid === v.selectedTask) ||
       items.find((x) => x.status === "running") ||
       items[0];
-  return `${pageHeader()}${workspaceTabs()}${context()}${meter()}<div class="filter-toolbar"><div class="status-filter join" role="group" aria-label="${t("status")}">${["all", "running", "blocked", "pending", "done"].map((key) => `<button class="btn btn-xs join-item ${v.filter === key ? "btn-primary" : "btn-ghost"}" type="button" data-filter="${key}" aria-pressed="${v.filter === key}">${t(key)}</button>`).join("")}</div><form class="task-search" data-form="tasks"><label><span class="sr-only">${t("taskSearch")}</span><input class="input input-sm" name="query" aria-label="${t("taskSearch")}" value="${esc(v.taskQuery)}" placeholder="${t("taskSearch")}"></label><button class="btn btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form></div>${items.length ? `<div class="tasks-layout"><section><table class="table tasks-table"><caption class="sr-only">${t("tasks")} · ${currentRun().id}</caption><thead><tr><th scope="col"><span class="sr-only">${t("status")}</span></th><th scope="col">${t("taskColumn")}</th><th scope="col">${t("owner")}</th><th scope="col">${t("status")}</th></tr></thead><tbody>${items.map((r) => `<tr class="${selected?.uid === r.uid ? "selected-row" : ""}"><td>${statusMark(r.status, false)}</td><td><button class="task-title-button" type="button" data-task-select="${r.uid}" aria-pressed="${selected?.uid === r.uid}"><strong>${esc(tr(r.title))}</strong><span class="queue-code">${r.id}</span></button></td><td>${esc(tr(r.owner))}</td><td>${statusMark(r.status)}</td></tr>`).join("")}</tbody></table></section>${selected ? `<aside class="card task-inspector"><p class="eyebrow">${t("selectedTask")}</p><p class="mono micro muted" style="margin-top:9px">${selected.id}</p><h2>${esc(tr(selected.title))}</h2>${statusMark(selected.status)}<h3>${t("objective")}</h3><p>${esc(tr(selected.goal))}</p><h3>${t("depends")}</h3><p>${selected.depends.join(", ") || t("noDependencies")}</p><h3>${t("result")}</h3><p>${resultText(selected)}</p><button class="btn btn-sm" type="button" data-record="${selected.uid}">${t("taskFull")} ${icon("arrow")}</button></aside>` : ""}</div>` : empty(taskRecords().length ? "noMatches" : "noTasks", taskRecords().length ? "noMatchesHelp" : "noTasksHelp", "inbox", taskRecords().length ? `<button class="btn btn-sm" type="button" data-reset="tasks">${t("reset")}</button>` : "")}`;
+  return `${pageHeader()}${context()}${meter()}<div class="filter-toolbar"><div class="status-filter join" role="group" aria-label="${t("status")}">${["all", "running", "blocked", "pending", "done"].map((key) => `<button class="btn btn-xs join-item ${v.filter === key ? "btn-primary" : "btn-ghost"}" type="button" data-filter="${key}" aria-pressed="${v.filter === key}">${t(key)}</button>`).join("")}</div><form class="task-search" data-form="tasks"><label><span class="sr-only">${t("taskSearch")}</span><input class="input input-sm" name="query" aria-label="${t("taskSearch")}" value="${esc(v.taskQuery)}" placeholder="${t("taskSearch")}"></label><button class="btn btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form></div>${items.length ? `<div class="tasks-layout"><section><table class="table tasks-table"><caption class="sr-only">${t("tasks")} · ${currentRun().id}</caption><thead><tr><th scope="col"><span class="sr-only">${t("status")}</span></th><th scope="col">${t("taskColumn")}</th><th scope="col">${t("owner")}</th><th scope="col">${t("status")}</th></tr></thead><tbody>${items.map((r) => `<tr class="${selected?.uid === r.uid ? "selected-row" : ""}"><td>${statusMark(r.status, false)}</td><td><button class="task-title-button" type="button" data-task-select="${r.uid}" aria-pressed="${selected?.uid === r.uid}"><strong>${esc(tr(r.title))}</strong><span class="queue-code">${r.id}</span></button></td><td>${esc(tr(r.owner))}</td><td>${statusMark(r.status)}</td></tr>`).join("")}</tbody></table></section>${selected ? `<aside class="card task-inspector"><p class="eyebrow">${t("selectedTask")}</p><p class="mono micro muted" style="margin-top:9px">${selected.id}</p><h2>${esc(tr(selected.title))}</h2>${statusMark(selected.status)}<h3>${t("objective")}</h3><p>${esc(tr(selected.goal))}</p><h3>${t("depends")}</h3><p>${selected.depends.join(", ") || t("noDependencies")}</p><h3>${t("result")}</h3><p>${resultText(selected)}</p><button class="btn btn-sm" type="button" data-record="${selected.uid}">${t("taskFull")} ${icon("arrow")}</button></aside>` : ""}</div>` : empty(taskRecords().length ? "noMatches" : "noTasks", taskRecords().length ? "noMatchesHelp" : "noTasksHelp", "inbox", taskRecords().length ? `<button class="btn btn-sm" type="button" data-reset="tasks">${t("reset")}</button>` : "")}`;
 }
 function resultText(r) {
   return r.status === "done"
@@ -736,7 +723,7 @@ function recordPage() {
       "Verify record context and keyboard focus across RUN changes and refreshes.",
     ),
   ];
-  return `${breadcrumb()}<article class="record-page"><header class="record-hero">${context()}<div class="run-context">${chip(r.kind, "badge-outline")}<span class="eyebrow">${r.id}</span>${statusMark(r.status)}</div><h1>${esc(tr(r.title))}</h1><div class="record-meta"><span>${t("owner")}: ${esc(tr(r.owner))}</span><span>·</span><span>2026-11-10</span></div></header><div class="reading-grid"><div class="reading-body"><section class="reading-section"><h2>${t("objective")}</h2><p>${esc(tr(r.goal))}</p></section><section class="reading-section"><h2>${r.kind === "PLAN" ? t("requirements") : t("result")}</h2><p>${r.kind === "PLAN" ? esc(tr(run.description)) : resultText(r)}</p></section><section class="reading-section"><h2>${t("verification")}</h2><ul>${checks.map((c) => `<li class="checkline">${icon("check")}<span>${esc(tr(c))}</span></li>`).join("")}</ul></section><section class="reading-section"><h2>${t("depends")}</h2><p>${
+  return `<article class="record-page"><header class="record-hero">${context()}<div class="run-context">${chip(r.kind, "badge-outline")}<span class="eyebrow">${r.id}</span>${statusMark(r.status)}</div><h1>${esc(tr(r.title))}</h1><div class="record-meta"><span>${t("owner")}: ${esc(tr(r.owner))}</span><span>·</span><span>2026-11-10</span></div></header><div class="reading-grid"><div class="reading-body"><section class="reading-section"><h2>${t("objective")}</h2><p>${esc(tr(r.goal))}</p></section><section class="reading-section"><h2>${r.kind === "PLAN" ? t("requirements") : t("result")}</h2><p>${r.kind === "PLAN" ? esc(tr(run.description)) : resultText(r)}</p></section><section class="reading-section"><h2>${t("verification")}</h2><ul>${checks.map((c) => `<li class="checkline">${icon("check")}<span>${esc(tr(c))}</span></li>`).join("")}</ul></section><section class="reading-section"><h2>${t("depends")}</h2><p>${
     r.depends.length
       ? r.depends
           .map((id) => {
@@ -797,7 +784,7 @@ function renderTabs() {
   $("#run-tabs").innerHTML = runs
     .map(
       (run) =>
-        `<button id="tab-${run.key}" class="tab run-tab" role="tab" type="button" data-run="${run.key}" aria-controls="page-content" aria-selected="${run.key === state.run}" tabindex="${run.key === state.run ? 0 : -1}" title="${esc(tr(run.title))} · ${run.id} · ${esc(run.source)}"><span class="run-tab-title"><span class="status ${statusColors[run.status]}" aria-hidden="true"></span><span>${esc(tr(run.title))}</span></span><span class="run-tab-meta"><span>${run.id}</span><span>${t(run.owner)}</span></span></button>`,
+        `<button id="tab-${run.key}" class="tab run-tab" role="tab" type="button" data-run="${run.key}" aria-controls="page-content" aria-selected="${run.key === state.run}" tabindex="${run.key === state.run ? 0 : -1}" title="${esc(tr(run.title))} · ${run.id} · ${esc(run.source)}"><span class="run-tab-title"><span class="status ${statusColors[run.status]}" aria-hidden="true"></span><span>${esc(tr(run.title))}</span></span><span class="run-tab-meta">${run.id}</span></button>`,
     )
     .join("");
   $("#page-content").setAttribute("aria-labelledby", `tab-${selected.key}`);
