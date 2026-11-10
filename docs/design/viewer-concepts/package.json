@@ -1,0 +1,15 @@
+{
+  "name": "tapl-viewer-design-concepts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline DaisyUI 5 design studies; independent of the shipping Viewer build.",
+  "scripts": {
+    "build": "tailwindcss -i ./components.source.css -o ./components.css --minify",
+    "check": "node --check concepts.js"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.5",
+    "daisyui": "5.7.50",
+    "tailwindcss": "4.3.5"
+  }
+}

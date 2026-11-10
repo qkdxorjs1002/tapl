@@ -1,0 +1,9 @@
+@import "tailwindcss" source(none);
+@source "./index.html";
+@source "./concepts.js";
+@plugin "daisyui" {
+  themes:
+    light --default,
+    dark;
+  logs: false;
+}

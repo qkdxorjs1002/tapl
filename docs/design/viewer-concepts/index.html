@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>TAPL — Viewer Design Lab · 10 concepts</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="components.css" />
+    <link rel="stylesheet" href="lab.css" />
+    <script defer src="concepts.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#preview">시안으로 건너뛰기</a>
+    <div class="lab-shell">
+      <header class="lab-header">
+        <a class="lab-brand" href="#01"
+          ><span class="brand-symbol" aria-hidden="true">t</span> tapl
+          <span class="brand-divider">/</span> <span>Design lab</span></a
+        >
+        <div class="lab-header-meta">
+          <span class="live-dot"></span> DESIGN STUDIES
+          <span class="edition">2026.11 / 01—10</span>
+        </div>
+        <a class="lab-doc-link" href="../../development/viewer-ux-design.ko.md"
+          >개선 계획 <span aria-hidden="true">↗</span></a
+        >
+      </header>
+      <section class="lab-intro">
+        <div>
+          <p class="lab-eyebrow">VIEWER + VS CODE EXTENSION</p>
+          <h1>작업의 흐름이<br />먼저 보이도록<span class="lime">.</span></h1>
+        </div>
+        <div class="intro-aside">
+          <p>
+            같은 데이터, 열 가지 시선.<br />지금 하는 일과 다음 판단에 집중하는
+            인터페이스.
+          </p>
+          <div class="lab-tags">
+            <span>DaisyUI 5.7.50</span><span>Tailwind 4.3.5</span
+            ><span>로컬 데모</span>
+          </div>
+        </div>
+      </section>
+      <div class="lab-workbench">
+        <aside class="concept-rail" aria-label="시안 선택">
+          <div class="rail-heading">
+            <span>EXPLORE CONCEPTS</span><span>10</span>
+          </div>
+          <nav id="concept-nav"></nav>
+          <button class="overview-button" id="overview-button" type="button">
+            전체 시안 비교 <span aria-hidden="true">↗</span>
+          </button>
+          <p class="rail-footnote">
+            모든 시안은 가상 예시입니다.<br />실제 RUN과 연결되지 않습니다.
+          </p>
+        </aside>
+        <main class="lab-main" id="preview">
+          <div class="concept-heading">
+            <div>
+              <p class="concept-kicker" id="concept-kicker"></p>
+              <h2 id="concept-title"></h2>
+              <p id="concept-description"></p>
+            </div>
+            <div class="concept-paging">
+              <button
+                class="lab-icon-button"
+                id="previous-concept"
+                aria-label="이전 시안"
+                type="button"
+              >
+                ←</button
+              ><span id="concept-position"></span
+              ><button
+                class="lab-icon-button"
+                id="next-concept"
+                aria-label="다음 시안"
+                type="button"
+              >
+                →
+              </button>
+            </div>
+          </div>
+          <div class="preview-toolbar">
+            <div class="toolbar-group" role="group" aria-label="표면 선택">
+              <button type="button" data-surface="pair">함께 보기</button
+              ><button type="button" data-surface="viewer">Viewer</button
+              ><button type="button" data-surface="extension">확장</button>
+            </div>
+            <div class="toolbar-end">
+              <label class="state-selector"
+                >화면 상태
+                <select id="screen-state">
+                  <option value="ready">정상</option>
+                  <option value="loading">로딩</option>
+                  <option value="empty">비어 있음</option>
+                  <option value="error">연결 오류</option>
+                </select></label
+              >
+              <div class="toolbar-group" role="group" aria-label="테마 선택">
+                <button type="button" data-color="light" aria-label="밝은 테마">
+                  밝게</button
+                ><button
+                  type="button"
+                  data-color="dark"
+                  aria-label="어두운 테마"
+                >
+                  어둡게
+                </button>
+              </div>
+            </div>
+          </div>
+          <div id="screens" class="screens" aria-label="시안 미리보기"></div>
+          <section
+            class="design-rationale"
+            id="rationale"
+            aria-label="시안 설계 판단"
+          ></section>
+          <section
+            id="overview-grid"
+            class="overview-grid"
+            aria-label="전체 시안 비교"
+            hidden
+          ></section>
+        </main>
+      </div>
+      <footer class="lab-footer">
+        <span>TAPL / Less chrome. More context.</span
+        ><span>읽기 전용 탐색 · 키보드 사용 가능 · 외부 요청 없음</span>
+      </footer>
+    </div>
+    <dialog
+      id="detail-dialog"
+      class="modal"
+      data-theme="light"
+      aria-labelledby="dialog-title"
+    >
+      <div class="modal-box">
+        <form method="dialog" class="dialog-close">
+          <button
+            class="btn btn-sm btn-circle btn-ghost"
+            aria-label="상세 닫기"
+          >
+            ✕
+          </button>
+        </form>
+        <div id="dialog-content"></div>
+        <form method="dialog" class="modal-action">
+          <button class="btn btn-sm">닫기</button>
+        </form>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button aria-label="상세 배경 닫기">닫기</button>
+      </form>
+    </dialog>
+    <p id="announcement" class="sr-only" aria-live="polite"></p>
+  </body>
+</html>
