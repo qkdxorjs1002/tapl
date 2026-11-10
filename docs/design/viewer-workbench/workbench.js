@@ -619,7 +619,7 @@ function view() {
       query: "",
       scope: "all",
       group: "run",
-      searchOpen: [state.run],
+      searchOpen: [],
       memoryQuery: "",
       memory: null,
       scrolls: {},
@@ -1445,7 +1445,8 @@ document.addEventListener("click", (event) => {
           : "query"
     ] = "";
     if (key === "tasks") view().filter = "all";
-    render();
+    if (key === "records") view().searchOpen = [];
+    render({ captureSearch: key !== "records" });
     $("#page-content input")?.focus({ preventScroll: true });
   } else if (button.id === "page-back") goBack();
   else if (button.id === "theme-toggle") {
@@ -1498,7 +1499,8 @@ document.addEventListener("submit", (event) => {
         ? "memoryQuery"
         : "query"
   ] = query;
-  render();
+  if (form.dataset.form === "records") view().searchOpen = [];
+  render({ captureSearch: form.dataset.form !== "records" });
   announce(t("searchUpdated"));
 });
 $("#language-menu").addEventListener("focusout", (event) => {
@@ -1508,7 +1510,7 @@ $("#language-menu").addEventListener("focusout", (event) => {
 document.addEventListener("change", (event) => {
   if (event.target.id === "search-scope") {
     view().scope = event.target.value;
-    view().searchOpen = event.target.value === "current" ? [state.run] : [];
+    view().searchOpen = [];
     render({ captureSearch: false });
     announce(t("searchUpdated"));
   }
