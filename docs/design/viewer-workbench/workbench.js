@@ -34,22 +34,17 @@ const copy = {
   complete: ["완료", "Completed"],
   progress: ["작업 완료 비율", "Task completion"],
   currentFocus: ["진행 중인 작업", "Work in progress"],
-  runStages: ["RUN 단계", "RUN stages"],
-  currentStage: ["현재 진행 단계", "Current stage"],
+  runInfo: ["RUN 정보", "RUN information"],
+  workType: ["분류", "Work type"],
+  runDifficulty: ["난이도", "Difficulty"],
+  workflowMode: ["진행 방식", "Workflow mode"],
+  recordMode: ["기록 방식", "Record mode"],
+  planSummary: ["PLAN", "PLAN"],
+
   planFinal: ["확정", "Finalized"],
   planReview: ["검토 중", "In review"],
-  approvalPending: ["승인 대기", "Awaiting approval"],
-  approvalApproved: ["승인 완료", "Approved"],
-  reviewScope: ["검토 범위", "Review scope"],
-  taskOutline: ["작업 구성", "Task outline"],
   viewPlan: ["PLAN 자세히 보기", "View PLAN"],
   noPlans: ["등록된 PLAN이 없습니다", "No PLANs yet"],
-  noApprovals: ["승인 대상 PLAN이 없습니다", "No PLANs to review"],
-  noChecks: ["검증 결과가 없습니다", "No verification results yet"],
-  passed: ["통과", "Passed"],
-  failed: ["실패", "Failed"],
-  verificationResults: ["검증 결과", "Verification results"],
-  evidenceRecords: ["관련 근거", "Related evidence"],
 
   flowBoard: ["작업 흐름", "Task flow"],
   emptyLane: ["작업 없음", "No tasks"],
@@ -150,10 +145,6 @@ const copy = {
     "확인 절차를 미리 보았습니다. 실제 RUN과 시안 데이터는 유지됩니다.",
     "Confirmation previewed. Real RUNs and demo data remain unchanged.",
   ],
-  planStep: ["계획", "Plan"],
-  approvalStep: ["승인", "Approval"],
-  executionStep: ["실행", "Execution"],
-  verificationStep: ["검증", "Verification"],
   navigationChanged: ["RUN과 페이지를 전환했습니다", "RUN and page updated"],
   searchUpdated: ["검색 결과를 갱신했습니다", "Search results updated"],
 };
@@ -205,7 +196,10 @@ function t(key) {
 const runs = [
   {
     key: "local24",
-    phase: "execution",
+    work_type: "implementation",
+    difficulty: "moderate",
+    workflow_mode: "standard",
+    record_mode: "planned",
     id: "RUN-024",
     source: "local / design-study",
     title: bi("Viewer 경험 개선", "Viewer experience"),
@@ -220,7 +214,10 @@ const runs = [
   },
   {
     key: "local25",
-    phase: "execution",
+    work_type: "implementation",
+    difficulty: "moderate",
+    workflow_mode: "standard",
+    record_mode: "planned",
     id: "RUN-025",
     source: "local / other-session",
     title: bi("통합 검색 개선", "Unified search"),
@@ -238,7 +235,10 @@ const runs = [
   },
   {
     key: "local26",
-    phase: "verification",
+    work_type: "implementation",
+    difficulty: "low",
+    workflow_mode: "standard",
+    record_mode: "planned",
     archived: true,
     id: "RUN-026",
     source: "local / other-session",
@@ -254,7 +254,10 @@ const runs = [
   },
   {
     key: "local27",
-    phase: "plan",
+    work_type: "planning",
+    difficulty: "unknown",
+    workflow_mode: "fast",
+    record_mode: "lightweight",
     id: "RUN-027",
     source: "local / design-study",
     title: bi("새로운 작업", "New work"),
@@ -269,7 +272,10 @@ const runs = [
   },
   {
     key: "peer24",
-    phase: "execution",
+    work_type: "investigation",
+    difficulty: "high",
+    workflow_mode: "strict",
+    record_mode: "planned",
     archived: true,
     id: "RUN-024",
     source: "peer / sample-history",
@@ -559,30 +565,34 @@ const memories = [
     topic: bi("탐색", "Navigation"),
   },
 ];
-// Independent stage previews and verification outcomes are synthetic fixtures.
-const phaseKeys = ["plan", "approval", "execution", "verification"];
-const phaseLabels = ["planStep", "approvalStep", "executionStep", "verificationStep"];
-const verificationSamples = {
-  local24: [
-    [bi("한국어·영어 표시", "Korean and English content"), "passed", "TASK-002"],
-    [bi("원문 탐색·돌아가기", "Source navigation and Back"), "passed", "TASK-003"],
-    [bi("VS Code 테마 연결", "VS Code theme integration"), "failed", "TASK-004"],
-  ],
-  local25: [
-    [bi("검색 범위 변경", "Search scope changes"), "passed", "TASK-001"],
-    [bi("RUN별 결과 분리", "Results grouped by RUN"), "pending", "TASK-002"],
-    [bi("원문·기억 출처 연결", "Record and memory source links"), "pending", "TASK-004"],
-  ],
-  local26: [
-    [bi("문서 홈 연결", "Documentation home links"), "passed", "TASK-001"],
-    [bi("양언어 명령 예제", "Bilingual command examples"), "passed", "TASK-002"],
-    [bi("상대 링크·앵커", "Relative links and anchors"), "passed", "TASK-003"],
-  ],
-  peer24: [
-    [bi("공유 기록 읽기", "Shared record reading"), "passed", "TASK-001"],
-    [bi("출처·권한 경계", "Provenance and access boundaries"), "failed", "TASK-002"],
-    [bi("동일 ID 구분", "Identical ID disambiguation"), "pending", "TASK-003"],
-  ],
+// Classification fields mirror the RUN contract; difficulty is a design-only fixture.
+const runFieldInfo = {
+  work_type: {
+    answer: [bi("답변", "Answer"), bi("질문에 대한 답과 근거를 정리합니다.", "Answer a question with supporting context.")],
+    investigation: [bi("조사", "Investigation"), bi("현황과 근거를 조사해 확인합니다.", "Inspect the current state and supporting evidence.")],
+    analysis: [bi("분석", "Analysis"), bi("원인과 대안을 비교해 판단합니다.", "Compare causes and options to reach a conclusion.")],
+    planning: [bi("계획", "Planning"), bi("범위와 작업 순서를 정리합니다.", "Define scope and the order of work.")],
+    implementation: [bi("구현", "Implementation"), bi("기능과 동작을 구현하거나 개선합니다.", "Build or improve features and behavior.")],
+    mixed: [bi("복합", "Mixed"), bi("서로 다른 유형의 작업을 함께 다룹니다.", "Combine several kinds of work.")],
+    unknown: [bi("미분류", "Unclassified"), bi("작업 유형은 아직 정해지지 않았습니다.", "The work type has not been classified yet.")],
+  },
+  difficulty: {
+    low: [bi("낮음", "Low"), bi("범위가 좁고 연결된 요소가 적습니다.", "A focused scope with few connected parts.")],
+    moderate: [bi("보통", "Moderate"), bi("여러 화면과 탐색 연결을 함께 다룹니다.", "Several screens and navigation paths are involved.")],
+    high: [bi("높음", "High"), bi("다양한 출처와 복잡한 경계를 함께 확인합니다.", "Several sources and complex boundaries need review.")],
+    unknown: [bi("미정", "Unrated"), bi("범위를 확인한 뒤 난이도를 정합니다.", "Difficulty is assessed after scope is understood.")],
+  },
+  workflow_mode: {
+    fast: [bi("간소", "Fast"), bi("작은 범위를 간결한 확인 절차로 진행합니다.", "Use concise checks for a small, known scope.")],
+    standard: [bi("표준", "Standard"), bi("계획에 따라 구현과 검증을 진행합니다.", "Follow the plan through implementation and checks.")],
+    strict: [bi("엄격", "Strict"), bi("영향과 경계를 더 엄격히 검증합니다.", "Verify impacts and boundaries more rigorously.")],
+    unknown: [bi("미정", "Unset"), bi("진행 방식은 아직 정해지지 않았습니다.", "The workflow mode has not been set yet.")],
+  },
+  record_mode: {
+    planned: [bi("계획 기록", "Planned"), bi("PLAN·TASK로 작업과 결과를 기록합니다.", "Keep work and results in PLANs and TASKs.")],
+    lightweight: [bi("간략 기록", "Lightweight"), bi("핵심 판단과 결과를 간결하게 기록합니다.", "Keep a concise record of decisions and results.")],
+    unknown: [bi("미정", "Unset"), bi("기록 방식은 아직 정해지지 않았습니다.", "The record mode has not been set yet.")],
+  },
 };
 const capabilities = { discardRun: true };
 function canDiscard(run = currentRun()) {
@@ -602,7 +612,6 @@ function view() {
   if (!views.has(state.run))
     views.set(state.run, {
       page: "current",
-      phase: currentRun().phase || "execution",
       openKind: "PLAN",
       record: null,
       filter: "all",
@@ -616,6 +625,7 @@ function view() {
       scrolls: {},
       foldScrolls: {},
       flowPosition: 0,
+      planPosition: 0,
     });
   return views.get(state.run);
 }
@@ -692,84 +702,63 @@ function flowBoard(items) {
   const ordered = [...items].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
   const states = ["pending", "running", "blocked", "done"];
   if (items.some((item) => item.status === "skipped")) states.push("skipped");
-  return `<section class="flow-section"><div class="section-title"><h2 id="flow-title">${t("flowBoard")}</h2></div><div class="flow-viewport"><div id="flow-board" class="flow-board" role="region" aria-labelledby="flow-title" tabindex="0">${states.map((status) => {
+  return `<section class="flow-section"><div class="section-title"><h2 id="flow-title">${t("flowBoard")}</h2></div><div class="flow-viewport scroll-viewport"><div id="flow-board" class="flow-board horizontal-track" role="region" aria-labelledby="flow-title" tabindex="0">${states.map((status) => {
     const lane = ordered.filter((item) => item.status === status);
     return `<section class="flow-lane" aria-labelledby="flow-${status}"><header class="flow-heading"><h3 id="flow-${status}">${statusMark(status)}</h3><span class="flow-count">${formatItemCount(lane.length)}</span></header><ul class="flow-list">${lane.map((item) => `<li><button id="flow-${item.id}" class="card flow-task" type="button" data-record="${item.uid}" aria-describedby="flow-${status}"><span class="mono flow-task-id">${item.id}</span><span class="flow-task-title">${esc(tr(item.title))}</span><span class="flow-task-footer"><span>${esc(tr(item.owner))}</span>${item.depends.length ? `<span>${t("depends")} ${formatItemCount(item.depends.length)}</span>` : ""}</span></button></li>`).join("") || `<li class="flow-empty">${t("emptyLane")}</li>`}</ul></section>`;
   }).join("")}</div></div></section>`;
 }
-function flowLaneStep(board) {
-  return board.firstElementChild.getBoundingClientRect().width + parseFloat(getComputedStyle(board).columnGap);
+const trackPositionKeys = { "flow-board": "flowPosition", "plan-board": "planPosition" };
+function scrollTracks() {
+  return Object.keys(trackPositionKeys).map((id) => $(`#${id}`)).filter(Boolean);
 }
-function readFlowPosition(board) {
-  return board.scrollLeft / flowLaneStep(board);
+function trackStep(track) {
+  return track.firstElementChild.getBoundingClientRect().width + parseFloat(getComputedStyle(track).columnGap);
 }
-function updateFlowEdges() {
-  const board = $("#flow-board");
-  if (!board) return;
-  const fade = parseFloat(getComputedStyle(board).getPropertyValue("--flow-fade-size"));
-  const remaining = board.scrollWidth - board.clientWidth - board.scrollLeft;
+function readTrackPosition(track) {
+  return track.scrollLeft / trackStep(track);
+}
+function updateTrackEdges(track) {
+  const fade = parseFloat(getComputedStyle(track).getPropertyValue("--track-fade-size"));
+  const remaining = track.scrollWidth - track.clientWidth - track.scrollLeft;
   const opacity = (distance) => String(Math.max(0, Math.min(1, 1 - distance / fade)));
-  board.style.setProperty("--flow-left-opacity", opacity(board.scrollLeft));
-  board.style.setProperty("--flow-right-opacity", opacity(remaining));
+  track.style.setProperty("--track-left-opacity", opacity(track.scrollLeft));
+  track.style.setProperty("--track-right-opacity", opacity(remaining));
 }
-function restoreFlowPosition() {
-  const board = $("#flow-board");
-  if (!board) return;
-  board.scrollLeft = view().flowPosition * flowLaneStep(board);
-  view().flowPosition = readFlowPosition(board);
-  updateFlowEdges();
+function captureTrackPositions(owner) {
+  if (!owner) return;
+  scrollTracks().forEach((track) => { owner[trackPositionKeys[track.id]] = readTrackPosition(track); });
 }
-window.addEventListener("resize", updateFlowEdges);
+function restoreTrackPositions() {
+  scrollTracks().forEach((track) => {
+    const key = trackPositionKeys[track.id];
+    track.scrollLeft = (view()[key] || 0) * trackStep(track);
+    view()[key] = readTrackPosition(track);
+    updateTrackEdges(track);
+  });
+}
+window.addEventListener("resize", () => scrollTracks().forEach(updateTrackEdges));
 document.addEventListener("scroll", (event) => {
-  const board = event.target;
-  if (board.id !== "flow-board" || !board.isConnected) return;
-  views.get(board.closest("#page-content").dataset.run).flowPosition = readFlowPosition(board);
-  updateFlowEdges();
+  const track = event.target;
+  const key = trackPositionKeys[track.id];
+  if (!key || !track.isConnected) return;
+  const owner = views.get(track.closest("#page-content").dataset.run);
+  if (owner) owner[key] = readTrackPosition(track);
+  updateTrackEdges(track);
 }, true);
 document.addEventListener("focusin", (event) => {
-  const card = event.target.closest?.("#flow-board .flow-task");
+  const card = event.target.closest?.(".horizontal-track .flow-task, .horizontal-track .plan-summary");
   if (card) card.scrollIntoView({ block: "nearest", inline: "nearest" });
 });
 document.addEventListener("keydown", (event) => {
-  const board = event.target;
-  if (board.id !== "flow-board" || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const track = event.target;
+  if (!trackPositionKeys[track.id] || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
   event.preventDefault();
   const left = event.key === "Home" ? 0
-    : event.key === "End" ? board.scrollWidth
-    : board.scrollLeft + (event.key === "ArrowRight" ? 1 : -1) * flowLaneStep(board);
-  board.scrollTo({ left, behavior: motionPreference.matches ? "auto" : "smooth" });
+    : event.key === "End" ? track.scrollWidth
+    : track.scrollLeft + (event.key === "ArrowRight" ? 1 : -1) * trackStep(track);
+  track.scrollTo({ left, behavior: motionPreference.matches ? "auto" : "smooth" });
 });
-function phaseSteps() {
-  const current = phaseKeys.indexOf(currentRun().phase || "execution");
-  return `<ol class="steps phase-steps" aria-label="${t("runStages")}">${phaseKeys.map((phase, index) => `<li class="step ${index <= current ? "step-primary" : ""}" ${index === current ? 'aria-current="step"' : ""}><button id="phase-${phase}" class="phase-button" type="button" data-phase="${phase}" aria-label="${t(phaseLabels[index])}${index === current ? ` · ${t("currentStage")}` : ""}" title="${index === current ? t("currentStage") : ""}" aria-pressed="${phase === view().phase}" aria-controls="phase-content"><span>${t(phaseLabels[index])}</span></button></li>`).join("")}</ol>`;
-}
-function phaseLink(record, label, prefix, cls = "btn btn-sm") {
-  return `<button id="phase-${prefix}-${record.id}" class="${cls}" type="button" data-record="${record.uid}">${label}${icon("arrow")}</button>`;
-}
-function requirementsList(plan) {
-  return `<ul class="phase-requirements">${(plan.requirements || [plan.goal]).map((item) => `<li>${esc(tr(item))}</li>`).join("")}</ul>`;
-}
-function planningPhase() {
-  const plans = runRecords(currentRun(), "PLAN");
-  if (!plans.length) return empty("noPlans", null, "plan");
-  const tasks = [...taskRecords()].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-  return `<div class="phase-grid"><div class="phase-stack">${plans.map((plan) => `<article class="card phase-card"><div class="phase-card-meta"><span class="mono">${plan.id}</span>${chip(t(plan.approval === "approved" ? "planFinal" : "planReview"), "badge-outline")}</div><h2>${esc(tr(plan.title))}</h2><p>${esc(tr(plan.goal))}</p><h3>${t("requirements")}</h3>${requirementsList(plan)}<footer>${phaseLink(plan, t("viewPlan"), "plan")}</footer></article>`).join("")}</div><aside class="card phase-card phase-outline"><div class="section-title"><h2>${t("taskOutline")}</h2><span>${formatItemCount(tasks.length)}</span></div>${tasks.length ? `<ul class="phase-task-list">${tasks.slice(0, 6).map((task) => `<li>${phaseLink(task, `<span><span class="mono">${task.id}</span><strong>${esc(tr(task.title))}</strong></span>`, "task", "phase-task-link")}</li>`).join("")}</ul>` : `<p class="muted">${t("noTasks")}</p>`}<footer><button class="btn btn-sm" type="button" data-page="tasks">${t("showTasks")}${icon("arrow")}</button></footer></aside></div>`;
-}
-function approvalPhase() {
-  const plans = runRecords(currentRun(), "PLAN");
-  if (!plans.length) return empty("noApprovals", null, "plan");
-  return `<div class="phase-approval-grid">${plans.map((plan) => `<article class="card phase-card approval-card"><div class="phase-card-meta"><span class="mono">${plan.id}</span><span class="phase-verdict ${plan.approval === "approved" ? "passed" : "pending"}">${icon(plan.approval === "approved" ? "check" : "info")}${t(plan.approval === "approved" ? "approvalApproved" : "approvalPending")}</span></div><h2>${esc(tr(plan.title))}</h2><h3>${t("reviewScope")}</h3><p>${esc(tr(plan.goal))}</p><h3>${t("requirements")}</h3>${requirementsList(plan)}<footer>${phaseLink(plan, t("viewPlan"), "approval")}</footer></article>`).join("")}</div>`;
-}
-function verificationPhase() {
-  const checks = verificationSamples[state.run] || [];
-  if (!checks.length) return empty("noChecks", null, "check");
-  const evidence = runRecords(currentRun(), "FINDING");
-  return `<div class="phase-grid"><section class="card phase-card"><h2>${t("verificationResults")}</h2><ul class="phase-check-list">${checks.map(([label, status, id], index) => {
-    const record = getRecord(`${state.run}/TASK/${id}`);
-    return `<li><button id="phase-check-${index}" class="phase-check" type="button" data-record="${record.uid}"><span class="phase-verdict ${status}">${icon(status === "passed" ? "check" : status === "failed" ? "alert" : "info")}${t(status)}</span><strong>${esc(tr(label))}</strong><span class="phase-check-source mono">${id}${icon("arrow")}</span></button></li>`;
-  }).join("")}</ul></section><aside class="card phase-card phase-evidence"><h2>${t("evidenceRecords")}</h2>${evidence.map((record) => phaseLink(record, `<span><span class="mono">${record.id}</span><strong>${esc(tr(record.title))}</strong></span>`, "finding", "phase-task-link")).join("")}</aside></div>`;
-}
-function executionPhase() {
+function taskOverview() {
   const items = taskRecords(),
     active = items.find((x) => x.status === "running");
   let body;
@@ -784,32 +773,24 @@ function executionPhase() {
   else if (!active)
     body = `${blocker()}${empty("noActive", "noActiveHelp", "info", `<button class="btn btn-sm" type="button" data-page="tasks">${t("showTasks")}</button>`)}`;
   else
-    body = `<section class="current-focus"><article class="card focus-surface"><div class="eyebrow"><span>${t("currentFocus")}</span><span>${active.id}</span></div><h2>${esc(tr(active.title))}</h2><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))} · ${t(active.status)}</span><button id="focus-${active.id}" class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}</section>`;
+    body = `<section class="current-focus" aria-labelledby="focus-title"><div class="section-title"><h2 id="focus-title">${t("currentFocus")}</h2><span class="mono">${active.id}</span></div><article class="card focus-surface"><h3>${esc(tr(active.title))}</h3><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))}</span><button id="focus-${active.id}" class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}</section>`;
   return `${body}${flowBoard(items)}`;
 }
-function currentPage() {
+function runInformation() {
   const run = currentRun();
-  const renderers = { plan: planningPhase, approval: approvalPhase, execution: executionPhase, verification: verificationPhase };
-  return `${pageHeader(tr(run.title), view().phase === "execution" ? tr(run.description) : "")}${phaseSteps()}<section id="phase-content" class="phase-content" data-phase="${view().phase}" aria-labelledby="phase-${view().phase}">${renderers[view().phase]()}</section>`;
+  const fields = [["work_type", "workType"], ["difficulty", "runDifficulty"], ["workflow_mode", "workflowMode"], ["record_mode", "recordMode"]];
+  return `<section class="run-information" aria-label="${t("runInfo")}"><dl class="run-facts">${fields.map(([field, label]) => {
+    const [value, explanation] = runFieldInfo[field][run[field]] || runFieldInfo[field].unknown;
+    return `<div data-run-field="${field}"><dt>${t(label)}</dt><dd><strong>${esc(tr(value))}</strong><p>${esc(tr(explanation))}</p></dd></div>`;
+  }).join("")}</dl></section>`;
 }
-function selectPhase(phase) {
-  if (!phaseKeys.includes(phase)) return;
-  view().phase = phase;
-  render({ resetScroll: true, motion: "page" });
-  $(`#phase-${phase}`).focus({ preventScroll: true });
-  announce(t(phaseLabels[phaseKeys.indexOf(phase)]));
+function planSummaries() {
+  const plans = runRecords(currentRun(), "PLAN");
+  return `<section class="plan-section"><div class="section-title"><h2 id="plan-title">${t("planSummary")}</h2><span>${formatItemCount(plans.length)}</span></div>${plans.length ? `<div class="plan-viewport scroll-viewport"><div id="plan-board" class="plan-board horizontal-track" data-single="${plans.length === 1}" role="region" aria-labelledby="plan-title" tabindex="0">${plans.map((plan) => `<button id="plan-summary-${plan.id}" class="card plan-summary" type="button" data-record="${plan.uid}"><span class="plan-summary-meta"><span class="mono">${plan.id}</span>${chip(t(plan.approval === "approved" ? "planFinal" : "planReview"), "badge-outline")}</span><span class="plan-summary-heading"><strong class="plan-summary-title">${esc(tr(plan.title))}</strong>${icon("arrow")}</span><span class="plan-summary-goal">${esc(tr(plan.goal))}</span><span class="sr-only">${t("viewPlan")}</span></button>`).join("")}</div></div>` : `<p class="plan-placeholder">${t("noPlans")}</p>`}</section>`;
 }
-document.addEventListener("keydown", (event) => {
-  if (!event.target.matches?.("button[data-phase]")) return;
-  let index = phaseKeys.indexOf(event.target.dataset.phase);
-  if (event.key === "ArrowRight") index = (index + 1) % phaseKeys.length;
-  else if (event.key === "ArrowLeft") index = (index + phaseKeys.length - 1) % phaseKeys.length;
-  else if (event.key === "Home") index = 0;
-  else if (event.key === "End") index = phaseKeys.length - 1;
-  else return;
-  event.preventDefault();
-  selectPhase(phaseKeys[index]);
-});
+function currentPage() {
+  return `${pageHeader(tr(currentRun().title))}<div class="current-overview"><div class="run-context">${runInformation()}${planSummaries()}</div>${taskOverview()}</div>`;
+}
 function filteredTasks() {
   const v = view();
   const q = v.taskQuery.trim().toLocaleLowerCase();
@@ -1225,7 +1206,6 @@ function syncUrl() {
     lang: state.locale,
     theme: state.theme,
   });
-  if (view().page === "current") params.set("phase", view().phase);
   if (view().page === "record" && view().record)
     params.set("record", view().record);
   history.replaceState(null, "", `#${params}`);
@@ -1278,11 +1258,8 @@ function render(options = {}) {
   pageMotions = [];
   const token = focusToken();
   const scroll = $("#page-scroll").scrollTop;
-  if (options.captureFlow !== false) {
-    const board = $("#flow-board");
-    const previous = views.get($("#page-content").dataset.run);
-    if (board && previous) previous.flowPosition = readFlowPosition(board);
-  }
+  if (options.captureTracks !== false)
+    captureTrackPositions(views.get($("#page-content").dataset.run));
   if (options.captureSearch !== false) {
     const content = $("#page-content");
     const previous = views.get(content.dataset.run);
@@ -1297,7 +1274,7 @@ function render(options = {}) {
   renderTabs();
   renderSidebar(options.captureSidebar !== false);
   renderPage();
-  restoreFlowPosition();
+  restoreTrackPositions();
   syncResponsiveMenu();
   $("#page-scroll").scrollTop = options.resetScroll ? 0 : scroll;
   syncUrl();
@@ -1321,7 +1298,7 @@ function rememberPage() {
   finishFoldMotion();
   finishDisclosures();
   const saved = structuredClone(view());
-  if ($("#flow-board")) saved.flowPosition = readFlowPosition($("#flow-board"));
+  captureTrackPositions(saved);
   $("#record-folds")
     .querySelectorAll(".fold-list:not([hidden])")
     .forEach((list) => (saved.foldScrolls[list.id] = list.scrollTop));
@@ -1348,7 +1325,7 @@ function goBack() {
     focusPage: true,
     captureSearch: false,
     captureSidebar: false,
-    captureFlow: false,
+    captureTracks: false,
     motion: "page",
   });
   $("#page-scroll").scrollTop = previous.scroll;
@@ -1433,7 +1410,6 @@ document.addEventListener("click", (event) => {
     $("#language-toggle").focus({ preventScroll: true });
     announce(state.locale === "ko" ? "한국어 화면" : "English interface");
   } else if (button.dataset.run) switchRun(button.dataset.run, true);
-  else if (button.dataset.phase) selectPhase(button.dataset.phase);
   else if (button.dataset.page)
     navigate(button.dataset.page, Boolean(button.closest("#page-content")));
   else if (button.dataset.fold) toggleExplore(button.dataset.fold);
@@ -1598,8 +1574,6 @@ if (["light", "dark"].includes(initial.get("theme")))
   state.theme = initial.get("theme");
 if (["current", "tasks", "records", "memories"].includes(initial.get("page")))
   view().page = initial.get("page");
-if (view().page === "current" && phaseKeys.includes(initial.get("phase")))
-  view().phase = initial.get("phase");
 if (initial.get("page") === "record") {
   const item = getRecord(initial.get("record"));
   if (item && item.runKey === state.run) {
