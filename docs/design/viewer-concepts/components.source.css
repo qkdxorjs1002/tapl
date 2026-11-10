@@ -1,6 +1,8 @@
 @import "tailwindcss" source(none);
 @source "./index.html";
 @source "./concepts.js";
+@source "../viewer-workbench/index.html";
+@source "../viewer-workbench/workbench.js";
 @plugin "daisyui" {
   themes:
     light --default,

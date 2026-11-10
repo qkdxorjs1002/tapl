@@ -148,6 +148,11 @@ svg.icon {
   gap: 25px;
   align-items: center;
 }
+.lab-header-actions {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
 .lab-doc-link:hover {
   color: var(--lime);
 }

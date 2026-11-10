@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>TAPL — Integrated Viewer concept</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="../viewer-concepts/components.css" />
+    <link rel="stylesheet" href="workbench.css" />
+    <script defer src="workbench.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#page-content" data-i18n="skip"
+      >본문으로 건너뛰기</a
+    >
+    <div id="workbench" class="workbench">
+      <header id="topbar" class="topbar">
+        <div class="brand-area">
+          <button
+            class="btn btn-ghost btn-sm mobile-menu"
+            id="menu-toggle"
+            type="button"
+            aria-controls="sidebar"
+            aria-expanded="false"
+          >
+            <span data-icon="menu"></span
+            ><span class="sr-only" data-i18n="navigation">탐색</span></button
+          ><a href="../viewer-concepts/#overview" class="brand"
+            ><span class="brand-mark">t</span><strong>tapl</strong></a
+          ><span class="brand-note">personal / tapl</span>
+        </div>
+        <nav
+          id="run-tabs"
+          class="run-tabs tabs"
+          role="tablist"
+          aria-label="RUN"
+        ></nav>
+        <div class="top-actions">
+          <span class="demo-label" data-i18n="concept">통합 시안</span
+          ><label
+            ><span class="sr-only" data-i18n="language">언어</span
+            ><select class="select select-sm locale-select" id="locale">
+              <option value="ko">한국어</option>
+              <option value="en">English</option>
+            </select></label
+          ><button
+            class="btn btn-ghost btn-sm btn-square"
+            id="theme-toggle"
+            type="button"
+          >
+            <span data-icon="sun"></span
+            ><span class="sr-only" data-i18n="theme">테마 전환</span>
+          </button>
+        </div>
+      </header>
+      <aside id="sidebar" class="sidebar" aria-label="탐색">
+        <section class="sidebar-workspace">
+          <h2 class="nav-caption" data-i18n="workspace">작업 공간</h2>
+          <nav class="menu main-menu" id="workspace-nav"></nav>
+        </section>
+        <section class="sidebar-explore">
+          <h2 class="nav-caption" data-i18n="explore">탐색</h2>
+          <div id="record-folds" class="record-folds"></div>
+        </section>
+        <div class="sidebar-bottom">
+          <section>
+            <h2 class="nav-caption" data-i18n="memory">메모리</h2>
+            <nav class="menu main-menu" id="memory-nav"></nav>
+          </section>
+          <section class="management">
+            <h2 class="nav-caption" data-i18n="management">관리</h2>
+            <button
+              class="btn btn-ghost discard-button"
+              id="discard-open"
+              type="button"
+            >
+              <span data-icon="trash"></span
+              ><span data-i18n="discard">RUN 삭제</span
+              ><span data-icon="arrow"></span>
+            </button>
+            <p class="permission-note" id="permission-note"></p>
+          </section>
+          <div class="sidebar-footer">
+            <span class="status status-primary" aria-hidden="true"></span
+            ><span data-i18n="localDemo">로컬 가상 데이터</span
+            ><a
+              href="../../development/viewer-ux-design.ko.md"
+              id="design-link"
+              data-i18n="designNotes"
+              >설계 안내 ↗</a
+            >
+          </div>
+        </div>
+      </aside>
+      <main id="page-scroll" class="page-scroll">
+        <div
+          id="page-content"
+          class="page-content"
+          role="tabpanel"
+          tabindex="-1"
+        ></div>
+      </main>
+      <div id="sidebar-scrim" class="sidebar-scrim" hidden></div>
+    </div>
+    <dialog id="discard-dialog" class="modal" aria-labelledby="discard-title">
+      <div class="modal-box">
+        <form method="dialog" class="dialog-x">
+          <button
+            class="btn btn-sm btn-circle btn-ghost"
+            aria-label="닫기"
+            id="discard-x"
+          >
+            ✕
+          </button>
+        </form>
+        <p class="eyebrow" data-i18n="management">관리</p>
+        <h2 id="discard-title" data-i18n="discardTitle">
+          이 RUN을 폐기할까요?
+        </h2>
+        <div id="discard-context"></div>
+        <label class="fieldset"
+          ><span class="fieldset-legend" data-i18n="confirmId"
+            >RUN ID를 입력해 확인하세요</span
+          ><input
+            id="discard-id"
+            class="input w-full"
+            autocomplete="off"
+            spellcheck="false"
+        /></label>
+        <div class="demo-notice">
+          <span data-icon="info"></span>
+          <p data-i18n="discardDemo">
+            시안의 확인 절차입니다. 실제 RUN·이력은 변경되지 않습니다.
+          </p>
+        </div>
+        <div class="modal-action">
+          <button
+            class="btn btn-sm"
+            type="button"
+            id="discard-cancel"
+            data-i18n="cancel"
+          >
+            취소</button
+          ><button
+            class="btn btn-sm btn-error"
+            type="button"
+            id="discard-confirm"
+            disabled
+            data-i18n="previewDiscard"
+          >
+            폐기 확인 미리보기
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button aria-label="닫기" id="discard-backdrop">닫기</button>
+      </form>
+    </dialog>
+    <div id="toast" class="toast toast-end" hidden>
+      <div class="alert"><span id="toast-text" role="status"></span></div>
+    </div>
+    <p id="live-region" class="sr-only" aria-live="polite"></p>
+  </body>
+</html>

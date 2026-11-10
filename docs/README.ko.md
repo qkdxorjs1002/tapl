@@ -51,7 +51,7 @@ TAPL은 Codex와 Claude Code의 계획·승인·실행·검증과 작업 이력�
 | 페이지 | 내용 |
 | --- | --- |
 | [내부 구조](development/architecture.ko.md) | CLI·MCP·hook·DB·Viewer의 경계를 살펴봅니다. |
-| [Viewer UX 설계](development/viewer-ux-design.ko.md) | Viewer·확장 개선안, DaisyUI 5 업그레이드 계획과 시안 10종을 비교합니다. |
+| [Viewer UX 설계](development/viewer-ux-design.ko.md) | 다중 RUN·다국어 통합 시안, DaisyUI 5 업그레이드 계획과 대안 10종을 살펴봅니다. |
 | [기여와 검증](development/contributing.ko.md) | 개발 환경을 준비하고 변경과 문서를 검증합니다. |
 | [릴리스](development/releases.ko.md) | 배포 채널·설치 스크립트·서명·확장 배포를 이해합니다. |
 

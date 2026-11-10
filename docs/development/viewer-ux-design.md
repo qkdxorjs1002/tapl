@@ -4,6 +4,28 @@
 
 **This is a design proposal. [Viewer](../guides/viewer.md) and [VS Code extension](../guides/vscode.md) describe current product behavior.**
 
+## Integrated concept
+
+The [integrated Viewer concept](../design/viewer-workbench/index.html) combines the current-work focus of 03 with the TASK status view of 01 in a fixed shell. Screenshots show [current RUN](../design/viewer-workbench/current-ko.png), [Explore details](../design/viewer-workbench/explore-ko.png), [integrated search](../design/viewer-workbench/search-ko.png) and [English with a dark theme](../design/viewer-workbench/current-en-dark.png).
+
+| Area | Structure and behavior |
+| --- | --- |
+| Fixed top bar | RUN navigation tabs use the available space. Switching changes status, Explore and management context to the selected RUN. Arrow keys, Home and End are supported; excess tabs scroll within the tab region. |
+| Upper-left Workspace | Current RUN uses the focus layout from 03; TASK status uses the list and selected detail from 01. Page tabs and sidebar navigation share the same selection. |
+| Upper-left Explore | At most one PLAN, TASK or FINDING fold is open. Its list scrolls independently and retains its position per RUN and kind. Selecting a record displays its objective, requirements, verification, results, related records and extra fields in the page rather than a popup. |
+| Lower-left Memory | Open record search or associative memory. Record search combines PLAN, TASK and FINDING with independent `Selected RUN / All records` scopes and `Group by RUN / Record list` presentation. Associative memory retains read-only workspace lessons, cues and source browsing. |
+| Lower-left Management | `Discard RUN` retains existing semantics: RUNs with records are archived, empty RUNs can be deleted, and confirmation requires the exact RUN ID. The control follows server discard support and RUN `writable`; writable local RUNs from other sessions remain eligible. Read-only peer history disables it. Discard does not stop external agents or processes. **The concept's confirmation button deletes neither real RUNs nor synthetic data.** |
+
+On PC, the top bar and sidebar remain fixed while only the right page scrolls. The expanded Explore list is a separate scroll region. Narrow layouts expose navigation through a menu and exclude the closed panel from keyboard navigation. Each RUN keeps separate page, search and record selection state. Selecting another RUN's search result or memory source moves to its source RUN tab. The examples include identical display IDs with distinct provenance.
+
+Grouped search across all records shows RUN titles, provenance and match counts first; expand a group to read individual records. Expanded groups persist through language and theme changes. Record-list presentation lists individual records directly.
+
+Switch Korean/English UI, status, guidance, accessible labels and sample content, as well as light/dark themes. Locale switching does not promise automatic translation of stored records. Product implementation must retain locale delivery, existing translation keys and user-authored content as separate concerns. Links can specify context, for example `#run=local24&page=tasks&lang=en&theme=dark`.
+
+This is an independent synthetic concept before product integration. Existing CLI/MCP arguments, configuration, VS Code host behavior and RUN discard are unchanged. The ten alternatives below remain available for comparing individual information structures.
+
+The integrated concept was checked in headless Chrome with a temporary profile: two locales × two themes × three widths (390, 1024 and 1600px) × five RUNs × four pages, totaling 240 combinations, plus 48 search-scope/presentation combinations. Checks also covered fixed chrome, page/list scrolling, RUN provenance, inline details, filters, search, memory sources, discard confirmation, keyboard and focus. The checked cases had no horizontal overflow, sidebar clipping or script errors; representative screens were visually reviewed. These checks do not replace actual VS Code host, high-contrast or screen-reader validation.
+
 ## Explore the concepts
 
 Open the [gallery of ten concepts](../design/viewer-concepts/index.html) in a browser. It works without installation and uses local styles and scripts. GitHub's HTML source view does not run the preview; download the repository and open it locally.
@@ -34,9 +56,9 @@ Sources: [`App.tsx`](../../vscode-extension/src/webview/App.tsx), [`styles.css`]
 
 | Concept | Main information structure | Extension adaptation | Fit and limitation |
 | --- | --- | --- | --- |
-| **01 Signal Desk** | Task list alongside selected-task detail | Compact list and detail dialog | **Recommended Viewer default.** Balances work and supporting evidence. |
+| **01 Signal Desk** | Task list alongside selected-task detail | Compact list and detail dialog | **Basis of the integrated TASK status view.** Balances work and evidence. |
 | 02 Flow Board | Pending, running, blocked and completed lanes | Status filter and vertical lanes | Parallel work; long queues increase page length. |
-| **03 Focus Now** | Current task, purpose, verification and next queue | Prioritize the current task | **Recommended extension default.** Needs a separate view for comparison. |
+| **03 Focus Now** | Current task, purpose, verification and next queue | Prioritize the current task | **Basis of the integrated current RUN view.** Needs a separate comparison view. |
 | 04 Evidence Stream | Chronological events and source records | Vertical timeline | Resuming and retrospectives; chronology is not dependency order. |
 | 05 Record Library | Search results alongside source content | Results followed by content | Records and archives; less suitable for live execution. |
 | 06 Memory Garden | Lessons, recall cues and sources | Single-column memory cards | Dedicated memory screen; progressively disclose long content. |
@@ -45,7 +67,7 @@ Sources: [`App.tsx`](../../vscode-extension/src/webview/App.tsx), [`styles.css`]
 | 09 Dependency Lens | Prerequisite and downstream TASK connections | Read conditions from top to bottom | Blocker analysis; graph layout requires separate implementation. |
 | 10 Quiet Outline | Short outline, task list and collapsed records | Single-column progressive disclosure | Reading and keyboard use; needs an auxiliary comparison view. |
 
-The recommendation is to **combine 01 and 03 using shared data and components**, use 05 for search, 06 for memory and 09 as an auxiliary board view. This does not propose adding all ten as product view options. Select the main information structure, then limit navigation choices.
+The integrated concept **combines 01 and 03 as Workspace tabs**, uses 05 for search, 06 for memory and 08's information structure for record exploration. It does not add all ten as product view options. The dependency view from 09 remains an optional follow-up.
 
 ## DaisyUI component use
 
@@ -119,7 +141,7 @@ These commands apply to the subsequent product refactor. Run related session, re
 
 ## Maintain the gallery
 
-Run from the repository root. Generated `components.css` is included, so viewing requires no installation.
+Run from the repository root. Generated `components.css` is included, so viewing requires no installation. The integrated concept shares this local CSS; `build` and `check` cover both concepts.
 
 ```sh
 npm --prefix docs/design/viewer-concepts ci
@@ -129,6 +151,8 @@ python3 -m http.server 8767 --bind 127.0.0.1 --directory .
 ```
 
 When serving, open `http://127.0.0.1:8767/docs/design/viewer-concepts/`. Opening `index.html` directly also works. Edit `components.source.css`, `concepts.js` and `lab.css`. Screen copy is Korean; both language guides link to the same gallery.
+
+Open the integrated concept at `http://127.0.0.1:8767/docs/design/viewer-workbench/`. Its editable sources are `viewer-workbench/index.html`, `workbench.js` and `workbench.css`. Switch Korean/English in its top bar.
 
 The pinned minified build currently emits two optimizer warnings for selectors inside DaisyUI `join`'s `@scope`. Generation succeeds and the gallery supplies an explicit focus outline. Recheck these warnings and selector/focus rendering in the lowest supported webview during the product upgrade.
 

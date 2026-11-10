@@ -5,7 +5,7 @@
   "description": "Offline DaisyUI 5 design studies; independent of the shipping Viewer build.",
   "scripts": {
     "build": "tailwindcss -i ./components.source.css -o ./components.css --minify",
-    "check": "node --check concepts.js"
+    "check": "node --check concepts.js && node --check ../viewer-workbench/workbench.js"
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.3.5",
