@@ -622,20 +622,15 @@ select {
   margin-top: 8px;
   max-width: 760px;
 }
-.run-context {
+.record-context {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 16px;
 }
-.run-context .eyebrow {
+.record-context .eyebrow {
   letter-spacing: 1px;
-}
-.context-separator {
-  height: 10px;
-  border-left: 1px solid var(--color-base-300);
-  margin: 0 4px;
 }
 .run-meter {
   display: flex;
@@ -982,7 +977,7 @@ select {
   padding-bottom: 25px;
   border-bottom: 1px solid var(--color-base-300);
 }
-.record-hero .run-context {
+.record-hero .record-context {
   margin-bottom: 12px;
 }
 .record-hero h1 {
@@ -1892,11 +1887,8 @@ select {
   .run-aside-section {
     margin-bottom: 25px;
   }
-  .run-context .eyebrow {
+  .record-context .eyebrow {
     font-size: 11px;
-  }
-  .context-separator {
-    margin: 0;
   }
   .run-meter {
     gap: 9px;

@@ -26,7 +26,7 @@ Grouped search across all records shows RUN titles, provenance and match counts 
 
 Switch Korean/English UI, status, guidance, accessible labels and sample content, as well as light/dark themes. Locale switching does not promise automatic translation of stored records. Product implementation must retain locale delivery, existing translation keys and user-authored content as separate concerns. Links can specify context, for example `#run=local24&page=tasks&lang=en&theme=dark`.
 
-Screens retain titles, status, record content and necessary provenance while omitting generic introductions, demo badges, repeated footers and duplicate context. Grouped search places provenance in group headers; record-list presentation shows it per result. Empty-state help and discard confirmation/effect descriptions remain where needed.
+Screens retain titles, status, record content and necessary provenance while omitting generic introductions, demo badges, repeated footers and duplicate context. The selected RUN is identified by the top tabs; Current RUN, TASK status and Explore detail headers omit repeated RUN ID, session and source rows. Grouped search places provenance in group headers; record-list presentation shows it per result. Empty-state help and discard confirmation/effect descriptions remain where needed.
 
 The light theme combines cool gray and white surfaces with a deep teal accent; the dark theme uses navy surfaces and a pale teal accent. Larger body and secondary text, increased line height, thin dividers and restrained shadows establish hierarchy. The RUN indicator and page transition take 260ms; folds and search groups take 180–240ms. Rapid input settles interrupted motion. `prefers-reduced-motion` removes motion, and theme colors switch immediately.
 
