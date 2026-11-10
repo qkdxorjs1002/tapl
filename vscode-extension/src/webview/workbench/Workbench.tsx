@@ -312,20 +312,34 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
       </header>
       <aside ref={sidebarRef} id="wb-sidebar" className="wb-sidebar" aria-label={t('wbNavigation')}>
         <section>
-          {props.workspace && (
+          {props.workspace && !props.browser && (
             <button
               type="button"
               className="wb-workspace-switch"
               title={props.workspace}
               aria-label={t('changeWorkspace')}
-              onClick={() => navigation.wrappedSend({ command: 'chooseWorkspace' })}
+              onClick={() => props.send({ command: 'chooseWorkspace' })}
             >
               <Icon name="folder" />
               <span>{props.workspace.split(/[\\/]/).filter(Boolean).pop()}</span>
               <Icon name="chevron" />
             </button>
           )}
-          <h2 className="wb-nav-caption">{t('wbWorkspace')}</h2>
+          <div className="wb-section-heading wb-workspace-heading">
+            <h2 className="wb-nav-caption">{t('wbWorkspace')}</h2>
+            {props.browser && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs btn-square"
+                aria-label={t('changeWorkspace')}
+                title={[t('changeWorkspace'), props.workspace].filter(Boolean).join(' · ')}
+                onClick={() => navigation.wrappedSend({ command: 'chooseWorkspace' })}
+                data-wb-focus="workspace-picker"
+              >
+                <Icon name="folder" />
+              </button>
+            )}
+          </div>
           <nav className="menu wb-main-menu">
             {navButton('current', 'focus', t('wbCurrent'), snapshot ? `${counts.percent}%` : undefined)}
             {navButton('tasks', 'table', t('wbTasks'), snapshot ? <ItemCount count={counts.total} /> : undefined)}
@@ -354,7 +368,7 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
             </nav>
           </section>
           <section className="wb-management">
-            <div className="wb-management-heading">
+            <div className="wb-section-heading">
               <h2 className="wb-nav-caption">{t('wbManagement')}</h2>
               <div>
                 {(['refresh', 'debug'] as const).map((command) => (

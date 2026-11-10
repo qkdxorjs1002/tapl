@@ -87,6 +87,15 @@ test('real Viewer keeps RUN context, record navigation, preferences and fixed sh
     assert.equal(await page.locator('html').getAttribute('lang'), 'en');
     assert.equal(await page.locator('html').getAttribute('data-tapl-theme'), 'dark');
     assert.equal(await page.locator('.wb-back').count(), 0, 'reload clears historical Back');
+    const picker = page.locator('.wb-workspace-heading button');
+    assert.equal(await picker.count(), 1);
+    assert.equal(await page.locator('.wb-workspace-switch').count(), 0, 'browser uses the heading icon');
+    await picker.click();
+    await page.locator('#tapl-workspace-path').waitFor();
+    await page.locator('.wb-back').click();
+    await page.locator('.wb-current-overview').waitFor();
+    assert.ok((await page.locator('.wb-current-overview').innerText()).includes('Second RUN task'));
+
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });

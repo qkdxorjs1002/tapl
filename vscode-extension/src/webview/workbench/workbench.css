@@ -1600,27 +1600,27 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .tapl-workbench {
   height: 12px;
 }
 
-.wb-management-heading {
+.wb-section-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
 }
-.wb-management-heading .wb-nav-caption {
+.wb-section-heading .wb-nav-caption {
   margin-bottom: 0 !important;
 }
-.wb-management-heading > div {
+.wb-section-heading > div {
   display: flex;
   gap: 2px;
 }
-.wb-management-heading .btn {
+.wb-section-heading .btn {
   color: var(--wb-muted);
   min-width: 26px;
   width: 26px;
   height: 26px;
   min-height: 26px;
 }
-.wb-management-heading .wb-icon {
+.wb-section-heading .wb-icon {
   width: 14px;
   height: 14px;
 }

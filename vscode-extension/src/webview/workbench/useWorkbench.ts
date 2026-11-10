@@ -53,6 +53,8 @@ export function expectedForCommand(command: WebviewCommand, targetRun?: TaplWork
       return JSON.stringify(['search', command.query]);
     case 'debug':
       return 'debug';
+    case 'chooseWorkspace':
+      return 'workspace';
     default:
       return undefined;
   }

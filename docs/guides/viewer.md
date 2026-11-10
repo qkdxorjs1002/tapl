@@ -28,7 +28,7 @@ RUN tabs select the session whose records you inspect. Archives and history let 
 
 ## Navigate the Viewer
 
-The desktop sidebar and RUN bar stay fixed while the page scrolls. The sidebar scrolls independently on short screens; narrow windows use a navigation drawer. The workspace button changes folders. Language and light/dark controls sit beside the text brand; UI language does not translate stored records. VS Code theme tokens supply the initial editor palette; a manual theme choice is retained.
+The desktop sidebar and RUN bar stay fixed while the page scrolls. The sidebar scrolls independently on short screens; narrow windows use a navigation drawer. In the web Viewer, the folder icon beside the Workspace heading changes folders. Language and light/dark controls sit beside the text brand; UI language does not translate stored records. VS Code theme tokens supply the initial editor palette; a manual theme choice is retained.
 
 - **Current RUN** shows recorded work type, workflow mode and record mode in one compact row, horizontal PLAN summaries and horizontal task-status lanes. Missing metadata is omitted. The sidebar shows integer completion percentage; it is calculated from TASK state, not the selected page.
 - **TASK status** filters the full TASK list. Selecting a TASK opens its detailed page; **Back** returns to the preceding filter, query, scroll and focus.

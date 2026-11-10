@@ -132,7 +132,7 @@ export function viewIdentity(view: WebviewView): string {
     case 'search':
       return JSON.stringify(['search', view.search.query]);
     case 'workspace':
-      return JSON.stringify(['workspace', view.workspace]);
+      return 'workspace';
     case 'error':
       return JSON.stringify(['error', view.message]);
     default:
