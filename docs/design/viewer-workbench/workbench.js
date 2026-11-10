@@ -556,6 +556,7 @@ function view() {
       memory: null,
       scrolls: {},
       foldScrolls: {},
+      flowPosition: 0,
     });
   return views.get(state.run);
 }
@@ -632,11 +633,53 @@ function flowBoard(items) {
   const ordered = [...items].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
   const states = ["pending", "running", "blocked", "done"];
   if (items.some((item) => item.status === "skipped")) states.push("skipped");
-  return `<section class="flow-section" aria-labelledby="flow-title"><div class="section-title"><h2 id="flow-title">${t("flowBoard")}</h2></div><div class="flow-board">${states.map((status) => {
+  return `<section class="flow-section"><div class="section-title"><h2 id="flow-title">${t("flowBoard")}</h2></div><div class="flow-viewport"><div id="flow-board" class="flow-board" role="region" aria-labelledby="flow-title" tabindex="0">${states.map((status) => {
     const lane = ordered.filter((item) => item.status === status);
     return `<section class="flow-lane" aria-labelledby="flow-${status}"><header class="flow-heading"><h3 id="flow-${status}">${statusMark(status)}</h3><span class="flow-count">${formatItemCount(lane.length)}</span></header><ul class="flow-list">${lane.map((item) => `<li><button id="flow-${item.id}" class="card flow-task" type="button" data-record="${item.uid}" aria-describedby="flow-${status}"><span class="mono flow-task-id">${item.id}</span><span class="flow-task-title">${esc(tr(item.title))}</span><span class="flow-task-footer"><span>${esc(tr(item.owner))}</span>${item.depends.length ? `<span>${t("depends")} ${formatItemCount(item.depends.length)}</span>` : ""}</span></button></li>`).join("") || `<li class="flow-empty">${t("emptyLane")}</li>`}</ul></section>`;
-  }).join("")}</div></section>`;
+  }).join("")}</div></div></section>`;
 }
+function flowLaneStep(board) {
+  return board.firstElementChild.getBoundingClientRect().width + parseFloat(getComputedStyle(board).columnGap);
+}
+function readFlowPosition(board) {
+  return board.scrollLeft / flowLaneStep(board);
+}
+function updateFlowEdges() {
+  const board = $("#flow-board");
+  if (!board) return;
+  const fade = parseFloat(getComputedStyle(board).getPropertyValue("--flow-fade-size"));
+  const remaining = board.scrollWidth - board.clientWidth - board.scrollLeft;
+  const opacity = (distance) => String(Math.max(0, Math.min(1, 1 - distance / fade)));
+  board.style.setProperty("--flow-left-opacity", opacity(board.scrollLeft));
+  board.style.setProperty("--flow-right-opacity", opacity(remaining));
+}
+function restoreFlowPosition() {
+  const board = $("#flow-board");
+  if (!board) return;
+  board.scrollLeft = view().flowPosition * flowLaneStep(board);
+  view().flowPosition = readFlowPosition(board);
+  updateFlowEdges();
+}
+window.addEventListener("resize", updateFlowEdges);
+document.addEventListener("scroll", (event) => {
+  const board = event.target;
+  if (board.id !== "flow-board" || !board.isConnected) return;
+  views.get(board.closest("#page-content").dataset.run).flowPosition = readFlowPosition(board);
+  updateFlowEdges();
+}, true);
+document.addEventListener("focusin", (event) => {
+  const card = event.target.closest?.("#flow-board .flow-task");
+  if (card) card.scrollIntoView({ block: "nearest", inline: "nearest" });
+});
+document.addEventListener("keydown", (event) => {
+  const board = event.target;
+  if (board.id !== "flow-board" || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const left = event.key === "Home" ? 0
+    : event.key === "End" ? board.scrollWidth
+    : board.scrollLeft + (event.key === "ArrowRight" ? 1 : -1) * flowLaneStep(board);
+  board.scrollTo({ left, behavior: motionPreference.matches ? "auto" : "smooth" });
+});
 function currentPage() {
   const run = currentRun(),
     items = taskRecords(),
@@ -1123,6 +1166,11 @@ function render(options = {}) {
   pageMotions = [];
   const token = focusToken();
   const scroll = $("#page-scroll").scrollTop;
+  if (options.captureFlow !== false) {
+    const board = $("#flow-board");
+    const previous = views.get($("#page-content").dataset.run);
+    if (board && previous) previous.flowPosition = readFlowPosition(board);
+  }
   if (options.captureSearch !== false) {
     const content = $("#page-content");
     const previous = views.get(content.dataset.run);
@@ -1137,6 +1185,7 @@ function render(options = {}) {
   renderTabs();
   renderSidebar(options.captureSidebar !== false);
   renderPage();
+  restoreFlowPosition();
   syncResponsiveMenu();
   $("#page-scroll").scrollTop = options.resetScroll ? 0 : scroll;
   syncUrl();
@@ -1160,6 +1209,7 @@ function rememberPage() {
   finishFoldMotion();
   finishDisclosures();
   const saved = structuredClone(view());
+  if ($("#flow-board")) saved.flowPosition = readFlowPosition($("#flow-board"));
   $("#record-folds")
     .querySelectorAll(".fold-list:not([hidden])")
     .forEach((list) => (saved.foldScrolls[list.id] = list.scrollTop));
@@ -1186,6 +1236,7 @@ function goBack() {
     focusPage: true,
     captureSearch: false,
     captureSidebar: false,
+    captureFlow: false,
     motion: "page",
   });
   $("#page-scroll").scrollTop = previous.scroll;

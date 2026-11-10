@@ -706,13 +706,46 @@ select {
   min-width: 0;
   margin-top: 30px;
 }
+.flow-viewport {
+  min-width: 0;
+}
 .flow-board {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  align-items: start;
+  --flow-fade-size: 28px;
+  --flow-left-opacity: 1;
+  --flow-right-opacity: 1;
+  --flow-mask: linear-gradient(
+    to right,
+    rgb(0 0 0 / var(--flow-left-opacity)),
+    #000 var(--flow-fade-size),
+    #000 calc(100% - var(--flow-fade-size)),
+    rgb(0 0 0 / var(--flow-right-opacity))
+  );
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
   gap: 14px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 4px 12px;
+  scroll-padding-inline: 30px;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-base-300) transparent;
+  -webkit-mask-image: var(--flow-mask);
+  mask-image: var(--flow-mask);
+}
+.flow-board:focus-visible {
+  outline: none;
+}
+.flow-viewport:has(> .flow-board:focus-visible) {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+  border-radius: 14px;
 }
 .flow-lane {
+  flex: 0 0 320px;
+  max-width: calc(100% - 28px);
   min-width: 0;
   padding: 12px;
   border: 1px solid color-mix(in srgb, var(--color-base-300) 70%, transparent);
@@ -1697,9 +1730,6 @@ select {
   }
 }
 @media (max-width: 1250px) {
-  .flow-board {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   :root {
     --rail: 225px;
   }
@@ -2112,11 +2142,5 @@ select {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
-  }
-}
-
-@media (max-width: 600px) {
-  .flow-board {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
