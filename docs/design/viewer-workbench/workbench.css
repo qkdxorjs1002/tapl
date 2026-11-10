@@ -300,21 +300,12 @@ select {
   letter-spacing: 0.035em;
   color: var(--muted);
 }
-.top-actions {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  padding: 0 20px;
-  flex: none;
-}
 .locale-select {
   font-size: 12px;
-  max-width: 98px;
-  background: var(--color-base-100);
-}
-.top-actions .btn svg {
-  width: 17px;
-  height: 17px;
+  width: 100%;
+  height: 34px;
+  min-height: 34px;
+  background: var(--surface);
 }
 .mobile-menu {
   display: none;
@@ -521,6 +512,28 @@ select {
   padding-bottom: 16px;
   display: grid;
   gap: 20px;
+}
+.sidebar-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-inline: 12px;
+}
+.sidebar-settings > label {
+  flex: 1;
+  min-width: 0;
+}
+.sidebar-settings .btn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  color: var(--muted);
+}
+.sidebar-settings .btn .icon {
+  width: 17px;
+  height: 17px;
 }
 .management {
   border-top: 1px solid var(--color-base-300);
@@ -1626,10 +1639,6 @@ select {
     font-size: 10px;
     padding-left: 8px;
   }
-  .top-actions {
-    padding-inline: 12px;
-    gap: 6px;
-  }
   .run-tabs {
     padding-inline: 8px;
   }
@@ -1670,9 +1679,6 @@ select {
   }
   .brand-area {
     justify-content: start;
-  }
-  .top-actions .locale-select {
-    max-width: 88px;
   }
   .run-tab.tab {
     max-width: 180px;
@@ -1757,19 +1763,6 @@ select {
     min-width: 29px;
     width: 29px;
   }
-  .top-actions {
-    padding: 0 9px;
-    gap: 3px;
-  }
-  .locale-select {
-    max-width: 78px;
-    font-size: 11px;
-  }
-  .top-actions .btn {
-    padding: 0;
-    min-width: 27px;
-    width: 27px;
-  }
   .run-tabs {
     padding: 0 4px;
   }
@@ -1844,15 +1837,6 @@ select {
   }
   .run-tab.tab {
     flex-basis: 140px;
-  }
-  .locale-select {
-    padding-left: 7px;
-    min-height: 30px;
-    height: 30px;
-    max-width: 77px;
-  }
-  .top-actions {
-    padding: 0 6px 0 3px;
   }
   .page-content {
     padding: 21px 17px 30px;
@@ -2013,25 +1997,27 @@ select {
     font-size: 22px;
   }
 }
-@media (max-height: 750px) and (min-width: 801px) {
+@media (max-height: 750px) {
   .sidebar {
-    padding-top: 15px;
-    gap: 15px;
+    padding-top: 12px;
+    gap: 12px;
   }
   .sidebar-bottom {
-    gap: 12px;
+    gap: 10px;
+    padding-bottom: 12px;
   }
   .nav-caption {
     margin-bottom: 6px;
   }
   .nav-button {
-    padding-block: 8px;
+    min-height: 38px;
+    padding-block: 6px;
   }
   .fold-trigger {
     padding-block: 7px;
   }
   .management {
-    padding-top: 12px;
+    padding-top: 10px;
   }
   .sidebar-explore {
     min-height: 148px;
