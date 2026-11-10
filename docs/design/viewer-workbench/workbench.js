@@ -34,6 +34,23 @@ const copy = {
   complete: ["완료", "Completed"],
   progress: ["작업 완료 비율", "Task completion"],
   currentFocus: ["진행 중인 작업", "Work in progress"],
+  runStages: ["RUN 단계", "RUN stages"],
+  currentStage: ["현재 진행 단계", "Current stage"],
+  planFinal: ["확정", "Finalized"],
+  planReview: ["검토 중", "In review"],
+  approvalPending: ["승인 대기", "Awaiting approval"],
+  approvalApproved: ["승인 완료", "Approved"],
+  reviewScope: ["검토 범위", "Review scope"],
+  taskOutline: ["작업 구성", "Task outline"],
+  viewPlan: ["PLAN 자세히 보기", "View PLAN"],
+  noPlans: ["등록된 PLAN이 없습니다", "No PLANs yet"],
+  noApprovals: ["승인 대상 PLAN이 없습니다", "No PLANs to review"],
+  noChecks: ["검증 결과가 없습니다", "No verification results yet"],
+  passed: ["통과", "Passed"],
+  failed: ["실패", "Failed"],
+  verificationResults: ["검증 결과", "Verification results"],
+  evidenceRecords: ["관련 근거", "Related evidence"],
+
   flowBoard: ["작업 흐름", "Task flow"],
   emptyLane: ["작업 없음", "No tasks"],
   taskDetail: ["목적과 검증 조건", "Purpose and verification"],
@@ -188,6 +205,7 @@ function t(key) {
 const runs = [
   {
     key: "local24",
+    phase: "execution",
     id: "RUN-024",
     source: "local / design-study",
     title: bi("Viewer 경험 개선", "Viewer experience"),
@@ -202,6 +220,7 @@ const runs = [
   },
   {
     key: "local25",
+    phase: "execution",
     id: "RUN-025",
     source: "local / other-session",
     title: bi("통합 검색 개선", "Unified search"),
@@ -219,6 +238,7 @@ const runs = [
   },
   {
     key: "local26",
+    phase: "verification",
     archived: true,
     id: "RUN-026",
     source: "local / other-session",
@@ -234,6 +254,7 @@ const runs = [
   },
   {
     key: "local27",
+    phase: "plan",
     id: "RUN-027",
     source: "local / design-study",
     title: bi("새로운 작업", "New work"),
@@ -248,6 +269,7 @@ const runs = [
   },
   {
     key: "peer24",
+    phase: "execution",
     archived: true,
     id: "RUN-024",
     source: "peer / sample-history",
@@ -379,7 +401,14 @@ function addRecord(run, kind, id, title, goal, status = "done", extra = {}) {
 }
 for (const run of runs) {
   if (run.key === "local27") continue;
-  addRecord(run, "PLAN", "PLAN-001", run.planTitle, run.description, "running");
+  addRecord(run, "PLAN", "PLAN-001", run.planTitle, run.description, "running", {
+    approval: "approved",
+    requirements: [
+      bi("선택한 RUN과 원문 출처를 함께 유지합니다.", "Retain the selected RUN and original provenance."),
+      bi("한국어·영어에서 같은 탐색과 기록 연결을 제공합니다.", "Provide matching navigation and record links in Korean and English."),
+      ...(run.key === "local24" ? [bi("상단·왼쪽 패널을 고정하고 본문을 스크롤합니다.", "Keep the header and sidebar fixed while page content scrolls.")] : []),
+    ],
+  });
   if (run.key === "local24")
     addRecord(
       run,
@@ -391,6 +420,10 @@ for (const run of runs) {
         "Verify reading and selection across themes and container widths.",
       ),
       "pending",
+      { approval: "pending", requirements: [
+        bi("두 테마에서 본문과 상태를 구분할 수 있어야 합니다.", "Keep text and statuses distinct in both themes."),
+        bi("좁은 화면에서도 키보드로 기록을 탐색합니다.", "Keep records accessible by keyboard on narrow screens."),
+      ] },
     );
   const count = run.key === "local24" ? 12 : run.key === "local25" ? 5 : 3;
   for (let i = 0; i < count; i++) {
@@ -526,6 +559,31 @@ const memories = [
     topic: bi("탐색", "Navigation"),
   },
 ];
+// Independent stage previews and verification outcomes are synthetic fixtures.
+const phaseKeys = ["plan", "approval", "execution", "verification"];
+const phaseLabels = ["planStep", "approvalStep", "executionStep", "verificationStep"];
+const verificationSamples = {
+  local24: [
+    [bi("한국어·영어 표시", "Korean and English content"), "passed", "TASK-002"],
+    [bi("원문 탐색·돌아가기", "Source navigation and Back"), "passed", "TASK-003"],
+    [bi("VS Code 테마 연결", "VS Code theme integration"), "failed", "TASK-004"],
+  ],
+  local25: [
+    [bi("검색 범위 변경", "Search scope changes"), "passed", "TASK-001"],
+    [bi("RUN별 결과 분리", "Results grouped by RUN"), "pending", "TASK-002"],
+    [bi("원문·기억 출처 연결", "Record and memory source links"), "pending", "TASK-004"],
+  ],
+  local26: [
+    [bi("문서 홈 연결", "Documentation home links"), "passed", "TASK-001"],
+    [bi("양언어 명령 예제", "Bilingual command examples"), "passed", "TASK-002"],
+    [bi("상대 링크·앵커", "Relative links and anchors"), "passed", "TASK-003"],
+  ],
+  peer24: [
+    [bi("공유 기록 읽기", "Shared record reading"), "passed", "TASK-001"],
+    [bi("출처·권한 경계", "Provenance and access boundaries"), "failed", "TASK-002"],
+    [bi("동일 ID 구분", "Identical ID disambiguation"), "pending", "TASK-003"],
+  ],
+};
 const capabilities = { discardRun: true };
 function canDiscard(run = currentRun()) {
   return Boolean(run) && capabilities.discardRun && run.writable !== false;
@@ -544,6 +602,7 @@ function view() {
   if (!views.has(state.run))
     views.set(state.run, {
       page: "current",
+      phase: currentRun().phase || "execution",
       openKind: "PLAN",
       record: null,
       filter: "all",
@@ -626,7 +685,7 @@ function blocker() {
     : "";
 }
 function empty(title, help, ico = "inbox", action = "") {
-  return `<div class="empty-page">${icon(ico)}<h2>${t(title)}</h2><p>${t(help)}</p>${action}</div>`;
+  return `<div class="empty-page">${icon(ico)}<h2>${t(title)}</h2>${help ? `<p>${t(help)}</p>` : ""}${action}</div>`;
 }
 function flowBoard(items) {
   if (!items.length) return "";
@@ -680,9 +739,38 @@ document.addEventListener("keydown", (event) => {
     : board.scrollLeft + (event.key === "ArrowRight" ? 1 : -1) * flowLaneStep(board);
   board.scrollTo({ left, behavior: motionPreference.matches ? "auto" : "smooth" });
 });
-function currentPage() {
-  const run = currentRun(),
-    items = taskRecords(),
+function phaseSteps() {
+  const current = phaseKeys.indexOf(currentRun().phase || "execution");
+  return `<ol class="steps phase-steps" aria-label="${t("runStages")}">${phaseKeys.map((phase, index) => `<li class="step ${index <= current ? "step-primary" : ""}" ${index === current ? 'aria-current="step"' : ""}><button id="phase-${phase}" class="phase-button" type="button" data-phase="${phase}" aria-label="${t(phaseLabels[index])}${index === current ? ` · ${t("currentStage")}` : ""}" title="${index === current ? t("currentStage") : ""}" aria-pressed="${phase === view().phase}" aria-controls="phase-content"><span>${t(phaseLabels[index])}</span></button></li>`).join("")}</ol>`;
+}
+function phaseLink(record, label, prefix, cls = "btn btn-sm") {
+  return `<button id="phase-${prefix}-${record.id}" class="${cls}" type="button" data-record="${record.uid}">${label}${icon("arrow")}</button>`;
+}
+function requirementsList(plan) {
+  return `<ul class="phase-requirements">${(plan.requirements || [plan.goal]).map((item) => `<li>${esc(tr(item))}</li>`).join("")}</ul>`;
+}
+function planningPhase() {
+  const plans = runRecords(currentRun(), "PLAN");
+  if (!plans.length) return empty("noPlans", null, "plan");
+  const tasks = [...taskRecords()].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  return `<div class="phase-grid"><div class="phase-stack">${plans.map((plan) => `<article class="card phase-card"><div class="phase-card-meta"><span class="mono">${plan.id}</span>${chip(t(plan.approval === "approved" ? "planFinal" : "planReview"), "badge-outline")}</div><h2>${esc(tr(plan.title))}</h2><p>${esc(tr(plan.goal))}</p><h3>${t("requirements")}</h3>${requirementsList(plan)}<footer>${phaseLink(plan, t("viewPlan"), "plan")}</footer></article>`).join("")}</div><aside class="card phase-card phase-outline"><div class="section-title"><h2>${t("taskOutline")}</h2><span>${formatItemCount(tasks.length)}</span></div>${tasks.length ? `<ul class="phase-task-list">${tasks.slice(0, 6).map((task) => `<li>${phaseLink(task, `<span><span class="mono">${task.id}</span><strong>${esc(tr(task.title))}</strong></span>`, "task", "phase-task-link")}</li>`).join("")}</ul>` : `<p class="muted">${t("noTasks")}</p>`}<footer><button class="btn btn-sm" type="button" data-page="tasks">${t("showTasks")}${icon("arrow")}</button></footer></aside></div>`;
+}
+function approvalPhase() {
+  const plans = runRecords(currentRun(), "PLAN");
+  if (!plans.length) return empty("noApprovals", null, "plan");
+  return `<div class="phase-approval-grid">${plans.map((plan) => `<article class="card phase-card approval-card"><div class="phase-card-meta"><span class="mono">${plan.id}</span><span class="phase-verdict ${plan.approval === "approved" ? "passed" : "pending"}">${icon(plan.approval === "approved" ? "check" : "info")}${t(plan.approval === "approved" ? "approvalApproved" : "approvalPending")}</span></div><h2>${esc(tr(plan.title))}</h2><h3>${t("reviewScope")}</h3><p>${esc(tr(plan.goal))}</p><h3>${t("requirements")}</h3>${requirementsList(plan)}<footer>${phaseLink(plan, t("viewPlan"), "approval")}</footer></article>`).join("")}</div>`;
+}
+function verificationPhase() {
+  const checks = verificationSamples[state.run] || [];
+  if (!checks.length) return empty("noChecks", null, "check");
+  const evidence = runRecords(currentRun(), "FINDING");
+  return `<div class="phase-grid"><section class="card phase-card"><h2>${t("verificationResults")}</h2><ul class="phase-check-list">${checks.map(([label, status, id], index) => {
+    const record = getRecord(`${state.run}/TASK/${id}`);
+    return `<li><button id="phase-check-${index}" class="phase-check" type="button" data-record="${record.uid}"><span class="phase-verdict ${status}">${icon(status === "passed" ? "check" : status === "failed" ? "alert" : "info")}${t(status)}</span><strong>${esc(tr(label))}</strong><span class="phase-check-source mono">${id}${icon("arrow")}</span></button></li>`;
+  }).join("")}</ul></section><aside class="card phase-card phase-evidence"><h2>${t("evidenceRecords")}</h2>${evidence.map((record) => phaseLink(record, `<span><span class="mono">${record.id}</span><strong>${esc(tr(record.title))}</strong></span>`, "finding", "phase-task-link")).join("")}</aside></div>`;
+}
+function executionPhase() {
+  const items = taskRecords(),
     active = items.find((x) => x.status === "running");
   let body;
   if (!items.length) body = empty("noTasks", "noTasksHelp");
@@ -696,9 +784,32 @@ function currentPage() {
   else if (!active)
     body = `${blocker()}${empty("noActive", "noActiveHelp", "info", `<button class="btn btn-sm" type="button" data-page="tasks">${t("showTasks")}</button>`)}`;
   else
-    body = `<section class="current-focus"><ul class="steps phase-steps" aria-label="${t("progress")}">${["planStep", "approvalStep", "executionStep", "verificationStep"].map((key, i) => `<li class="step ${i < 3 ? "step-primary" : ""}">${t(key)}</li>`).join("")}</ul><article class="card focus-surface"><div class="eyebrow"><span>${t("currentFocus")}</span><span>${active.id}</span></div><h2>${esc(tr(active.title))}</h2><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))} · ${t(active.status)}</span><button id="focus-${active.id}" class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}</section>`;
-  return `${pageHeader(tr(run.title), tr(run.description))}${body}${flowBoard(items)}`;
+    body = `<section class="current-focus"><article class="card focus-surface"><div class="eyebrow"><span>${t("currentFocus")}</span><span>${active.id}</span></div><h2>${esc(tr(active.title))}</h2><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))} · ${t(active.status)}</span><button id="focus-${active.id}" class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}</section>`;
+  return `${body}${flowBoard(items)}`;
 }
+function currentPage() {
+  const run = currentRun();
+  const renderers = { plan: planningPhase, approval: approvalPhase, execution: executionPhase, verification: verificationPhase };
+  return `${pageHeader(tr(run.title), view().phase === "execution" ? tr(run.description) : "")}${phaseSteps()}<section id="phase-content" class="phase-content" data-phase="${view().phase}" aria-labelledby="phase-${view().phase}">${renderers[view().phase]()}</section>`;
+}
+function selectPhase(phase) {
+  if (!phaseKeys.includes(phase)) return;
+  view().phase = phase;
+  render({ resetScroll: true, motion: "page" });
+  $(`#phase-${phase}`).focus({ preventScroll: true });
+  announce(t(phaseLabels[phaseKeys.indexOf(phase)]));
+}
+document.addEventListener("keydown", (event) => {
+  if (!event.target.matches?.("button[data-phase]")) return;
+  let index = phaseKeys.indexOf(event.target.dataset.phase);
+  if (event.key === "ArrowRight") index = (index + 1) % phaseKeys.length;
+  else if (event.key === "ArrowLeft") index = (index + phaseKeys.length - 1) % phaseKeys.length;
+  else if (event.key === "Home") index = 0;
+  else if (event.key === "End") index = phaseKeys.length - 1;
+  else return;
+  event.preventDefault();
+  selectPhase(phaseKeys[index]);
+});
 function filteredTasks() {
   const v = view();
   const q = v.taskQuery.trim().toLocaleLowerCase();
@@ -781,7 +892,7 @@ function recordPage() {
       "Verify record context and keyboard focus across RUN changes and refreshes.",
     ),
   ];
-  return `<article class="record-page"><header class="record-hero"><div class="record-heading-row"><div class="record-heading-copy"><div class="record-context">${chip(r.kind, "badge-outline")}<span class="eyebrow">${r.id}</span>${statusMark(r.status)}</div><h1>${esc(tr(r.title))}</h1><div class="record-meta"><span>${t("owner")}: ${esc(tr(r.owner))}</span><span>·</span><span>2026-11-10</span></div></div>${backButton()}</div></header><div class="reading-grid"><div class="reading-body"><section class="reading-section"><h2>${t("objective")}</h2><p>${esc(tr(r.goal))}</p></section><section class="reading-section"><h2>${r.kind === "PLAN" ? t("requirements") : t("result")}</h2><p>${r.kind === "PLAN" ? esc(tr(run.description)) : resultText(r)}</p></section><section class="reading-section"><h2>${t("verification")}</h2><ul>${checks.map((c) => `<li class="checkline">${icon("check")}<span>${esc(tr(c))}</span></li>`).join("")}</ul></section><section class="reading-section"><h2>${t("depends")}</h2><p>${
+  return `<article class="record-page"><header class="record-hero"><div class="record-heading-row"><div class="record-heading-copy"><div class="record-context">${chip(r.kind, "badge-outline")}<span class="eyebrow">${r.id}</span>${statusMark(r.status)}</div><h1>${esc(tr(r.title))}</h1><div class="record-meta"><span>${t("owner")}: ${esc(tr(r.owner))}</span><span>·</span><span>2026-11-10</span></div></div>${backButton()}</div></header><div class="reading-grid"><div class="reading-body"><section class="reading-section"><h2>${t("objective")}</h2><p>${esc(tr(r.goal))}</p></section><section class="reading-section"><h2>${r.kind === "PLAN" ? t("requirements") : t("result")}</h2>${r.kind === "PLAN" && r.requirements?.length ? `<ul>${r.requirements.map((item) => `<li>${esc(tr(item))}</li>`).join("")}</ul>` : `<p>${r.kind === "PLAN" ? esc(tr(run.description)) : resultText(r)}</p>`}</section><section class="reading-section"><h2>${t("verification")}</h2><ul>${checks.map((c) => `<li class="checkline">${icon("check")}<span>${esc(tr(c))}</span></li>`).join("")}</ul></section><section class="reading-section"><h2>${t("depends")}</h2><p>${
     r.depends.length
       ? r.depends
           .map((id) => {
@@ -1114,6 +1225,7 @@ function syncUrl() {
     lang: state.locale,
     theme: state.theme,
   });
+  if (view().page === "current") params.set("phase", view().phase);
   if (view().page === "record" && view().record)
     params.set("record", view().record);
   history.replaceState(null, "", `#${params}`);
@@ -1321,6 +1433,7 @@ document.addEventListener("click", (event) => {
     $("#language-toggle").focus({ preventScroll: true });
     announce(state.locale === "ko" ? "한국어 화면" : "English interface");
   } else if (button.dataset.run) switchRun(button.dataset.run, true);
+  else if (button.dataset.phase) selectPhase(button.dataset.phase);
   else if (button.dataset.page)
     navigate(button.dataset.page, Boolean(button.closest("#page-content")));
   else if (button.dataset.fold) toggleExplore(button.dataset.fold);
@@ -1485,6 +1598,8 @@ if (["light", "dark"].includes(initial.get("theme")))
   state.theme = initial.get("theme");
 if (["current", "tasks", "records", "memories"].includes(initial.get("page")))
   view().page = initial.get("page");
+if (view().page === "current" && phaseKeys.includes(initial.get("phase")))
+  view().phase = initial.get("phase");
 if (initial.get("page") === "record") {
   const item = getRecord(initial.get("record"));
   if (item && item.runKey === state.run) {
