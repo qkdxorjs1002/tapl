@@ -549,7 +549,7 @@ function view() {
       filter: "all",
       taskQuery: "",
       query: "",
-      scope: "current",
+      scope: "all",
       group: "run",
       searchOpen: [state.run],
       memoryQuery: "",
