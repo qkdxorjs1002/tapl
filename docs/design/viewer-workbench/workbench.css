@@ -935,13 +935,18 @@ select {
   margin-bottom: 18px;
 }
 .status-filter {
-  display: flex;
+  display: inline-flex;
   gap: 2px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
+  border-radius: 999px;
 }
 .status-filter .btn {
   font-size: 12px;
-  border: 1px solid var(--color-primary);
+  border: 0;
+  border-radius: 999px;
 }
 .task-search {
   display: flex;
@@ -1959,7 +1964,7 @@ select {
     flex: 1;
   }
   .status-filter .btn {
-    padding-inline: 8px;
+    padding-inline: 5px;
     font-size: 11px;
   }
   .record-heading-row {
