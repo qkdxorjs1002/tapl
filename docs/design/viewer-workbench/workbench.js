@@ -33,7 +33,11 @@ const copy = {
   skipped: ["건너뜀", "Skipped"],
   complete: ["완료", "Completed"],
   progress: ["작업 완료 비율", "Task completion"],
-  currentFocus: ["지금 집중하는 작업", "IN FOCUS"],
+  currentFocus: ["진행 중인 작업", "Work in progress"],
+  taskOverview: ["작업 현황", "Task overview"],
+  taskCarousel: ["작업 캐러셀", "Task carousel"],
+  previousTasks: ["이전 작업", "Previous tasks"],
+  nextTasks: ["다음 작업", "Next tasks"],
   taskDetail: ["목적과 검증 조건", "Purpose and verification"],
   upNext: ["이어지는 작업", "Up next"],
   waitsFor: ["선행 조건 대기", "Awaiting prerequisites"],
@@ -43,7 +47,6 @@ const copy = {
     "A blocker is holding up downstream verification",
   ],
   blockerLink: ["막힘 근거 읽기", "Read blocker evidence"],
-  planSummary: ["이 RUN의 계획", "Plan for this RUN"],
   objective: ["목적", "Objective"],
   owner: ["담당", "Owner"],
   source: ["출처", "Source"],
@@ -558,6 +561,7 @@ function view() {
       memory: null,
       scrolls: {},
       foldScrolls: {},
+      carouselPosition: null,
     });
   return views.get(state.run);
 }
@@ -621,7 +625,12 @@ function sectionTitle(title, meta = "") {
   return `<div class="section-title"><h2>${title}</h2>${meta ? `<span>${meta}</span>` : ""}</div>`;
 }
 function taskQueue(items) {
-  return `<ul class="task-queue list">${items.map((item) => `<li class="queue-item"><button type="button" class="queue-button" data-record="${item.uid}"><span class="status ${statusColors[item.status]}" aria-hidden="true"></span><span class="queue-copy"><span class="queue-code">${item.id}</span><span class="queue-title">${esc(tr(item.title))}</span><span class="queue-meta">${esc(tr(item.owner))} · ${t(item.status)}</span></span>${icon("arrow")}</button></li>`).join("")}</ul>`;
+  return `<ul class="task-queue list">${items.map((item) => `<li class="queue-item"><button id="queue-${item.id}" type="button" class="queue-button" data-record="${item.uid}"><span class="status ${statusColors[item.status]}" aria-hidden="true"></span><span class="queue-copy"><span class="queue-code">${item.id}</span><span class="queue-title">${esc(tr(item.title))}</span><span class="queue-meta">${esc(tr(item.owner))} · ${t(item.status)}</span></span>${icon("arrow")}</button></li>`).join("")}</ul>`;
+}
+function taskCarousel(items) {
+  if (!items.length) return "";
+  const ordered = [...items].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  return `<section class="task-overview" aria-labelledby="task-overview-title"><div class="task-overview-header"><h2 id="task-overview-title">${t("taskOverview")}</h2><div class="carousel-controls"><button id="tasks-previous" class="btn btn-ghost btn-sm btn-circle" type="button" data-carousel="previous" aria-controls="task-carousel" aria-label="${t("previousTasks")}">${icon("back")}</button><button id="tasks-next" class="btn btn-ghost btn-sm btn-circle" type="button" data-carousel="next" aria-controls="task-carousel" aria-label="${t("nextTasks")}">${icon("arrow")}</button></div></div><ol id="task-carousel" class="carousel carousel-horizontal task-carousel" aria-label="${t("taskCarousel")}">${ordered.map((item) => `<li class="carousel-item" ${item.status === "running" ? 'aria-current="step"' : ""}><button id="carousel-${item.id}" class="task-card" type="button" data-record="${item.uid}"><span class="task-card-meta"><span class="mono">${item.id}</span>${statusMark(item.status)}</span><span class="task-card-title">${esc(tr(item.title))}</span><span class="task-card-owner">${esc(tr(item.owner))}</span></button></li>`).join("")}</ol></section>`;
 }
 function blocker() {
   const item = taskRecords().find((x) => x.status === "blocked");
@@ -635,8 +644,7 @@ function empty(title, help, ico = "inbox", action = "") {
 function currentPage() {
   const run = currentRun(),
     items = taskRecords(),
-    active = items.find((x) => x.status === "running"),
-    plan = runRecords(run, "PLAN")[0];
+    active = items.find((x) => x.status === "running");
   let body;
   if (!items.length) body = empty("noTasks", "noTasksHelp");
   else if (!active && items.every((x) => x.status === "done"))
@@ -649,8 +657,8 @@ function currentPage() {
   else if (!active)
     body = `${blocker()}${empty("noActive", "noActiveHelp", "info", `<button class="btn btn-sm" type="button" data-page="tasks">${t("showTasks")}</button>`)}`;
   else
-    body = `<div class="run-overview"><section><ul class="steps phase-steps" aria-label="${t("progress")}">${["planStep", "approvalStep", "executionStep", "verificationStep"].map((key, i) => `<li class="step ${i < 3 ? "step-primary" : ""}">${t(key)}</li>`).join("")}</ul><article class="card focus-surface"><div class="eyebrow"><span>${t("currentFocus")}</span><span>${active.id}</span></div><h2>${esc(tr(active.title))}</h2><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))} · ${t(active.status)}</span><button class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}<div class="details-grid">${sectionTitle(t("planSummary"))}${plan ? recButton(plan, `${plan.id} · ${esc(tr(plan.title))}`) : ""}</div></section><aside class="run-aside"><section class="run-aside-section">${sectionTitle(t("upNext"), t("waitsFor"))}${taskQueue(items.filter((x) => x.status === "pending").slice(0, 4))}</section><section class="run-aside-section">${sectionTitle(t("recentDone"), `${counts().done}`)}${taskQueue(items.filter((x) => x.status === "done").slice(0, 3))}</section></aside></div>`;
-  return `${pageHeader(tr(run.title), tr(run.description))}${items.length ? meter() : ""}${body}`;
+    body = `<div class="run-overview"><section><ul class="steps phase-steps" aria-label="${t("progress")}">${["planStep", "approvalStep", "executionStep", "verificationStep"].map((key, i) => `<li class="step ${i < 3 ? "step-primary" : ""}">${t(key)}</li>`).join("")}</ul><article class="card focus-surface"><div class="eyebrow"><span>${t("currentFocus")}</span><span>${active.id}</span></div><h2>${esc(tr(active.title))}</h2><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))} · ${t(active.status)}</span><button id="focus-${active.id}" class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}</section><aside class="run-aside"><section class="run-aside-section">${sectionTitle(t("upNext"), t("waitsFor"))}${taskQueue(items.filter((x) => x.status === "pending").slice(0, 4))}</section><section class="run-aside-section">${sectionTitle(t("recentDone"), `${counts().done}`)}${taskQueue(items.filter((x) => x.status === "done").slice(0, 3))}</section></aside></div>`;
+  return `${pageHeader(tr(run.title), tr(run.description))}${taskCarousel(items)}${body}`;
 }
 function filteredTasks() {
   const v = view();
@@ -863,6 +871,37 @@ function updateRunIndicator() {
   if (!tabs.hasAttribute("data-indicator-ready"))
     requestAnimationFrame(() => tabs.setAttribute("data-indicator-ready", ""));
 }
+function updateTaskCarousel() {
+  const track = $("#task-carousel");
+  if (!track) return;
+  $("#tasks-previous").disabled = track.scrollLeft <= 1;
+  $("#tasks-next").disabled = track.scrollLeft >= track.scrollWidth - track.clientWidth - 1;
+}
+function taskCarouselStep(track) {
+  return track.firstElementChild.getBoundingClientRect().width + parseFloat(getComputedStyle(track).columnGap);
+}
+// Card-relative positions survive width changes while another RUN is selected.
+function taskCarouselPosition(track) {
+  return track.scrollLeft / taskCarouselStep(track);
+}
+function restoreTaskCarousel() {
+  const track = $("#task-carousel");
+  if (!track) return;
+  const first = track.firstElementChild;
+  const current = $("[aria-current=step]", track) || first;
+  track.scrollLeft = (view().carouselPosition ?? [...track.children].indexOf(current)) * taskCarouselStep(track);
+  view().carouselPosition = taskCarouselPosition(track);
+  updateTaskCarousel();
+}
+function scrollTaskCarousel(direction) {
+  const track = $("#task-carousel");
+  if (!track) return;
+  const step = taskCarouselStep(track);
+  track.scrollBy({
+    left: direction * Math.max(step, Math.floor(track.clientWidth / step) * step),
+    behavior: motionPreference.matches ? "auto" : "smooth",
+  });
+}
 function toggleExplore(kind) {
   finishFoldMotion();
   const owner = view(),
@@ -974,6 +1013,29 @@ document.addEventListener("keydown", (event) => {
   }
 });
 window.addEventListener("resize", updateRunIndicator);
+window.addEventListener("resize", updateTaskCarousel);
+document.addEventListener("scroll", (event) => {
+  const track = event.target;
+  if (track.id !== "task-carousel" || !track.isConnected) return;
+  const owner = views.get(track.closest("#page-content").dataset.run);
+  owner.carouselPosition = taskCarouselPosition(track);
+  updateTaskCarousel();
+}, true);
+document.addEventListener("keydown", (event) => {
+  const track = event.target.closest?.("#task-carousel");
+  if (!track || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const buttons = [...track.querySelectorAll("button")];
+  let index = buttons.indexOf(event.target.closest("button"));
+  if (event.key === "Home") index = 0;
+  else if (event.key === "End") index = buttons.length - 1;
+  else index = Math.max(0, Math.min(buttons.length - 1, index + (event.key === "ArrowRight" ? 1 : -1)));
+  event.preventDefault();
+  buttons[index].focus({ preventScroll: true });
+  track.scrollTo({
+    left: buttons[index].parentElement.offsetLeft - track.firstElementChild.offsetLeft,
+    behavior: motionPreference.matches ? "auto" : "smooth",
+  });
+});
 
 function renderTabs() {
   const selected = currentRun();
@@ -1119,6 +1181,11 @@ function render(options = {}) {
   pageMotions = [];
   const token = focusToken();
   const scroll = $("#page-scroll").scrollTop;
+  if (options.captureCarousel !== false) {
+    const track = $("#task-carousel");
+    const previous = views.get($("#page-content").dataset.run);
+    if (track && previous) previous.carouselPosition = taskCarouselPosition(track);
+  }
   if (options.captureSearch !== false) {
     const content = $("#page-content");
     const previous = views.get(content.dataset.run);
@@ -1133,6 +1200,7 @@ function render(options = {}) {
   renderTabs();
   renderSidebar(options.captureSidebar !== false);
   renderPage();
+  restoreTaskCarousel();
   syncResponsiveMenu();
   $("#page-scroll").scrollTop = options.resetScroll ? 0 : scroll;
   syncUrl();
@@ -1156,6 +1224,7 @@ function rememberPage() {
   finishFoldMotion();
   finishDisclosures();
   const saved = structuredClone(view());
+  if ($("#task-carousel")) saved.carouselPosition = taskCarouselPosition($("#task-carousel"));
   $("#record-folds")
     .querySelectorAll(".fold-list:not([hidden])")
     .forEach((list) => (saved.foldScrolls[list.id] = list.scrollTop));
@@ -1182,6 +1251,7 @@ function goBack() {
     focusPage: true,
     captureSearch: false,
     captureSidebar: false,
+    captureCarousel: false,
     motion: "page",
   });
   $("#page-scroll").scrollTop = previous.scroll;
@@ -1266,6 +1336,7 @@ document.addEventListener("click", (event) => {
     $("#language-toggle").focus({ preventScroll: true });
     announce(state.locale === "ko" ? "한국어 화면" : "English interface");
   } else if (button.dataset.run) switchRun(button.dataset.run, true);
+  else if (button.dataset.carousel) scrollTaskCarousel(button.dataset.carousel === "next" ? 1 : -1);
   else if (button.dataset.page)
     navigate(button.dataset.page, Boolean(button.closest("#page-content")));
   else if (button.dataset.fold) toggleExplore(button.dataset.fold);

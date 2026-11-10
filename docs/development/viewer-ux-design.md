@@ -20,6 +20,8 @@ On PC, the top bar and sidebar remain fixed while only the right page scrolls. T
 
 TASK status and PLAN/TASK/FINDING tabs display counts with units: `12개` in Korean and `12 items` (`1 item` for singular) in English.
 
+Current RUN omits the top aggregate and bottom plan summary. A task overview carousel sits above Plan, Approval, Execution and Verification progress, showing titles, statuses and owners in TASK ID order. It initially shows the task in progress and supports previous/next buttons, horizontal scrolling, arrow keys, Home and End. Selecting a card opens its Explore detail. Back and RUN, language and theme changes restore the carousel position. There is no autoplay; reduced motion uses immediate scrolling. The focus card is labeled `Work in progress`.
+
 The header uses the `tapl` name as text. Pages opened through internal links show a `Back` button at the upper right. TASKs, search results, related records and memory sources can return to the previous RUN, page, query/filter, expanded groups, selected record and scroll position. The current language and theme remain in effect. Choosing a sidebar page or top RUN tab directly starts a new navigation path and clears the return trail. Direct links and reloaded pages have no return button.
 
 The search-scope selector shows a down arrow. RUN-grouped and record-list view controls share the status filter’s subtle pill outline. Grouped search across all records shows RUN titles, provenance and match counts first; expand a group to read individual records. Expanded groups persist through language and theme changes. Record-list presentation lists individual records directly.

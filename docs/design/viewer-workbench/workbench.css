@@ -707,6 +707,97 @@ select {
   gap: 25px;
   align-items: start;
 }
+.task-overview {
+  min-width: 0;
+  margin-bottom: 25px;
+}
+.task-overview-header,
+.carousel-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.task-overview-header {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.task-overview-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.carousel-controls .btn {
+  border: 1px solid var(--color-base-300);
+  background-color: var(--surface);
+}
+.carousel-controls .btn:disabled {
+  opacity: 0.35;
+}
+.task-carousel {
+  display: flex;
+  position: relative;
+  width: 100%;
+  gap: 12px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: hidden;
+  scroll-padding-inline: 4px;
+  scroll-behavior: auto;
+  overscroll-behavior-x: contain;
+}
+.task-carousel .carousel-item {
+  width: clamp(230px, 27%, 300px);
+}
+.task-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  width: 100%;
+  min-height: 145px;
+  padding: 17px 18px;
+  border: 1px solid var(--color-base-300);
+  border-radius: 14px;
+  background-color: var(--surface);
+  color: var(--color-base-content);
+  text-align: left;
+  transition:
+    border-color 160ms var(--ease-state),
+    background-color 160ms var(--ease-state);
+}
+.task-card:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-base-300));
+  background-color: var(--soft);
+}
+.carousel-item[aria-current="step"] .task-card {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-base-300));
+  background-color: color-mix(in srgb, var(--color-primary) 5%, var(--surface));
+}
+.task-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.task-card-meta .status-label {
+  font-size: 11px;
+}
+.task-card-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-height: 3em;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.task-card-owner {
+  font-size: 11px;
+  color: var(--muted);
+}
 .focus-surface {
   padding: 28px 30px;
   border: 1px solid var(--color-base-300);
@@ -1896,6 +1987,9 @@ select {
   }
   .focus-surface {
     padding: 21px 19px;
+  }
+  .task-carousel .carousel-item {
+    width: calc(100% - 30px);
   }
   .focus-surface h2 {
     font-size: 23px;
