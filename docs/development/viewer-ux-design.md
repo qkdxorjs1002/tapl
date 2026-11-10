@@ -6,7 +6,7 @@
 
 ## Integrated concept
 
-The [integrated Viewer concept](../design/viewer-workbench/index.html) combines the current-work focus of 03 with the TASK status view of 01 in a fixed shell. Screenshots show [current RUN](../design/viewer-workbench/current-ko.png), [Explore details](../design/viewer-workbench/explore-ko.png), [integrated search](../design/viewer-workbench/search-ko.png) and [English with a dark theme](../design/viewer-workbench/current-en-dark.png).
+The [integrated Viewer concept](../design/viewer-workbench/index.html) combines the current-work focus of 03, the Flow kanban of 02 and the TASK status view of 01 in a fixed shell. Screenshots show [current RUN](../design/viewer-workbench/current-ko.png), [Explore details](../design/viewer-workbench/explore-ko.png), [integrated search](../design/viewer-workbench/search-ko.png) and [English with a dark theme](../design/viewer-workbench/current-en-dark.png).
 
 | Area | Structure and behavior |
 | --- | --- |
@@ -20,7 +20,7 @@ On PC, the top bar and sidebar remain fixed while only the right page scrolls. T
 
 TASK status and PLAN/TASK/FINDING tabs display counts with units: `12개` in Korean and `12 items` (`1 item` for singular) in English.
 
-Current RUN omits the top aggregate and bottom plan summary. A task overview carousel sits above Plan, Approval, Execution and Verification progress, showing titles, statuses and owners in TASK ID order. It initially shows the task in progress and supports previous/next buttons, horizontal scrolling, arrow keys, Home and End. Selecting a card opens its Explore detail. Back and RUN, language and theme changes restore the carousel position. There is no autoplay; reduced motion uses immediate scrolling. The focus card is labeled `Work in progress`.
+Current RUN omits the top aggregate and bottom plan summary. The status kanban from 02 Flow Board appears below Plan, Approval, Execution and Verification progress and `Work in progress`. Pending, In progress, Blocked and Completed columns show counts with units, titles, owners and prerequisites in TASK ID order; skipped tasks get a separate column when present. Cards are read-only and open Explore details, with Back restoring page scroll and the original card focus. The board uses four columns on PC, two at intermediate widths and one on narrow screens, with page scrolling only. The carousel, Up next and Completed work lists are omitted.
 
 The header uses the `tapl` name as text. Pages opened through internal links show a `Back` button at the upper right. TASKs, search results, related records and memory sources can return to the previous RUN, page, query/filter, expanded groups, selected record and scroll position. The current language and theme remain in effect. Choosing a sidebar page or top RUN tab directly starts a new navigation path and clears the return trail. Direct links and reloaded pages have no return button.
 
@@ -67,7 +67,7 @@ Sources: [`App.tsx`](../../vscode-extension/src/webview/App.tsx), [`styles.css`]
 | Concept | Main information structure | Extension adaptation | Fit and limitation |
 | --- | --- | --- | --- |
 | **01 Signal Desk** | Task list alongside selected-task detail | Compact list and detail dialog | **Basis of the integrated TASK status view.** Balances work and evidence. |
-| 02 Flow Board | Pending, running, blocked and completed lanes | Status filter and vertical lanes | Parallel work; long queues increase page length. |
+| **02 Flow Board** | Pending, running, blocked and completed lanes | Status filter and vertical lanes | **Basis for task flow below Current RUN in the integrated concept.** More tasks make the page longer. |
 | **03 Focus Now** | Current task, purpose, verification and next queue | Prioritize the current task | **Basis of the integrated current RUN view.** Needs a separate comparison view. |
 | 04 Evidence Stream | Chronological events and source records | Vertical timeline | Resuming and retrospectives; chronology is not dependency order. |
 | 05 Record Library | Search results alongside source content | Results followed by content | Records and archives; less suitable for live execution. |

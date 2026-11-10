@@ -701,102 +701,90 @@ select {
   height: 4px;
   width: 145px;
 }
-.run-overview {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(235px, 0.75fr);
-  gap: 25px;
-  align-items: start;
-}
-.task-overview {
+/* Flow Board uses page scrolling; lanes never trap vertical scroll. */
+.flow-section {
   min-width: 0;
-  margin-bottom: 25px;
+  margin-top: 30px;
 }
-.task-overview-header,
-.carousel-controls {
+.flow-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px;
+}
+.flow-lane {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-base-300) 70%, transparent);
+  border-radius: 14px;
+  background: var(--soft);
+}
+.flow-heading {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-.task-overview-header {
   justify-content: space-between;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin: 3px 2px 15px;
 }
-.task-overview-header h2 {
-  font-size: 14px;
+.flow-heading h3 {
+  font-size: 12px;
   font-weight: 600;
 }
-.carousel-controls .btn {
-  border: 1px solid var(--color-base-300);
-  background-color: var(--surface);
+.flow-count,
+.flow-empty {
+  font-size: 11px;
+  color: var(--muted);
 }
-.carousel-controls .btn:disabled {
-  opacity: 0.35;
-}
-.task-carousel {
-  display: flex;
-  position: relative;
-  width: 100%;
-  gap: 12px;
+.flow-list {
+  display: grid;
+  gap: 10px;
   margin: 0;
-  padding: 4px;
+  padding: 0;
   list-style: none;
-  overflow-y: hidden;
-  scroll-padding-inline: 4px;
-  scroll-behavior: auto;
-  overscroll-behavior-x: contain;
 }
-.task-carousel .carousel-item {
-  width: clamp(230px, 27%, 300px);
-}
-.task-card {
+.flow-task {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 14px;
+  gap: 12px;
   width: 100%;
-  min-height: 145px;
-  padding: 17px 18px;
+  padding: 16px;
   border: 1px solid var(--color-base-300);
-  border-radius: 14px;
-  background-color: var(--surface);
+  border-radius: 10px;
+  background: var(--surface);
   color: var(--color-base-content);
   text-align: left;
   transition:
     border-color 160ms var(--ease-state),
     background-color 160ms var(--ease-state);
 }
-.task-card:hover {
+.flow-task:hover {
   border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-base-300));
-  background-color: var(--soft);
+  background: color-mix(in srgb, var(--color-primary) 3%, var(--surface));
 }
-.carousel-item[aria-current="step"] .task-card {
-  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-base-300));
-  background-color: color-mix(in srgb, var(--color-primary) 5%, var(--surface));
+.flow-task[aria-describedby="flow-running"] {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-base-300));
 }
-.task-card-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.flow-task-id,
+.flow-task-footer {
   font-size: 11px;
   color: var(--muted);
 }
-.task-card-meta .status-label {
-  font-size: 11px;
-}
-.task-card-title {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  min-height: 3em;
+.flow-task-title {
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.5;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
-.task-card-owner {
-  font-size: 11px;
-  color: var(--muted);
+.flow-task-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+}
+.flow-empty {
+  padding: 18px 4px;
+  text-align: center;
 }
 .focus-surface {
   padding: 28px 30px;
@@ -898,44 +886,6 @@ select {
   font-size: 11px;
   color: var(--muted);
 }
-.run-aside {
-  padding-top: 3px;
-  min-width: 0;
-}
-.run-aside-section {
-  margin-bottom: 28px;
-}
-.task-queue {
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-.queue-item {
-  border-bottom: 1px solid var(--color-base-300);
-  padding: 15px 0;
-}
-.queue-button {
-  border: 0;
-  background: none;
-  width: 100%;
-  display: flex;
-  align-items: start;
-  gap: 9px;
-  text-align: left;
-  color: var(--color-base-content);
-  padding: 0;
-  line-height: 1.6;
-}
-.queue-button > .status {
-  margin-top: 6px;
-  flex: none;
-  width: 6px;
-  height: 6px;
-}
-.queue-button .queue-copy {
-  flex: 1;
-  min-width: 0;
-}
 .queue-code {
   font:
     11px ui-monospace,
@@ -956,15 +906,6 @@ select {
   font-size: 12px;
   color: var(--muted);
   margin-top: 5px;
-}
-.queue-button > svg {
-  width: 13px;
-  height: 13px;
-  margin-top: 6px;
-  color: var(--muted);
-}
-.queue-button:hover .queue-title {
-  color: var(--color-primary);
 }
 .blocker-notice {
   border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
@@ -1680,7 +1621,6 @@ select {
   box-shadow: 0 0 0 3px
     color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
-.queue-button .icon,
 .related-button > .icon,
 .memory-footer .btn .icon {
   transition: transform 180ms var(--ease-out);
@@ -1726,7 +1666,6 @@ select {
     box-shadow: 0 5px 12px
       color-mix(in srgb, var(--color-primary) 18%, transparent);
   }
-  .queue-button:hover .icon,
   .related-button:hover > .icon,
   .memory-footer .btn:hover .icon {
     transform: translateX(3px);
@@ -1756,11 +1695,11 @@ select {
   .page-title-row h1 {
     font-size: 32px;
   }
-  .run-overview {
-    gap: 38px;
-  }
 }
 @media (max-width: 1250px) {
+  .flow-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   :root {
     --rail: 225px;
   }
@@ -1784,10 +1723,6 @@ select {
   }
   .page-content {
     padding: 27px 29px;
-  }
-  .run-overview {
-    grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.8fr);
-    gap: 22px;
   }
   .focus-surface {
     padding: 23px;
@@ -1822,14 +1757,6 @@ select {
   }
   .page-content {
     padding: 24px;
-  }
-  .run-overview {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .run-aside {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
   }
   .reading-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1988,9 +1915,6 @@ select {
   .focus-surface {
     padding: 21px 19px;
   }
-  .task-carousel .carousel-item {
-    width: calc(100% - 30px);
-  }
   .focus-surface h2 {
     font-size: 23px;
   }
@@ -2005,12 +1929,6 @@ select {
   }
   .phase-steps {
     font-size: 11px;
-  }
-  .run-aside {
-    display: block;
-  }
-  .run-aside-section {
-    margin-bottom: 25px;
   }
   .record-context .eyebrow {
     font-size: 11px;
@@ -2183,7 +2101,6 @@ select {
   .input {
     font-size: 16px;
   }
-  .queue-button,
   .related-button {
     min-height: 40px;
   }
@@ -2195,5 +2112,11 @@ select {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+}
+
+@media (max-width: 600px) {
+  .flow-board {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
