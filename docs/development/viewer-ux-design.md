@@ -18,6 +18,8 @@ The [integrated Viewer concept](../design/viewer-workbench/index.html) combines 
 
 On PC, the top bar and sidebar remain fixed while only the right page scrolls. The expanded Explore list is a separate scroll region. Narrow layouts expose navigation through a menu and exclude the closed panel from keyboard navigation. Each RUN keeps separate page, search and record selection state. Selecting another RUN's search result or memory source moves to its source RUN tab. The examples include identical display IDs with distinct provenance.
 
+TASK status and PLAN/TASK/FINDING tabs display counts with units: `12개` in Korean and `12 items` (`1 item` for singular) in English.
+
 The header uses the `tapl` name as text. Pages opened through internal links show a `Back` button at the upper right. TASKs, search results, related records and memory sources can return to the previous RUN, page, query/filter, expanded groups, selected record and scroll position. The current language and theme remain in effect. Choosing a sidebar page or top RUN tab directly starts a new navigation path and clears the return trail. Direct links and reloaded pages have no return button.
 
 Grouped search across all records shows RUN titles, provenance and match counts first; expand a group to read individual records. Expanded groups persist through language and theme changes. Record-list presentation lists individual records directly.

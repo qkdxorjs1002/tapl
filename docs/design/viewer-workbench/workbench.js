@@ -97,6 +97,8 @@ const copy = {
   resultCount: ["검색 결과", "Results"],
   sourceRun: ["원문 RUN", "Source RUN"],
   recordCount: ["개 레코드", "records"],
+  itemCount: ["{count}개", "{count} items"],
+  singleItemCount: ["{count}개", "{count} item"],
   memorySearch: ["기억 검색", "Search memories"],
   memoryPlaceholder: ["교훈 또는 검색 단서", "Lesson or recall cue"],
   memoryScope: ["작업 공간 전체", "Entire workspace"],
@@ -977,6 +979,9 @@ function renderTabs() {
   $("#page-content").setAttribute("aria-labelledby", `tab-${selected.key}`);
   updateRunIndicator();
 }
+function formatItemCount(count) {
+  return t(count === 1 ? "singleItemCount" : "itemCount").replace("{count}", String(count));
+}
 function navItem(page, ico, count = "") {
   return `<button type="button" class="nav-button" data-page="${page}" ${view().page === page ? 'aria-current="page"' : ""}>${icon(ico)}<span>${t(page)}</span>${count !== "" ? `<span class="nav-counter">${count}</span>` : ""}</button>`;
 }
@@ -986,7 +991,7 @@ function renderSidebar(captureScroll = true) {
     c = counts();
   $("#workspace-nav").innerHTML =
     navItem("current", "focus", `${c.total ? Math.round((c.done / c.total) * 100) : 0}%`) +
-    navItem("tasks", "table", taskRecords().length);
+    navItem("tasks", "table", formatItemCount(taskRecords().length));
   $("#memory-nav").innerHTML =
     navItem("records", "search") + navItem("memories", "book");
   const folds = $("#record-folds");
@@ -1000,7 +1005,7 @@ function renderSidebar(captureScroll = true) {
     .map((kind) => {
       const items = runRecords(run, kind),
         open = v.openKind === kind;
-      return `<section class="record-fold ${open ? "is-open" : ""}"><button id="fold-${kind}" class="fold-trigger" type="button" data-fold="${kind}" aria-expanded="${open}" aria-controls="list-${kind}">${icon("chevron").replace('class="icon"', 'class="icon fold-chevron"')}${icon(kind === "PLAN" ? "folder" : "file")}<span>${kind}</span><span class="fold-count">${items.length}</span></button><div class="fold-list" id="list-${kind}" role="region" aria-labelledby="fold-${kind}" ${open ? "" : "hidden"}>${items.map((r) => `<button type="button" data-record="${r.uid}" ${v.page === "record" && v.record === r.uid ? 'aria-current="true"' : ""}><span class="record-code"><span class="status ${statusColors[r.status]}" aria-hidden="true"></span>${r.id}</span><span class="record-label">${esc(tr(r.title))}</span></button>`).join("") || `<p class="fold-empty">${t("noRecords")}</p>`}</div></section>`;
+      return `<section class="record-fold ${open ? "is-open" : ""}"><button id="fold-${kind}" class="fold-trigger" type="button" data-fold="${kind}" aria-expanded="${open}" aria-controls="list-${kind}">${icon("chevron").replace('class="icon"', 'class="icon fold-chevron"')}${icon(kind === "PLAN" ? "folder" : "file")}<span>${kind}</span><span class="fold-count">${formatItemCount(items.length)}</span></button><div class="fold-list" id="list-${kind}" role="region" aria-labelledby="fold-${kind}" ${open ? "" : "hidden"}>${items.map((r) => `<button type="button" data-record="${r.uid}" ${v.page === "record" && v.record === r.uid ? 'aria-current="true"' : ""}><span class="record-code"><span class="status ${statusColors[r.status]}" aria-hidden="true"></span>${r.id}</span><span class="record-label">${esc(tr(r.title))}</span></button>`).join("") || `<p class="fold-empty">${t("noRecords")}</p>`}</div></section>`;
     })
     .join("");
   folds.querySelectorAll(".fold-list:not([hidden])").forEach((list) => {
