@@ -3,7 +3,6 @@
 const copy = {
   skip: ["본문으로 건너뛰기", "Skip to page content"],
   navigation: ["탐색", "Navigation"],
-  concept: ["통합 시안", "Design concept"],
   language: ["언어", "Language"],
   theme: ["테마 전환", "Change theme"],
   workspace: ["작업 공간", "Workspace"],
@@ -15,8 +14,6 @@ const copy = {
   records: ["기록 검색", "Record search"],
   memories: ["연상 기억", "Associative memory"],
   discard: ["RUN 삭제", "Discard RUN"],
-  localDemo: ["로컬 가상 데이터", "Local demo data"],
-  designNotes: ["설계 안내 ↗", "Design notes ↗"],
   permissionOwn: [
     "선택한 RUN의 기존 폐기 절차를 미리 봅니다.",
     "Preview the existing discard flow for this RUN.",
@@ -29,33 +26,16 @@ const copy = {
   otherSession: ["다른 세션", "Other session"],
   peerHistory: ["공유 이력", "Peer history"],
   readOnly: ["읽기 전용 탐색", "Read-only browsing"],
-  synthetic: ["가상 예시", "Synthetic example"],
   running: ["진행 중", "In progress"],
   blocked: ["막힘", "Blocked"],
   pending: ["대기", "Pending"],
   done: ["완료", "Completed"],
   skipped: ["건너뜀", "Skipped"],
-  currentDescription: [
-    "지금 진행하는 일과 다음 판단을 한곳에서 확인합니다.",
-    "Keep current work and the next decision in view.",
-  ],
-  tasksDescription: [
-    "선택한 RUN의 작업 상태와 근거를 함께 읽습니다.",
-    "Read task status and supporting evidence for the selected RUN.",
-  ],
-  recordsDescription: [
-    "연결된 PLAN·TASK·FINDING을 함께 검색하고 원문을 읽습니다.",
-    "Search related PLAN, TASK and FINDING records and read their sources.",
-  ],
-  memoriesDescription: [
-    "작업 공간에 남은 교훈과 검색 단서, 원문 출처를 살펴봅니다.",
-    "Explore workspace lessons, recall cues and original sources.",
-  ],
   complete: ["완료", "Completed"],
   progress: ["작업 완료 비율", "Task completion"],
   currentFocus: ["지금 집중하는 작업", "IN FOCUS"],
   taskDetail: ["목적과 검증 조건", "Purpose and verification"],
-  taskFull: ["페이지에서 자세히 보기", "Read full record"],
+  taskFull: ["상세 보기", "View details"],
   upNext: ["이어지는 작업", "Up next"],
   waitsFor: ["선행 조건 대기", "Awaiting prerequisites"],
   recentDone: ["완료한 일", "Completed work"],
@@ -65,7 +45,6 @@ const copy = {
   ],
   blockerLink: ["막힘 근거 읽기", "Read blocker evidence"],
   planSummary: ["이 RUN의 계획", "Plan for this RUN"],
-  runFacts: ["실행 문맥", "Run context"],
   objective: ["목적", "Objective"],
   owner: ["담당", "Owner"],
   source: ["출처", "Source"],
@@ -120,30 +99,11 @@ const copy = {
   resultCount: ["검색 결과", "Results"],
   sourceRun: ["원문 RUN", "Source RUN"],
   recordCount: ["개 레코드", "records"],
-  searchContext: [
-    "결과를 선택하면 원문 RUN으로 전환하여 본문에 표시합니다.",
-    "Selecting a result opens its source RUN and displays the record in the page.",
-  ],
-  sampleNote: [
-    "모든 내용은 시안용 예시이며 실제 데이터와 연결되지 않습니다.",
-    "All content is synthetic and disconnected from real data.",
-  ],
-  structureNote: [
-    "고정된 탐색 영역 · 본문 스크롤",
-    "Fixed navigation · scrolling page",
-  ],
   memorySearch: ["기억 검색", "Search memories"],
   memoryPlaceholder: ["교훈 또는 검색 단서", "Lesson or recall cue"],
-  memoryScope: [
-    "작업 공간 전체의 기억 · 원문에서 RUN 확인",
-    "Workspace memories · verify RUN at source",
-  ],
+  memoryScope: ["작업 공간 전체", "Entire workspace"],
   memorySource: ["출처 읽기", "Read source"],
   sourcePreview: ["기억의 원문 출처", "Memory source"],
-  memoryReadOnly: [
-    "기억과 원문은 읽기 전용으로 탐색합니다.",
-    "Memories and source records are read-only.",
-  ],
   relatedRun: ["원문 RUN으로 이동", "Open source RUN"],
   discardTitle: ["이 RUN을 폐기할까요?", "Discard this RUN?"],
   confirmId: [
@@ -163,8 +123,8 @@ const copy = {
     "An empty RUN can be deleted. This concept does not delete it.",
   ],
   discardDemo: [
-    "시안의 확인 절차입니다. 실제 RUN·이력은 변경되지 않습니다.",
-    "Confirmation preview only. Real RUNs and history remain unchanged.",
+    "미리보기 · 실제 데이터는 변경되지 않습니다.",
+    "Preview only. Real data remains unchanged.",
   ],
   previewDiscard: ["폐기 확인 미리보기", "Preview discard confirmation"],
   cancel: ["취소", "Cancel"],
@@ -636,7 +596,6 @@ function context() {
   return `<div class="run-context"><span class="eyebrow">${run.id}</span><span class="context-separator"></span>${chip(t(run.owner), "badge-outline")}<span class="micro muted">${esc(run.source)}</span></div>`;
 }
 function breadcrumb() {
-  const run = currentRun();
   const page = view().page;
   const section =
     page === "current" || page === "tasks"
@@ -644,10 +603,10 @@ function breadcrumb() {
       : page === "record"
         ? "explore"
         : "memory";
-  return `<div class="breadcrumbs-bar"><div class="breadcrumbs-copy"><span>personal / tapl</span>${icon("chevron")}<span>${t(section)}</span>${icon("chevron")}<span>${titleForPage()}</span></div><span class="source-chip">${run.id} · ${t(run.owner)}</span></div>`;
+  return `<div class="breadcrumbs-bar"><div class="breadcrumbs-copy"><span>${t(section)}</span>${icon("chevron")}<span>${titleForPage()}</span></div></div>`;
 }
-function pageHeader(descriptionKey, heading = "", description = "") {
-  return `${breadcrumb()}<div class="page-title-row"><div><h1>${esc(heading || titleForPage())}</h1><p class="page-description">${esc(description || t(descriptionKey))}</p></div><div class="page-title-aside">${chip(t("synthetic"), "badge-outline")}${chip(t("readOnly"), "badge-ghost")}</div></div>`;
+function pageHeader(heading = "", summary = "") {
+  return `${breadcrumb()}<div class="page-title-row"><div><h1>${esc(heading || titleForPage())}</h1>${summary ? `<p class="page-description">${esc(summary)}</p>` : ""}</div></div>`;
 }
 function workspaceTabs() {
   return `<div class="workspace-tabs tabs" role="group" aria-label="${t("workspace")}">${["current", "tasks"].map((key) => `<button class="tab ${view().page === key ? "tab-active" : ""}" type="button" aria-pressed="${view().page === key}" data-page="${key}">${t(key)}</button>`).join("")}</div>`;
@@ -667,9 +626,6 @@ function blocker() {
   return item
     ? `<div class="blocker-notice">${icon("alert")}<div><h3>${t("blockerTitle")}</h3><p>${item.id} · ${esc(tr(item.title))}</p><button class="btn btn-link btn-xs" type="button" data-record="${item.uid}">${t("blockerLink")} ${icon("arrow")}</button></div></div>`
     : "";
-}
-function note() {
-  return `<footer class="page-note"><span>${t("sampleNote")}</span><span>${t("structureNote")}</span></footer>`;
 }
 function empty(title, help, ico = "inbox", action = "") {
   return `<div class="empty-page">${icon(ico)}<h2>${t(title)}</h2><p>${t(help)}</p>${action}</div>`;
@@ -691,8 +647,8 @@ function currentPage() {
   else if (!active)
     body = `${blocker()}${empty("noActive", "noActiveHelp", "info", `<button class="btn btn-sm" type="button" data-page="tasks">${t("showTasks")}</button>`)}`;
   else
-    body = `<div class="run-overview"><section><ul class="steps phase-steps" aria-label="${t("progress")}">${["planStep", "approvalStep", "executionStep", "verificationStep"].map((key, i) => `<li class="step ${i < 3 ? "step-primary" : ""}">${t(key)}</li>`).join("")}</ul><article class="card focus-surface"><div class="eyebrow"><span>${t("currentFocus")}</span><span>${active.id}</span></div><h2>${esc(tr(active.title))}</h2><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))} · ${t(active.status)}</span><button class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}<div class="details-grid"><section>${sectionTitle(t("planSummary"))}${plan ? `<p class="small muted" style="line-height:1.9;margin-bottom:12px">${esc(tr(plan.goal))}</p>${recButton(plan, `${plan.id} · ${esc(tr(plan.title))}`)}` : ""}</section><section>${sectionTitle(t("runFacts"))}<dl class="info-lines"><dt>${t("owner")}</dt><dd>${t(run.owner)}</dd><dt>${t("source")}</dt><dd class="mono">${esc(run.source)}</dd><dt>${t("parentPlan")}</dt><dd>${plan ? recButton(plan, plan.id) : "—"}</dd></dl></section></div></section><aside class="run-aside"><section class="run-aside-section">${sectionTitle(t("upNext"), t("waitsFor"))}${taskQueue(items.filter((x) => x.status === "pending").slice(0, 4))}</section><section class="run-aside-section">${sectionTitle(t("recentDone"), `${counts().done}`)}${taskQueue(items.filter((x) => x.status === "done").slice(0, 3))}</section></aside></div>`;
-  return `${pageHeader("currentDescription", tr(run.title), tr(run.description))}${workspaceTabs()}${context()}${items.length ? meter() : ""}${body}${note()}`;
+    body = `<div class="run-overview"><section><ul class="steps phase-steps" aria-label="${t("progress")}">${["planStep", "approvalStep", "executionStep", "verificationStep"].map((key, i) => `<li class="step ${i < 3 ? "step-primary" : ""}">${t(key)}</li>`).join("")}</ul><article class="card focus-surface"><div class="eyebrow"><span>${t("currentFocus")}</span><span>${active.id}</span></div><h2>${esc(tr(active.title))}</h2><p>${esc(tr(active.goal))}</p><div class="focus-footer"><span class="focus-owner"><span class="owner-mark">A</span>${esc(tr(active.owner))} · ${t(active.status)}</span><button class="btn btn-primary btn-sm" type="button" data-record="${active.uid}">${t("taskDetail")} ${icon("arrow")}</button></div></article>${blocker()}<div class="details-grid">${sectionTitle(t("planSummary"))}${plan ? recButton(plan, `${plan.id} · ${esc(tr(plan.title))}`) : ""}</div></section><aside class="run-aside"><section class="run-aside-section">${sectionTitle(t("upNext"), t("waitsFor"))}${taskQueue(items.filter((x) => x.status === "pending").slice(0, 4))}</section><section class="run-aside-section">${sectionTitle(t("recentDone"), `${counts().done}`)}${taskQueue(items.filter((x) => x.status === "done").slice(0, 3))}</section></aside></div>`;
+  return `${pageHeader(tr(run.title), tr(run.description))}${workspaceTabs()}${context()}${items.length ? meter() : ""}${body}`;
 }
 function filteredTasks() {
   const v = view();
@@ -711,7 +667,7 @@ function tasksPage() {
       items.find((x) => x.uid === v.selectedTask) ||
       items.find((x) => x.status === "running") ||
       items[0];
-  return `${pageHeader("tasksDescription")}${workspaceTabs()}${context()}${meter()}<div class="filter-toolbar"><div class="status-filter join" role="group" aria-label="${t("status")}">${["all", "running", "blocked", "pending", "done"].map((key) => `<button class="btn btn-xs join-item ${v.filter === key ? "btn-primary" : "btn-ghost"}" type="button" data-filter="${key}" aria-pressed="${v.filter === key}">${t(key)}</button>`).join("")}</div><form class="task-search" data-form="tasks"><label><span class="sr-only">${t("taskSearch")}</span><input class="input input-sm" name="query" aria-label="${t("taskSearch")}" value="${esc(v.taskQuery)}" placeholder="${t("taskSearch")}"></label><button class="btn btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form></div>${items.length ? `<div class="tasks-layout"><section><table class="table tasks-table"><caption class="sr-only">${t("tasks")} · ${currentRun().id}</caption><thead><tr><th scope="col"><span class="sr-only">${t("status")}</span></th><th scope="col">${t("taskColumn")}</th><th scope="col">${t("owner")}</th><th scope="col">${t("status")}</th></tr></thead><tbody>${items.map((r) => `<tr class="${selected?.uid === r.uid ? "selected-row" : ""}"><td>${statusMark(r.status, false)}</td><td><button class="task-title-button" type="button" data-task-select="${r.uid}" aria-pressed="${selected?.uid === r.uid}"><strong>${esc(tr(r.title))}</strong><span class="queue-code">${r.id}</span></button></td><td>${esc(tr(r.owner))}</td><td>${statusMark(r.status)}</td></tr>`).join("")}</tbody></table></section>${selected ? `<aside class="card task-inspector"><p class="eyebrow">${t("selectedTask")}</p><p class="mono micro muted" style="margin-top:9px">${selected.id}</p><h2>${esc(tr(selected.title))}</h2>${statusMark(selected.status)}<h3>${t("objective")}</h3><p>${esc(tr(selected.goal))}</p><h3>${t("depends")}</h3><p>${selected.depends.join(", ") || t("noDependencies")}</p><h3>${t("result")}</h3><p>${resultText(selected)}</p><button class="btn btn-sm" type="button" data-record="${selected.uid}">${t("taskFull")} ${icon("arrow")}</button></aside>` : ""}</div>` : empty(taskRecords().length ? "noMatches" : "noTasks", taskRecords().length ? "noMatchesHelp" : "noTasksHelp", "inbox", taskRecords().length ? `<button class="btn btn-sm" type="button" data-reset="tasks">${t("reset")}</button>` : "")}${note()}`;
+  return `${pageHeader()}${workspaceTabs()}${context()}${meter()}<div class="filter-toolbar"><div class="status-filter join" role="group" aria-label="${t("status")}">${["all", "running", "blocked", "pending", "done"].map((key) => `<button class="btn btn-xs join-item ${v.filter === key ? "btn-primary" : "btn-ghost"}" type="button" data-filter="${key}" aria-pressed="${v.filter === key}">${t(key)}</button>`).join("")}</div><form class="task-search" data-form="tasks"><label><span class="sr-only">${t("taskSearch")}</span><input class="input input-sm" name="query" aria-label="${t("taskSearch")}" value="${esc(v.taskQuery)}" placeholder="${t("taskSearch")}"></label><button class="btn btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form></div>${items.length ? `<div class="tasks-layout"><section><table class="table tasks-table"><caption class="sr-only">${t("tasks")} · ${currentRun().id}</caption><thead><tr><th scope="col"><span class="sr-only">${t("status")}</span></th><th scope="col">${t("taskColumn")}</th><th scope="col">${t("owner")}</th><th scope="col">${t("status")}</th></tr></thead><tbody>${items.map((r) => `<tr class="${selected?.uid === r.uid ? "selected-row" : ""}"><td>${statusMark(r.status, false)}</td><td><button class="task-title-button" type="button" data-task-select="${r.uid}" aria-pressed="${selected?.uid === r.uid}"><strong>${esc(tr(r.title))}</strong><span class="queue-code">${r.id}</span></button></td><td>${esc(tr(r.owner))}</td><td>${statusMark(r.status)}</td></tr>`).join("")}</tbody></table></section>${selected ? `<aside class="card task-inspector"><p class="eyebrow">${t("selectedTask")}</p><p class="mono micro muted" style="margin-top:9px">${selected.id}</p><h2>${esc(tr(selected.title))}</h2>${statusMark(selected.status)}<h3>${t("objective")}</h3><p>${esc(tr(selected.goal))}</p><h3>${t("depends")}</h3><p>${selected.depends.join(", ") || t("noDependencies")}</p><h3>${t("result")}</h3><p>${resultText(selected)}</p><button class="btn btn-sm" type="button" data-record="${selected.uid}">${t("taskFull")} ${icon("arrow")}</button></aside>` : ""}</div>` : empty(taskRecords().length ? "noMatches" : "noTasks", taskRecords().length ? "noMatchesHelp" : "noTasksHelp", "inbox", taskRecords().length ? `<button class="btn btn-sm" type="button" data-reset="tasks">${t("reset")}</button>` : "")}`;
 }
 function resultText(r) {
   return r.status === "done"
@@ -780,7 +736,7 @@ function recordPage() {
       "Verify record context and keyboard focus across RUN changes and refreshes.",
     ),
   ];
-  return `${breadcrumb()}<article class="record-page"><header class="record-hero">${context()}<div class="run-context">${chip(r.kind, "badge-outline")}<span class="eyebrow">${r.id}</span>${statusMark(r.status)}</div><h1>${esc(tr(r.title))}</h1><p class="record-description">${esc(tr(r.goal))}</p><div class="record-meta"><span>${t("owner")}: ${esc(tr(r.owner))}</span><span>·</span><span>${t("synthetic")}</span><span>·</span><span>2026-11-10</span></div></header><div class="reading-grid"><div class="reading-body"><section class="reading-section"><h2>${t("objective")}</h2><p>${esc(tr(r.goal))}</p></section><section class="reading-section"><h2>${r.kind === "PLAN" ? t("requirements") : t("result")}</h2><p>${r.kind === "PLAN" ? esc(tr(run.description)) : resultText(r)}</p></section><section class="reading-section"><h2>${t("verification")}</h2><ul>${checks.map((c) => `<li class="checkline">${icon("check")}<span>${esc(tr(c))}</span></li>`).join("")}</ul></section><section class="reading-section"><h2>${t("depends")}</h2><p>${
+  return `${breadcrumb()}<article class="record-page"><header class="record-hero">${context()}<div class="run-context">${chip(r.kind, "badge-outline")}<span class="eyebrow">${r.id}</span>${statusMark(r.status)}</div><h1>${esc(tr(r.title))}</h1><div class="record-meta"><span>${t("owner")}: ${esc(tr(r.owner))}</span><span>·</span><span>2026-11-10</span></div></header><div class="reading-grid"><div class="reading-body"><section class="reading-section"><h2>${t("objective")}</h2><p>${esc(tr(r.goal))}</p></section><section class="reading-section"><h2>${r.kind === "PLAN" ? t("requirements") : t("result")}</h2><p>${r.kind === "PLAN" ? esc(tr(run.description)) : resultText(r)}</p></section><section class="reading-section"><h2>${t("verification")}</h2><ul>${checks.map((c) => `<li class="checkline">${icon("check")}<span>${esc(tr(c))}</span></li>`).join("")}</ul></section><section class="reading-section"><h2>${t("depends")}</h2><p>${
     r.depends.length
       ? r.depends
           .map((id) => {
@@ -789,7 +745,7 @@ function recordPage() {
           })
           .join(" · ")
       : t("noDependencies")
-  }</p></section><section class="related-records">${sectionTitle(t("related"))}${relatedFor(r).map(relatedButton).join("")}</section><details class="collapse collapse-arrow record-fields"><summary class="collapse-title">${t("fields")}</summary><div class="collapse-content"><p><code>source: ${esc(run.source)}</code></p><p><code>run_key: ${run.key}</code></p><p>${t("sampleNote")}</p></div></details></div><aside class="record-properties"><h2>${t("properties")}</h2><dl class="property"><dt>RUN</dt><dd>${run.id}<br>${esc(tr(run.title))}</dd></dl><dl class="property"><dt>${t("source")}</dt><dd class="mono">${esc(run.source)}</dd></dl><dl class="property"><dt>${t("owner")}</dt><dd>${esc(tr(r.owner))}</dd></dl><dl class="property"><dt>${t("kind")}</dt><dd>${r.kind}</dd></dl><dl class="property"><dt>${t("parentPlan")}</dt><dd>${runRecords(run, "PLAN")[0] ? recButton(runRecords(run, "PLAN")[0], "PLAN-001") : "—"}</dd></dl></aside></div>${note()}</article>`;
+  }</p></section><section class="related-records">${sectionTitle(t("related"))}${relatedFor(r).map(relatedButton).join("")}</section><details class="collapse collapse-arrow record-fields"><summary class="collapse-title">${t("fields")}</summary><div class="collapse-content"><p><code>source: ${esc(run.source)}</code></p><p><code>run_key: ${run.key}</code></p></div></details></div><aside class="record-properties"><h2>${t("properties")}</h2><dl class="property"><dt>RUN</dt><dd>${run.id}<br>${esc(tr(run.title))}</dd></dl><dl class="property"><dt>${t("source")}</dt><dd class="mono">${esc(run.source)}</dd></dl><dl class="property"><dt>${t("owner")}</dt><dd>${esc(tr(r.owner))}</dd></dl><dl class="property"><dt>${t("kind")}</dt><dd>${r.kind}</dd></dl><dl class="property"><dt>${t("parentPlan")}</dt><dd>${runRecords(run, "PLAN")[0] ? recButton(runRecords(run, "PLAN")[0], "PLAN-001") : "—"}</dd></dl></aside></div></article>`;
 }
 function searchResults() {
   const v = view(),
@@ -803,9 +759,9 @@ function searchResults() {
           .includes(q)),
   );
 }
-function resultRow(r) {
+function resultRow(r, showSource = true) {
   const run = runFor(r);
-  return `<button class="search-result" type="button" data-record="${r.uid}"><span class="result-meta">${chip(r.kind, "badge-outline")}<span class="mono">${r.id}</span>${statusMark(r.status)}</span><h3>${esc(tr(r.title))}</h3><p>${esc(tr(r.goal))}</p><span class="result-tail"><span>${run.id} · ${esc(tr(run.title))}</span><span class="mono">${esc(run.source)}</span></span></button>`;
+  return `<button class="search-result" type="button" data-record="${r.uid}"><span class="result-meta">${chip(r.kind, "badge-outline")}<span class="mono">${r.id}</span>${statusMark(r.status)}</span><h3>${esc(tr(r.title))}</h3><p>${esc(tr(r.goal))}</p>${showSource ? `<span class="result-tail"><span>${run.id} · ${esc(tr(run.title))}</span><span class="mono">${esc(run.source)}</span></span>` : ""}</button>`;
 }
 function recordsPage() {
   const v = view(),
@@ -813,7 +769,7 @@ function recordsPage() {
   const grouped = runs
     .map((run) => ({ run, items: found.filter((r) => r.runKey === run.key) }))
     .filter((g) => g.items.length);
-  return `${pageHeader("recordsDescription")}<form class="search-box" data-form="records"><label class="input input-sm">${icon("search")}<input name="query" aria-label="${t("records")}" value="${esc(v.query)}" placeholder="${t("searchPlaceholder")}"></label><button class="btn btn-primary btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form><div class="search-controls"><label class="scope-controls"><span>${t("scope")}</span><select class="select select-sm" id="search-scope"><option value="current" ${v.scope === "current" ? "selected" : ""}>${t("selectedRun")} · ${currentRun().id}</option><option value="all" ${v.scope === "all" ? "selected" : ""}>${t("allRecords")}</option></select></label><div class="view-controls join" role="group" aria-label="${t("resultCount")}">${["run", "record"].map((key) => `<button class="btn btn-sm join-item ${v.group === key ? "btn-primary" : "btn-ghost"}" type="button" data-group="${key}" aria-pressed="${v.group === key}">${icon(key === "run" ? "folder" : "file")}${t(key === "run" ? "grouped" : "flat")}</button>`).join("")}</div></div><p class="search-context">${t("resultCount")} <strong>${found.length}</strong> · ${t(v.scope === "current" ? "selectedRun" : "allRecords")} · ${t("searchContext")}</p>${!found.length ? empty("noMatches", "noMatchesHelp", "search", `<button class="btn btn-sm" type="button" data-reset="records">${t("reset")}</button>`) : v.group === "run" ? grouped.map((g) => `<details class="search-group" data-search-run="${g.run.key}" ${v.searchOpen.includes(g.run.key) ? "open" : ""}><summary class="search-group-header"><div><h2>${g.run.id} · ${esc(tr(g.run.title))}</h2><p>${esc(g.run.source)} · ${t(g.run.owner)}</p></div><span class="search-group-meta">${chip(`${g.items.length} ${t("recordCount")}`, "badge-outline")}${icon("chevron").replace('class="icon"', 'class="icon group-chevron"')}</span></summary><div class="search-group-body">${g.items.map(resultRow).join("")}</div></details>`).join("") : `<section class="flat-results">${found.map(resultRow).join("")}</section>`}${note()}`;
+  return `${pageHeader()}<form class="search-box" data-form="records"><label class="input input-sm">${icon("search")}<input name="query" aria-label="${t("records")}" value="${esc(v.query)}" placeholder="${t("searchPlaceholder")}"></label><button class="btn btn-primary btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form><div class="search-controls"><label class="scope-controls"><span>${t("scope")}</span><select class="select select-sm" id="search-scope"><option value="current" ${v.scope === "current" ? "selected" : ""}>${t("selectedRun")} · ${currentRun().id}</option><option value="all" ${v.scope === "all" ? "selected" : ""}>${t("allRecords")}</option></select></label><div class="view-controls join" role="group" aria-label="${t("resultCount")}">${["run", "record"].map((key) => `<button class="btn btn-sm join-item ${v.group === key ? "btn-primary" : "btn-ghost"}" type="button" data-group="${key}" aria-pressed="${v.group === key}">${icon(key === "run" ? "folder" : "file")}${t(key === "run" ? "grouped" : "flat")}</button>`).join("")}</div></div><p class="search-context">${t("resultCount")} <strong>${found.length}</strong></p>${!found.length ? empty("noMatches", "noMatchesHelp", "search", `<button class="btn btn-sm" type="button" data-reset="records">${t("reset")}</button>`) : v.group === "run" ? grouped.map((g) => `<details class="search-group" data-search-run="${g.run.key}" ${v.searchOpen.includes(g.run.key) ? "open" : ""}><summary class="search-group-header"><div><h2>${g.run.id} · ${esc(tr(g.run.title))}</h2><p>${esc(g.run.source)} · ${t(g.run.owner)}</p></div><span class="search-group-meta">${chip(`${g.items.length} ${t("recordCount")}`, "badge-outline")}${icon("chevron").replace('class="icon"', 'class="icon group-chevron"')}</span></summary><div class="search-group-body">${g.items.map((r) => resultRow(r, false)).join("")}</div></details>`).join("") : `<section class="flat-results">${found.map((r) => resultRow(r)).join("")}</section>`}`;
 }
 function memoriesPage() {
   const v = view(),
@@ -827,14 +783,14 @@ function memoriesPage() {
   );
   const selected = memories.find((m) => m.id === v.memory);
   const source = selected && getRecord(selected.source);
-  return `${pageHeader("memoriesDescription")}<div class="memory-intro"><div><p class="small muted">${t("memoryScope")}</p><p class="micro muted" style="margin-top:8px">${t("memoryReadOnly")}</p></div><form class="search-box" data-form="memories"><label class="input input-sm">${icon("search")}<input name="query" aria-label="${t("memorySearch")}" value="${esc(v.memoryQuery)}" placeholder="${t("memoryPlaceholder")}"></label><button class="btn btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form></div>${selected ? `<section class="memory-detail" id="memory-source" tabindex="-1"><p class="eyebrow">${t("sourcePreview")} / ${selected.id}</p><h2>${esc(tr(selected.title))}</h2><p>${esc(tr(selected.body))}</p><p style="margin-top:13px">${source.id} · ${runFor(source).id} · ${esc(runFor(source).source)}</p>${relatedButton(source)}</section>` : ""}<div class="memory-grid" style="margin-top:${selected ? "22px" : "0"}">${found
+  return `${pageHeader()}<div class="memory-intro"><div><p class="small muted">${t("memoryScope")}</p></div><form class="search-box" data-form="memories"><label class="input input-sm">${icon("search")}<input name="query" aria-label="${t("memorySearch")}" value="${esc(v.memoryQuery)}" placeholder="${t("memoryPlaceholder")}"></label><button class="btn btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form></div>${selected ? `<section class="memory-detail" id="memory-source" tabindex="-1"><p class="eyebrow">${t("sourcePreview")} / ${selected.id}</p><h2>${esc(tr(selected.title))}</h2><p>${esc(tr(selected.body))}</p><p style="margin-top:13px">${source.id} · ${runFor(source).id} · ${esc(runFor(source).source)}</p>${relatedButton(source)}</section>` : ""}<div class="memory-grid" style="margin-top:${selected ? "22px" : "0"}">${found
     .map((m) => {
       const src = getRecord(m.source);
       return `<article class="card memory-card"><div class="memory-top">${chip(tr(m.topic), "badge-outline")}<span class="mono micro muted">${m.id}</span></div><h2>${esc(tr(m.title))}</h2><p>${esc(tr(m.body))}</p><div class="memory-cues">${m.cues.map((cue) => chip(cue)).join("")}</div><div class="memory-footer"><span>${src.id} · ${runFor(src).id}</span><button class="btn btn-ghost btn-xs" type="button" data-memory="${m.id}">${t("memorySource")} ${icon("arrow")}</button></div></article>`;
     })
     .join(
       "",
-    )}</div>${found.length ? "" : empty("noMatches", "noMatchesHelp", "search", `<button class="btn btn-sm" type="button" data-reset="memories">${t("reset")}</button>`)}${note()}`;
+    )}</div>${found.length ? "" : empty("noMatches", "noMatchesHelp", "search", `<button class="btn btn-sm" type="button" data-reset="memories">${t("reset")}</button>`)}`;
 }
 function renderTabs() {
   const selected = currentRun();
@@ -878,9 +834,8 @@ function renderSidebar() {
   $("#discard-open").title = t(
     canDiscard(run) ? "permissionOwn" : "permissionOther",
   );
-  $("#permission-note").textContent = t(
-    canDiscard(run) ? "permissionOwn" : "permissionOther",
-  );
+  $("#permission-note").hidden = canDiscard(run);
+  $("#permission-note").textContent = t("readOnly");
   $("#sidebar").setAttribute("aria-label", t("navigation"));
 }
 function applyCopy() {
@@ -898,8 +853,6 @@ function applyCopy() {
     `<span class="sr-only">${t("theme")}</span>`;
   $("#discard-x").setAttribute("aria-label", t("close"));
   $("#discard-backdrop").setAttribute("aria-label", t("close"));
-  $("#design-link").href =
-    `../../development/viewer-ux-design${state.locale === "ko" ? ".ko" : ""}.md`;
 }
 function renderPage() {
   const page = view().page;

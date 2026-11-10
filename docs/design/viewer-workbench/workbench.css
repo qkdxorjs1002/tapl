@@ -295,11 +295,6 @@ select {
   padding: 0 20px;
   flex: none;
 }
-.demo-label {
-  font-size: 10px;
-  color: var(--muted);
-  white-space: nowrap;
-}
 .locale-select {
   font-size: 11px;
   max-width: 98px;
@@ -498,6 +493,7 @@ select {
   margin-top: auto;
   flex: none;
   padding-top: 6px;
+  padding-bottom: 16px;
   display: grid;
   gap: 20px;
 }
@@ -532,26 +528,6 @@ select {
   font-size: 9px;
   line-height: 1.7;
   color: var(--muted);
-}
-.sidebar-footer {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border-top: 1px solid var(--color-base-300);
-  font-size: 9px;
-  color: var(--muted);
-  padding: 15px 0;
-}
-.sidebar-footer .status {
-  width: 5px;
-  height: 5px;
-}
-.sidebar-footer a {
-  margin-left: auto;
-  text-decoration: none;
-}
-.sidebar-footer a:hover {
-  color: var(--color-primary);
 }
 .page-scroll {
   grid-column: 2;
@@ -589,12 +565,6 @@ select {
   height: 13px;
   width: 13px;
 }
-.source-chip {
-  font:
-    10px ui-monospace,
-    monospace;
-  white-space: nowrap;
-}
 .page-title-row {
   display: flex;
   justify-content: space-between;
@@ -614,16 +584,6 @@ select {
   line-height: 1.9;
   margin-top: 8px;
   max-width: 700px;
-}
-.page-title-aside {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding-top: 8px;
-  white-space: nowrap;
-}
-.page-title-aside .badge {
-  font-size: 10px;
 }
 .workspace-tabs {
   margin: 0 0 25px;
@@ -658,18 +618,6 @@ select {
   height: 10px;
   border-left: 1px solid var(--color-base-300);
   margin: 0 4px;
-}
-.identity-title {
-  font-size: 24px;
-  letter-spacing: -0.8px;
-  margin-bottom: 9px;
-  line-height: 1.5;
-}
-.identity-description {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.9;
-  max-width: 650px;
 }
 .run-meter {
   display: flex;
@@ -881,27 +829,10 @@ select {
   height: auto;
 }
 .details-grid {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr;
-  gap: 20px;
+  display: block;
   margin-top: 28px;
   padding-top: 25px;
   border-top: 1px solid var(--color-base-300);
-}
-.info-lines {
-  display: grid;
-  grid-template-columns: 95px minmax(0, 1fr);
-  row-gap: 12px;
-  column-gap: 12px;
-  font-size: 11px;
-  line-height: 1.75;
-}
-.info-lines dt {
-  color: var(--muted);
-}
-.info-lines dd {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 .record-link {
   border: 0;
@@ -912,18 +843,6 @@ select {
   text-align: left;
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-.page-note {
-  margin-top: 30px;
-  border-top: 1px solid var(--color-base-300);
-  padding-top: 15px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 15px;
-  flex-wrap: wrap;
-  font-size: 10px;
-  color: var(--muted);
 }
 .filter-toolbar {
   display: flex;
@@ -1060,12 +979,6 @@ select {
   line-height: 1.55;
   letter-spacing: -1px;
   margin-bottom: 13px;
-}
-.record-description {
-  font-size: 14px;
-  color: var(--muted);
-  line-height: 1.9;
-  max-width: 760px;
 }
 .record-meta {
   display: flex;
@@ -1571,9 +1484,6 @@ select {
     padding-inline: 12px;
     gap: 6px;
   }
-  .demo-label {
-    display: none;
-  }
   .run-tabs {
     padding-inline: 8px;
   }
@@ -1688,9 +1598,6 @@ select {
   .page-title-row h1 {
     font-size: 27px;
   }
-  .details-grid {
-    grid-template-columns: 1fr;
-  }
 }
 @media (max-width: 800px) {
   :root {
@@ -1773,9 +1680,6 @@ select {
   .page-content {
     padding: 24px 22px;
   }
-  .source-chip {
-    font-size: 9px;
-  }
   .breadcrumbs-bar {
     margin-bottom: 23px;
   }
@@ -1784,11 +1688,6 @@ select {
   }
   .page-title-row h1 {
     font-size: 27px;
-  }
-  .page-title-aside {
-    padding-top: 4px;
-    flex-wrap: wrap;
-    justify-content: end;
   }
   .workspace-tabs {
     gap: 22px;
@@ -1849,26 +1748,11 @@ select {
     gap: 6px;
     font-size: 10px;
   }
-  .source-chip {
-    font-size: 8px;
-  }
   .page-title-row h1 {
     font-size: 24px;
   }
-  .page-title-aside .badge {
-    font-size: 8px;
-    padding: 3px 6px;
-    min-height: 19px;
-    height: auto;
-  }
   .page-description {
     font-size: 11px;
-  }
-  .identity-title {
-    font-size: 22px;
-  }
-  .identity-description {
-    font-size: 12px;
   }
   .focus-surface {
     padding: 21px 19px;
@@ -1946,9 +1830,6 @@ select {
   .record-hero h1 {
     font-size: 24px;
   }
-  .record-description {
-    font-size: 13px;
-  }
   .reading-section p,
   .reading-section li {
     font-size: 12px;
@@ -2008,9 +1889,6 @@ select {
   .empty-page h2 {
     font-size: 20px;
   }
-  .page-note {
-    font-size: 9px;
-  }
   .modal-box {
     padding: 20px;
   }
@@ -2037,9 +1915,6 @@ select {
   }
   .management {
     padding-top: 12px;
-  }
-  .sidebar-footer {
-    padding-block: 11px;
   }
   .sidebar-explore {
     max-height: 260px;

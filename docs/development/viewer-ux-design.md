@@ -22,9 +22,11 @@ Grouped search across all records shows RUN titles, provenance and match counts 
 
 Switch Korean/English UI, status, guidance, accessible labels and sample content, as well as light/dark themes. Locale switching does not promise automatic translation of stored records. Product implementation must retain locale delivery, existing translation keys and user-authored content as separate concerns. Links can specify context, for example `#run=local24&page=tasks&lang=en&theme=dark`.
 
+Screens retain titles, status, record content and necessary provenance while omitting generic introductions, demo badges, repeated footers and duplicate context. Grouped search places provenance in group headers; record-list presentation shows it per result. Empty-state help and discard confirmation/effect descriptions remain where needed.
+
 This is an independent synthetic concept before product integration. Existing CLI/MCP arguments, configuration, VS Code host behavior and RUN discard are unchanged. The ten alternatives below remain available for comparing individual information structures.
 
-The integrated concept was checked in headless Chrome with a temporary profile: two locales × two themes × three widths (390, 1024 and 1600px) × five RUNs × four pages, totaling 240 combinations, plus 48 search-scope/presentation combinations. Checks also covered fixed chrome, page/list scrolling, RUN provenance, inline details, filters, search, memory sources, discard confirmation, keyboard and focus. The checked cases had no horizontal overflow, sidebar clipping or script errors; representative screens were visually reviewed. These checks do not replace actual VS Code host, high-contrast or screen-reader validation.
+The integrated concept was checked in headless Chrome with a temporary profile: two locales × two themes × three widths (390, 1024 and 1600px) × five pages, totaling 60 combinations. Checks covered removal of repeated copy, preservation of record content, RUN/Explore/search navigation and discard confirmation, with no horizontal overflow, sidebar clipping or script errors. Representative screens were visually reviewed. These checks do not replace actual VS Code host, high-contrast or screen-reader validation.
 
 ## Explore the concepts
 
