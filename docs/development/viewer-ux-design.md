@@ -22,7 +22,7 @@ TASK status and PLAN/TASK/FINDING tabs display counts with units: `12개` in Kor
 
 The header uses the `tapl` name as text. Pages opened through internal links show a `Back` button at the upper right. TASKs, search results, related records and memory sources can return to the previous RUN, page, query/filter, expanded groups, selected record and scroll position. The current language and theme remain in effect. Choosing a sidebar page or top RUN tab directly starts a new navigation path and clears the return trail. Direct links and reloaded pages have no return button.
 
-Grouped search across all records shows RUN titles, provenance and match counts first; expand a group to read individual records. Expanded groups persist through language and theme changes. Record-list presentation lists individual records directly.
+The search-scope selector shows a down arrow. RUN-grouped and record-list view controls share the status filter’s subtle pill outline. Grouped search across all records shows RUN titles, provenance and match counts first; expand a group to read individual records. Expanded groups persist through language and theme changes. Record-list presentation lists individual records directly.
 
 Switch Korean/English UI, status, guidance, accessible labels and sample content, as well as light/dark themes. Locale switching does not promise automatic translation of stored records. Product implementation must retain locale delivery, existing translation keys and user-authored content as separate concerns. Links can specify context, for example `#run=local24&page=tasks&lang=en&theme=dark`.
 

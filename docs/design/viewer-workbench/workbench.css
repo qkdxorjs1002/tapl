@@ -934,7 +934,7 @@ select {
   flex-wrap: wrap;
   margin-bottom: 18px;
 }
-.status-filter {
+.pill-tabs {
   display: inline-flex;
   gap: 2px;
   flex-wrap: nowrap;
@@ -943,7 +943,7 @@ select {
   border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
   border-radius: 999px;
 }
-.status-filter .btn {
+.pill-tabs .btn {
   font-size: 12px;
   border: 0;
   border-radius: 999px;
@@ -1210,14 +1210,8 @@ select {
 .scope-controls .select {
   font-size: 12px;
   min-width: 140px;
-  background: var(--color-base-100);
-}
-.view-controls {
-  display: flex;
-  gap: 2px;
-}
-.view-controls .btn {
-  font-size: 12px;
+  background-color: var(--color-base-100);
+  cursor: pointer;
 }
 .search-context {
   font-size: 12px;
@@ -1579,7 +1573,7 @@ select {
 }
 .input,
 .select {
-  background: var(--surface);
+  background-color: var(--surface);
   border-color: var(--color-base-300);
   box-shadow: 0 1px 2px rgb(20 35 50 / 0.025);
   transition:
