@@ -144,6 +144,7 @@ const copy = {
 };
 const bi = (ko, en) => [ko, en];
 const icons = {
+  languages: '<path d="M3 5h12M9 3v2M5 5c0 6 5 9 8 10M13 5c0 6-5 9-8 10M14 21l4-10 4 10M15.5 18h5"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/>',
   moon: '<path d="M20.5 14.5A9 9 0 0 1 9.5 3.5a9 9 0 1 0 11 11z"/>',
@@ -1024,7 +1025,9 @@ function applyCopy() {
   document
     .querySelectorAll("[data-icon]")
     .forEach((el) => (el.innerHTML = icon(el.dataset.icon)));
-  $("#locale").value = state.locale;
+  document.querySelectorAll("[data-locale]").forEach((button) =>
+    button.setAttribute("aria-pressed", String(button.dataset.locale === state.locale)),
+  );
   $("#theme-toggle").innerHTML =
     icon(state.theme === "light" ? "moon" : "sun") +
     `<span class="sr-only">${t("theme")}</span>`;
@@ -1240,9 +1243,18 @@ function openDiscard() {
   $("#discard-id").focus();
 }
 document.addEventListener("click", (event) => {
+  const languageMenu = $("#language-menu");
+  if (languageMenu.open && !languageMenu.contains(event.target))
+    languageMenu.open = false;
   const button = event.target.closest("button");
   if (!button) return;
-  if (button.dataset.run) switchRun(button.dataset.run, true);
+  if (button.dataset.locale) {
+    state.locale = button.dataset.locale;
+    languageMenu.open = false;
+    render();
+    $("#language-toggle").focus({ preventScroll: true });
+    announce(state.locale === "ko" ? "한국어 화면" : "English interface");
+  } else if (button.dataset.run) switchRun(button.dataset.run, true);
   else if (button.dataset.page)
     navigate(button.dataset.page, Boolean(button.closest("#page-content")));
   else if (button.dataset.fold) toggleExplore(button.dataset.fold);
@@ -1334,10 +1346,9 @@ document.addEventListener("submit", (event) => {
   render();
   announce(t("searchUpdated"));
 });
-$("#locale").addEventListener("change", (event) => {
-  state.locale = event.target.value;
-  render();
-  announce(state.locale === "ko" ? "한국어 화면" : "English interface");
+$("#language-menu").addEventListener("focusout", (event) => {
+  if (!event.currentTarget.contains(event.relatedTarget))
+    event.currentTarget.open = false;
 });
 document.addEventListener("change", (event) => {
   if (event.target.id === "search-scope") {
@@ -1370,7 +1381,12 @@ $("#run-tabs").addEventListener("keydown", (event) => {
   switchRun(runs[index].key, true);
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.menuOpen) {
+  if (event.key !== "Escape") return;
+  if ($("#language-menu").open) {
+    $("#language-menu").open = false;
+    $("#language-toggle").focus({ preventScroll: true });
+    event.preventDefault();
+  } else if (state.menuOpen) {
     closeMenu();
     $("#menu-toggle").focus();
   }

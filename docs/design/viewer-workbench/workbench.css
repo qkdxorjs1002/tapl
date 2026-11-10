@@ -300,12 +300,74 @@ select {
   letter-spacing: 0.035em;
   color: var(--muted);
 }
-.locale-select {
-  font-size: 12px;
-  width: 100%;
-  height: 34px;
-  min-height: 34px;
+.brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex: none;
+}
+.language-menu {
+  display: block;
+  flex: none;
+}
+.brand-actions .btn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: var(--muted);
+  border: 0;
+  box-shadow: none;
+}
+.language-toggle {
+  list-style: none;
+}
+.language-toggle::-webkit-details-marker {
+  display: none;
+}
+.brand-actions .btn .icon {
+  width: 16px;
+  height: 16px;
+}
+.language-menu[open] .language-toggle {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+.language-options {
+  top: calc(100% + 10px);
+  right: 0;
+  width: 148px;
+  padding: 6px;
   background: var(--surface);
+  border: 1px solid var(--color-base-300);
+  border-radius: 10px;
+  box-shadow: var(--shadow-float);
+  z-index: 1;
+}
+.language-options button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+.language-options button[aria-pressed="true"] {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+.language-options button .icon {
+  width: 14px;
+  height: 14px;
+  visibility: hidden;
+}
+.language-options button[aria-pressed="true"] .icon {
+  visibility: visible;
+}
+.topbar:has(.language-menu[open]) {
+  z-index: 60;
 }
 .mobile-menu {
   display: none;
@@ -512,28 +574,6 @@ select {
   padding-bottom: 16px;
   display: grid;
   gap: 20px;
-}
-.sidebar-settings {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-inline: 12px;
-}
-.sidebar-settings > label {
-  flex: 1;
-  min-width: 0;
-}
-.sidebar-settings .btn {
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
-  min-height: 34px;
-  color: var(--muted);
-}
-.sidebar-settings .btn .icon {
-  width: 17px;
-  height: 17px;
 }
 .management {
   border-top: 1px solid var(--color-base-300);
@@ -1754,8 +1794,13 @@ select {
     gap: 5px;
     border: 0;
   }
-  .brand {
-    display: none;
+  .brand strong {
+    font-size: 20px;
+    letter-spacing: -1px;
+  }
+  .language-options {
+    left: 0;
+    right: auto;
   }
   .mobile-menu {
     display: inline-flex;
@@ -2030,8 +2075,14 @@ select {
   .fold-list button {
     min-height: 40px;
   }
-  .locale-select {
-    font-size: 13px;
+  .brand-actions .btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+  }
+  .language-options button {
+    min-height: 40px;
   }
   .input {
     font-size: 16px;
