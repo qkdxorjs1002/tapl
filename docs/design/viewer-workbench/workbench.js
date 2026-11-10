@@ -144,6 +144,9 @@ const copy = {
 };
 const bi = (ko, en) => [ko, en];
 const icons = {
+  plan: '<rect x="8" y="3" width="8" height="5" rx="1"/><rect x="2" y="16" width="7" height="5" rx="1"/><rect x="15" y="16" width="7" height="5" rx="1"/><path d="M12 8v4M5.5 16v-4h13v4"/>',
+  task: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 14l2 2 4-5"/>',
+  finding: '<circle cx="10" cy="10" r="6"/><path d="m14.5 14.5 6 6M7.5 10.5l1.7 1.7 3.3-3.4"/>',
   languages: '<path d="M3 5h12M9 3v2M5 5c0 6 5 9 8 10M13 5c0 6-5 9-8 10M14 21l4-10 4 10M15.5 18h5"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/>',
@@ -1002,7 +1005,7 @@ function renderSidebar(captureScroll = true) {
     .map((kind) => {
       const items = runRecords(run, kind),
         open = v.openKind === kind;
-      return `<section class="record-fold ${open ? "is-open" : ""}"><button id="fold-${kind}" class="fold-trigger" type="button" data-fold="${kind}" aria-expanded="${open}" aria-controls="list-${kind}">${icon("chevron").replace('class="icon"', 'class="icon fold-chevron"')}${icon(kind === "PLAN" ? "folder" : "file")}<span>${kind}</span><span class="fold-count">${formatItemCount(items.length)}</span></button><div class="fold-list" id="list-${kind}" role="region" aria-labelledby="fold-${kind}" ${open ? "" : "hidden"}>${items.map((r) => `<button type="button" data-record="${r.uid}" ${v.page === "record" && v.record === r.uid ? 'aria-current="true"' : ""}><span class="record-code"><span class="status ${statusColors[r.status]}" aria-hidden="true"></span>${r.id}</span><span class="record-label">${esc(tr(r.title))}</span></button>`).join("") || `<p class="fold-empty">${t("noRecords")}</p>`}</div></section>`;
+      return `<section class="record-fold ${open ? "is-open" : ""}"><button id="fold-${kind}" class="fold-trigger" type="button" data-fold="${kind}" aria-expanded="${open}" aria-controls="list-${kind}">${icon("chevron").replace('class="icon"', 'class="icon fold-chevron"')}${icon(kind.toLowerCase())}<span>${kind}</span><span class="fold-count">${formatItemCount(items.length)}</span></button><div class="fold-list" id="list-${kind}" role="region" aria-labelledby="fold-${kind}" ${open ? "" : "hidden"}>${items.map((r) => `<button type="button" data-record="${r.uid}" ${v.page === "record" && v.record === r.uid ? 'aria-current="true"' : ""}><span class="record-code"><span class="status ${statusColors[r.status]}" aria-hidden="true"></span>${r.id}</span><span class="record-label">${esc(tr(r.title))}</span></button>`).join("") || `<p class="fold-empty">${t("noRecords")}</p>`}</div></section>`;
     })
     .join("");
   folds.querySelectorAll(".fold-list:not([hidden])").forEach((list) => {
