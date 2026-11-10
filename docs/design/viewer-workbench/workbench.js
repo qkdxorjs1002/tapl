@@ -129,7 +129,7 @@ const copy = {
   previewDiscard: ["폐기 확인 미리보기", "Preview discard confirmation"],
   cancel: ["취소", "Cancel"],
   close: ["닫기", "Close"],
-  back: ["뒤로 가기", "Back"],
+  back: ["돌아가기", "Back"],
   returned: ["이전 화면으로 돌아왔습니다", "Returned to the previous page"],
   discardToast: [
     "확인 절차를 미리 보았습니다. 실제 RUN과 시안 데이터는 유지됩니다.",
