@@ -127,6 +127,8 @@ const copy = {
   previewDiscard: ["폐기 확인 미리보기", "Preview discard confirmation"],
   cancel: ["취소", "Cancel"],
   close: ["닫기", "Close"],
+  back: ["뒤로 가기", "Back"],
+  returned: ["이전 화면으로 돌아왔습니다", "Returned to the previous page"],
   discardToast: [
     "확인 절차를 미리 보았습니다. 실제 RUN과 시안 데이터는 유지됩니다.",
     "Confirmation previewed. Real RUNs and demo data remain unchanged.",
@@ -153,6 +155,7 @@ const icons = {
   book: '<path d="M4 4h6a3 3 0 0 1 2 1 3 3 0 0 1 2-1h6v15h-6a3 3 0 0 0-2 1 3 3 0 0 0-2-1H4zM12 5v15"/>',
   trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
   arrow: '<path d="M5 12h14M14 7l5 5-5 5"/>',
+  back: '<path d="M19 12H5M10 7l-5 5 5 5"/>',
   chevron: '<path d="m9 5 7 7-7 7"/>',
   alert: '<path d="m12 3 10 18H2zM12 9v5M12 17h.01"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
@@ -522,6 +525,7 @@ function canDiscard(run = currentRun()) {
   return Boolean(run) && capabilities.discardRun && run.writable !== false;
 }
 const views = new Map();
+const navigationTrail = [];
 function currentRun() {
   return runs.find((r) => r.key === state.run);
 }
@@ -592,8 +596,13 @@ function context() {
   const run = currentRun();
   return `<div class="run-context"><span class="eyebrow">${run.id}</span><span class="context-separator"></span>${chip(t(run.owner), "badge-outline")}<span class="micro muted">${esc(run.source)}</span></div>`;
 }
+function backButton() {
+  return navigationTrail.length
+    ? `<button class="btn btn-sm page-back" id="page-back" type="button">${icon("back")}<span>${t("back")}</span></button>`
+    : "";
+}
 function pageHeader(heading = "", summary = "") {
-  return `<div class="page-title-row"><div><h1>${esc(heading || titleForPage())}</h1>${summary ? `<p class="page-description">${esc(summary)}</p>` : ""}</div></div>`;
+  return `<div class="page-title-row"><div><h1>${esc(heading || titleForPage())}</h1>${summary ? `<p class="page-description">${esc(summary)}</p>` : ""}</div>${backButton()}</div>`;
 }
 function meter() {
   const c = counts();
@@ -716,7 +725,7 @@ function recordPage() {
       "Verify record context and keyboard focus across RUN changes and refreshes.",
     ),
   ];
-  return `<article class="record-page"><header class="record-hero">${context()}<div class="run-context">${chip(r.kind, "badge-outline")}<span class="eyebrow">${r.id}</span>${statusMark(r.status)}</div><h1>${esc(tr(r.title))}</h1><div class="record-meta"><span>${t("owner")}: ${esc(tr(r.owner))}</span><span>·</span><span>2026-11-10</span></div></header><div class="reading-grid"><div class="reading-body"><section class="reading-section"><h2>${t("objective")}</h2><p>${esc(tr(r.goal))}</p></section><section class="reading-section"><h2>${r.kind === "PLAN" ? t("requirements") : t("result")}</h2><p>${r.kind === "PLAN" ? esc(tr(run.description)) : resultText(r)}</p></section><section class="reading-section"><h2>${t("verification")}</h2><ul>${checks.map((c) => `<li class="checkline">${icon("check")}<span>${esc(tr(c))}</span></li>`).join("")}</ul></section><section class="reading-section"><h2>${t("depends")}</h2><p>${
+  return `<article class="record-page"><header class="record-hero"><div class="record-heading-row"><div class="record-heading-copy">${context()}<div class="run-context">${chip(r.kind, "badge-outline")}<span class="eyebrow">${r.id}</span>${statusMark(r.status)}</div><h1>${esc(tr(r.title))}</h1><div class="record-meta"><span>${t("owner")}: ${esc(tr(r.owner))}</span><span>·</span><span>2026-11-10</span></div></div>${backButton()}</div></header><div class="reading-grid"><div class="reading-body"><section class="reading-section"><h2>${t("objective")}</h2><p>${esc(tr(r.goal))}</p></section><section class="reading-section"><h2>${r.kind === "PLAN" ? t("requirements") : t("result")}</h2><p>${r.kind === "PLAN" ? esc(tr(run.description)) : resultText(r)}</p></section><section class="reading-section"><h2>${t("verification")}</h2><ul>${checks.map((c) => `<li class="checkline">${icon("check")}<span>${esc(tr(c))}</span></li>`).join("")}</ul></section><section class="reading-section"><h2>${t("depends")}</h2><p>${
     r.depends.length
       ? r.depends
           .map((id) => {
@@ -971,7 +980,7 @@ function renderTabs() {
 function navItem(page, ico, count = "") {
   return `<button type="button" class="nav-button" data-page="${page}" ${view().page === page ? 'aria-current="page"' : ""}>${icon(ico)}<span>${t(page)}</span>${count !== "" ? `<span class="nav-counter">${count}</span>` : ""}</button>`;
 }
-function renderSidebar() {
+function renderSidebar(captureScroll = true) {
   const v = view(),
     run = currentRun(),
     c = counts();
@@ -982,7 +991,7 @@ function renderSidebar() {
     navItem("records", "search") + navItem("memories", "book");
   const folds = $("#record-folds");
   const previous = views.get(folds.dataset.run);
-  if (previous)
+  if (previous && captureScroll)
     folds.querySelectorAll(".fold-list:not([hidden])").forEach((list) => {
       previous.foldScrolls[list.id] = list.scrollTop;
     });
@@ -1107,7 +1116,7 @@ function render(options = {}) {
   }
   applyCopy();
   renderTabs();
-  renderSidebar();
+  renderSidebar(options.captureSidebar !== false);
   renderPage();
   syncResponsiveMenu();
   $("#page-scroll").scrollTop = options.resetScroll ? 0 : scroll;
@@ -1128,7 +1137,46 @@ function closeMenu() {
   $("#menu-toggle").setAttribute("aria-expanded", "false");
   syncResponsiveMenu();
 }
-function navigate(page) {
+function rememberPage() {
+  finishFoldMotion();
+  finishDisclosures();
+  const saved = structuredClone(view());
+  $("#record-folds")
+    .querySelectorAll(".fold-list:not([hidden])")
+    .forEach((list) => (saved.foldScrolls[list.id] = list.scrollTop));
+  if (saved.page === "records")
+    saved.searchOpen = [...document.querySelectorAll("details[data-search-run][open]")]
+      .map((group) => group.dataset.searchRun);
+  navigationTrail.push({
+    run: state.run,
+    view: saved,
+    scroll: $("#page-scroll").scrollTop,
+    focus: focusToken(),
+  });
+}
+function goBack() {
+  if (!navigationTrail.length) return;
+  finishFoldMotion();
+  finishDisclosures();
+  const previous = navigationTrail.pop();
+  state.run = previous.run;
+  views.set(state.run, previous.view);
+  closeMenu();
+  render({
+    resetScroll: true,
+    focusPage: true,
+    captureSearch: false,
+    captureSidebar: false,
+    motion: "page",
+  });
+  $("#page-scroll").scrollTop = previous.scroll;
+  restoreFocus(previous.focus);
+  $(`#tab-${state.run}`).scrollIntoView({ block: "nearest", inline: "nearest" });
+  announce(t("returned"));
+}
+function navigate(page, remember = false) {
+  if (remember && view().page !== page) rememberPage();
+  else if (!remember) navigationTrail.length = 0;
   view().page = page;
   closeMenu();
   render({ resetScroll: true, focusPage: true, motion: "page" });
@@ -1136,6 +1184,7 @@ function navigate(page) {
 }
 function switchRun(key, focusTab = false) {
   if (!runs.some((r) => r.key === key)) return;
+  navigationTrail.length = 0;
   view().scrolls[view().page] = $("#page-scroll").scrollTop;
   state.run = key;
   closeMenu();
@@ -1147,7 +1196,8 @@ function switchRun(key, focusTab = false) {
 }
 function openRecord(uid) {
   const record = getRecord(uid);
-  if (!record) return;
+  if (!record || (view().page === "record" && view().record === uid)) return;
+  rememberPage();
   state.run = record.runKey;
   view().page = "record";
   view().record = uid;
@@ -1192,7 +1242,8 @@ document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.dataset.run) switchRun(button.dataset.run, true);
-  else if (button.dataset.page) navigate(button.dataset.page);
+  else if (button.dataset.page)
+    navigate(button.dataset.page, Boolean(button.closest("#page-content")));
   else if (button.dataset.fold) toggleExplore(button.dataset.fold);
   else if (button.dataset.record) openRecord(button.dataset.record);
   else if (button.dataset.filter) {
@@ -1228,7 +1279,8 @@ document.addEventListener("click", (event) => {
     if (key === "tasks") view().filter = "all";
     render();
     $("#page-content input")?.focus({ preventScroll: true });
-  } else if (button.id === "theme-toggle") {
+  } else if (button.id === "page-back") goBack();
+  else if (button.id === "theme-toggle") {
     document.documentElement.classList.add("theme-swapping");
     state.theme = state.theme === "light" ? "dark" : "light";
     render();
