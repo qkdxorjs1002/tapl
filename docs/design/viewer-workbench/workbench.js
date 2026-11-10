@@ -221,6 +221,7 @@ const runs = [
   },
   {
     key: "local26",
+    archived: true,
     id: "RUN-026",
     source: "local / other-session",
     title: bi("문서 구조 정리", "Documentation structure"),
@@ -249,6 +250,7 @@ const runs = [
   },
   {
     key: "peer24",
+    archived: true,
     id: "RUN-024",
     source: "peer / sample-history",
     title: bi("공유 기록 검토", "Shared history"),
@@ -534,6 +536,11 @@ const views = new Map();
 const navigationTrail = [];
 function currentRun() {
   return runs.find((r) => r.key === state.run);
+}
+function tabRuns() {
+  const active = runs.filter((run) => !run.archived);
+  const selected = currentRun();
+  return selected.archived ? [...active, selected] : active;
 }
 function view() {
   if (!views.has(state.run))
@@ -970,13 +977,14 @@ window.addEventListener("resize", updateRunIndicator);
 
 function renderTabs() {
   const selected = currentRun();
-  $("#run-tabs").innerHTML = runs
+  $("#run-tabs").innerHTML = tabRuns()
     .map(
       (run) =>
-        `<button id="tab-${run.key}" class="tab run-tab" role="tab" type="button" data-run="${run.key}" aria-controls="page-content" aria-selected="${run.key === state.run}" tabindex="${run.key === state.run ? 0 : -1}" title="${esc(tr(run.title))} · ${run.id} · ${esc(run.source)}"><span class="run-tab-title"><span class="status ${statusColors[run.status]}" aria-hidden="true"></span><span>${esc(tr(run.title))}</span></span><span class="run-tab-meta">${run.id}</span></button>`,
+        `<button id="tab-${run.key}" class="tab run-tab${run.archived ? " run-tab-temporary" : ""}" role="tab" type="button" data-run="${run.key}" aria-controls="page-content" aria-selected="${run.key === state.run}" tabindex="${run.key === state.run ? 0 : -1}" title="${esc(tr(run.title))} · ${run.id} · ${esc(run.source)}"><span class="run-tab-title"><span class="status ${statusColors[run.status]}" aria-hidden="true"></span><span>${esc(tr(run.title))}</span></span><span class="run-tab-meta">${run.id}</span></button>`,
     )
     .join("");
   $("#page-content").setAttribute("aria-labelledby", `tab-${selected.key}`);
+  $(`#tab-${selected.key}`).scrollIntoView({ block: "nearest", inline: "nearest" });
   updateRunIndicator();
 }
 function formatItemCount(count) {
@@ -1373,15 +1381,16 @@ $("#sidebar-scrim").addEventListener("click", () => {
 });
 $("#run-tabs").addEventListener("keydown", (event) => {
   if (!event.target.matches("[data-run]")) return;
-  let index = runs.findIndex((r) => r.key === state.run);
-  if (event.key === "ArrowRight") index = (index + 1) % runs.length;
+  const visibleRuns = tabRuns();
+  let index = visibleRuns.findIndex((r) => r.key === state.run);
+  if (event.key === "ArrowRight") index = (index + 1) % visibleRuns.length;
   else if (event.key === "ArrowLeft")
-    index = (index + runs.length - 1) % runs.length;
+    index = (index + visibleRuns.length - 1) % visibleRuns.length;
   else if (event.key === "Home") index = 0;
-  else if (event.key === "End") index = runs.length - 1;
+  else if (event.key === "End") index = visibleRuns.length - 1;
   else return;
   event.preventDefault();
-  switchRun(runs[index].key, true);
+  switchRun(visibleRuns[index].key, true);
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;

@@ -269,6 +269,9 @@ select {
   background: color-mix(in srgb, var(--color-primary) 5%, transparent);
   color: var(--color-base-content);
 }
+.run-tab.run-tab-temporary {
+  margin-inline-start: auto;
+}
 .run-tab:hover {
   background: var(--color-base-200);
 }
