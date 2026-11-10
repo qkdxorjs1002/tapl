@@ -82,4 +82,6 @@ BM25/전문 검색에는 선택적 의미 검색 의존성이 필요하지 않�
 
 브라우저와 VS Code는 React 구성 요소, CSS, 프로토콜 타입을 공유합니다. 브라우저 HTTP는 origin·콘텐츠·워크스페이스를 검사합니다. VS Code는 pool로 관리하는 stdio 클라이언트를 사용하며 오래된 워크스페이스·화면 이동 결과를 거부합니다. 서버의 지원 기능 표시에 따라 메모리·확인된 폐기를 제공하고 구버전에서도 다른 화면을 유지합니다. 메모리 화면은 읽기 전용입니다.
 
+공유 `src/webview/workbench/`는 화면 구조·원본을 포함한 이동·RUN별 설정·탐색 목록·RUN/TASK 화면·기록 검색을 맡습니다. `App.tsx`는 기록·기억 상세와 확인 후 RUN 삭제를 유지합니다. 두 호스트는 읽기 전용 `tapl_get_run`·`tapl_list_records` 어댑터를 사용하며 목록은 페이지 분할 전 필터와 원본 오류를 제공합니다. 브라우저 내부 run/records 경로는 새 공개 CLI 명령이 아닙니다.
+
 이 경계를 바꿀 때는 세션 격리, 트랜잭션 상태, 구조화된 schema, 정확한 실행 정리, 공유 UI 동작을 보존해야 합니다. `test_session_mcp.py`, `test_application.py`, `test_context_optimization.py`, `test_search.py`, 메모리·폐기 테스트와 확장 호스트 테스트가 계약을 다룹니다. 명령은 [기여와 검증](contributing.ko.md), 패키징 경계는 [릴리스](releases.ko.md)를 보세요.

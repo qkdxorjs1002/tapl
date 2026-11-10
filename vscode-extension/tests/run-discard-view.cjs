@@ -240,3 +240,23 @@ test('duplicate RUN IDs keep source-specific selection and foreign close control
   tabs[1].props.onClick();
   assert.deepEqual(h.commands, [{ command: 'selectRun', sessionId: 'owner-b', source_db: 'tapl-peer.db' }]);
 }));
+
+test('Management opens exact-ID confirmation for the selected RUN without a tab close control', () => withHarness({ managementOnly: true }, (h) => {
+  const opener = h.find(node => node.props?.['data-wb-focus'] === 'discard');
+  assert.equal(opener.props.disabled, false);
+  assert.equal(h.close(), undefined);
+  opener.props.onClick(); h.render();
+  enterRunId(h, 'run-a');
+  confirm(h).props.onClick(); h.render();
+  assert.equal(h.commands.length, 1);
+  assert.equal(h.commands[0].runId, 'run-a');
+  assert.equal(h.commands[0].targetSessionId, 'owner-a');
+}));
+
+test('Management confirmation cannot follow a newly selected RUN', () => withHarness({ managementOnly: true }, (h) => {
+  h.find(node => node.props?.['data-wb-focus'] === 'discard').props.onClick(); h.render();
+  enterRunId(h, 'run-a');
+  h.render({ selectedId: 'run-b' });
+  assert.equal(dialog(h), undefined);
+  assert.deepEqual(h.commands, []);
+}));

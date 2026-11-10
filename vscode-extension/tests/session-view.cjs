@@ -35,37 +35,39 @@ function render(activeRun, runs = [run]) {
   }
 }
 
-test('the remaining RUN stays selectable after the previously selected RUN ends', () => {
+test('the remaining RUN stays keyboard-selectable after the selected RUN ends', () => {
   const html = render(false);
-  assert.match(html, /role="tablist" aria-label="active run"/);
-  assert.match(html, /id="tapl-run-tab-local-run-b"[^>]*aria-selected="false"[^>]*tabindex="0"/);
-  assert.match(html, /tapl-run-tab-title">Remaining work/);
-  assert.match(html, /aria-label="No active run"/);
+  assert.match(html, /role="tablist" aria-label="RUN"/);
+  assert.match(html, /aria-selected="false"[^>]*id="wb-run-tab-0"[^>]*tabindex="0"/);
+  assert.match(html, /Remaining work/);
+  assert.match(html, /No active RUN/);
 });
 
-test('one selected RUN keeps the top-level tab visible', () => {
+test('one selected RUN keeps the header tab and shared navigation visible', () => {
   const html = render(true);
-  assert.match(html, /id="tapl-run-tab-local-run-b"[^>]*aria-selected="true"/);
-  assert.match(html, /role="tabpanel" aria-labelledby="tapl-run-tab-local-run-b"/);
-  assert.ok(html.indexOf('class="tapl-run-tabs"') < html.indexOf('class="tapl-hero"'));
-  assert.doesNotMatch(html, /<select/);
+  assert.match(html, /aria-selected="true"[^>]*id="wb-run-tab-0"/);
+  assert.match(html, /role="tabpanel" aria-labelledby="wb-run-tab-0"/);
+  assert.match(html, /wb-sidebar/);
+  assert.match(html, /TASK status/);
+  assert.doesNotMatch(html, /tapl-hero|<select/);
 });
 
-test('multiple RUNs have separate tabs with full titles and one keyboard entry', () => {
-  const title = '신규 개발·운영 Site-to-Site VPN 연결2개의 과금 중지를 위해 비밀값 확인 '.repeat(4);
+test('multiple RUNs keep full titles and one keyboard entry', () => {
+  const title = '긴 작업 제목 '.repeat(12);
   const html = render(true, [run, { id: 'run-c', session_id: 'session-c', request_summary: title }]);
-  assert.match(html, /id="tapl-run-tab-local-run-c"[^>]*aria-selected="false"[^>]*tabindex="-1"/);
-  assert.ok(html.includes(`title="${title}\nsession-c"`));
-  assert.ok(html.includes(`tapl-run-tab-title">${title}</span>`));
+  assert.match(html, /aria-selected="false"[^>]*id="wb-run-tab-1"[^>]*tabindex="-1"/);
+  assert.ok(html.includes(`title="${title.trim()}\nrun-c"`));
+  assert.equal((html.match(/role="tab"/g) || []).length, 2);
 });
 
-test('no RUNs keeps a disabled empty tab in the same top-level slot', () => {
+test('no RUNs keeps the navigation and an actionable empty state', () => {
   const html = render(false, []);
-  assert.match(html, /class="tapl-run-tab"[^>]*role="tab"[^>]*disabled=""/);
-  assert.match(html, /tapl-run-tab-title">No active run/);
-  assert.ok(html.indexOf('class="tapl-run-tabs"') < html.indexOf('class="tapl-hero"'));
+  assert.match(html, /wb-run-tabs tabs/);
+  assert.match(html, /No active RUN/);
+  assert.match(html, /Record search/);
+  assert.doesNotMatch(html, /role="tab"/);
 });
 
-test('the selected RUN remains a tab when the inventory does not include it', () => {
-  assert.match(render(true, []), /id="tapl-run-tab-local-run-b"[^>]*aria-selected="true"/);
+test('the selected RUN remains a tab when the inventory omits it', () => {
+  assert.match(render(true, []), /aria-selected="true"[^>]*id="wb-run-tab-0"/);
 });

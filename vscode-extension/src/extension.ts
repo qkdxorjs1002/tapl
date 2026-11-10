@@ -13,12 +13,14 @@ import {
   type TaplMcpWorkspace
 } from './taplMcpClient';
 
-import type { DisplayLayout, AssociativeMemory, MemoryDiagnostics, HostCapabilities, RunDiscardResult, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
+import type { DisplayLayout, AssociativeMemory, MemoryDiagnostics, HostCapabilities, RunDiscardResult, TaplRunSnapshot, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
 
 type NodeKind = 'overview' | 'task' | 'archive' | 'empty';
 type DisplayLanguage = 'auto' | SupportedLocale;
 
 type PanelView = (
+  | { type: 'run'; runId: string }
+  | { type: 'records'; query: string; scope: 'all' | 'run'; runId?: string; offset: number; limit: number }
   | { type: 'overview' | 'debug' }
   | { type: 'archive' | 'archiveEvents'; archiveId: string }
   | { type: 'search'; query: string }
@@ -374,9 +376,29 @@ class WorkflowWebviewManager {
   }
 
   private async buildCurrentView(route: PanelView): Promise<WebviewView> {
+    if (route.type === 'run') {
+      const result = await callTaplMcp('tapl_get_run', { run_id: route.runId, ...(route.source_db ? { source_db: route.source_db } : {}) });
+      return result.ok ? { type: 'run', snapshot: result.value as unknown as TaplRunSnapshot, workspace: getWorkspaceRoot()?.uri.fsPath }
+        : { type: 'error', message: result.error };
+    }
+    if (route.type === 'records') {
+      const result = await callTaplMcp('tapl_list_records', { query: route.query, scope: route.scope,
+        offset: route.offset, limit: route.limit, ...(route.runId ? { run_id: route.runId } : {}),
+        ...(route.source_db ? { source_db: route.source_db } : {}) });
+      if (!result.ok) { return { type: 'error', message: result.error }; }
+      const payload = result.value;
+      const context = route.scope === 'run' ? await readRunContext(route.runId, route.source_db) : undefined;
+      return { ...payload, type: 'records', query: route.query, scope: route.scope,
+        runId: route.scope === 'run' ? route.runId : undefined,
+        source_db: typeof payload.source_db === 'string' ? payload.source_db : undefined,
+        offset: route.offset, limit: route.limit, total: Number(payload.total ?? 0),
+        records: payload.records ?? [], runs: payload.runs ?? [], ...(context ? { context } : {}) } as Extract<WebviewView, { type: 'records' }>;
+    }
     if (route.type === 'archive' || route.type === 'archiveEvents') {
       const detail = await safeArchiveDetail(route.archiveId, route.source_db);
-      return detail.ok ? { type: route.type, archive: detail.value.archive, detail: detail.value } : { type: 'error', message: detail.error };
+      if (!detail.ok) { return { type: 'error', message: detail.error }; }
+      const context = await readRunContext(detail.value.archive.run_id, detail.value.archive.source_db ?? route.source_db);
+      return { type: route.type, archive: detail.value.archive, detail: detail.value, ...(context ? { context } : {}) };
     }
     if (route.type === 'search') {
       const result = await searchTapl(route.query);
@@ -399,8 +421,12 @@ class WorkflowWebviewManager {
       const memory = (result.value.memory ?? null) as AssociativeMemory | null;
       const source = memory?.source_record;
       if (route.type === 'memorySource' && memory?.source_available && source) {
-        if (source.kind === 'item' && source.item) { return this.itemView(source.item.id, memory.source_db); }
-        if (source.kind === 'run' && source.run) { return { type: 'memorySource', memoryId: route.memoryId, run: source.run, source_db: memory.source_db }; }
+        if (source.kind === 'item' && source.item) { return this.itemView(source.item.id, memory.source_db ?? route.source_db); }
+        if (source.kind === 'run' && source.run) {
+          const context = await readRunContext(source.run.id, memory.source_db ?? route.source_db);
+          return { type: 'memorySource', memoryId: route.memoryId, run: source.run, source_db: memory.source_db ?? route.source_db,
+            ...(context ? { context } : {}) };
+        }
       }
       return { type: 'memory', memoryId: route.memoryId, memory, source_db: memory?.source_db ?? route.source_db };
     }
@@ -416,8 +442,9 @@ class WorkflowWebviewManager {
   private async itemView(itemId: number, sourceDb?: string): Promise<WebviewView> {
     const detail = await safeItemDetail(itemId, sourceDb);
     if (!detail.ok) { return { type: 'error', message: detail.error }; }
-    const item = await enrichTaskDetail(detail.value);
-    return { type: 'searchItem', result: searchResultFromItem(item), detail: item };
+    const context = await readRunContext(detail.value.run_id, detail.value.source_db ?? sourceDb);
+    const item = await enrichTaskDetail(detail.value, context);
+    return { type: 'searchItem', result: searchResultFromItem(item), detail: item, ...(context ? { context } : {}) };
   }
 
   private async runSearch(query: string, reveal = false): Promise<void> {
@@ -433,6 +460,25 @@ class WorkflowWebviewManager {
       case 'ready': await this.postCurrentView('hydrate'); return;
       case 'refresh': await this.refresh(); return;
       case 'discardRun': await this.discardRun(message); return;
+      case 'openRun':
+        if (typeof message.runId === 'string' && message.runId && message.runId.length <= 256) {
+          await this.navigate({ type: 'run', runId: message.runId,
+            source_db: typeof message.source_db === 'string' ? message.source_db : undefined }, { pushHistory: true });
+        }
+        return;
+      case 'records': {
+        const query = message.query ?? '', scope = message.scope ?? 'all';
+        const offset = message.offset ?? 0, limit = message.limit ?? 50;
+        if (typeof query !== 'string' || query.length > 500 || (scope !== 'all' && scope !== 'run')
+          || typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0 || offset > 1000000
+          || typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 50
+          || (scope === 'run' && (typeof message.runId !== 'string' || !message.runId || message.runId.length > 256))) { return; }
+        await this.navigate({ type: 'records', query, scope, offset, limit,
+          runId: scope === 'run' ? message.runId as string : undefined,
+          source_db: typeof message.source_db === 'string' ? message.source_db : undefined },
+          { pushHistory: this.currentView.type !== 'records' });
+        return;
+      }
       case 'selectRun': {
         const root = getWorkspaceRoot();
         if (root && typeof message.sessionId === 'string' && message.sessionId.length <= 256) {
@@ -667,11 +713,18 @@ async function safeItemDetail(itemId: number, sourceDb?: string): Promise<{ ok: 
   return { ok: true, value: payload.item };
 }
 
-async function enrichTaskDetail(detail: TaplItemDetail): Promise<TaplItemDetail> {
+async function readRunContext(runId?: string, sourceDb?: string): Promise<TaplRunSnapshot | undefined> {
+  if (!runId) { return undefined; }
+  const result = await callTaplMcp('tapl_get_run', { run_id: runId, ...(sourceDb ? { source_db: sourceDb } : {}) });
+  return result.ok ? result.value as unknown as TaplRunSnapshot : undefined;
+}
+
+async function enrichTaskDetail(detail: TaplItemDetail, context?: TaplRunSnapshot): Promise<TaplItemDetail> {
+  if (detail.run_id && !context) { return detail; }
   if (detail.kind !== 'task' || detail.archived || detail.run_status === 'archived') {
     return detail;
   }
-  const status = await safeStatus({ full: true });
+  const status = context ? { ok: true as const, value: context } : await safeStatus({ full: true });
   if (!status.ok) {
     return detail;
   }
@@ -700,7 +753,7 @@ async function searchTapl(query: string): Promise<{ ok: true; value: TaplSearchP
 }
 
 async function callTaplMcp(
-  tool: 'tapl_get_status' | 'tapl_get_item' | 'tapl_search_history' | 'tapl_list_archives' | 'tapl_get_archive' | 'tapl_recall' | 'tapl_get_memory' | 'tapl_discard_run',
+  tool: 'tapl_get_status' | 'tapl_get_run' | 'tapl_list_records' | 'tapl_get_item' | 'tapl_search_history' | 'tapl_list_archives' | 'tapl_get_archive' | 'tapl_recall' | 'tapl_get_memory' | 'tapl_discard_run',
   args: Record<string, unknown>,
   root: vscode.WorkspaceFolder | undefined = getWorkspaceRoot()
 ): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false; error: string }> {
@@ -768,6 +821,7 @@ function emptyNode(label: string): WorkflowNode {
 function searchResultFromItem(item: TaplItemDetail): TaplSearchResult {
   return {
     id: item.id,
+    ...(item.run_id ? { run_id: item.run_id } : {}),
     stable_id: item.stable_id,
     kind: item.kind,
     title: item.title,

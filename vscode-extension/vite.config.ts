@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig({
-  plugins: [react()],
+export default defineConfig(async () => ({
+  // The Tailwind plugin is ESM-only; keep this package's extension host in CommonJS.
+  plugins: [react(), (await import('@tailwindcss/vite')).default()],
   build: {
     outDir: 'webview-dist',
     emptyOutDir: true,
@@ -16,4 +17,4 @@ export default defineConfig({
       }
     }
   }
-});
+}));

@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [한국어](mcp.ko.md)
 
-`tapl-mcp` exposes the workflow application over MCP stdio. Management commands belong to [the CLI](cli.md). This page covers all **30 public tools** registered by [`mcp_server.py`](../../tapl/taplctl/mcp_server.py); the connected server's JSON schema is the authority for exact validation.
+`tapl-mcp` exposes the workflow application over MCP stdio. Management commands belong to [the CLI](cli.md). This page covers all **32 public tools** registered by [`mcp_server.py`](../../tapl/taplctl/mcp_server.py); the connected server's JSON schema is the authority for exact validation.
 
 Claude Code requires the exact `claude-code:<native-session-id>` hook owner on every call, even reads. Its missing/raw/foreign-client IDs are rejected; the legacy omission behavior below applies only to Codex. Approval source `request_user_input` remains the stable tool-confirmed provenance value, including Claude `AskUserQuestion` answers. Host-specific policy and model setup are described in the [Claude guide](../getting-started/claude-code.md).
 
@@ -66,6 +66,8 @@ Search, lists, and recall read multiple databases in the working folder. Preserv
 
 | Tool | Required arguments | Optional arguments and behavior |
 | --- | --- | --- |
+| `tapl_get_run` | `run_id` (1–256 characters) | Optional `source_db`. Reads the exact active/archived RUN, items, task counts and execution metadata; does not follow its owner's newer RUN. Includes `readonly` and source provenance. |
+| `tapl_list_records` | None | `query=""` (0–500 characters), `scope="all"` or `"run"`, optional `run_id`, `source_db`, `offset=0` (0–1,000,000), `limit=50` (1–50). Run scope requires an exact RUN ID; all scope federates sources. Returns literal title/body/stable-ID matches, full filtered totals, per-RUN counts and source errors. |
 | `tapl_search_history` | `query` (1–500 characters) | `limit` (1–50; configuration default when omitted). Searches active/archived originals. |
 | `tapl_get_item` | `item_id` (positive integer) | Optional `source_db` (exact source filename; omission selects local). `compact=false`. Reads a plan/task/finding. Compact mode omits generated body only when exactly reconstructible from canonical fields; custom/raw bodies and findings remain intact. |
 | `tapl_list_archives` | None | `limit` (1–100). Lists recent archives. |

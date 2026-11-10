@@ -152,6 +152,37 @@ class NativeJsonRunner:
                 full="--full" in args,
                 include_events="--include-events" in args,
             )
+        if args[:2] == ["run", "show"]:
+            from .history import annotate_records
+            conn = self._connection(db_path)
+            try:
+                snapshot = db.run_snapshot(conn, self._option(args, "--id") or "")
+                if snapshot is None:
+                    raise ViewerError("RUN not found.")
+                snapshot["run"].update(source_db=db_path.name, writable=False)
+                for key in ("plans", "tasks", "findings", "active_batches", "active_executions", "active_runs"):
+                    snapshot[key] = annotate_records(snapshot[key], db_path.name)
+                for run in snapshot["active_runs"]:
+                    run["writable"] = False
+                return {**snapshot, "readonly": True}
+            finally:
+                conn.close()
+        if args[:2] == ["records", "list"]:
+            conn = self._connection(db_path)
+            try:
+                options = self._record_options(args)
+                query, scope = options.get("--query", ""), options.get("--scope", "all")
+                run_id = options.get("--run-id") if scope == "run" else None
+                offset, limit = int(options.get("--offset", "0")), int(options.get("--limit", "50"))
+                if run_id and conn.execute("SELECT 1 FROM workflow_runs WHERE id=?", (run_id,)).fetchone() is None:
+                    raise ViewerError("RUN not found.")
+                result = db.record_library(conn, query=query, run_id=run_id, limit=offset + limit)
+                result["records"] = [{**record, "source_db": db_path.name} for record in result["records"][offset:offset + limit]]
+                result["runs"] = [{**run, "source_db": db_path.name, "writable": False} for run in result["runs"]]
+                return {**result, "query": query, "scope": scope, "offset": offset, "limit": limit,
+                        **({"run_id": run_id, "source_db": db_path.name} if run_id else {})}
+            finally:
+                conn.close()
         if args[:2] == ["archive", "list"]:
             return self._archive_list(db_path, args)
         if args[:2] == ["archive", "show"]:
@@ -178,6 +209,16 @@ class NativeJsonRunner:
                 raise ViewerError("Missing memory id.")
             return self._memory(db_path, memory_id)
         raise ViewerError(f"Unsupported viewer data request: {' '.join(args)}")
+
+    @staticmethod
+    def _record_options(args: list[str]) -> dict[str, str]:
+        """Internal records commands contain fixed option/value pairs.
+
+        Values are literal user text, including strings that resemble options.
+        """
+        if len(args[2:]) % 2:
+            raise ViewerError("Invalid record request options.")
+        return dict(zip(args[2::2], args[3::2]))
 
     @staticmethod
     def _option(args: list[str], name: str) -> str | None:
@@ -482,7 +523,7 @@ class ViewerApplication:
                     "message": "",
                 }
             view = self._build_view(payload, db_path)
-            if workspace is not None and view.get("type") == "overview":
+            if workspace is not None and view.get("type") in {"overview", "run"}:
                 view["workspace"] = str(workspace)
         except WorkspaceRequired as exc:
             if payload["command"] == "revision":
@@ -564,6 +605,16 @@ class ViewerApplication:
         from .history import HistoryReader
         reader = HistoryReader(workspace, local_db_path=db.local_db_path(workspace, create_identity=False))
         try:
+            if args[:2] == ["run", "show"]:
+                return reader.get_run(NativeJsonRunner._option(args, "--id"), source_db=selected.name)
+            if args[:2] == ["records", "list"]:
+                options = NativeJsonRunner._record_options(args)
+                return reader.list_records(options.get("--query", ""),
+                                           scope=options.get("--scope", "all"),
+                                           run_id=options.get("--run-id"),
+                                           source_db=selected.name,
+                                           offset=int(options.get("--offset", "0")),
+                                           limit=int(options.get("--limit", "50")))
             if args[:2] == ["archive", "list"]:
                 limit = NativeJsonRunner._option(args, "--limit")
                 return reader.list_archives(limit=int(limit) if limit else None)
@@ -584,6 +635,32 @@ class ViewerApplication:
 
     def _build_view(self, payload: dict[str, Any], db_path: Path) -> dict[str, Any]:
         command = str(payload["command"])
+        if command == "openRun":
+            run_id = self._required_string(payload, "runId")
+            if len(run_id) > 256:
+                raise ViewerError("Invalid RUN id.")
+            return {"type": "run", "snapshot": self._read(db_path, ["run", "show", "--id", run_id], payload.get("source_db"))}
+        if command == "records":
+            query, scope = payload.get("query", ""), payload.get("scope", "all")
+            offset, limit = payload.get("offset", 0), payload.get("limit", 50)
+            if not isinstance(query, str) or len(query) > 500 or scope not in ("all", "run"):
+                raise ViewerError("Invalid record query or scope.")
+            if type(offset) is not int or not 0 <= offset <= 1000000 or type(limit) is not int or not 1 <= limit <= 50:
+                raise ViewerError("Invalid record pagination.")
+            args = ["records", "list", "--query", query, "--scope", scope, "--offset", str(offset), "--limit", str(limit)]
+            if scope == "run":
+                run_id = self._required_string(payload, "runId")
+                if len(run_id) > 256:
+                    raise ViewerError("Invalid RUN id.")
+                args += ["--run-id", run_id]
+            result = self._read(db_path, args, payload.get("source_db"))
+            view = {"type": "records", **{key: result[key] for key in (
+                "query", "scope", "offset", "limit", "total", "records", "runs", "source_errors", "active_runs", "source_db",
+            ) if key in result}}
+            if scope == "run":
+                view["runId"] = run_id
+                view.update(self._run_context(db_path, run_id, result.get("source_db", payload.get("source_db"))))
+            return view
         if command in {"ready", "selectWorkspace", "selectRun"}:
             return self._overview(db_path, search_query="", source_db=payload.get("source_db"))
         if command == "refresh":
@@ -605,6 +682,7 @@ class ViewerApplication:
                     "items": detail.get("items") if isinstance(detail.get("items"), list) else [],
                     "events": detail.get("events") if isinstance(detail.get("events"), list) else [],
                 },
+                **self._run_context(db_path, archive.get("run_id"), archive.get("source_db", payload.get("source_db"))),
             }
         if command == "search":
             query = self._required_string(payload, "query").strip()
@@ -628,7 +706,8 @@ class ViewerApplication:
                 if record.get("kind") == "item" and isinstance(record.get("item"), dict):
                     return self._build_view({"command": "openSearchResult", "itemId": record["item"]["id"], "source_db": memory.get("source_db")}, db_path)
                 if isinstance(record.get("run"), dict):
-                    return {"type": "memorySource", "memoryId": memory_id, "run": record["run"], "source_db": memory.get("source_db")}
+                    return {"type": "memorySource", "memoryId": memory_id, "run": record["run"], "source_db": memory.get("source_db"),
+                            **self._run_context(db_path, record["run"].get("id"), memory.get("source_db"))}
             return {"type": "memory", "memoryId": memory_id, "memory": memory, "source_db": memory.get("source_db") if isinstance(memory, dict) else memory_payload.get("source_db", payload.get("source_db"))}
         if command == "openSearchResult":
             raw_item_id = payload.get("itemId")
@@ -642,12 +721,15 @@ class ViewerApplication:
             detail = detail_payload.get("item")
             if not isinstance(detail, dict):
                 raise ViewerError("Item details are unavailable.")
-            if detail.get("kind") == "task":
-                status = self._read(db_path, ["status", "--json", "--full"], detail.get("source_db"))
+            context = self._run_context(db_path, detail.get("run_id"), detail.get("source_db", payload.get("source_db")))
+            if detail.get("kind") == "task" and (context or not detail.get("run_id")):
+                status = context.get("context") or self._read(db_path, ["status", "--json", "--full"], detail.get("source_db"))
                 matching = next(
                     (
                         item for item in status.get("tasks", [])
                         if isinstance(item, dict) and item.get("id") == detail.get("id")
+                        and item.get("source_db") == detail.get("source_db")
+                        and (not detail.get("run_id") or item.get("run_id") == detail["run_id"])
                     ),
                     None,
                 )
@@ -662,12 +744,15 @@ class ViewerApplication:
                 "source": detail.get("source"),
                 "search_source": "native",
                 "source_db": detail.get("source_db"),
+                **({"run_id": detail["run_id"]} if detail.get("run_id") else {}),
             }
-            return {"type": "searchItem", "result": result, "detail": detail}
+            return {"type": "searchItem", "result": result, "detail": detail, **context}
         raise ViewerError(f"Unsupported viewer command: {command}")
 
     def _refresh_view(self, payload: dict[str, Any], db_path: Path) -> dict[str, Any]:
         view_type = str(payload.get("viewType") or "overview")
+        if view_type in {"run", "records"}:
+            return self._build_view({**payload, "command": "openRun" if view_type == "run" else "records"}, db_path)
         if view_type == "debug":
             return self._build_view({**payload, "command": "debug"}, db_path)
         if view_type in {"archive", "archiveEvents"}:
@@ -683,6 +768,21 @@ class ViewerApplication:
             command = {"memories": "memories", "memory": "openMemory", "memorySource": "openMemorySource"}[view_type]
             return self._build_view({**payload, "command": command}, db_path)
         return self._overview(db_path, search_query=str(payload.get("query") or ""), source_db=payload.get("source_db"))
+
+    def _run_context(self, db_path: Path, run_id: Any, source_db: Any) -> dict[str, Any]:
+        if not isinstance(run_id, str) or not run_id:
+            return {}
+        try:
+            return {"context": self._read(db_path, ["run", "show", "--id", run_id], source_db)}
+        except ViewerError:
+            # A concurrently removed source must not hide an already-read item.
+            return {}
+        except (AssertionError, NotImplementedError):
+            if self.json_runner is run_native_json:
+                raise
+            # Older injected JsonRunner implementations may only implement the
+            # original item/archive/status protocol. Context is additive.
+            return {}
 
     def _overview(self, db_path: Path, *, search_query: str, source_db: object = None) -> dict[str, Any]:
         status = self._read(db_path, ["status", "--json", "--full"], source_db)

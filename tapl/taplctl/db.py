@@ -3136,8 +3136,9 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
         raise
 
 
-def _status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
-    run = active_run(conn)
+def _status_payload(conn: sqlite3.Connection, *, run_id: str | None = None) -> dict[str, Any]:
+    run = (conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
+           if run_id is not None else active_run(conn))
     as_of = utc_now()
     run_id = run["id"] if run else None
     task_counts = {status: 0 for status in TASK_STATUSES}
@@ -3262,6 +3263,58 @@ def _status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
         "archive_count": archive_count,
         "recent_events": recent_events,
     }
+
+
+def run_snapshot(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
+    """Read an exact RUN, independent of the connection's selected owner."""
+    owns_transaction = not conn.in_transaction
+    if owns_transaction:
+        conn.execute("BEGIN")
+    try:
+        if conn.execute("SELECT 1 FROM workflow_runs WHERE id = ?", (run_id,)).fetchone() is None:
+            return None
+        state = _status_payload(conn, run_id=run_id)
+        return {"run": state["active_run"], **{key: state[key] for key in (
+            "plans", "tasks", "findings", "task_counts", "active_batches", "active_executions", "active_runs",
+        )}}
+    finally:
+        if owns_transaction:
+            conn.rollback()
+
+
+def record_library(conn: sqlite3.Connection, *, query: str, run_id: str | None,
+                   limit: int) -> dict[str, Any]:
+    """Filter before counting/paging; LIKE metacharacters are literal text."""
+    clauses, params = [], []
+    if run_id is not None:
+        clauses.append("i.run_id = ?")
+        params.append(run_id)
+    if query:
+        literal = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append("(i.title LIKE ? ESCAPE '\\' OR i.body LIKE ? ESCAPE '\\' OR i.stable_id LIKE ? ESCAPE '\\')")
+        params.extend([f"%{literal}%"] * 3)
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    owns_transaction = not conn.in_transaction
+    if owns_transaction:
+        conn.execute("BEGIN")
+    try:
+        counts = {row["run_id"]: int(row["count"]) for row in conn.execute(
+            "SELECT i.run_id, COUNT(*) AS count FROM items i" + where + " GROUP BY i.run_id", params)}
+        rows = conn.execute("SELECT i.*, 0.0 AS score FROM items i" + where
+                            + " ORDER BY i.updated_at DESC, i.run_id, i.id LIMIT ?", [*params, limit])
+        records = [{**search_row(row, "text"), "updated_at": row["updated_at"]} for row in rows]
+        # Keep empty RUNs discoverable when the library is unfiltered.
+        runs = []
+        for row in conn.execute("SELECT * FROM workflow_runs ORDER BY created_at DESC, id"):
+            if run_id is not None and row["id"] != run_id:
+                continue
+            if query and row["id"] not in counts:
+                continue
+            runs.append({**workflow_run_to_dict(row), "record_count": counts.get(row["id"], 0)})
+        return {"records": records, "runs": runs, "total": sum(counts.values())}
+    finally:
+        if owns_transaction:
+            conn.rollback()
 
 
 def list_archives(conn: sqlite3.Connection, limit: int | None = None) -> list[dict[str, Any]]:
@@ -3532,6 +3585,7 @@ def search_row(row: sqlite3.Row, source: str) -> dict[str, Any]:
     )
     return {
         "id": data.get("id"),
+        **({"run_id": data["run_id"]} if data.get("run_id") is not None else {}),
         "stable_id": data.get("stable_id"),
         "kind": data.get("kind"),
         "title": data.get("title"),

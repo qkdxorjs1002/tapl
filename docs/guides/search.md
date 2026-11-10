@@ -18,6 +18,12 @@ Example `tapl_search_history` arguments, using the current hook session identity
 
 Search covers the working folder's `tapl-*.db` files. Forward each result's `source_db` to detail reads. See [Local identity and shared history](storage.md) for combined ranking, source errors, and sharing boundaries.
 
+## Browse records in the Viewer
+
+**Record search** is a paginated text library of PLAN, TASK and FINDING records. It starts with **All records** and accepts an empty query. A nonempty query matches literal title, body and stable-ID text; semantic/hybrid ranking settings below apply to `tapl_search_history`, not this library.
+
+Select **Selected RUN** to restrict matches to its exact source database and RUN. RUN groups start collapsed; expand one to read its records or open the original RUN. **By record** displays a flat list. Query and scope changes collapse groups and reset the page. Totals and per-RUN counts are calculated after filtering, before pagination; a RUN can have matches on another page. Each page contains at most 50 records. Source failures remain visible without hiding successful sources. Internal detail links preserve a return path and source identity.
+
 ## Choose a search mode
 
 SQLite full-text search is available in every installation. Optional semantic search adds embeddings and a vector index.

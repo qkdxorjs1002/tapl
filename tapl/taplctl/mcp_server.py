@@ -493,6 +493,31 @@ def _create_server(
             **compact_payload(source_db=source_db),
         )
 
+    @server.tool(name="tapl_get_run", title="Read an exact TAPL RUN", annotations=READ_ONLY)
+    async def get_run(
+        run_id: Annotated[str, Field(min_length=1, max_length=256)],
+        source_db: SourceDb = None,
+        session_id: SessionId = None,
+    ) -> dict[str, Any]:
+        """Read the specified active or historical RUN without changing session selection or ownership."""
+        return await call_application(application.get_run, run_id, session_id=session_id,
+                                      **compact_payload(source_db=source_db))
+
+    @server.tool(name="tapl_list_records", title="Browse TAPL records", annotations=READ_ONLY)
+    async def list_records(
+        query: Annotated[str, Field(max_length=500)] = "",
+        scope: Literal["all", "run"] = "all",
+        run_id: Annotated[str | None, Field(min_length=1, max_length=256)] = None,
+        source_db: SourceDb = None,
+        offset: Annotated[int, Field(ge=0, le=1000000, strict=True)] = 0,
+        limit: Annotated[int, Field(ge=1, le=50, strict=True)] = 50,
+        session_id: SessionId = None,
+    ) -> dict[str, Any]:
+        """Paginate literal title/body/stable-ID matches. All scope federates sources; run scope requires an exact RUN ID."""
+        return await call_application(application.list_records, query, session_id=session_id,
+                                      scope=scope, run_id=run_id, offset=offset, limit=limit,
+                                      **compact_payload(source_db=source_db))
+
     @server.tool(name="tapl_get_next", title="Get safest TAPL action", annotations=READ_ONLY)
     async def get_next(
         available_models: Annotated[dict[str, list[str]] | None, Field(description="Optional live delegation-tool catalog for setup or a user-requested settings check. Omit during ordinary workflow entry. Include every exposed model/effort, including fixed agent-role models, before asserting catalog_complete. Never guess or fill missing entries from saved settings.")] = None,

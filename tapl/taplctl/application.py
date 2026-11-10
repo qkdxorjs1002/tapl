@@ -30,8 +30,14 @@ class WorkflowApplication:
 
     def __init__(self, workspace_root: Path, session_id: str | None = None) -> None:
         self.workspace_root = workspace_root.expanduser().resolve()
-        self.db_path = db.default_db_path(self.workspace_root)
+        self._db_path: Path | None = None
         self.session_id = sessions.normalize_session_id(session_id) if session_id is not None else None
+
+    @property
+    def db_path(self) -> Path:
+        if self._db_path is None:
+            self._db_path = db.default_db_path(self.workspace_root)
+        return self._db_path
 
     @contextmanager
     def _connection(self) -> Iterator[Any]:
@@ -45,7 +51,7 @@ class WorkflowApplication:
         return config.load(start=self.workspace_root)
 
     def _history(self) -> history.HistoryReader:
-        return history.HistoryReader(self.workspace_root, local_db_path=self.db_path,
+        return history.HistoryReader(self.workspace_root, local_db_path=self._db_path,
                                      settings=self._settings(), session_id=self.session_id)
 
     @staticmethod
@@ -447,6 +453,20 @@ class WorkflowApplication:
     def get_item(self, item_id: int, *, source_db: str | None = None) -> dict[str, Any]:
         try:
             return self._history().get_item(item_id, source_db=source_db)
+        except history.HistoryError as exc:
+            raise WorkflowApplicationError(str(exc)) from exc
+
+    def get_run(self, run_id: str, *, source_db: str | None = None) -> dict[str, Any]:
+        try:
+            return self._history().get_run(run_id, source_db=source_db)
+        except history.HistoryError as exc:
+            raise WorkflowApplicationError(str(exc)) from exc
+
+    def list_records(self, query: str = "", *, scope: str = "all", run_id: str | None = None,
+                     source_db: str | None = None, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+        try:
+            return self._history().list_records(query, scope=scope, run_id=run_id, source_db=source_db,
+                                              offset=offset, limit=limit)
         except history.HistoryError as exc:
             raise WorkflowApplicationError(str(exc)) from exc
 

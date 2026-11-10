@@ -25,12 +25,23 @@ uv --directory tapl sync --extra test --extra semantic
 The extension uses TypeScript, React, Vite, and the MCP TypeScript SDK. Release CI uses **Node.js 22**. Prepare and verify from the repository root:
 
 ```sh
-npm --prefix vscode-extension install --package-lock=false
-npm --prefix vscode-extension run test:host
-npm --prefix vscode-extension run compile
+pnpm --dir vscode-extension install --frozen-lockfile
+pnpm --dir vscode-extension run test:host
+pnpm --dir vscode-extension exec tsc -p tsconfig.webview.json
+pnpm --dir vscode-extension run compile
 ```
 
 `test:host` compiles TypeScript then runs `tests/*.cjs` with Node's test runner. `compile` builds the extension bundle, webview, and synchronized Python browser assets. Run it after shared Viewer changes; do not hand-edit compiled `_viewer/assets` as the source of a fix. Packaging commands are `npm run package` and `npm run package:pre-release` from `vscode-extension`; they are local package builds, not publication commands.
+
+The shared Viewer uses DaisyUI 5.7.50 and Tailwind CSS 4.3.5. CSS-first configuration in `styles.css` and `@tailwindcss/vite` generate the assets. Maintain `pnpm-lock.yaml` with dependency changes. Release CI's npm path remains documented in [Releases](releases.md).
+
+To check browser behavior with real Chrome and an isolated database, prepare the Python test environment and Chrome, then run from the repository root. Python defaults to `tapl/.venv/bin/python`; override with `TAPL_PYTHON`, or set `CHROME_PATH` for a different Chrome executable. The test starts and stops a local current-code server without modifying existing workspaces.
+
+```sh
+node --test vscode-extension/tests/browser/workbench.cjs
+```
+
+`test_workbench_reads.py` covers exact RUNs, the federated library, pagination totals, provenance and read-only boundaries. Browser checks cover RUN switching, TASK details, Back, temporary tabs, language/theme and responsive Explore. These do not replace actual VS Code GUI, high-contrast or screen-reader checks.
 
 ## Choose meaningful checks
 

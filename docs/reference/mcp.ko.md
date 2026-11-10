@@ -2,7 +2,7 @@
 
 [문서 홈](../README.ko.md) · [English](mcp.md)
 
-`tapl-mcp`는 MCP stdio로 워크플로 애플리케이션을 제공합니다. 관리 명령은 [CLI](cli.ko.md)를 사용합니다. 이 페이지는 [`mcp_server.py`](../../tapl/taplctl/mcp_server.py)에 등록된 **공개 도구 30개 전체**를 다룹니다. 정확한 입력 검증은 연결된 서버의 JSON schema가 기준입니다.
+`tapl-mcp`는 MCP stdio로 워크플로 애플리케이션을 제공합니다. 관리 명령은 [CLI](cli.ko.md)를 사용합니다. 이 페이지는 [`mcp_server.py`](../../tapl/taplctl/mcp_server.py)에 등록된 **공개 도구 32개 전체**를 다룹니다. 정확한 입력 검증은 연결된 서버의 JSON schema가 기준입니다.
 
 Claude Code는 읽기를 포함해 모든 호출에 정확한 hook 소유자 `claude-code:<native-session-id>`가 필요합니다. 생략·원본 ID·다른 클라이언트 ID를 거부하며, 아래 legacy 생략 동작은 Codex에만 적용됩니다. 승인 source `request_user_input`은 Claude `AskUserQuestion` 응답을 포함한 도구 확인 이력의 기존 값으로 유지합니다. 호스트별 정책·모델 설정은 [Claude 가이드](../getting-started/claude-code.ko.md)를 참고하세요.
 
@@ -66,6 +66,8 @@ RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌�
 
 | 도구 | 필수 인자 | 선택 인자와 동작 |
 | --- | --- | --- |
+| `tapl_get_run` | `run_id` (1–256자) | 선택 `source_db`. 지정한 활성·아카이브 RUN, 항목, TASK 건수와 실행 메타데이터를 읽습니다. 같은 소유자의 새 RUN으로 따라가지 않습니다. `readonly`와 원본 정보를 포함합니다. |
+| `tapl_list_records` | 없음 | `query=""` (0–500자), `scope="all"` 또는 `"run"`, 선택 `run_id`, `source_db`, `offset=0` (0–1,000,000), `limit=50` (1–50). RUN 범위는 정확한 RUN ID가 필요하고 전체 범위는 원본을 통합합니다. 제목·본문·고정 ID 문자열 결과, 전체 필터 건수, RUN별 건수와 원본 오류를 반환합니다. |
 | `tapl_search_history` | `query` (1–500자) | `limit` (1–50, 생략 시 설정 기본값). 활성·아카이브 원본을 검색합니다. |
 | `tapl_get_item` | `item_id` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). `compact=false`. 계획·작업·발견 사항을 읽습니다. 축약 모드는 표준 필드로 정확히 복원할 수 있는 생성 본문만 생략하며 사용자 지정·raw 본문과 발견 사항은 보존합니다. |
 | `tapl_list_archives` | 없음 | `limit` (1–100). 최근 아카이브 목록. |

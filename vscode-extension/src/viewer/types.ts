@@ -18,6 +18,19 @@ export interface TaplWorkflowRun {
   work_type?: string;
   workflow_mode?: string;
   record_mode?: string;
+  record_count?: number;
+}
+
+export interface TaplRunSnapshot {
+  run: TaplWorkflowRun;
+  plans: TaplItem[];
+  tasks: TaplItem[];
+  findings: TaplItem[];
+  task_counts: Record<string, number>;
+  active_batches: TaplExecutionBatch[];
+  active_executions: TaplExecution[];
+  readonly: boolean;
+  active_runs?: TaplWorkflowRun[];
 }
 
 export interface TaplStatus {
@@ -68,6 +81,7 @@ export interface TaplExecutionBatch {
 }
 
 export interface TaplItem {
+  run_id?: string;
   source_db?: string;
   id?: number;
   stable_id: string;
@@ -97,6 +111,7 @@ export interface TaplExecutionTiming {
 }
 
 export interface TaplArchive {
+  run_id?: string;
   source_db?: string;
   id: string;
   slug: string;
@@ -119,6 +134,7 @@ export interface TaplEvent {
 }
 
 export interface TaplSearchResult {
+  run_id?: string;
   source_db?: string;
   id?: number;
   stable_id: string;
@@ -202,16 +218,18 @@ export interface MemoryDiagnostics {
 }
 
 export type WebviewView =
+  | { type: 'run'; snapshot: TaplRunSnapshot; workspace?: string }
+  | { type: 'records'; query: string; scope: 'all' | 'run'; runId?: string; source_db?: string; offset: number; limit: number; total: number; records: Array<TaplSearchResult & { run_id: string }>; runs: TaplWorkflowRun[]; source_errors?: Array<{ source_db: string; error: string }>; context?: TaplRunSnapshot; active_runs?: TaplWorkflowRun[] }
   | { type: 'memories'; query: string; offset: number; total: number; limit: number; memories: AssociativeMemory[]; diagnostics?: MemoryDiagnostics }
   | { type: 'memory'; source_db?: string; memoryId: string; memory: AssociativeMemory | null }
-  | { type: 'memorySource'; source_db?: string; memoryId: string; run: TaplWorkflowRun }
+  | { type: 'memorySource'; source_db?: string; memoryId: string; run: TaplWorkflowRun; context?: TaplRunSnapshot }
   | { type: 'workspace'; workspace: string; message?: string }
   | { type: 'overview'; status: TaplStatus; archives: TaplArchive[]; searchQuery: string; workspace?: string }
-  | { type: 'archive'; archive: TaplArchive; detail?: TaplArchiveDetail }
-  | { type: 'archiveEvents'; archive: TaplArchive; detail?: TaplArchiveDetail }
+  | { type: 'archive'; archive: TaplArchive; detail?: TaplArchiveDetail; context?: TaplRunSnapshot }
+  | { type: 'archiveEvents'; archive: TaplArchive; detail?: TaplArchiveDetail; context?: TaplRunSnapshot }
   | { type: 'debug'; status: TaplStatus }
   | { type: 'search'; search: TaplSearchPayload }
-  | { type: 'searchItem'; result: TaplSearchResult; detail?: TaplItemDetail }
+  | { type: 'searchItem'; result: TaplSearchResult; detail?: TaplItemDetail; context?: TaplRunSnapshot }
   | { type: 'error'; message: string };
 
 export type HostMessage =
@@ -229,6 +247,8 @@ export interface RevisionMessage {
 }
 
 export type WebviewCommand = (
+  | { command: 'openRun'; runId: string }
+  | { command: 'records'; query?: string; scope?: 'all' | 'run'; runId?: string; offset?: number; limit?: number }
   | { command: 'memories'; query?: string; offset?: number }
   | { command: 'openMemory'; memoryId: string }
   | { command: 'openMemorySource'; memoryId: string }

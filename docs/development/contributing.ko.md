@@ -25,12 +25,23 @@ uv --directory tapl sync --extra test --extra semantic
 확장은 TypeScript·React·Vite·MCP TypeScript SDK를 사용하며 릴리스 CI는 **Node.js 22**를 사용합니다. 저장소 루트에서 준비·검증합니다.
 
 ```sh
-npm --prefix vscode-extension install --package-lock=false
-npm --prefix vscode-extension run test:host
-npm --prefix vscode-extension run compile
+pnpm --dir vscode-extension install --frozen-lockfile
+pnpm --dir vscode-extension run test:host
+pnpm --dir vscode-extension exec tsc -p tsconfig.webview.json
+pnpm --dir vscode-extension run compile
 ```
 
 `test:host`는 TypeScript 컴파일 후 Node 테스트 러너로 `tests/*.cjs`를 실행합니다. `compile`은 확장 번들·webview를 빌드하고 Python 브라우저 자산을 동기화합니다. 공유 Viewer 변경 후 실행하며 수정의 원본으로 컴파일된 `_viewer/assets`를 직접 편집하지 않습니다. `vscode-extension`에서 사용하는 패키징 명령은 `npm run package`, `npm run package:pre-release`이며 로컬 패키지 생성이지 게시 명령이 아닙니다.
+
+공유 Viewer는 DaisyUI 5.7.50·Tailwind CSS 4.3.5를 사용합니다. `styles.css`의 CSS 우선 설정과 `@tailwindcss/vite`가 자산을 생성합니다. `pnpm-lock.yaml`을 함께 유지하세요. 릴리스 CI의 npm 경로는 [릴리스](releases.ko.md)를 따릅니다.
+
+실제 Chrome과 격리 DB로 브라우저 동작을 검사하려면 Python 테스트 환경과 Chrome을 준비하고 저장소 루트에서 실행합니다. 기본 Python 경로는 `tapl/.venv/bin/python`이며 `TAPL_PYTHON`으로, Chrome 경로는 `CHROME_PATH`로 바꿀 수 있습니다. 이 검사는 현재 코드의 로컬 서버를 시작하고 종료하며 기존 워크스페이스를 수정하지 않습니다.
+
+```sh
+node --test vscode-extension/tests/browser/workbench.cjs
+```
+
+`test_workbench_reads.py`는 정확한 RUN·통합 기록·페이지 건수·원본 격리·읽기 전용 경계를 검사합니다. 브라우저 검사는 RUN 전환·TASK 상세·돌아가기·임시 탭·언어·테마·반응형 탐색을 다룹니다. 실제 VS Code GUI·고대비·스크린리더 검사를 대신하지 않습니다.
 
 ## 의미 있는 검사 선택
 

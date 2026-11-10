@@ -1,14 +1,21 @@
 @import 'github-markdown-css/github-markdown.css';
+@import 'tailwindcss' source('./');
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@plugin 'daisyui' {
+  themes: false;
+  logs: false;
+}
 
 :root {
   color-scheme: light dark;
-  --rounded-box: 1rem;
-  --rounded-btn: 0.7rem;
-  --rounded-badge: 999px;
+  --radius-box: 1rem;
+  --radius-field: 0.7rem;
+  --radius-selector: 0.5rem;
+  --size-field: 0.25rem;
+  --size-selector: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
   --tapl-tech-blue: var(--vscode-button-background, #0e639c);
   --tapl-tech-cyan: var(--vscode-textLink-foreground, #3794ff);
   --tapl-page-bg: var(--vscode-sideBar-background, var(--vscode-panel-background, var(--vscode-editor-background, #252526)));
@@ -34,11 +41,49 @@
   --tapl-border-item: color-mix(in srgb, var(--tapl-border-base) 46%, transparent);
   --tapl-border-control: var(--vscode-input-border, var(--tapl-border-base));
   --tapl-border-strong: var(--vscode-focusBorder, var(--tapl-accent));
+  --tapl-primary: var(--vscode-button-background, var(--tapl-accent));
+  --tapl-primary-content: var(--vscode-button-foreground, #ffffff);
+  --tapl-primary-hover: var(--vscode-button-hoverBackground, color-mix(in srgb, var(--color-primary) 88%, var(--color-base-content)));
+  --tapl-secondary: var(--vscode-button-secondaryBackground, var(--tapl-panel));
+  --tapl-secondary-content: var(--vscode-button-secondaryForeground, var(--tapl-foreground));
+  --tapl-secondary-hover: var(--vscode-button-secondaryHoverBackground, var(--tapl-surface));
+  --tapl-input-content: var(--vscode-input-foreground, var(--tapl-foreground));
+  --tapl-code-bg: var(--vscode-textCodeBlock-background, var(--tapl-surface-muted));
+  --color-base-100: var(--tapl-panel);
+  --color-base-200: var(--tapl-surface);
+  --color-base-300: var(--tapl-surface-muted);
+  --color-base-content: var(--tapl-foreground);
+  --color-primary: var(--tapl-primary);
+  --color-primary-content: var(--tapl-primary-content);
+  --color-secondary: var(--tapl-secondary);
+  --color-secondary-content: var(--tapl-secondary-content);
+  --color-accent: var(--tapl-accent);
+  --color-accent-content: var(--tapl-primary-content);
+  --color-neutral: var(--tapl-surface-muted);
+  --color-neutral-content: var(--tapl-foreground);
+  --color-info: var(--tapl-info);
+  --color-info-content: var(--tapl-panel);
+  --color-success: var(--tapl-success);
+  --color-success-content: var(--tapl-panel);
+  --color-warning: var(--tapl-warning);
+  --color-warning-content: var(--tapl-panel);
+  --color-error: var(--tapl-error);
+  --color-error-content: var(--tapl-panel);
   --tapl-shadow: 0 22px 54px rgb(0 0 0 / 0.2);
   --tapl-shadow-soft: 0 10px 28px rgb(0 0 0 / 0.14);
   --tapl-shadow-raised: 0 14px 34px rgb(0 0 0 / 0.16), 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent) inset;
   --tapl-shadow-item: 0 6px 18px rgb(0 0 0 / 0.11);
   --tapl-shadow-inset: 0 1px 0 rgb(255 255 255 / 0.035) inset;
+}
+
+:root:not([data-tapl-theme]):has(> body.vscode-light),
+:root:not([data-tapl-theme]):has(> body.vscode-high-contrast-light) {
+  color-scheme: light;
+}
+
+:root:not([data-tapl-theme]):has(> body.vscode-dark),
+:root:not([data-tapl-theme]):has(> body.vscode-high-contrast) {
+  color-scheme: dark;
 }
 
 html {
@@ -66,34 +111,45 @@ input {
   font: inherit;
 }
 
+/* Preserve joined controls' stacking when the upstream scoped selectors are optimized out. */
+@media (hover: hover) {
+  .join > :where(.btn:hover, :has(.btn:hover)) {
+    z-index: 1;
+  }
+}
+
+.join > :where(:focus, :has(:focus)) {
+  z-index: 2;
+}
+
 .btn-primary {
   border: 0;
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   box-shadow: 0 8px 20px color-mix(in srgb, var(--tapl-accent) 24%, transparent);
 }
 
 .btn-primary:hover {
-  background: var(--vscode-button-hoverBackground, #1177bb);
+  background: var(--tapl-primary-hover);
   transform: translateY(-1px);
 }
 
 .btn-secondary {
   border-color: transparent;
-  background: color-mix(in srgb, var(--vscode-button-secondaryBackground, var(--tapl-panel)) 88%, transparent);
-  color: var(--vscode-button-secondaryForeground, var(--tapl-foreground));
+  background: color-mix(in srgb, var(--color-secondary) 88%, transparent);
+  color: var(--color-secondary-content);
   box-shadow: var(--tapl-shadow-inset);
 }
 
 .btn-secondary:hover {
-  background: var(--vscode-button-secondaryHoverBackground, var(--tapl-surface));
+  background: var(--tapl-secondary-hover);
   color: var(--tapl-foreground);
 }
 
 .input {
   background: var(--tapl-surface-muted);
-  color: var(--vscode-input-foreground, var(--tapl-foreground));
-  border-color: color-mix(in srgb, var(--vscode-input-border, var(--tapl-border-control)) 70%, transparent);
+  color: var(--tapl-input-content);
+  border-color: color-mix(in srgb, var(--tapl-border-control) 70%, transparent);
   box-shadow: var(--tapl-shadow-inset);
 }
 
@@ -230,7 +286,7 @@ pre {
 .tapl-discard-confirmation label { display: block; font-size: 13px; font-weight: 600; }
 .tapl-discard-confirmation p { font-size: 12px; }
 .tapl-discard-confirmation input { font-family: monospace; }
-.tapl-discard-error { color: var(--vscode-errorForeground, #ef6464); }
+.tapl-discard-error { color: var(--tapl-error); }
 .tapl-discard-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
 .tapl-run-tab:hover:not(:disabled),
@@ -701,7 +757,7 @@ pre {
 }
 
 .tapl-journey-step.in-progress .tapl-step-node {
-  color: var(--vscode-button-foreground, #ffffff);
+  color: var(--color-primary-content);
   background: var(--tapl-accent);
   box-shadow:
     0 0 0 4px var(--tapl-surface),
@@ -919,7 +975,7 @@ pre {
   max-width: 82ch;
   color: var(--tapl-foreground);
   background: transparent;
-  font-family: var(--vscode-font-family);
+  font-family: var(--tapl-font);
 }
 
 .tapl-readable.markdown-body > *:first-child {
@@ -946,7 +1002,7 @@ pre {
 }
 
 .tapl-readable.markdown-body a {
-  color: var(--vscode-textLink-foreground, var(--tapl-accent));
+  color: var(--tapl-highlight);
 }
 
 .tapl-readable.markdown-body blockquote {
@@ -978,11 +1034,11 @@ pre {
 
 .tapl-readable.markdown-body code,
 .tapl-readable.markdown-body tt {
-  background-color: var(--vscode-textCodeBlock-background, var(--tapl-surface-muted));
+  background-color: var(--tapl-code-bg);
 }
 
 .tapl-readable.markdown-body pre {
-  background-color: var(--vscode-textCodeBlock-background, var(--tapl-surface-muted));
+  background-color: var(--tapl-code-bg);
 }
 
 .tapl-readable.markdown-body pre code {
@@ -1197,7 +1253,7 @@ pre {
 
   .tapl-workspace-form .join-item {
     width: 100%;
-    border-radius: var(--rounded-btn);
+    border-radius: var(--radius-field);
   }
 }
 

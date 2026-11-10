@@ -226,7 +226,7 @@ Standalone installers default to the latest stable release; for Claude Code, use
 
 ## Open the viewer
 
-The browser and VS Code extension share the same Viewer screens, features, and message types. The browser uses the extension’s neutral default colors; VS Code’s selected theme takes precedence inside the extension.
+The browser and VS Code extension share the same Viewer screens, features, and message types. They provide fixed RUN navigation, TASK details, record browsing and language/theme controls. The extension initially follows VS Code’s selected theme.
 
 From the same working folder, start the local viewer:
 
@@ -241,7 +241,7 @@ list, search, detail, and original-source inspection. Ask the agent explicitly t
 edit or delete a memory through MCP. The command does not open a browser automatically;
 press `Ctrl+C` to stop it.
 
-The **×** icon on a RUN tab opens a confirmation dialog. Enter or paste the full
+Select **Management → Discard RUN** to open the confirmation dialog. Enter or paste the full
 RUN ID exactly to confirm. RUNs with records are force-archived with their dependent
 work; truly empty RUNs are deleted without an archive. Cancellation changes nothing.
 See [RUN discard behavior](docs/guides/viewer.md) for scope and execution details.

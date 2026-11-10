@@ -26,6 +26,18 @@ If the starting folder has no database, choose a folder containing `.tapl/tapl-{
 
 RUN tabs select the session whose records you inspect. Archives and history let you revisit earlier work; the memory view links a reusable cue back to its original evidence. Changing the selected RUN does not transfer its ownership.
 
+## Navigate the Viewer
+
+The desktop sidebar and RUN bar stay fixed while the page scrolls. The sidebar scrolls independently on short screens; narrow windows use a navigation drawer. The workspace button changes folders. Language and light/dark controls sit beside the text brand; UI language does not translate stored records. VS Code theme tokens supply the initial editor palette; a manual theme choice is retained.
+
+- **Current RUN** shows recorded work type, workflow mode and record mode in one compact row, horizontal PLAN summaries and horizontal task-status lanes. Missing metadata is omitted. The sidebar shows integer completion percentage; it is calculated from TASK state, not the selected page.
+- **TASK status** filters the full TASK list. Selecting a TASK opens its detailed page; **Back** returns to the preceding filter, query, scroll and focus.
+- **Explore** opens one PLAN, TASK or FINDING list to the right on hover or click. Its list scrolls independently. Keyboard users can open it with Enter or Right Arrow and close it with Escape.
+- **Record search** starts with all records and collapsed RUN groups. Switch between all records and the selected RUN, or grouped and flat results. See [Search](search.md#browse-records-in-the-viewer).
+- **Associative memory** retains read-only list, search, detail and original-source inspection. Refresh and Debug controls sit beside Management.
+
+The top bar lists unarchived RUNs. Opening an archived source from records or memory adds one temporary tab at the right; selecting another RUN removes it. Source database and RUN ID remain paired during navigation. Internal links provide Back; direct navigation and reload clear the return trail. Per-RUN filters and theme/language choices persist separately from that trail.
+
 ## Database access and protected services
 
 Viewer data requests open the selected database with SQLite `mode=ro` and `query_only`, using a read transaction per connection. They do not create a database, change journal mode, migrate the schema, or update metadata. A service can start without `~/.tapl/tapl-{UUID}.db`; do not require it in a startup check. A successful page load or `revision` response confirms the web server or file metadata, not that SQLite queries succeed.
@@ -46,7 +58,7 @@ Confirmed [RUN discard](#discard-a-run) uses the separate write API and still ne
 
 ## Discard a RUN
 
-Click **×** on the RUN tab. In the dialog, type or paste the **full RUN ID** exactly as displayed. This is the RUN identifier, not `PLAN-001`, a session ID, or a shortened hash. Confirmation remains disabled unless case and whitespace also match. Cancel or Escape changes nothing.
+Select the RUN tab, then choose **Management → Discard RUN** in the sidebar. In the dialog, type or paste the **full RUN ID** exactly as displayed. This is the RUN identifier, not `PLAN-001`, a session ID, or a shortened hash. Confirmation remains disabled unless case and whitespace also match. Cancel or Escape changes nothing.
 
 After confirmation:
 

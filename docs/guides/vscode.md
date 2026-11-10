@@ -49,7 +49,9 @@ Connections are pooled by workspace. Database, WAL, and SHM changes (`.tapl/tapl
 
 The browser and extension share React screens, CSS, and `src/viewer/types.ts`. VS Code supplies workspace/MCP adapters; the browser supplies HTTP and local folder selection. Both provide memory list/search/detail and original-source navigation. Memory editing and deletion require an explicit agent request.
 
-Capabilities come from the server. Older servers without memory support still show the other screens. RUN **×** discard is available only when a current server advertises it; otherwise the Viewer remains read-only. The dialog requires the full matching RUN ID and explicit confirmation. Retained work is archived; truly empty RUNs are deleted. External agents keep running. See [Viewer](viewer.md#discard-a-run) for exact effects.
+Capabilities come from the server. Older servers without memory support still show the other screens. **Management → Discard RUN** is available only when a current server advertises it; otherwise the Viewer remains read-only. The dialog requires the full matching RUN ID and explicit confirmation. Retained work is archived; truly empty RUNs are deleted. External agents keep running. See [Viewer](viewer.md#discard-a-run) for exact effects.
+
+The shared [Viewer navigation guide](viewer.md#navigate-the-viewer) describes fixed RUN tabs, Explore flyouts, per-RUN TASK filters, record browsing and Back. `small` uses a navigation drawer; other layout choices retain the fixed shell when width permits. Upgrade the workspace MCP server to use exact historical RUN pages and the record library; unsupported memory remains capability-gated.
 
 ## Validate or diagnose
 

@@ -73,6 +73,6 @@ for bundled dependencies.
 
 ## Shared Viewer
 
-The extension and browser share the same Viewer. See the [extension guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#shared-viewer-and-capabilities) for feature availability and the [Viewer guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/viewer.md) for RUN discard confirmation and service setup.
+The extension and browser share fixed RUN navigation, Explore panels, TASK details, record browsing and language/theme controls in the same Viewer. See the [extension guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#shared-viewer-and-capabilities) for feature availability and the [Viewer guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/viewer.md) for RUN discard confirmation and service setup.
 
 For development checks, use [contributing and verification](https://github.com/qkdxorjs1002/tapl/blob/main/docs/development/contributing.md).

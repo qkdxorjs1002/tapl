@@ -18,7 +18,7 @@ export function MemoryView({ view, supported, send }: { view: MemoryScreen; supp
         <p className="tapl-muted m-0">{t('memoryReadOnly')}</p>
       </div>
       <div className="tapl-command-actions">
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => send({ command: 'back' })}>{t('back')}</button>
+        <button type="button" className="btn btn-secondary btn-sm" data-legacy-back onClick={() => send({ command: 'back' })}>{t('back')}</button>
         {supported && <button type="button" className="btn btn-primary btn-sm" onClick={() => send({ command: 'refresh' })}>{t('refresh')}</button>}
       </div>
     </header>
@@ -47,7 +47,7 @@ function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memori
       <p className="tapl-muted m-0">{t('memoryIntro')}</p>
       <form className="tapl-memory-search" role="search" aria-label={t('searchMemories')} onSubmit={submit}>
         <label htmlFor="memory-query">{t('searchMemories')}</label>
-        <div><input id="memory-query" type="search" maxLength={500} className="input input-bordered" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchMemories')} />
+        <div><input id="memory-query" type="search" maxLength={500} className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchMemories')} />
           <button className="btn btn-primary" type="submit">{t('search')}</button></div>
       </form>
       {view.diagnostics && <MemoryDiagnosticRows diagnostics={view.diagnostics} />}

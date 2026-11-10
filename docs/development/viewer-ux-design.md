@@ -2,7 +2,7 @@
 
 **English** · [한국어](viewer-ux-design.ko.md)
 
-**This is a design proposal. [Viewer](../guides/viewer.md) and [VS Code extension](../guides/vscode.md) describe current product behavior.**
+**The integrated layout is implemented in the shared Viewer; the galleries remain synthetic design references. [Viewer](../guides/viewer.md) and [VS Code extension](../guides/vscode.md) describe current product behavior.**
 
 ## Integrated concept
 
@@ -38,7 +38,7 @@ Screens retain titles, status, record content and necessary provenance while omi
 
 The light theme combines cool gray and white surfaces with a deep teal accent; the dark theme uses navy surfaces and a pale teal accent. Larger body and secondary text, increased line height, thin dividers and restrained shadows establish hierarchy. The RUN indicator and page transition take 260ms; the Explore flyout takes 160ms and search groups take 180–240ms. Rapid input settles interrupted motion. `prefers-reduced-motion` removes motion, and theme colors switch immediately.
 
-This is an independent synthetic concept before product integration. Existing CLI/MCP arguments, configuration, VS Code host behavior and RUN discard are unchanged. The ten alternatives below remain available for comparing individual information structures.
+This synthetic concept is a design reference for the implemented shared Workbench. The product omits absent metadata, including the concept-only difficulty field. Public CLI arguments and configuration defaults remain unchanged; exact RUN reads and paginated record browsing use additive MCP tools. RUN discard retains its existing confirmation and lifecycle semantics. The ten alternatives below remain available for comparing individual information structures.
 
 The integrated concept was checked in headless Chrome with a temporary profile across Korean/English, light/dark themes and 320, 390, 1024 and 1600px widths for RUN context, PLAN summaries and primary pages. Checks covered direct links, PLAN/TASK/FINDING source returns, focus, independent horizontal positions, page scroll, per-RUN state, read-only behavior, empty states, normal motion and reduced motion. Horizontal kanban checks covered wheel and keyboard input, fade boundaries and restoration after width changes. Explore checks covered pointer transitions, mixed input, keyboard, touch, responsive resizing and independent sidebar/list scrolling in short viewports. Twenty-two body/secondary text and primary button pairs in the base palette had a minimum contrast of 4.64:1. Representative screens were visually reviewed. These checks do not replace actual VS Code host, high-contrast or screen-reader validation.
 
@@ -58,15 +58,15 @@ RUNs, tasks, owners, records and timestamps are synthetic. The 2/6 completion co
 
 ## Findings from the current implementation
 
-| Evidence | UX or maintenance effect | Proposed direction |
-| --- | --- | --- |
-| `OverviewView` places a large header, status pills and six metric cards before the task list. | Users scan aggregate information before current work and blockers. | Lead with RUN identity, current work and blockers; disclose other metrics progressively. |
-| `App.tsx` combines routing, RUN tabs, the board, records and detail renderers. | Information-structure changes have a broad review surface. | Separate views, read models, components and host adapters. |
-| CSS broadly overrides buttons, inputs, tabs, cards and `tapl-*` structures despite using DaisyUI. | Base components and custom presentation must be maintained together. | Prefer semantic tokens and variants; reserve dedicated CSS for layout. |
-| `styles.css` already uses VS Code semantic colors, fonts and focus variables. | Losing this mapping would break editor-theme integration. | Preserve it in a DaisyUI 5 token adapter. |
-| Browser and extension share React UI but receive updates differently. | Splitting views alone does not separate transport responsibilities. | Keep browser polling and extension push in adapters. |
+| Boundary | Current implementation |
+| --- | --- |
+| Shared shell | `workbench/Workbench.tsx`, fixed desktop shell and responsive drawer |
+| Navigation | `model.ts` and `useWorkbench.ts`, source-qualified RUN identity, Back and per-RUN preferences |
+| Pages | `RunViews.tsx`, `RecordsView.tsx`, `Explore.tsx`; existing record/memory detail rendering in `App.tsx` |
+| Themes | DaisyUI semantic tokens mapped to existing TAPL/VS Code colors, with retained manual light/dark selection |
+| Hosts | Browser HTTP and VS Code stdio adapters share exact RUN and record-list contracts |
 
-Sources: [`App.tsx`](../../vscode-extension/src/webview/App.tsx), [`styles.css`](../../vscode-extension/src/webview/styles.css), [`MemoryView.tsx`](../../vscode-extension/src/webview/MemoryView.tsx), [`extension.ts`](../../vscode-extension/src/extension.ts), [`viewer.py`](../../tapl/taplctl/viewer.py). These are design judgments from code inspection, not usability-test findings or measured performance improvements.
+The [Viewer guide](../guides/viewer.md) is the behavior reference; gallery fixtures are not runtime data.
 
 ## Ten directions
 
@@ -100,60 +100,24 @@ The goal is not to add more components. Use the structures, states and sizes fro
 
 ## Refactoring phases
 
+
 ### 1. Regression baseline and version transition
 
-The shipping stack is DaisyUI 4.12.24 / Tailwind CSS 3.4.17 / React 18.3.1 / Vite 5.4.20. Capture fixtures for the current screens and host protocol first, then verify the **DaisyUI 5 + Tailwind CSS 4 transition** independently of information-structure changes. Pin selected patch versions in the product lockfile at implementation time. The gallery build does not validate the product migration.
+The product pins DaisyUI **5.7.50**, Tailwind CSS and `@tailwindcss/vite` **4.3.5** in `pnpm-lock.yaml`. React **18.3.1**, Vite **5.4.20** and the VS Code **1.90** minimum remain unchanged. `styles.css` uses `@import "tailwindcss"` and `@plugin "daisyui"`; legacy JavaScript Tailwind/PostCSS configs are removed. Build through Vite and synchronize browser assets with `compile`.
 
-1. Separate the old DaisyUI plugin configuration and move to the Tailwind 4 CSS entry point and `@plugin "daisyui"`. Do not copy v4 JavaScript settings unchanged.
-2. Check Vite, Node and Tailwind plugin compatibility. Prefer evaluating `@tailwindcss/vite`; if compatibility requires retaining PostCSS, use `@tailwindcss/postcss`. Do not apply both paths. Validate any necessary Vite major upgrade in a separate diff.
-3. Replace `@tailwind` entry directives with `@import "tailwindcss"`. Inspect generated JavaScript configuration, theme, `@apply` and dynamic status-class output.
-4. Migrate actual uses of `tabs-boxed` → `tabs-box`, `card-bordered` → `card-border`, `card-compact` → `card-sm`, menu `active` → `menu-active`, and removed `input-bordered` and form-label classes.
-5. Map the v4 theme to v5 semantic color, radius and size tokens. Connect `--vscode-*` as valid CSS colors rather than reusing old color-format conversions.
-6. Check conflicts between `github-markdown-css`, Tailwind preflight, VS Code high-contrast themes and focus styles. Package local assets without external CDNs, fonts or scripts, and retain browser-asset synchronization.
-
-Follow the [DaisyUI upgrade guide](https://daisyui.com/docs/upgrade/) and [Tailwind upgrade guide](https://tailwindcss.com/docs/upgrade-guide). The automated Tailwind upgrade tool requires Node.js 20+. The documented v4 browser baseline is Safari 16.4+, Chrome 111+ and Firefox 128+; also check additional CSS used by selected patch versions in the actual Chromium shipped by the lowest supported VS Code version. Do not raise the extension's minimum version without this check.
+The semantic color adapter preserves VS Code variables, browser defaults and manual themes. Explicit join focus/hover fallbacks cover selectors omitted by the upstream CSS optimizer. See the [DaisyUI upgrade guide](https://daisyui.com/docs/upgrade/) and [Tailwind upgrade guide](https://tailwindcss.com/docs/upgrade-guide).
 
 ### 2. Separate shared UI responsibilities
 
-The following modules are proposals, not existing APIs.
-
-| Boundary | Responsibility |
-| --- | --- |
-| `model/` | Read models, sorting and filtering for RUNs, TASKs, dependencies, sources and capabilities |
-| `transport/` | Browser polling and VS Code message adapters, cancellation, errors and freshness |
-| `components/` | `RunIdentity`, `StatusBadge`, `TaskList`, `TaskDetail`, `RecordContent`, `EmptyState` |
-| `views/` | Overview, Records, Memory, Workspace and Debug composition |
-| `theme/` | Browser and VS Code token adapters, density and contrast |
-
-Avoid implementing the same task information twice across surfaces. Separate responsibilities while retaining existing presentation, then apply the selected layout. Preserve `auto/small/medium/large`, Korean and English, custom fields, Markdown, execution timing and batch/execution details.
+Workbench modules own navigation and page composition. Existing record content, custom fields, execution details, memory views, workspace choice, diagnostics and the exact-ID discard dialog remain shared. Host adapters preserve origin/CSP, source identity, read-only access and stale-result protection. Missing run context from older hosts does not fabricate active records; upgrade the MCP server for the new record library.
 
 ### 3. Apply the selected UX
 
-- Lead with RUN identity, purpose, current TASK and blockers. Select at most two or three useful metrics and move Debug, source content and extra fields into details.
-- Read task purpose, owner, prerequisites, verification and result through one consistent detail component.
-- Recompose according to width: current-task focus in narrow extensions, a single list at medium width, and list/detail composition in wide containers. Use webview container width rather than viewport width.
-- Preserve `(source_db, id)` identity, session ownership and capabilities across multiple RUNs. Keep browsing and execution authority distinct.
-- Preserve selection, expansion, input, scrolling and focus through refresh. Design empty-RUN, loading, connection-error and stale-data states.
-- Retain capability gating and exact-ID confirmation for RUN discard. The gallery does not implement discard.
+The product uses fixed RUN tabs and sidebar, compact present metadata, horizontal PLAN/Flow sections, a full TASK list and one hover/click Explore panel. TASK selection opens a detailed page. Record search defaults to all records with collapsed groups. An archived source gets one temporary tab; Back restores source context, filter, scroll and focus. See [Viewer navigation](../guides/viewer.md#navigate-the-viewer).
 
 ### 4. Verify before adoption
 
-These are completion criteria for subsequent product implementation.
-
-- Check light, dark and high-contrast themes, narrow containers, and long Korean, English and Markdown content in browsers and actual VS Code webviews.
-- Preserve information for no RUN, multiple RUNs, peer history, many TASKs, every TASK state, parallel batches, errors and details opened during refresh.
-- Verify RUN-tab keyboard navigation, selected TASKs, dialog focus and Escape, and scroll/focus after automatic updates. Pair text with color and target 4.5:1 body-text contrast.
-- Retain existing CLI/MCP arguments, configuration defaults and read-only behavior. Review necessary changes as explicit user behavior and update bilingual user guides together.
-- Run a short usability check for locating current work, blockers and sources. Report improvements only after measuring them.
-
-```sh
-npm --prefix vscode-extension run compile
-npm --prefix vscode-extension run test:host
-uv --directory tapl run --extra test python -m pytest -q tests/test_viewer.py tests/test_viewer_native.py tests/test_viewer_discard.py tests/test_viewer_readonly.py tests/test_viewer_sources.py tests/test_run_discard.py
-git diff --check
-```
-
-These commands apply to the subsequent product refactor. Run related session, read-only and recall tests and actual webview checks according to the changed boundaries. Commit the version transition and UI changes separately so previous builds, lockfiles and shared assets remain available for rollback.
+Use the [contributing checks](contributing.md) for shared webview TypeScript, host contracts, real Chrome behavior, Python read-only/source tests and packaged assets. Run real VS Code, high-contrast and screen-reader checks when those environments are available; browser and mocked host checks alone do not establish them. Gallery validation below applies only to the synthetic examples.
 
 ## Maintain the gallery
 

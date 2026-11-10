@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
 
-from . import config, db, embeddings, recall as memory_store
+from . import config, db, embeddings, recall as memory_store, sessions
 
 
 class HistoryError(ValueError):
@@ -19,6 +19,16 @@ class HistoryError(ValueError):
 
 def _annotate(record: dict[str, Any] | None, source_db: str) -> dict[str, Any] | None:
     return {**record, "source_db": source_db} if record is not None else None
+
+
+def annotate_records(value: Any, source_db: str) -> Any:
+    """Tag record containers without changing custom fields or timing values."""
+    if isinstance(value, list):
+        return [annotate_records(item, source_db) for item in value]
+    if isinstance(value, dict):
+        return {**{key: annotate_records(item, source_db) if key in ("batch", "executions", "active_execution") else item
+                   for key, item in value.items()}, "source_db": source_db}
+    return value
 
 
 def _memory(record: dict[str, Any], source_db: str) -> dict[str, Any]:
@@ -69,6 +79,11 @@ class HistoryReader:
             selected = next((path for path in sources if path == self.local_db_path), None)
             if selected is not None:
                 return selected
+        legacy = self.workspace_root / ".tapl" / "tapl.db"
+        if legacy in sources:
+            # Unadopted local history remains readable without creating an
+            # installation identity or running the writable migration path.
+            return legacy
         raise HistoryError("local TAPL history is unavailable; select a discovered source_db")
 
     @contextmanager
@@ -120,6 +135,77 @@ class HistoryReader:
         if item is None:
             raise HistoryError(f"item not found: {item_id}")
         return {"ok": True, "item": _annotate(item, path.name), "source_db": path.name}
+
+    def _run(self, record: dict[str, Any], path: Path) -> dict[str, Any]:
+        return {**record, "source_db": path.name,
+                "writable": path == self.local_db_path and record.get("status") == "active"}
+
+    def active_run_inventory(self) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+        runs, errors = [], []
+        for path in self.discover_sources():
+            try:
+                with self._connection(path) as conn:
+                    runs.extend(self._run(run, path) for run in db.active_runs(conn))
+            except (sqlite3.Error, OSError, ValueError) as exc:
+                errors.append(self._error(path, exc))
+        return runs, errors
+
+    def get_run(self, run_id: str, source_db: str | None = None) -> dict[str, Any]:
+        if not isinstance(run_id, str) or not run_id or len(run_id) > 256:
+            raise HistoryError("run_id must be a nonempty string of at most 256 characters")
+        path, snapshot = self._detail(source_db, lambda conn: db.run_snapshot(conn, run_id))
+        if snapshot is None:
+            raise HistoryError(f"run not found: {run_id}")
+        result = {**snapshot, "run": self._run(snapshot["run"], path)}
+        for key in ("plans", "tasks", "findings", "active_batches", "active_executions"):
+            result[key] = annotate_records(snapshot[key], path.name)
+        owner = self.session_id if self.session_id is not None else sessions.current_session_id()
+        result["readonly"] = not result["run"]["writable"] or result["run"].get("session_id", "") != owner
+        result["active_runs"], errors = self.active_run_inventory()
+        return {"ok": True, **result, "source_db": path.name, "source_errors": errors}
+
+    def list_records(self, query: str = "", *, scope: str = "all", run_id: str | None = None,
+                     source_db: str | None = None, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+        if not isinstance(query, str) or len(query) > 500:
+            raise HistoryError("query must be a string of at most 500 characters")
+        if scope not in ("all", "run"):
+            raise HistoryError("scope must be all or run")
+        if type(offset) is not int or not 0 <= offset <= 1000000 or type(limit) is not int or not 1 <= limit <= 50:
+            raise HistoryError("limit must be 1–50 and offset must be 0–1000000")
+        if run_id is not None and (not isinstance(run_id, str) or not run_id or len(run_id) > 256):
+            raise HistoryError("run_id must be a nonempty string of at most 256 characters")
+        if scope == "run" and run_id is None:
+            raise HistoryError("run_id is required for run scope")
+        # Validate supplied selectors even for a federated read; all scope still
+        # includes every discovered source rather than silently narrowing it.
+        selected = self.select_source(source_db) if source_db is not None or scope == "run" else None
+        paths = [selected] if scope == "run" else self.discover_sources()
+        records, runs, errors, total = [], [], [], 0
+        for path in paths:
+            try:
+                with self._connection(path) as conn:
+                    if scope == "run" and conn.execute("SELECT 1 FROM workflow_runs WHERE id=?", (run_id,)).fetchone() is None:
+                        raise HistoryError(f"run not found: {run_id}")
+                    payload = db.record_library(conn, query=query, run_id=run_id if scope == "run" else None,
+                                                limit=offset + limit)
+                total += payload["total"]
+                records.extend(_annotate(record, path.name) for record in payload["records"])
+                runs.extend(self._run(run, path) for run in payload["runs"])
+            except (sqlite3.Error, OSError, ValueError) as exc:
+                if scope == "run":
+                    raise HistoryError(f"Cannot read {path.name}: {exc}") from exc
+                errors.append(self._error(path, exc))
+        records.sort(key=lambda row: (row["source_db"], row["run_id"], row["id"]))
+        records.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
+        runs.sort(key=lambda row: (row["source_db"], row["id"]))
+        runs.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+        active_runs, inventory_errors = self.active_run_inventory()
+        known_errors = {error["source_db"] for error in errors}
+        errors.extend(error for error in inventory_errors if error["source_db"] not in known_errors)
+        return {"ok": True, "query": query, "scope": scope, "offset": offset, "limit": limit, "total": total,
+                "records": records[offset:offset + limit], "runs": runs, "active_runs": active_runs,
+                "source_errors": errors,
+                **({"run_id": run_id, "source_db": selected.name} if scope == "run" else {})}
 
     def list_archives(self, limit: int | None = None) -> dict[str, Any]:
         if limit is not None and (type(limit) is not int or limit < 1):

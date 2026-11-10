@@ -2,7 +2,7 @@
 
 [English](viewer-ux-design.md) · **한국어**
 
-**설계 제안입니다. 제품의 현재 동작은 [Viewer](../guides/viewer.ko.md)와 [VS Code 확장](../guides/vscode.ko.md)이 기준입니다.**
+**통합 구성을 공유 Viewer에 적용했으며 갤러리는 합성 데이터 기반 설계 참고 자료입니다. 제품의 현재 동작은 [Viewer](../guides/viewer.ko.md)와 [VS Code 확장](../guides/vscode.ko.md)이 기준입니다.**
 
 ## 통합 시안
 
@@ -58,15 +58,15 @@ RUN·작업·담당·기록·시각은 모두 가상 예시입니다. 진행률 
 
 ## 현재 구현에서 확인한 개선 지점
 
-| 관찰 근거 | UX·유지보수 영향 | 개선 방향 |
-| --- | --- | --- |
-| `OverviewView`는 큰 헤더, 상태 pill, 6개 지표 카드를 작업 목록 앞에 배치합니다. | 현재 작업과 막힘보다 요약 지표를 먼저 훑어야 합니다. | RUN 제목·현재 작업·막힘을 먼저 배치하고 나머지 지표를 접습니다. |
-| `App.tsx`에 화면 전환·RUN 탭·보드·기록·상세 렌더러가 함께 있습니다. | 정보 구조를 변경할 때 검토 범위가 큽니다. | 화면, 읽기 모델, 컴포넌트, host 어댑터를 분리합니다. |
-| DaisyUI를 쓰지만 CSS에서 버튼·입력·탭·카드와 `tapl-*` 구조를 폭넓게 덮어씁니다. | 기본 컴포넌트와 커스텀 표현을 함께 관리해야 합니다. | 의미 토큰과 variant 조합을 우선하고 배치에만 전용 CSS를 둡니다. |
-| `styles.css`는 이미 VS Code의 의미 색상·폰트·포커스 변수를 사용합니다. | 이 기반을 잃으면 편집기 테마와 화면이 어긋납니다. | 기존 변수 연결을 DaisyUI 5 토큰 어댑터로 보존합니다. |
-| 브라우저와 확장은 공유 React UI를 사용하지만 갱신 방식은 다릅니다. | 화면 분리만으로 transport 책임이 분리되지는 않습니다. | 브라우저 polling과 확장 push를 어댑터에 남깁니다. |
+| 경계 | 현재 구현 |
+| --- | --- |
+| 공유 구조 | `workbench/Workbench.tsx`의 고정 PC 구조와 반응형 서랍 |
+| 이동 | `model.ts`·`useWorkbench.ts`의 원본 포함 RUN 식별, 돌아가기와 RUN별 설정 |
+| 페이지 | `RunViews.tsx`·`RecordsView.tsx`·`Explore.tsx`, `App.tsx`의 기존 기록·기억 상세 |
+| 테마 | 기존 TAPL·VS Code 색상에 연결한 DaisyUI 의미 토큰과 수동 라이트/다크 선택 |
+| 호스트 | 정확한 RUN·기록 목록 계약을 공유하는 브라우저 HTTP·VS Code stdio 어댑터 |
 
-근거: [`App.tsx`](../../vscode-extension/src/webview/App.tsx), [`styles.css`](../../vscode-extension/src/webview/styles.css), [`MemoryView.tsx`](../../vscode-extension/src/webview/MemoryView.tsx), [`extension.ts`](../../vscode-extension/src/extension.ts), [`viewer.py`](../../tapl/taplctl/viewer.py). 관찰에 기반한 설계 판단이며 사용자 테스트나 성능 개선 측정 결과는 아닙니다.
+동작 기준은 [Viewer 안내](../guides/viewer.ko.md)이며 갤러리 fixture는 실제 데이터가 아닙니다.
 
 ## 열 가지 방향
 
@@ -100,60 +100,24 @@ RUN·작업·담당·기록·시각은 모두 가상 예시입니다. 진행률 
 
 ## 단계별 리팩토링 계획
 
+
 ### 1. 회귀 기준과 버전 전환
 
-현재 제품은 DaisyUI 4.12.24 / Tailwind CSS 3.4.17 / React 18.3.1 / Vite 5.4.20입니다. 먼저 현재 화면과 host 프로토콜의 fixture를 기준으로 남기고, **DaisyUI 5 + Tailwind CSS 4 전환**을 정보 구조 변경과 분리해 검증합니다. 실제 적용 시 선택한 패치 버전을 lockfile에 고정합니다. 갤러리의 빌드가 제품 마이그레이션을 검증한 것은 아닙니다.
+제품은 `pnpm-lock.yaml`에 DaisyUI **5.7.50**, Tailwind CSS·`@tailwindcss/vite` **4.3.5**를 고정합니다. React **18.3.1**·Vite **5.4.20**·VS Code 최소 **1.90**은 유지합니다. `styles.css`는 `@import "tailwindcss"`·`@plugin "daisyui"`를 사용하며 예전 JavaScript Tailwind/PostCSS 설정은 제거했습니다. Vite 빌드와 브라우저 자산 동기화는 `compile`로 실행합니다.
 
-1. 기존 DaisyUI plugin 설정을 분리하고 Tailwind 4의 CSS 진입점·`@plugin "daisyui"`로 이동합니다. v4의 JS 설정을 그대로 복사하지 않습니다.
-2. Vite·Node·Tailwind plugin의 호환 범위를 확인합니다. `@tailwindcss/vite`를 우선 검토하고, 호환성 때문에 PostCSS 경로를 유지하면 `@tailwindcss/postcss`를 사용합니다. 두 경로를 동시에 적용하지 않습니다. Vite major 변경이 필요하면 별도 diff로 검증합니다.
-3. `@tailwind` 진입점을 `@import "tailwindcss"`로 변경합니다. JS 설정·테마·`@apply`·동적 상태 클래스의 생성 결과를 확인합니다.
-4. `tabs-boxed` → `tabs-box`, `card-bordered` → `card-border`, `card-compact` → `card-sm`, menu `active` → `menu-active`, 제거된 `input-bordered`·form label 클래스를 현재 사용처에 맞게 바꿉니다.
-5. v4 테마 값을 v5 의미 색상·radius·size 토큰으로 옮깁니다. `--vscode-*`는 유효한 CSS 색상으로 직접 연결하고, 이전 색상 형식의 변환을 그대로 재사용하지 않습니다.
-6. `github-markdown-css`, Tailwind preflight, VS Code 고대비와 focus 스타일의 충돌을 확인합니다. 외부 CDN·폰트·스크립트 없이 로컬 자산을 패키징하고 브라우저 자산 동기화를 유지합니다.
-
-[DaisyUI 업그레이드 가이드](https://daisyui.com/docs/upgrade/)와 [Tailwind 업그레이드 가이드](https://tailwindcss.com/docs/upgrade-guide)를 기준으로 합니다. Tailwind 자동 업그레이드 도구는 Node.js 20 이상이 필요합니다. 공식 v4 기준 브라우저 범위는 Safari 16.4+, Chrome 111+, Firefox 128+이며, 선택한 패치 버전의 추가 CSS 사용과 지원 최저 VS Code의 실제 Chromium에서 함께 확인해야 합니다. 확인 없이 확장의 최소 버전을 높이지 않습니다.
+의미 색상 어댑터는 VS Code 변수·브라우저 기본값·수동 테마를 유지합니다. 상위 CSS 최적화기가 생략하는 join 선택자는 명시적인 포커스·호버 대체 규칙으로 보완합니다. [DaisyUI 업그레이드](https://daisyui.com/docs/upgrade/)와 [Tailwind 업그레이드](https://tailwindcss.com/docs/upgrade-guide)를 참고하세요.
 
 ### 2. 공유 UI의 책임 분리
 
-다음은 새로 만들 모듈의 제안이며 현재 존재하는 API가 아닙니다.
-
-| 경계 | 책임 |
-| --- | --- |
-| `model/` | RUN·TASK·의존성·출처·권한의 읽기 모델과 정렬·필터 |
-| `transport/` | 브라우저 polling / VS Code message 어댑터, 취소·오류·최신성 |
-| `components/` | `RunIdentity`, `StatusBadge`, `TaskList`, `TaskDetail`, `RecordContent`, `EmptyState` |
-| `views/` | Overview, Records, Memory, Workspace, Debug 화면 조합 |
-| `theme/` | 브라우저와 VS Code 토큰 어댑터·밀도·대비 |
-
-하나의 작업 정보를 두 표면에서 중복 구현하지 않습니다. 먼저 기존 화면 그대로 경계를 나눈 뒤 선택한 시안의 배치를 적용합니다. `auto/small/medium/large`, 한국어·영어, 사용자 필드·Markdown·실행 시간·batch/execution 정보도 유지합니다.
+Workbench 모듈이 이동과 페이지 조합을 맡습니다. 기존 기록 내용·사용자 필드·실행 상세·기억 화면·워크스페이스 선택·진단·정확한 ID 삭제 확인창은 공유합니다. 호스트 어댑터는 origin/CSP·원본 식별·읽기 전용·늦은 결과 방어를 유지합니다. 구버전 호스트가 RUN 문맥을 제공하지 않아도 현재 기록을 지어내지 않습니다. 새 기록 목록을 사용하려면 MCP 서버도 업데이트합니다.
 
 ### 3. 선택한 UX 적용
 
-- RUN 식별·작업 목적·현재 TASK·막힘을 상단에 배치합니다. 지표는 핵심 두세 개 이내로 선택하고 Debug·원문·추가 필드는 상세로 이동합니다.
-- 목록에서 선택한 TASK의 목적·담당·선행 조건·검증·결과를 일관된 상세 컴포넌트로 읽습니다.
-- 폭을 기준으로 재배치합니다. 좁은 확장은 현재 작업 우선, 중간 폭은 단일 목록, 넓은 화면은 목록과 상세의 병렬 배치를 검토합니다. 고정 viewport 폭 대신 webview 컨테이너 폭을 사용합니다.
-- 여러 RUN의 `(source_db, id)` 식별, 세션 소유권과 capability를 유지합니다. 기록 조회와 실행 권한을 혼합하지 않습니다.
-- 새로고침 시 선택·펼침·입력·스크롤·포커스를 보존합니다. 빈 RUN·로딩·연결 오류·오래된 데이터 상태를 설계합니다.
-- RUN 폐기는 기존 capability와 정확한 ID 확인을 보존합니다. 이번 갤러리는 폐기를 구현하지 않습니다.
+고정 RUN 탭·패널, 실제 존재하는 메타데이터 한 줄, 수평 PLAN·작업 흐름, 전체 TASK 목록과 단일 호버/클릭 탐색 패널을 적용했습니다. TASK 선택은 상세 페이지로 이동합니다. 기록 검색은 전체 기록·접힌 그룹이 기본입니다. 아카이브 원본은 임시 탭 하나로 표시하며 돌아가기는 원본 문맥·필터·스크롤·포커스를 복원합니다. [Viewer 탐색](../guides/viewer.ko.md#viewer-탐색)을 참고하세요.
 
 ### 4. 검증 후 적용
 
-후속 제품 구현의 완료 기준입니다.
-
-- 브라우저와 VS Code 실제 webview에서 밝음·어두움·고대비, 좁은 컨테이너, 긴 한국어·영어·Markdown을 확인합니다.
-- RUN 없음·다중 RUN·peer 이력·다수 TASK·모든 TASK 상태·병렬 batch·오류·갱신 중 상세 열기에서 정보가 유실되지 않아야 합니다.
-- RUN 탭 키보드 조작, 선택한 TASK, 대화상자 focus·Escape, 자동 갱신 후 스크롤과 focus를 검증합니다. 색만으로 상태를 전달하지 않고 본문 대비 4.5:1을 목표로 합니다.
-- 기존 CLI·MCP 인자·설정 기본값·읽기 전용 동작은 유지합니다. 추가·변경이 필요하면 별도 사용자 동작으로 검토하고 양언어 사용 가이드를 함께 바꿉니다.
-- 기본 화면에서 현재 작업·막힘·출처를 쉽게 찾는지 짧은 사용성 확인을 합니다. 개선 수치는 실제 측정 후에만 보고합니다.
-
-```sh
-npm --prefix vscode-extension run compile
-npm --prefix vscode-extension run test:host
-uv --directory tapl run --extra test python -m pytest -q tests/test_viewer.py tests/test_viewer_native.py tests/test_viewer_discard.py tests/test_viewer_readonly.py tests/test_viewer_sources.py tests/test_run_discard.py
-git diff --check
-```
-
-명령은 후속 제품 리팩토링용입니다. 관련 session·readonly·recall 테스트와 실제 webview 확인도 변경 경계에 따라 실행합니다. 검증 실패 시 이전 빌드·lockfile·공유 자산으로 되돌릴 수 있도록 버전 전환과 UI 변경을 분리해 커밋합니다.
+공유 webview TypeScript·호스트 계약·실제 Chrome 동작·Python 읽기 전용/원본 검사·패키지 자산은 [기여와 검증](contributing.ko.md)을 따릅니다. 환경이 준비되면 실제 VS Code·고대비·스크린리더를 별도로 검사합니다. 브라우저와 모의 호스트 검사만으로 이를 검증했다고 볼 수 없습니다. 아래 갤러리 검증은 합성 예제에만 적용됩니다.
 
 ## 갤러리 유지보수
 

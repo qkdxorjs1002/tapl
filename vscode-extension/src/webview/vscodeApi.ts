@@ -133,7 +133,7 @@ class BrowserApi implements VsCodeApi {
   setState(state: unknown): void {
     const next = isRecord(state) ? state as PersistedState : {};
     const status = next.view?.type === 'overview' || next.view?.type === 'debug' ? next.view.status : undefined;
-    this.state = { ...next, selectedSessionId: status?.session_id ?? this.state.selectedSessionId, selectedSourceDb: status?.source_db ?? this.state.selectedSourceDb };
+    this.state = { ...this.state, ...next, selectedSessionId: status?.session_id ?? this.state.selectedSessionId, selectedSourceDb: status?.source_db ?? this.state.selectedSourceDb };
     writeStorage(sessionStorage, SESSION_STATE_KEY, this.state);
     this.scheduleRevisionCheck();
   }
@@ -169,7 +169,8 @@ class BrowserApi implements VsCodeApi {
         ? message.workspace.trim()
         : this.activeWorkspace ?? recentWorkspace;
     const request = {
-      ...(this.state.selectedSourceDb ? { source_db: this.state.selectedSourceDb } : {}),
+      ...(this.state.selectedSourceDb && message.command !== 'openRun' && message.command !== 'records'
+        ? { source_db: this.state.selectedSourceDb } : {}),
       ...message,
       ...(this.state.selectedSessionId !== undefined ? { sessionId: this.state.selectedSessionId } : {}),
       workspace: requestWorkspace,
@@ -229,9 +230,9 @@ class BrowserApi implements VsCodeApi {
         return true;
       }
       if ((message.command === 'ready' || message.command === 'selectWorkspace')
-        && isMemoryView(previous)
+        && (isMemoryView(previous) || isExactView(previous))
         && (payload.type === 'hydrate' || payload.type === 'view:update')
-        && payload.capabilities?.associativeMemory === true
+        && (!isMemoryView(previous) || payload.capabilities?.associativeMemory === true)
         && payload.workspace === recentWorkspace
         && payload.workspace === this.state.workspace
         && payload.view.type !== 'workspace') {
@@ -459,7 +460,7 @@ class BrowserApi implements VsCodeApi {
       this.navigate({ command: 'ready' });
       return;
     }
-    if (isMemoryView(previous)) {
+    if (isMemoryView(previous) || isExactView(previous)) {
       this.navigate({ command: 'refresh' }, previous);
       return;
     }
@@ -505,6 +506,13 @@ function refreshContext(
   if (message.command !== 'refresh' || !view) {
     return {};
   }
+  if (view.type === 'run') {
+    return { viewType: view.type, runId: view.snapshot.run.id, source_db: view.snapshot.run.source_db };
+  }
+  if (view.type === 'records') {
+    return { viewType: view.type, query: view.query, scope: view.scope, runId: view.runId,
+      source_db: view.source_db, offset: view.offset, limit: view.limit };
+  }
   if (view.type === 'memories') {
     return { viewType: view.type, query: view.query, offset: view.offset };
   }
@@ -525,6 +533,11 @@ function refreshContext(
 
 function isMemoryView(view: WebviewView | undefined): boolean {
   return view?.type === 'memories' || view?.type === 'memory' || view?.type === 'memorySource';
+}
+
+function isExactView(view: WebviewView | undefined): boolean {
+  return view?.type === 'run' || view?.type === 'records' || view?.type === 'searchItem'
+    || view?.type === 'archive' || view?.type === 'archiveEvents';
 }
 
 function shouldPushHistory(
