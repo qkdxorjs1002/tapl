@@ -243,7 +243,7 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
           >
             {runId}
           </button>
-          {runTitle && <span className="wb-property-caption">{runTitle}</span>}
+          {runTitle && <span className="wb-property-caption" title={runTitle}>{runTitle}</span>}
         </>
       ) : (
         runTitle

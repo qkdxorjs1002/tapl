@@ -677,6 +677,9 @@ const MESSAGES = {
     ko: KO_MESSAGES
 };
 const STATUS_KEYS = {
+    active: 'active',
+    archived: 'wbArchived',
+    queued: 'pending',
     Pending: 'pending',
     'In Progress': 'inProgress',
     Blocked: 'blocked',

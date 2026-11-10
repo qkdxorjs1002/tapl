@@ -685,6 +685,9 @@ const MESSAGES: Record<SupportedLocale, Record<TranslationKey, string>> = {
 };
 
 const STATUS_KEYS: Record<string, TranslationKey> = {
+  active: 'active',
+  archived: 'wbArchived',
+  queued: 'pending',
   Pending: 'pending',
   'In Progress': 'inProgress',
   Blocked: 'blocked',

@@ -41,9 +41,10 @@ test('actual narrative fields become reading sections in both locales, with one 
     assert.match(html, /class="wb-record-properties"/);
     assert.equal((html.match(/<h1/g) || []).length, 1);
     for (const key of ['goal', 'action', 'result', 'verification', 'blocker', 'nextAction', 'content', 'wbProperties']) assert.ok(section(html, translate(locale, key)), key);
-    for (const value of Object.values(fields).filter((value) => typeof value === 'string')) assert.ok(html.includes(escape(value.replace(/^- /, ''))), value);
+    for (const value of Object.entries(fields).filter(([key,value]) => key !== 'run_status' && typeof value === 'string').map(([,value]) => value)) assert.ok(html.includes(escape(value.replace(/^- /, ''))), value);
     assert.match(html, /Actual owner/);
     assert.ok(html.includes(translate(locale, 'blocked')));
+    assert.ok(html.includes(translate(locale, 'wbArchived')));
     assert.doesNotMatch(html, /tapl-card|tapl-topbar|Agent A|2026-11-10<\/span>/);
   }
 });

@@ -314,3 +314,6 @@
     transition: none;
   }
 }
+
+.wb-property-caption { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.tapl-discard-dialog.wb-dialog .tapl-discard-run-title { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; overflow:hidden; }
