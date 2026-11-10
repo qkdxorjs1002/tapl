@@ -1,59 +1,73 @@
 /* Fixed desktop shell, local theme tokens, and layout composition. DaisyUI 5 supplies controls. */
 :root {
   font-family:
-    Inter,
-    "Noto Sans KR",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-  --rail: 248px;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+    "Noto Sans KR", sans-serif;
+  --rail: 256px;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --shadow-card:
+    0 1px 2px rgb(24 40 60 / 0.03), 0 14px 34px -24px rgb(24 40 60 / 0.22);
+  --shadow-float:
+    0 18px 60px -22px rgb(15 29 47 / 0.25), 0 2px 8px rgb(15 29 47 / 0.06);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-state: cubic-bezier(0.2, 0.65, 0.3, 1);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   --bar: 72px;
-  --color-base-100: #fafcf8;
-  --color-base-200: #f0f3ed;
-  --color-base-300: #dfe5da;
-  --color-base-content: #28332a;
-  --color-primary: #4d653b;
+  --color-base-100: #f7f8fa;
+  --color-base-200: #edf1f5;
+  --color-base-300: #dce2e9;
+  --color-base-content: #222d3b;
+  --color-primary: #355e62;
   --color-primary-content: #fff;
-  --color-secondary: #526b7c;
+  --color-secondary: #526681;
   --color-secondary-content: #fff;
-  --color-success: #276e4c;
+  --color-success: #2b7457;
   --color-success-content: #fff;
-  --color-warning: #8e6019;
+  --color-warning: #8c601c;
   --color-warning-content: #fff;
-  --color-error: #ae4240;
+  --color-error: #b04749;
   --color-error-content: #fff;
-  --color-info: #3c6b90;
+  --color-info: #3c6797;
   --color-info-content: #fff;
-  --muted: #687566;
-  --soft: #f6f8f2;
-  --radius-box: 0.8rem;
-  --radius-field: 0.45rem;
-  --radius-selector: 0.4rem;
+  --muted: #606d7e;
+  --soft: #f0f3f7;
+  --radius-box: 0.9rem;
+  --radius-field: 0.5rem;
+  --radius-selector: 0.45rem;
   --depth: 0;
   --noise: 0;
   --border: 1px;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --color-base-100: #1b231e;
-  --color-base-200: #232e26;
-  --color-base-300: #3b4a3e;
-  --color-base-content: #e1eadd;
-  --color-primary: #c1df94;
-  --color-primary-content: #26341d;
-  --color-secondary: #b7cddd;
-  --color-secondary-content: #24333e;
-  --color-success: #9eddb7;
-  --color-success-content: #163322;
-  --color-warning: #e4bf82;
-  --color-warning-content: #3a2b14;
-  --color-error: #f2a49f;
-  --color-error-content: #3b1e1c;
-  --color-info: #a7c9ec;
-  --color-info-content: #1e3041;
-  --muted: #a8b7a4;
-  --soft: #202a23;
+  --surface: #1b2430;
+  --surface-raised: #232e3d;
+  --shadow-card:
+    0 1px 2px rgb(0 0 0 / 0.08), 0 14px 34px -24px rgb(0 0 0 / 0.4);
+  --shadow-float:
+    0 22px 70px -22px rgb(0 0 0 / 0.65), 0 2px 8px rgb(0 0 0 / 0.15);
+  --color-base-100: #151b24;
+  --color-base-200: #1f2834;
+  --color-base-300: #364354;
+  --color-base-content: #e6edf5;
+  --color-primary: #a7c9cb;
+  --color-primary-content: #152e32;
+  --color-secondary: #b6cbe7;
+  --color-secondary-content: #23354a;
+  --color-success: #99d5b4;
+  --color-success-content: #173526;
+  --color-warning: #e2bd7d;
+  --color-warning-content: #3a2b15;
+  --color-error: #f0a5a8;
+  --color-error-content: #3b1e23;
+  --color-info: #adccf0;
+  --color-info-content: #1d324a;
+  --muted: #a8b6c9;
+  --soft: #19212c;
   color-scheme: dark;
 }
 * {
@@ -126,21 +140,21 @@ select {
   font: inherit;
 }
 .btn {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
 }
 .badge {
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
 }
 .muted {
   color: var(--muted);
 }
 .small {
-  font-size: 12px;
+  font-size: 13px;
 }
 .micro {
-  font-size: 11px;
+  font-size: 12px;
 }
 .mono {
   font-family: ui-monospace, SFMono-Regular, monospace;
@@ -148,9 +162,9 @@ select {
 }
 .eyebrow {
   font:
-    10px ui-monospace,
+    11px ui-monospace,
     monospace;
-  letter-spacing: 1.5px;
+  letter-spacing: 0.08em;
   color: var(--muted);
   text-transform: uppercase;
 }
@@ -179,9 +193,11 @@ select {
   display: flex;
   align-items: stretch;
   border-bottom: 1px solid var(--color-base-300);
-  background: var(--color-base-100);
+  background: var(--surface);
   z-index: 20;
   min-width: 0;
+  box-shadow: 0 1px 0
+    color-mix(in srgb, var(--color-base-content) 2%, transparent);
 }
 .brand-area {
   width: var(--rail);
@@ -206,10 +222,11 @@ select {
   color: var(--color-primary-content);
   display: grid;
   place-items: center;
-  border-radius: 7px;
+  border-radius: 8px;
   font-family: Georgia, serif;
   font-size: 26px;
   line-height: 1;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14);
 }
 .brand strong {
   font-size: 23px;
@@ -217,7 +234,7 @@ select {
 }
 .brand-note {
   font:
-    9px ui-monospace,
+    11px ui-monospace,
     monospace;
   color: var(--muted);
   border-left: 1px solid var(--color-base-300);
@@ -235,7 +252,9 @@ select {
   gap: 4px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  position: relative;
+  isolation: isolate;
 }
 .run-tab.tab {
   height: auto;
@@ -250,14 +269,17 @@ select {
   align-items: start;
   justify-content: center;
   gap: 5px;
-  padding: 10px 14px;
+  padding: 12px 16px;
   background: none;
   color: var(--muted);
   text-align: left;
+  transition:
+    background-color 160ms var(--ease-state),
+    color 160ms var(--ease-state);
 }
 .run-tab[aria-selected="true"] {
-  border-bottom-color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+  border-bottom-color: transparent;
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
   color: var(--color-base-content);
 }
 .run-tab:hover {
@@ -267,9 +289,10 @@ select {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   max-width: 100%;
   white-space: nowrap;
+  font-weight: 550;
 }
 .run-tab-title > span:last-child {
   overflow: hidden;
@@ -281,12 +304,14 @@ select {
 }
 .run-tab-meta {
   font:
-    9px ui-monospace,
+    11px ui-monospace,
     monospace;
   display: flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+  letter-spacing: 0.035em;
+  color: var(--muted);
 }
 .top-actions {
   display: flex;
@@ -296,7 +321,7 @@ select {
   flex: none;
 }
 .locale-select {
-  font-size: 11px;
+  font-size: 12px;
   max-width: 98px;
   background: var(--color-base-100);
 }
@@ -318,12 +343,12 @@ select {
   background: var(--soft);
   gap: 23px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
 }
 .nav-caption {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 1px;
+  letter-spacing: 0.075em;
   color: var(--muted);
   margin: 0 12px 10px;
   text-transform: uppercase;
@@ -332,7 +357,7 @@ select {
   width: 100%;
   padding: 0;
   gap: 3px;
-  font-size: 12px;
+  font-size: 13px;
   display: flex;
   flex-direction: column;
 }
@@ -344,23 +369,29 @@ select {
   padding: 10px 12px;
   background: none;
   border: 0;
-  border-radius: 6px;
+  border-radius: 9px;
   text-align: left;
   color: var(--muted);
+  position: relative;
+  min-height: 42px;
+  font-size: 13px;
+  transition:
+    background-color 150ms var(--ease-state),
+    color 150ms var(--ease-state);
 }
 .nav-button:hover {
   background: var(--color-base-200);
   color: var(--color-base-content);
 }
 .nav-button[aria-current="page"] {
-  background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 9%, transparent);
   color: var(--color-primary);
   font-weight: 600;
 }
 .nav-button .nav-counter {
   margin-left: auto;
   font:
-    10px ui-monospace,
+    11px ui-monospace,
     monospace;
 }
 .nav-button svg {
@@ -374,7 +405,7 @@ select {
   display: flex;
   flex-direction: column;
   flex: 0 1 46%;
-  min-height: 108px;
+  min-height: 156px;
   max-height: 440px;
   overflow: hidden;
 }
@@ -402,10 +433,14 @@ select {
   gap: 9px;
   border: 0;
   background: none;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--muted);
   text-align: left;
   flex: none;
+  min-height: 39px;
+  transition:
+    background-color 150ms var(--ease-state),
+    color 150ms var(--ease-state);
 }
 .fold-trigger:hover {
   background: var(--color-base-200);
@@ -417,7 +452,7 @@ select {
 .fold-trigger .fold-count {
   margin-left: auto;
   font:
-    10px ui-monospace,
+    11px ui-monospace,
     monospace;
   color: var(--muted);
 }
@@ -428,7 +463,7 @@ select {
 .fold-chevron {
   width: 12px !important;
   height: 12px !important;
-  transition: transform 0.12s;
+  transition: transform 220ms var(--ease-out);
 }
 .fold-trigger[aria-expanded="true"] .fold-chevron {
   transform: rotate(90deg);
@@ -453,9 +488,12 @@ select {
   flex: none;
   border: 0;
   background: none;
-  border-radius: 5px;
-  padding: 8px 9px;
+  border-radius: 7px;
+  padding: 10px 10px;
   color: var(--muted);
+  transition:
+    background-color 150ms var(--ease-state),
+    color 150ms var(--ease-state);
 }
 .fold-list button:hover {
   background: var(--color-base-200);
@@ -469,15 +507,15 @@ select {
   align-items: center;
   gap: 6px;
   font:
-    9px ui-monospace,
+    11px ui-monospace,
     monospace;
   color: var(--muted);
   margin-bottom: 4px;
 }
 .fold-list .record-label {
   display: block;
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.7;
   overflow-wrap: anywhere;
 }
 .fold-list .status {
@@ -485,7 +523,7 @@ select {
   width: 5px;
 }
 .fold-empty {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   padding: 12px;
 }
@@ -510,7 +548,7 @@ select {
   color: var(--color-error);
   min-height: 0;
   height: auto;
-  font-size: 12px;
+  font-size: 13px;
   box-shadow: none;
 }
 .discard-button svg:last-child {
@@ -525,7 +563,7 @@ select {
 }
 .permission-note {
   padding: 7px 12px 0;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.7;
   color: var(--muted);
 }
@@ -541,7 +579,7 @@ select {
 }
 .page-content {
   max-width: 1470px;
-  padding: 32px 44px 40px;
+  padding: 34px 44px 42px;
   margin: 0 auto;
   min-width: 0;
   outline-offset: -3px;
@@ -554,17 +592,17 @@ select {
   margin-bottom: 25px;
 }
 .page-title-row h1 {
-  font-size: 29px;
-  font-weight: 550;
-  line-height: 1.4;
-  letter-spacing: -1.1px;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.8px;
 }
 .page-description {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
-  line-height: 1.9;
+  line-height: 1.85;
   margin-top: 8px;
-  max-width: 700px;
+  max-width: 760px;
 }
 .run-context {
   display: flex;
@@ -586,7 +624,7 @@ select {
   gap: 12px;
   align-items: center;
   margin: 20px 0 26px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   flex-wrap: wrap;
 }
@@ -601,9 +639,20 @@ select {
   align-items: start;
 }
 .focus-surface {
-  padding: 27px 29px 24px;
+  padding: 28px 30px;
   border: 1px solid var(--color-base-300);
-  background: var(--color-base-200);
+  background: linear-gradient(
+    140deg,
+    color-mix(in srgb, var(--color-primary) 3%, var(--surface)),
+    var(--surface) 65%
+  );
+  position: relative;
+  border-color: color-mix(
+    in srgb,
+    var(--color-primary) 23%,
+    var(--color-base-300)
+  );
+  box-shadow: var(--shadow-card);
 }
 .focus-surface .eyebrow {
   color: var(--color-primary);
@@ -611,18 +660,18 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 10px;
+  font-size: 11px;
 }
 .focus-surface h2 {
-  font-size: 27px;
-  font-weight: 550;
-  letter-spacing: -1px;
-  line-height: 1.55;
-  margin: 23px 0 13px;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.85px;
+  line-height: 1.45;
+  margin: 22px 0 14px;
   max-width: 550px;
 }
 .focus-surface > p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
   line-height: 1.9;
   max-width: 560px;
@@ -632,12 +681,14 @@ select {
   gap: 12px;
   align-items: center;
   justify-content: space-between;
-  margin-top: 28px;
-  font-size: 11px;
+  margin-top: 25px;
+  font-size: 12px;
   flex-wrap: wrap;
+  padding-top: 22px;
+  border-top: 1px solid var(--color-base-300);
 }
 .focus-footer .btn {
-  font-size: 11px;
+  font-size: 12px;
 }
 .focus-owner {
   display: flex;
@@ -653,12 +704,12 @@ select {
   color: var(--color-base-content);
   display: grid;
   place-items: center;
-  font-size: 9px;
+  font-size: 11px;
 }
 .phase-steps {
   margin: 16px 0 25px;
   width: 100%;
-  font-size: 10px;
+  font-size: 11px;
 }
 .phase-steps .step:before {
   height: 2px;
@@ -666,7 +717,7 @@ select {
 .phase-steps .step:after {
   width: 21px;
   height: 21px;
-  font-size: 9px;
+  font-size: 11px;
 }
 .phase-steps .step {
   min-width: 0;
@@ -680,11 +731,11 @@ select {
 }
 .section-title h2,
 .section-title h3 {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .section-title > span {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
 }
 .run-aside {
@@ -701,7 +752,7 @@ select {
 }
 .queue-item {
   border-bottom: 1px solid var(--color-base-300);
-  padding: 13px 0;
+  padding: 15px 0;
 }
 .queue-button {
   border: 0;
@@ -727,20 +778,22 @@ select {
 }
 .queue-code {
   font:
-    9px ui-monospace,
+    11px ui-monospace,
     monospace;
   color: var(--muted);
   margin-bottom: 4px;
   display: block;
+  letter-spacing: 0.025em;
 }
 .queue-title {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 550;
+  line-height: 1.65;
 }
 .queue-meta {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 5px;
 }
@@ -755,17 +808,18 @@ select {
 }
 .blocker-notice {
   border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
-  background: color-mix(
-    in srgb,
-    var(--color-warning) 5%,
-    var(--color-base-100)
-  );
+  background: color-mix(in srgb, var(--color-warning) 5%, var(--surface));
   display: flex;
   align-items: start;
   gap: 12px;
-  padding: 15px 17px;
+  padding: 17px 19px;
   margin: 16px 0;
-  border-radius: 8px;
+  border-radius: 10px;
+  border-color: color-mix(
+    in srgb,
+    var(--color-warning) 27%,
+    var(--color-base-300)
+  );
 }
 .blocker-notice > svg {
   color: var(--color-warning);
@@ -774,11 +828,11 @@ select {
   margin-top: 2px;
 }
 .blocker-notice h3 {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 550;
 }
 .blocker-notice p {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.8;
   color: var(--muted);
   margin-top: 5px;
@@ -786,7 +840,7 @@ select {
 .blocker-notice .btn {
   margin-top: 6px;
   padding: 0;
-  font-size: 11px;
+  font-size: 12px;
   min-height: 20px;
   height: auto;
 }
@@ -820,7 +874,7 @@ select {
   flex-wrap: wrap;
 }
 .status-filter .btn {
-  font-size: 11px;
+  font-size: 12px;
 }
 .task-search {
   display: flex;
@@ -828,31 +882,29 @@ select {
   align-items: center;
 }
 .task-search .input {
-  font-size: 12px;
+  font-size: 13px;
   max-width: 210px;
   min-width: 0;
 }
 .tasks-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 22px;
-  align-items: start;
+  min-width: 0;
 }
 .tasks-table {
   table-layout: fixed;
   width: 100%;
 }
 .tasks-table th {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--muted);
-  padding: 11px 8px;
+  padding: 12px 9px;
+  letter-spacing: 0.02em;
 }
 .tasks-table td {
-  font-size: 11px;
+  font-size: 13px;
   white-space: normal;
   overflow-wrap: anywhere;
-  padding: 14px 8px;
+  padding: 16px 9px;
 }
 .tasks-table th:first-child {
   width: 25px;
@@ -874,8 +926,8 @@ select {
 }
 .task-title-button strong {
   font-weight: 550;
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.65;
 }
 .task-title-button .queue-code {
   margin: 5px 0 0;
@@ -883,11 +935,14 @@ select {
 .task-title-button:hover strong {
   color: var(--color-primary);
 }
-.tasks-table tr.selected-row {
-  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+.tasks-table tbody tr {
+  transition: background-color 140ms var(--ease-state);
+}
+.tasks-table tbody tr:focus-within {
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
 }
 .status-label {
-  font-size: 10px;
+  font-size: 11px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -899,31 +954,6 @@ select {
 }
 .status-pending {
   background: var(--muted);
-}
-.task-inspector {
-  padding: 20px;
-  background: var(--color-base-200);
-  border: 1px solid var(--color-base-300);
-  min-width: 0;
-}
-.task-inspector h2 {
-  font-size: 17px;
-  line-height: 1.6;
-  letter-spacing: -0.4px;
-  margin: 12px 0 10px;
-}
-.task-inspector h3 {
-  font-size: 11px;
-  margin: 20px 0 8px;
-}
-.task-inspector p {
-  font-size: 11px;
-  line-height: 1.9;
-  color: var(--muted);
-}
-.task-inspector .btn {
-  margin-top: 24px;
-  width: 100%;
 }
 .record-page {
   max-width: 950px;
@@ -937,10 +967,11 @@ select {
   margin-bottom: 12px;
 }
 .record-hero h1 {
-  font-size: 29px;
-  line-height: 1.55;
-  letter-spacing: -1px;
+  font-size: 31px;
+  line-height: 1.45;
+  letter-spacing: -0.8px;
   margin-bottom: 13px;
+  font-weight: 600;
 }
 .record-meta {
   display: flex;
@@ -948,7 +979,7 @@ select {
   align-items: center;
   flex-wrap: wrap;
   margin-top: 18px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
 }
 .reading-grid {
@@ -964,13 +995,13 @@ select {
   margin-bottom: 29px;
 }
 .reading-section h2 {
-  font-size: 15px;
+  font-size: 16px;
   margin-bottom: 12px;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.2px;
 }
 .reading-section p,
 .reading-section li {
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.95;
   color: var(--muted);
 }
@@ -994,14 +1025,15 @@ select {
   color: var(--color-primary);
 }
 .record-properties {
-  padding: 18px;
+  padding: 21px;
   border: 1px solid var(--color-base-300);
-  background: var(--soft);
+  background: var(--surface);
   align-self: start;
-  border-radius: 8px;
+  border-radius: 11px;
+  box-shadow: var(--shadow-card);
 }
 .record-properties h2 {
-  font-size: 11px;
+  font-size: 12px;
   margin-bottom: 18px;
 }
 .property {
@@ -1011,12 +1043,12 @@ select {
   margin: 0;
 }
 .property dt {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
   margin-bottom: 6px;
 }
 .property dd {
-  font-size: 11px;
+  font-size: 12px;
   margin: 0;
   line-height: 1.75;
   overflow-wrap: anywhere;
@@ -1043,7 +1075,7 @@ select {
   min-width: 0;
 }
 .related-button .badge {
-  font-size: 9px;
+  font-size: 11px;
 }
 .related-button svg {
   width: 14px;
@@ -1058,12 +1090,12 @@ select {
   background: var(--color-base-200);
 }
 .record-fields .collapse-title {
-  font-size: 11px;
+  font-size: 12px;
   min-height: 0;
   padding-block: 13px;
 }
 .record-fields .collapse-content {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   line-height: 1.8;
 }
@@ -1077,7 +1109,7 @@ select {
   max-width: 800px;
 }
 .search-box .input {
-  font-size: 13px;
+  font-size: 14px;
   flex: 1;
   width: 100%;
   min-width: 0;
@@ -1100,11 +1132,11 @@ select {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .scope-controls .select {
-  font-size: 11px;
+  font-size: 12px;
   min-width: 140px;
   background: var(--color-base-100);
 }
@@ -1113,27 +1145,30 @@ select {
   gap: 2px;
 }
 .view-controls .btn {
-  font-size: 11px;
+  font-size: 12px;
 }
 .search-context {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   line-height: 1.7;
   margin: 18px 0 25px;
 }
 .search-group {
   border: 1px solid var(--color-base-300);
-  border-radius: 9px;
+  border-radius: 12px;
   margin-bottom: 20px;
   overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(20 35 50 / 0.025);
 }
 .search-group-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: var(--color-base-200);
-  padding: 14px 19px;
+  background: var(--surface);
+  padding: 18px 21px;
+  transition: background-color 160ms var(--ease-state);
 }
 .search-group-header {
   cursor: pointer;
@@ -1157,12 +1192,12 @@ select {
   transform: rotate(90deg);
 }
 .search-group-header h2 {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 550;
   margin-bottom: 5px;
 }
 .search-group-header > div > p {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
 }
 .search-group-body {
@@ -1186,19 +1221,20 @@ select {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
   margin-bottom: 9px;
 }
 .search-result h3 {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 550;
   margin-bottom: 8px;
+  line-height: 1.6;
 }
 .search-result p {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
-  line-height: 1.8;
+  line-height: 1.9;
   max-width: 850px;
 }
 .search-result:hover h3 {
@@ -1206,7 +1242,7 @@ select {
 }
 .search-result .result-tail {
   margin-top: 10px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
   display: flex;
   gap: 15px;
@@ -1230,9 +1266,10 @@ select {
   gap: 19px;
 }
 .memory-card {
-  padding: 23px;
+  padding: 25px;
   border: 1px solid var(--color-base-300);
-  background: var(--color-base-100);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 .memory-card .memory-top {
   display: flex;
@@ -1241,15 +1278,16 @@ select {
   align-items: center;
 }
 .memory-card h2 {
-  font-size: 17px;
-  line-height: 1.65;
+  font-size: 19px;
+  line-height: 1.55;
   letter-spacing: -0.5px;
   margin: 20px 0 11px;
+  font-weight: 600;
 }
 .memory-card > p {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
-  line-height: 1.95;
+  line-height: 1.9;
 }
 .memory-cues {
   display: flex;
@@ -1259,7 +1297,7 @@ select {
 }
 .memory-cues .badge {
   font:
-    9px ui-monospace,
+    11px ui-monospace,
     monospace;
   background: var(--color-base-200);
   border-color: var(--color-base-300);
@@ -1267,7 +1305,7 @@ select {
 .memory-footer {
   border-top: 1px solid var(--color-base-300);
   padding-top: 14px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--muted);
   display: flex;
   align-items: center;
@@ -1275,7 +1313,7 @@ select {
   gap: 10px;
 }
 .memory-footer .btn {
-  font-size: 10px;
+  font-size: 11px;
 }
 .memory-detail {
   margin-top: 24px;
@@ -1289,7 +1327,7 @@ select {
   margin: 10px 0 12px;
 }
 .memory-detail p {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.9;
   color: var(--muted);
 }
@@ -1317,7 +1355,7 @@ select {
   font-weight: 550;
 }
 .empty-page p {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.9;
   color: var(--muted);
   max-width: 430px;
@@ -1328,6 +1366,10 @@ select {
 .modal-box {
   border: 1px solid var(--color-base-300);
   max-width: 480px;
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  border-radius: 18px;
+  padding: 28px;
 }
 .modal-box h2 {
   font-size: 24px;
@@ -1335,7 +1377,7 @@ select {
   margin: 13px 0;
 }
 .modal-box p {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
   line-height: 1.9;
 }
@@ -1357,17 +1399,17 @@ select {
   margin-top: 6px;
 }
 .discard-summary p {
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 7px;
 }
 .modal-box .fieldset {
   padding-top: 8px;
 }
 .modal-box .fieldset-legend {
-  font-size: 12px;
+  font-size: 13px;
 }
 .modal-box .input {
-  font-size: 13px;
+  font-size: 14px;
 }
 .demo-notice {
   display: flex;
@@ -1383,13 +1425,13 @@ select {
   color: var(--muted);
 }
 .demo-notice p {
-  font-size: 11px;
+  font-size: 12px;
 }
 .toast {
   z-index: 70;
 }
 .toast .alert {
-  font-size: 12px;
+  font-size: 13px;
   max-width: 420px;
 }
 .sidebar-scrim {
@@ -1409,6 +1451,134 @@ select {
 [hidden] {
   display: none !important;
 }
+
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  color: var(--color-base-content);
+}
+.run-tabs::-webkit-scrollbar {
+  display: none;
+}
+.run-tabs::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  width: var(--run-line-width, 0px);
+  transform: translateX(var(--run-line-x, 0px));
+  background: var(--color-primary);
+  border-radius: 2px 2px 0 0;
+}
+.run-tabs[data-indicator-ready]::after {
+  transition:
+    transform 260ms var(--ease-out),
+    width 260ms var(--ease-out);
+}
+.nav-button::before {
+  content: "";
+  width: 2px;
+  height: 16px;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0);
+  background: var(--color-primary);
+  border-radius: 2px;
+}
+.nav-button[aria-current="page"]::before {
+  transform: translateY(-50%) scaleY(1);
+}
+.btn {
+  transition:
+    background-color 160ms var(--ease-state),
+    border-color 160ms var(--ease-state),
+    box-shadow 160ms var(--ease-state),
+    transform 160ms var(--ease-out);
+}
+.btn-primary {
+  box-shadow: 0 2px 5px
+    color-mix(in srgb, var(--color-primary) 13%, transparent);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+.input,
+.select {
+  background: var(--surface);
+  border-color: var(--color-base-300);
+  box-shadow: 0 1px 2px rgb(20 35 50 / 0.025);
+  transition:
+    border-color 160ms var(--ease-state),
+    box-shadow 160ms var(--ease-state);
+}
+.input:focus-within,
+.select:focus-visible {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+.queue-button .icon,
+.related-button > .icon,
+.memory-footer .btn .icon {
+  transition: transform 180ms var(--ease-out);
+}
+.search-group[open] > .search-group-header {
+  background: var(--soft);
+}
+.group-chevron {
+  transition: transform 220ms var(--ease-out);
+}
+.record-fields {
+  border: 1px solid var(--color-base-300);
+  border-radius: 9px;
+}
+.page-scroll,
+.fold-list {
+  scrollbar-color: color-mix(in srgb, var(--muted) 35%, transparent) transparent;
+  scrollbar-width: thin;
+}
+.page-scroll::-webkit-scrollbar,
+.fold-list::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+.page-scroll::-webkit-scrollbar-thumb,
+.fold-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 28%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+.is-revealing {
+  overflow: hidden !important;
+}
+.theme-swapping *,
+.theme-swapping *::before,
+.theme-swapping *::after {
+  transition: none !important;
+}
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 12px
+      color-mix(in srgb, var(--color-primary) 18%, transparent);
+  }
+  .queue-button:hover .icon,
+  .related-button:hover > .icon,
+  .memory-footer .btn:hover .icon {
+    transform: translateX(3px);
+  }
+  .tasks-table tbody tr:hover {
+    background: color-mix(in srgb, var(--color-primary) 4%, transparent);
+  }
+  .search-group-header:hover {
+    background: var(--soft);
+  }
+}
+
 @media (min-width: 1700px) {
   :root {
     --rail: 264px;
@@ -1439,7 +1609,7 @@ select {
     gap: 10px;
   }
   .brand-note {
-    font-size: 8px;
+    font-size: 10px;
     padding-left: 8px;
   }
   .top-actions {
@@ -1454,13 +1624,10 @@ select {
     padding-inline: 11px;
   }
   .run-tab-title {
-    font-size: 11px;
+    font-size: 12px;
   }
   .page-content {
     padding: 27px 29px;
-  }
-  .tasks-layout {
-    grid-template-columns: minmax(0, 1fr) 225px;
   }
   .run-overview {
     grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.8fr);
@@ -1474,9 +1641,6 @@ select {
   }
   .sidebar {
     padding-inline: 13px;
-  }
-  .task-inspector {
-    padding: 17px;
   }
   .reading-grid {
     gap: 23px;
@@ -1501,7 +1665,7 @@ select {
     flex-basis: 115px;
   }
   .run-tab-meta {
-    font-size: 8px;
+    font-size: 10px;
   }
   .page-content {
     padding: 24px;
@@ -1513,15 +1677,6 @@ select {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 24px;
-  }
-  .tasks-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .task-inspector {
-    margin-top: 12px;
-  }
-  .task-inspector .btn {
-    width: auto;
   }
   .reading-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1599,7 +1754,7 @@ select {
   }
   .locale-select {
     max-width: 78px;
-    font-size: 10px;
+    font-size: 11px;
   }
   .top-actions .btn {
     padding: 0;
@@ -1700,7 +1855,7 @@ select {
     font-size: 24px;
   }
   .page-description {
-    font-size: 11px;
+    font-size: 12px;
   }
   .focus-surface {
     padding: 21px 19px;
@@ -1709,16 +1864,16 @@ select {
     font-size: 23px;
   }
   .focus-surface > p {
-    font-size: 12px;
+    font-size: 13px;
   }
   .focus-footer {
     margin-top: 23px;
   }
   .focus-surface .eyebrow {
-    font-size: 8px;
+    font-size: 10px;
   }
   .phase-steps {
-    font-size: 9px;
+    font-size: 11px;
   }
   .run-aside {
     display: block;
@@ -1727,14 +1882,14 @@ select {
     margin-bottom: 25px;
   }
   .run-context .eyebrow {
-    font-size: 9px;
+    font-size: 11px;
   }
   .context-separator {
     margin: 0;
   }
   .run-meter {
     gap: 9px;
-    font-size: 10px;
+    font-size: 11px;
   }
   .run-meter .progress {
     width: 100px;
@@ -1754,10 +1909,10 @@ select {
     width: 74px;
   }
   .task-title-button strong {
-    font-size: 11px;
+    font-size: 12px;
   }
   .status-label {
-    font-size: 9px;
+    font-size: 11px;
     gap: 4px;
   }
   .filter-toolbar {
@@ -1773,26 +1928,26 @@ select {
   }
   .status-filter .btn {
     padding-inline: 8px;
-    font-size: 10px;
+    font-size: 11px;
   }
   .record-hero h1 {
     font-size: 24px;
   }
   .reading-section p,
   .reading-section li {
-    font-size: 12px;
+    font-size: 13px;
   }
   .record-properties {
     gap: 15px 10px;
   }
   .property dd {
-    font-size: 10px;
+    font-size: 11px;
   }
   .related-button {
     gap: 8px;
   }
   .related-button .queue-title {
-    font-size: 11px;
+    font-size: 12px;
   }
   .search-controls {
     align-items: start;
@@ -1813,23 +1968,23 @@ select {
     flex: 1;
   }
   .search-result h3 {
-    font-size: 13px;
+    font-size: 14px;
   }
   .search-result p {
-    font-size: 11px;
+    font-size: 12px;
   }
   .search-result .result-tail {
     gap: 8px;
-    font-size: 9px;
+    font-size: 11px;
   }
   .search-group-header {
     gap: 7px;
   }
   .search-group-header h2 {
-    font-size: 12px;
+    font-size: 13px;
   }
   .search-group-header .badge {
-    font-size: 9px;
+    font-size: 11px;
   }
   .empty-page {
     min-height: 360px;
@@ -1865,6 +2020,7 @@ select {
     padding-top: 12px;
   }
   .sidebar-explore {
+    min-height: 148px;
     max-height: 260px;
   }
 }
@@ -1875,7 +2031,7 @@ select {
     min-height: 40px;
   }
   .locale-select {
-    font-size: 12px;
+    font-size: 13px;
   }
   .input {
     font-size: 16px;

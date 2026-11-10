@@ -35,7 +35,6 @@ const copy = {
   progress: ["작업 완료 비율", "Task completion"],
   currentFocus: ["지금 집중하는 작업", "IN FOCUS"],
   taskDetail: ["목적과 검증 조건", "Purpose and verification"],
-  taskFull: ["상세 보기", "View details"],
   upNext: ["이어지는 작업", "Up next"],
   waitsFor: ["선행 조건 대기", "Awaiting prerequisites"],
   recentDone: ["완료한 일", "Completed work"],
@@ -80,7 +79,6 @@ const copy = {
   search: ["검색", "Search"],
   taskColumn: ["작업", "Task"],
   status: ["상태", "Status"],
-  selectedTask: ["선택한 TASK", "SELECTED TASK"],
   noMatches: ["일치하는 기록이 없습니다", "No matching records"],
   noMatchesHelp: [
     "검색어나 범위를 바꿔 보세요.",
@@ -533,7 +531,6 @@ function view() {
       page: "current",
       openKind: "PLAN",
       record: null,
-      selectedTask: null,
       filter: "all",
       taskQuery: "",
       query: "",
@@ -649,12 +646,8 @@ function filteredTasks() {
 }
 function tasksPage() {
   const v = view(),
-    items = filteredTasks(),
-    selected =
-      items.find((x) => x.uid === v.selectedTask) ||
-      items.find((x) => x.status === "running") ||
-      items[0];
-  return `${pageHeader()}${context()}${meter()}<div class="filter-toolbar"><div class="status-filter join" role="group" aria-label="${t("status")}">${["all", "running", "blocked", "pending", "done"].map((key) => `<button class="btn btn-xs join-item ${v.filter === key ? "btn-primary" : "btn-ghost"}" type="button" data-filter="${key}" aria-pressed="${v.filter === key}">${t(key)}</button>`).join("")}</div><form class="task-search" data-form="tasks"><label><span class="sr-only">${t("taskSearch")}</span><input class="input input-sm" name="query" aria-label="${t("taskSearch")}" value="${esc(v.taskQuery)}" placeholder="${t("taskSearch")}"></label><button class="btn btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form></div>${items.length ? `<div class="tasks-layout"><section><table class="table tasks-table"><caption class="sr-only">${t("tasks")} · ${currentRun().id}</caption><thead><tr><th scope="col"><span class="sr-only">${t("status")}</span></th><th scope="col">${t("taskColumn")}</th><th scope="col">${t("owner")}</th><th scope="col">${t("status")}</th></tr></thead><tbody>${items.map((r) => `<tr class="${selected?.uid === r.uid ? "selected-row" : ""}"><td>${statusMark(r.status, false)}</td><td><button class="task-title-button" type="button" data-task-select="${r.uid}" aria-pressed="${selected?.uid === r.uid}"><strong>${esc(tr(r.title))}</strong><span class="queue-code">${r.id}</span></button></td><td>${esc(tr(r.owner))}</td><td>${statusMark(r.status)}</td></tr>`).join("")}</tbody></table></section>${selected ? `<aside class="card task-inspector"><p class="eyebrow">${t("selectedTask")}</p><p class="mono micro muted" style="margin-top:9px">${selected.id}</p><h2>${esc(tr(selected.title))}</h2>${statusMark(selected.status)}<h3>${t("objective")}</h3><p>${esc(tr(selected.goal))}</p><h3>${t("depends")}</h3><p>${selected.depends.join(", ") || t("noDependencies")}</p><h3>${t("result")}</h3><p>${resultText(selected)}</p><button class="btn btn-sm" type="button" data-record="${selected.uid}">${t("taskFull")} ${icon("arrow")}</button></aside>` : ""}</div>` : empty(taskRecords().length ? "noMatches" : "noTasks", taskRecords().length ? "noMatchesHelp" : "noTasksHelp", "inbox", taskRecords().length ? `<button class="btn btn-sm" type="button" data-reset="tasks">${t("reset")}</button>` : "")}`;
+    items = filteredTasks();
+  return `${pageHeader()}${context()}${meter()}<div class="filter-toolbar"><div class="status-filter join" role="group" aria-label="${t("status")}">${["all", "running", "blocked", "pending", "done"].map((key) => `<button class="btn btn-xs join-item ${v.filter === key ? "btn-primary" : "btn-ghost"}" type="button" data-filter="${key}" aria-pressed="${v.filter === key}">${t(key)}</button>`).join("")}</div><form class="task-search" data-form="tasks"><label><span class="sr-only">${t("taskSearch")}</span><input class="input input-sm" name="query" aria-label="${t("taskSearch")}" value="${esc(v.taskQuery)}" placeholder="${t("taskSearch")}"></label><button class="btn btn-sm" type="submit" data-focus="search-submit">${t("search")}</button></form></div>${items.length ? `<div class="tasks-layout"><section><table class="table tasks-table"><caption class="sr-only">${t("tasks")} · ${currentRun().id}</caption><thead><tr><th scope="col"><span class="sr-only">${t("status")}</span></th><th scope="col">${t("taskColumn")}</th><th scope="col">${t("owner")}</th><th scope="col">${t("status")}</th></tr></thead><tbody>${items.map((r) => `<tr><td>${statusMark(r.status, false)}</td><td><button class="task-title-button" type="button" data-record="${r.uid}"><strong>${esc(tr(r.title))}</strong><span class="queue-code">${r.id}</span></button></td><td>${esc(tr(r.owner))}</td><td>${statusMark(r.status)}</td></tr>`).join("")}</tbody></table></section></div>` : empty(taskRecords().length ? "noMatches" : "noTasks", taskRecords().length ? "noMatchesHelp" : "noTasksHelp", "inbox", taskRecords().length ? `<button class="btn btn-sm" type="button" data-reset="tasks">${t("reset")}</button>` : "")}`;
 }
 function resultText(r) {
   return r.status === "done"
@@ -779,6 +772,191 @@ function memoriesPage() {
       "",
     )}</div>${found.length ? "" : empty("noMatches", "noMatchesHelp", "search", `<button class="btn btn-sm" type="button" data-reset="memories">${t("reset")}</button>`)}`;
 }
+// Motion is presentation-only; data, focus and disclosure state settle synchronously.
+const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+const activeMotions = new Set();
+const disclosureMotions = new Set();
+const disclosureState = new WeakMap();
+let pageMotions = [];
+let foldMotion = null;
+function tween(element, frames, duration = 240, complete) {
+  if (!element || motionPreference.matches || !element.animate) {
+    complete?.();
+    return null;
+  }
+  const animation = element.animate(frames, {
+    duration,
+    easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+  });
+  let settled = false;
+  const handle = {
+    finish() {
+      if (settled) return;
+      settled = true;
+      activeMotions.delete(handle);
+      animation.cancel();
+      complete?.();
+    },
+    cancel() {
+      if (settled) return;
+      settled = true;
+      activeMotions.delete(handle);
+      animation.cancel();
+    },
+  };
+  animation.onfinish = handle.finish;
+  activeMotions.add(handle);
+  return handle;
+}
+function finishFoldMotion() {
+  const previous = foldMotion;
+  foldMotion = null;
+  previous?.finish();
+}
+function finishDisclosures() {
+  [...disclosureMotions].forEach((handle) => handle.finish());
+}
+function animatePage(kind) {
+  pageMotions.forEach((handle) => handle?.cancel());
+  pageMotions = [];
+  if (!kind || motionPreference.matches) return;
+  const elements =
+    kind === "list"
+      ? [...document.querySelectorAll(".tasks-layout, .flat-results, .search-group, .memory-grid")]
+      : [$("#page-content")];
+  elements.forEach((element, index) => {
+    const handle = tween(
+      element,
+      [
+        { opacity: 0, transform: `translateY(${kind === "page" ? 7 : 4}px)` },
+        { opacity: 1, transform: "translateY(0)" },
+      ],
+      kind === "page" ? 260 : 200 + Math.min(index * 10, 40),
+    );
+    if (handle) pageMotions.push(handle);
+  });
+}
+function updateRunIndicator() {
+  const tabs = $("#run-tabs"),
+    active = $("[aria-selected=true]", tabs);
+  if (!active) return;
+  tabs.style.setProperty("--run-line-x", `${active.offsetLeft}px`);
+  tabs.style.setProperty("--run-line-width", `${active.offsetWidth}px`);
+  if (!tabs.hasAttribute("data-indicator-ready"))
+    requestAnimationFrame(() => tabs.setAttribute("data-indicator-ready", ""));
+}
+function toggleExplore(kind) {
+  finishFoldMotion();
+  const owner = view(),
+    scroll = $("#page-scroll").scrollTop;
+  const closing = owner.openKind === kind;
+  if (closing && !motionPreference.matches) {
+    const list = $(`#list-${kind}`),
+      trigger = $(`#fold-${kind}`);
+    owner.foldScrolls[list.id] = list.scrollTop;
+    owner.openKind = null;
+    trigger.setAttribute("aria-expanded", "false");
+    list.setAttribute("aria-hidden", "true");
+    list.inert = true;
+    list.classList.add("is-revealing");
+    foldMotion = tween(
+      list,
+      [
+        { height: `${list.clientHeight}px`, opacity: 1 },
+        { height: "0px", opacity: 0 },
+      ],
+      180,
+      () => {
+        if (!list.isConnected || view() !== owner) return;
+        const focus = focusToken();
+        list.hidden = true;
+        renderSidebar();
+        restoreFocus(focus);
+      },
+    );
+  } else {
+    owner.openKind = closing ? null : kind;
+    renderSidebar();
+    $(`#fold-${kind}`).focus({ preventScroll: true });
+    const list = $(`#list-${kind}`);
+    if (!closing) {
+      list.classList.add("is-revealing");
+      foldMotion = tween(
+        list,
+        [
+          { height: "0px", opacity: 0 },
+          { height: `${list.clientHeight}px`, opacity: 1 },
+        ],
+        240,
+        () => list.classList.remove("is-revealing"),
+      );
+    }
+  }
+  $("#page-scroll").scrollTop = scroll;
+}
+function toggleSearchGroup(details) {
+  const panel = $(".search-group-body", details);
+  const previous = disclosureState.get(details);
+  const opening = previous ? !previous.opening : !details.open;
+  const from = previous
+    ? panel.getBoundingClientRect().height
+    : opening
+      ? 0
+      : panel.getBoundingClientRect().height;
+  previous?.handle?.finish();
+  const owner = view();
+  owner.searchOpen = opening
+    ? [...new Set([...owner.searchOpen, details.dataset.searchRun])]
+    : owner.searchOpen.filter((key) => key !== details.dataset.searchRun);
+  if (motionPreference.matches) {
+    details.open = opening;
+    return;
+  }
+  details.open = true;
+  const target = panel.scrollHeight;
+  panel.classList.add("is-revealing");
+  panel.inert = !opening;
+  let handle;
+  const entry = { opening, handle: null };
+  handle = tween(
+    panel,
+    [
+      { height: `${from}px`, opacity: opening && !previous ? 0 : 1 },
+      { height: `${opening ? target : 0}px`, opacity: opening ? 1 : 0 },
+    ],
+    opening ? 240 : 180,
+    () => {
+      panel.classList.remove("is-revealing");
+      panel.inert = false;
+      details.open = opening;
+      disclosureMotions.delete(handle);
+      if (disclosureState.get(details) === entry)
+        disclosureState.delete(details);
+    },
+  );
+  entry.handle = handle;
+  if (handle) {
+    disclosureState.set(details, entry);
+    disclosureMotions.add(handle);
+  }
+}
+motionPreference.addEventListener("change", (event) => {
+  if (event.matches) [...activeMotions].forEach((handle) => handle.finish());
+});
+document.addEventListener("click", (event) => {
+  const summary = event.target.closest(".search-group > summary");
+  if (!summary) return;
+  event.preventDefault();
+  toggleSearchGroup(summary.parentElement);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Tab") {
+    finishFoldMotion();
+    finishDisclosures();
+  }
+});
+window.addEventListener("resize", updateRunIndicator);
+
 function renderTabs() {
   const selected = currentRun();
   $("#run-tabs").innerHTML = runs
@@ -788,6 +966,7 @@ function renderTabs() {
     )
     .join("");
   $("#page-content").setAttribute("aria-labelledby", `tab-${selected.key}`);
+  updateRunIndicator();
 }
 function navItem(page, ico, count = "") {
   return `<button type="button" class="nav-button" data-page="${page}" ${view().page === page ? 'aria-current="page"' : ""}>${icon(ico)}<span>${t(page)}</span>${count !== "" ? `<span class="nav-counter">${count}</span>` : ""}</button>`;
@@ -876,7 +1055,6 @@ function focusToken() {
     "data-page",
     "data-fold",
     "data-record",
-    "data-task-select",
     "data-filter",
     "data-group",
     "data-memory",
@@ -910,6 +1088,10 @@ function restoreFocus(token) {
   }
 }
 function render(options = {}) {
+  finishFoldMotion();
+  finishDisclosures();
+  pageMotions.forEach((handle) => handle?.cancel());
+  pageMotions = [];
   const token = focusToken();
   const scroll = $("#page-scroll").scrollTop;
   if (options.captureSearch !== false) {
@@ -931,6 +1113,7 @@ function render(options = {}) {
   syncUrl();
   if (options.focusPage) $("#page-content").focus({ preventScroll: true });
   else restoreFocus(token);
+  animatePage(options.motion);
 }
 function syncResponsiveMenu() {
   const compact = window.matchMedia("(max-width: 800px)").matches;
@@ -947,7 +1130,7 @@ function closeMenu() {
 function navigate(page) {
   view().page = page;
   closeMenu();
-  render({ resetScroll: true, focusPage: true });
+  render({ resetScroll: true, focusPage: true, motion: "page" });
   announce(t("navigationChanged"));
 }
 function switchRun(key, focusTab = false) {
@@ -955,7 +1138,7 @@ function switchRun(key, focusTab = false) {
   view().scrolls[view().page] = $("#page-scroll").scrollTop;
   state.run = key;
   closeMenu();
-  render({ resetScroll: true });
+  render({ resetScroll: true, motion: "page" });
   $("#page-scroll").scrollTop = view().scrolls[view().page] || 0;
   if (focusTab) $(`#tab-${key}`).focus({ preventScroll: true });
   $(`#tab-${key}`).scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -969,7 +1152,19 @@ function openRecord(uid) {
   view().record = uid;
   view().openKind = record.kind;
   closeMenu();
-  render({ resetScroll: true, focusPage: true });
+  render({ resetScroll: true, focusPage: true, motion: "page" });
+  const list = $(`#list-${record.kind}`);
+  const selected = [...list.querySelectorAll("[data-record]")].find(
+    (element) => element.dataset.record === uid,
+  );
+  if (selected) {
+    const itemBounds = selected.getBoundingClientRect();
+    const listBounds = list.getBoundingClientRect();
+    if (itemBounds.top < listBounds.top)
+      list.scrollTop += itemBounds.top - listBounds.top;
+    else if (itemBounds.bottom > listBounds.bottom)
+      list.scrollTop += itemBounds.bottom - listBounds.bottom;
+  }
   $(`#tab-${state.run}`).scrollIntoView({
     block: "nearest",
     inline: "nearest",
@@ -997,29 +1192,27 @@ document.addEventListener("click", (event) => {
   if (!button) return;
   if (button.dataset.run) switchRun(button.dataset.run, true);
   else if (button.dataset.page) navigate(button.dataset.page);
-  else if (button.dataset.fold) {
-    const previous = $("#page-scroll").scrollTop;
-    view().openKind =
-      view().openKind === button.dataset.fold ? null : button.dataset.fold;
-    const kind = button.dataset.fold;
-    renderSidebar();
-    $(`#fold-${kind}`).focus({ preventScroll: true });
-    $("#page-scroll").scrollTop = previous;
-  } else if (button.dataset.record) openRecord(button.dataset.record);
-  else if (button.dataset.taskSelect) {
-    view().selectedTask = button.dataset.taskSelect;
-    render();
-  } else if (button.dataset.filter) {
+  else if (button.dataset.fold) toggleExplore(button.dataset.fold);
+  else if (button.dataset.record) openRecord(button.dataset.record);
+  else if (button.dataset.filter) {
     view().filter = button.dataset.filter;
-    render();
+    render({ motion: "list" });
     announce(`${t("resultCount")} ${filteredTasks().length}`);
   } else if (button.dataset.group) {
     view().group = button.dataset.group;
-    render();
+    render({ motion: "list" });
     announce(t(button.dataset.group === "run" ? "grouped" : "flat"));
   } else if (button.dataset.memory) {
     view().memory = button.dataset.memory;
     render();
+    tween(
+      $("#memory-source"),
+      [
+        { opacity: 0, transform: "translateY(4px)" },
+        { opacity: 1, transform: "translateY(0)" },
+      ],
+      220,
+    );
     $("#memory-source").focus({ preventScroll: true });
     $("#memory-source").scrollIntoView({ block: "start" });
   } else if (button.dataset.reset) {
@@ -1035,8 +1228,22 @@ document.addEventListener("click", (event) => {
     render();
     $("#page-content input")?.focus({ preventScroll: true });
   } else if (button.id === "theme-toggle") {
+    document.documentElement.classList.add("theme-swapping");
     state.theme = state.theme === "light" ? "dark" : "light";
     render();
+    tween(
+      $("#theme-toggle .icon"),
+      [
+        { opacity: 0, transform: "rotate(-35deg)" },
+        { opacity: 1, transform: "rotate(0deg)" },
+      ],
+      220,
+    );
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        document.documentElement.classList.remove("theme-swapping"),
+      ),
+    );
   } else if (button.id === "menu-toggle") {
     state.menuOpen = !state.menuOpen;
     $("#workbench").classList.toggle("menu-open", state.menuOpen);
@@ -1123,6 +1330,7 @@ document.addEventListener(
     const details = event.target;
     if (!details.matches?.("details[data-search-run]") || !details.isConnected)
       return;
+    if (disclosureState.has(details)) return;
     const key = details.dataset.searchRun;
     view().searchOpen = details.open
       ? [...new Set([...view().searchOpen, key])]
