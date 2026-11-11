@@ -44,7 +44,7 @@ async function openPage() {
   return { page, errors };
 }
 
-test('icon navigation morphs counters, expands over the map and preserves pinning and Explore focus', { timeout: 60000 }, async () => {
+test('icon navigation hides collapsed counts, expands over the map and preserves pinning and Explore focus', { timeout: 60000 }, async () => {
   const { page, errors } = await openPage();
   const shell = page.locator('.tapl-workbench'), sidebar = page.locator('.wb-sidebar');
   const pin = page.locator('[data-wb-focus="sidebar-pin"]');
@@ -65,13 +65,16 @@ test('icon navigation morphs counters, expands over the map and preserves pinnin
     assert.ok(language.x + language.width <= theme.x && theme.x + theme.width <= pinBox.x, 'pin is the rightmost control after language and theme');
     assert.equal(await page.locator('.wb-mm-top-controls button[aria-pressed]').count(),0,'map motion has no toggle');
     const tasks = page.locator('[data-wb-focus="nav:tasks"]');
-    assert.equal(await tasks.locator('.wb-count-compact').innerText(), '24');
+    assert.equal(await page.locator('.wb-count-compact').count(),0);
+    assert.equal(await tasks.locator('.wb-rail-count').isVisible(),false);
     assert.equal(await tasks.locator('.wb-count-full').textContent(), '24개');
     assert.ok((await tasks.getAttribute('aria-label')).includes('24개'));
     const canvas = await page.locator('.wb-run-mindmap').boundingBox();
     await tasks.hover();
     await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.sidebarExpanded === 'true');
     assert.equal((await sidebar.boundingBox()).width, 256);
+    assert.equal(await tasks.locator('.wb-rail-count').isVisible(),true);
+    assert.equal(await tasks.locator('.wb-count-full').innerText(),'24개');
     assert.deepEqual(await page.locator('.wb-run-mindmap').boundingBox(), canvas, 'hover overlays rather than moves the canvas');
     await page.getByRole('tooltip').waitFor();
     assert.ok((await page.getByRole('tooltip').innerText()).includes('24개'));
@@ -154,14 +157,16 @@ test('large rail counts retain their full names and captions stay on one line th
     });
     await page.goto(origin);await page.locator('.wb-run-mindmap').waitFor();
     const task=page.locator('[data-wb-focus="nav:tasks"]');
-    assert.equal(await task.locator('.wb-count-compact').innerText(),'99+');
+    assert.equal(await page.locator('.wb-count-compact').count(),0);
     assert.ok((await task.getAttribute('aria-label')).includes('137개'));
-    assert.ok((await task.locator('.wb-rail-count').boundingBox()).width<30);
+    assert.equal(await task.locator('.wb-rail-count').isVisible(),false);
     await page.locator('.wb-sidebar').hover({position:{x:20,y:4}});
     const heights=await page.locator('.wb-workspace-heading .wb-nav-caption').evaluate(async el=>{
       const values=[];for(let i=0;i<24;i++){await new Promise(requestAnimationFrame);values.push({height:el.getBoundingClientRect().height,line:parseFloat(getComputedStyle(el).lineHeight),wrap:getComputedStyle(el).whiteSpace});}return values;
     });
     assert.ok(heights.every(value=>value.wrap==='nowrap' && value.height<=value.line+1),'caption never wraps during the width transition');
+    assert.equal(await task.locator('.wb-count-full').innerText(),'137개');
+    assert.equal(await task.locator('.wb-rail-count').isVisible(),true);
     assert.equal(await page.locator('.wb-mm-world').evaluate(el=>getComputedStyle(el).willChange),'auto');
     assert.equal(await page.locator('.wb-mm-node-button').first().evaluate(el=>getComputedStyle(el).transform),'none');
   } finally {await page.close();}

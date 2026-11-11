@@ -20,7 +20,7 @@ export function ItemCount({ count }: { count: number }): JSX.Element {
   const { t } = useI18n();
   return <>{t(count === 1 ? 'wbItem' : 'wbItems', { count })}</>;
 }
-/** One counter morphs between a full label and an icon badge without remounting. */
+/** Navigation counts are visible only while the rail is expanded. */
 export function NavCount({
   count,
   percentage = false,
@@ -33,7 +33,6 @@ export function NavCount({
   return (
     <span className={`wb-rail-count ${className}`} data-wb-count={count} aria-hidden="true">
       <span className="wb-count-full">{percentage ? `${count}%` : <ItemCount count={count} />}</span>
-      <span className="wb-count-compact">{percentage ? `${count}%` : count > 99 ? '99+' : count}</span>
     </span>
   );
 }
