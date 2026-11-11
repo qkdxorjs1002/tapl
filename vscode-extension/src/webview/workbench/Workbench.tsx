@@ -169,7 +169,17 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
         hoverTimer.current = setTimeout(() => setSidebarHovered(false), 600);
       }
     };
-    const pointer = () => setSidebarFocused(false);
+    const pointer = (event: PointerEvent) => {
+      setSidebarFocused(false);
+      const target = event.target;
+      if (
+        (target instanceof Node && sidebarRef.current?.contains(target)) ||
+        (target instanceof Element && target.closest('#wb-explore-panel,.wb-navigation-pin'))
+      ) return;
+      clearTimeout(hoverTimer.current);
+      setSidebarHovered(false);
+      setExploreActive(false);
+    };
     document.addEventListener('focusin', focus);
     document.addEventListener('pointerdown', pointer, true);
     return () => {
