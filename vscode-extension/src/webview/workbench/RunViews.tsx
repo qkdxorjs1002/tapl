@@ -103,7 +103,11 @@ function ActiveTasks({ snapshot, open }: { snapshot: TaplRunSnapshot; open: Open
         </span>
       </div>
       {tasks.length ? (
-        <ul className="wb-active-tasks">
+        <HorizontalTrack
+          name="active-tasks"
+          label={t('wbActiveTasks')}
+          className={`wb-active-tasks ${tasks.length === 1 ? 'wb-single-task' : ''}`}
+        >
           {tasks.map((item) => {
             const execution = item.active_execution;
             const assigned = recordedText(item.custom_fields?.owner, item.custom_fields?.assignee);
@@ -136,48 +140,47 @@ function ActiveTasks({ snapshot, open }: { snapshot: TaplRunSnapshot; open: Open
               ['verification', 'verification']
             ]);
             return (
-              <li key={item.id ?? item.stable_id}>
-                <button
-                  type="button"
-                  className="card wb-active-task"
-                  data-status={item.status}
-                  data-wb-focus={`active-task:${item.id ?? item.stable_id}`}
-                  onClick={() => {
-                    if (canOpen(item)) open(item, snapshot.run);
-                  }}
-                  disabled={!canOpen(item)}
-                  title={!canOpen(item) ? t('wbRecordUnavailable') : undefined}
-                >
-                  <span className="wb-overview-meta">
-                    <span className="wb-mono">{item.stable_id}</span>
-                    <StatusMark value={item.status} />
+              <button
+                type="button"
+                key={item.id ?? item.stable_id}
+                className="card wb-active-task"
+                data-status={item.status}
+                data-wb-focus={`active-task:${item.id ?? item.stable_id}`}
+                onClick={() => {
+                  if (canOpen(item)) open(item, snapshot.run);
+                }}
+                disabled={!canOpen(item)}
+                title={!canOpen(item) ? t('wbRecordUnavailable') : undefined}
+              >
+                <span className="wb-overview-meta">
+                  <span className="wb-mono">{item.stable_id}</span>
+                  <StatusMark value={item.status} />
+                </span>
+                <span className="wb-overview-heading">
+                  <strong>{item.title}</strong>
+                  <Icon name="arrow" />
+                </span>
+                <OverviewFields fields={fields} />
+                {(present.length > 0 || item.execution_timing) && (
+                  <span className="wb-overview-facts">
+                    {present.map(([label, value]) => (
+                      <span className="wb-overview-fact" key={label}>
+                        <span className="wb-overview-label">{t(label)}</span>
+                        <span>{value}</span>
+                      </span>
+                    ))}
+                    {item.execution_timing && (
+                      <span className="wb-overview-fact">
+                        <span className="wb-overview-label">{t('elapsedTime')}</span>
+                        <TaskDuration item={item} />
+                      </span>
+                    )}
                   </span>
-                  <span className="wb-overview-heading">
-                    <strong>{item.title}</strong>
-                    <Icon name="arrow" />
-                  </span>
-                  <OverviewFields fields={fields} />
-                  {(present.length > 0 || item.execution_timing) && (
-                    <span className="wb-overview-facts">
-                      {present.map(([label, value]) => (
-                        <span className="wb-overview-fact" key={label}>
-                          <span className="wb-overview-label">{t(label)}</span>
-                          <span>{value}</span>
-                        </span>
-                      ))}
-                      {item.execution_timing && (
-                        <span className="wb-overview-fact">
-                          <span className="wb-overview-label">{t('elapsedTime')}</span>
-                          <TaskDuration item={item} />
-                        </span>
-                      )}
-                    </span>
-                  )}
-                </button>
-              </li>
+                )}
+              </button>
             );
           })}
-        </ul>
+        </HorizontalTrack>
       ) : (
         <p className="wb-active-empty">{t('wbNoActiveTasks')}</p>
       )}
@@ -208,7 +211,6 @@ export function CurrentRun({
       <PageHeading title={title} back={back} />
       <div className="wb-current-overview">
         <RunInformation run={snapshot.run} />
-        <ActiveTasks snapshot={snapshot} open={open} />
         <section className="wb-plan-section">
           <div className="wb-section-title">
             <h2>PLAN</h2>
@@ -262,6 +264,7 @@ export function CurrentRun({
             <p className="wb-plan-placeholder">{t('wbNoPlans')}</p>
           )}
         </section>
+        <ActiveTasks snapshot={snapshot} open={open} />
       </div>
     </>
   );

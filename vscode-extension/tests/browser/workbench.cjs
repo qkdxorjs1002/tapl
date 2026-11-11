@@ -227,7 +227,7 @@ test('Current RUN shows only active TASKs and useful PLAN previews with responsi
     assert.ok((await tasks.first().innerText()).includes('Check both locales and responsive layouts.'));
     assert.ok((await tasks.first().locator('.wb-overview-facts').innerText()).includes('PLAN-001'));
     const section = await page.locator('.wb-active-section').boundingBox(), plans = await page.locator('.wb-plan-section').boundingBox();
-    assert.ok(section.y < plans.y);
+    assert.ok(plans.y < section.y);
     assert.equal(await page.locator('.wb-plan-summary').count(), 3);
     const plan = page.locator('.wb-plan-summary').first();
     assert.equal(await plan.locator('.wb-overview-field').count(), 3);
@@ -237,6 +237,19 @@ test('Current RUN shows only active TASKs and useful PLAN previews with responsi
     await track.evaluate(el => el.scrollLeft = 400);
     const horizontal = await track.evaluate(el => el.scrollLeft);
     assert.ok(horizontal > 0);
+    const taskTrack = page.locator('[data-wb-track="active-tasks"]');
+    const cards = await tasks.evaluateAll(elements => elements.slice(0, 2).map(el => el.getBoundingClientRect().toJSON()));
+    assert.equal(cards[0].y, cards[1].y, 'TASKs share one horizontal row');
+    assert.ok(cards[1].x > cards[0].x + cards[0].width);
+    const footers = await tasks.locator('.wb-overview-facts').evaluateAll(elements => elements.slice(0, 2).map(el => el.getBoundingClientRect().bottom));
+    assert.ok(Math.abs(footers[0] - footers[1]) < 1, 'TASK metadata aligns at the bottom of each card');
+    await taskTrack.focus();
+    await page.keyboard.press('End');
+    await page.waitForFunction(() => document.querySelector('[data-wb-track="active-tasks"]').style.getPropertyValue('--wb-track-left-opacity') === '0');
+    assert.equal(await track.evaluate(el => el.scrollLeft), horizontal, 'PLAN and TASK positions are independent');
+    assert.equal(await taskTrack.evaluate(el => el.style.getPropertyValue('--wb-track-left-opacity')), '0');
+    await page.keyboard.press('Home');
+    await page.waitForFunction(() => document.querySelector('[data-wb-track="active-tasks"]').scrollLeft === 0);
     await tasks.first().click();
     await page.locator('.wb-record-page').waitFor();
     assert.equal(await page.locator('.wb-record-page h1').innerText(), 'Interface task 1');
@@ -244,6 +257,16 @@ test('Current RUN shows only active TASKs and useful PLAN previews with responsi
     await page.locator('.wb-back').click();
     await page.locator('.wb-active-task').first().waitFor();
     assert.equal(await track.evaluate(el => el.scrollLeft), horizontal);
+    await tasks.nth(1).scrollIntoViewIfNeeded();
+    const taskHorizontal = await taskTrack.evaluate(el => el.scrollLeft);
+    assert.ok(taskHorizontal > 0);
+    await tasks.nth(1).click();
+    await page.locator('.wb-record-page').waitFor();
+    assert.equal(await page.locator('.wb-record-page h1').innerText(), 'Interface task 5');
+    await page.locator('.wb-back').click();
+    await page.locator('.wb-active-task').first().waitFor();
+    assert.equal(await taskTrack.evaluate(el => el.scrollLeft), taskHorizontal, 'TASK horizontal position returns from detail');
+    await taskTrack.evaluate(el => el.scrollLeft = 0);
 
     for (const locale of ['ko', 'en']) {
       await page.setViewportSize({ width: 1440, height: 1000 });

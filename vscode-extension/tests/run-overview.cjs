@@ -46,7 +46,7 @@ function render(value, locale = 'en', Component = CurrentRun, extra = {}) {
 }
 const occurrences = (html, text) => html.split(text).length - 1;
 
-test('Current RUN shows only exact In Progress tasks before PLAN and preserves compact RUN information', () => {
+test('Current RUN shows PLAN before exact In Progress tasks and preserves compact RUN information', () => {
   const inactive = ['Pending', 'Blocked', 'Completed', 'Skipped', 'Custom status', undefined, 'In Progress ', 'in progress'];
   const tasks = [task(10), task(2), ...inactive.map((status, index) => task(index + 20, status, { status }))];
   for (const locale of ['en', 'ko']) {
@@ -55,7 +55,8 @@ test('Current RUN shows only exact In Progress tasks before PLAN and preserves c
     assert.ok(html.indexOf('TASK-002') < html.indexOf('TASK-010'), 'stable IDs sort numerically');
     for (const item of tasks.slice(2)) assert.ok(!html.includes(item.title), item.status);
     assert.ok(html.indexOf('wb-run-information') < html.indexOf('wb-active-section'));
-    assert.ok(html.indexOf('wb-active-section') < html.indexOf('wb-plan-section'));
+    assert.ok(html.indexOf('wb-plan-section') < html.indexOf('wb-active-section'));
+    assert.ok(html.includes('data-wb-track="active-tasks"'));
     assert.ok(html.includes(translate(locale, 'wbActiveTasks')));
     for (const key of ['wbMetadataImplementation', 'wbMetadataPlanned', 'wbMetadataFull']) {
       assert.ok(html.includes(translate(locale, key)));
@@ -171,11 +172,11 @@ test('whole-card handlers pass the original item and exact source RUN, and guard
   assert.equal(cards.length, 10);
   for (const card of cards) card.props.onClick();
   assert.equal(calls.length, 2);
-  assert.strictEqual(calls[0][0], selectedTask);
-  assert.strictEqual(calls[1][0], selectedPlan);
+  assert.strictEqual(calls[0][0], selectedPlan);
+  assert.strictEqual(calls[1][0], selectedTask);
   for (const [, actualRun] of calls) assert.strictEqual(actualRun, run);
-  assert.equal(calls[0][0].source_db, '/actual/item-source.sqlite3');
-  assert.equal(calls[0][1].source_db, '/actual/peer.sqlite3');
+  assert.equal(calls[1][0].source_db, '/actual/item-source.sqlite3');
+  assert.equal(calls[1][1].source_db, '/actual/peer.sqlite3');
   assert.equal(cards.filter((card) => card.props.disabled).length, 8);
   assert.ok(cards.filter((card) => card.props.disabled).every((card) => card.props.title === translate('en', 'wbRecordUnavailable')));
   nodes.find((node) => node.props?.['data-wb-focus'] === 'back').props.onClick();
