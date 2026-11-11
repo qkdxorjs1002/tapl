@@ -39,7 +39,7 @@ The RUN bar stays fixed. Desktop navigation starts as an icon rail: hover or key
 
 The top bar lists unarchived RUNs. Opening an archived source from records or memory adds one temporary tab at the right; selecting another RUN removes it. Source database and RUN ID remain paired during navigation. Internal links provide Back. Clicking the already selected RUN tab preserves its page and return trail; switching RUNs, direct sidebar navigation and reload clear the trail. Per-RUN filters and theme/language choices persist separately from that trail.
 
-Both maps keep every node available for keyboard navigation. Pointer motion updates nearby nodes and their connectors; ambient pulses animate at most 24 visible connections at 30 frames per second. Stationary node/connector geometry is reused, and decorative work stops when the map is hidden or system reduced motion is enabled. Camera movement retains its separate frame rate.
+Both maps keep every node available for keyboard navigation. Pointer motion updates nearby nodes and their connectors. In an active RUN, light travels inside glass-like connection channels only toward **In Progress** records and along their ancestor paths; hovering another record does not start its flow. Other states, ended RUNs and associative memory links do not carry moving light. Moving light is limited to 24 visible executing connections at 30 frames per second. Stationary node/connector geometry is reused, and decorative work stops when the map is hidden or system reduced motion is enabled. Camera movement retains its separate frame rate.
 
 ## Read details and structured fields
 

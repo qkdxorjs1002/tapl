@@ -9,6 +9,7 @@
   --mm-accent: var(--tapl-highlight);
   --mm-focus: var(--tapl-focus);
   --mm-progress: var(--tapl-info);
+  --mm-flow-core: color-mix(in srgb, var(--mm-progress) 24%, var(--tapl-primary-content));
   --mm-completed: var(--tapl-success);
   --mm-blocked: var(--tapl-error);
   --mm-pending: var(--tapl-muted);
@@ -106,8 +107,54 @@
   transition: opacity 0.3s;
 }
 .wb-mm-pulse {
-  fill: var(--mm-accent);
   opacity: 0;
+}
+.wb-mm-edge-running .wb-mm-edge {
+  stroke: color-mix(in srgb, var(--mm-progress) 34%, var(--mm-line));
+  stroke-width: 4.4;
+  stroke-opacity: 0.6;
+}
+.wb-mm-glass-path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.wb-mm-tube-channel {
+  stroke: color-mix(in srgb, var(--mm-bg) 80%, var(--mm-progress));
+  stroke-width: 2.8;
+}
+.wb-mm-tube-reflection {
+  stroke: var(--mm-flow-core);
+  stroke-width: 0.45;
+  stroke-opacity: 0.22;
+}
+.wb-mm-flow {
+  opacity: 0;
+}
+/* Layered vector strokes give the light a soft tail without per-edge blur filters. */
+.wb-mm-flow-halo {
+  stroke: var(--mm-progress);
+  stroke-width: 2.8;
+  stroke-opacity: 0.28;
+  stroke-dasharray: 14 186;
+  stroke-dashoffset: calc(14 - var(--mm-flow-progress, 0));
+}
+.wb-mm-flow-tail {
+  stroke: var(--mm-progress);
+  stroke-width: 1.8;
+  stroke-opacity: 0.7;
+  stroke-dasharray: 8 192;
+  stroke-dashoffset: calc(8 - var(--mm-flow-progress, 0));
+}
+.wb-mm-flow-core {
+  stroke: var(--mm-flow-core);
+  stroke-width: 0.95;
+  stroke-dasharray: 4 196;
+  stroke-dashoffset: calc(4 - var(--mm-flow-progress, 0));
+}
+html:not([data-tapl-theme]) > body:is(.vscode-high-contrast, .vscode-high-contrast-light) .wb-mm-edge-running .wb-mm-edge {
+  stroke: var(--mm-line);
+  stroke-opacity: 1;
 }
 .wb-mm-node {
   position: absolute;
@@ -377,7 +424,7 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.wb-mindmap[data-reduced-motion='true'] .wb-mm-pulse {
+.wb-mindmap[data-reduced-motion='true'] :is(.wb-mm-pulse, .wb-mm-flow) {
   display: none;
 }
 .wb-mindmap[data-reduced-motion='true'] .wb-mm-node {
@@ -392,7 +439,8 @@
     animation: none !important;
     transition: none !important;
   }
-  .wb-mm-pulse {
+  .wb-mm-pulse,
+  .wb-mm-flow {
     display: none;
   }
   .wb-mm-node-button {

@@ -124,7 +124,8 @@ function attributeValues(html, attribute) {
 function assertDomOrder(html, graph) {
   assert.deepEqual(attributeValues(html, 'data-mindmap-node'), graph.nodes.map(node => node.key));
   assert.equal((html.match(/class="wb-mm-edge"/g) ?? []).length, graph.edges.length);
-  assert.equal((html.match(/class="wb-mm-pulse"/g) ?? []).length, graph.edges.length);
+  assert.equal((html.match(/class="wb-mm-pulse(?: wb-mm-flow)?"/g) ?? []).length, graph.edges.length);
+  assert.equal((html.match(/class="wb-mm-pulse wb-mm-flow"/g) ?? []).length, graph.edges.filter(edge => edge.flowing).length);
 }
 
 test('memoized RUN cards keep all records, edge order, titles, focus targets and both locales', () => {

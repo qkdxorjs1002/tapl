@@ -196,6 +196,78 @@ test('settings works without an active RUN and keeps unsaved inputs through back
   } finally { await page.close(); }
 });
 
+test('glass flow follows only executing paths, stays independent of hover, and stops on status refresh', { timeout: 45000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  let overview;
+  await page.route('**/api/message', async route => {
+    const response = await route.fetch(), payload = await response.json();
+    if (payload.view?.type === 'overview') {
+      if (!overview) {
+        const s = payload.view.status, plan = s.plans[0], task = s.tasks[0];
+        s.active_run.status = 'active';
+        s.plans = [1, 2].map(i => ({ ...plan, id: 90000+i, stable_id: `PLAN-90${i}`, status: 'Finalized', title: `Flow plan ${i}` }));
+        s.tasks = ['In Progress', 'Completed', 'Blocked', 'Pending', 'In Progress'].map((status, i) => ({
+          ...task, id: 91001+i, stable_id: `TASK-90${i+1}`, status, title: `Flow task ${i+1}`,
+          spec_id: i === 4 ? null : s.plans[i === 3 ? 1 : 0].stable_id
+        }));
+        s.task_counts = { 'In Progress': 2, Completed: 1, Blocked: 1, Pending: 1 };
+        overview = structuredClone(payload);
+      } else payload.view.status = structuredClone(overview.view.status);
+    }
+    await route.fulfill({ response, json: payload });
+  });
+  const publish = async () => page.evaluate(payload => window.postMessage({ ...payload, type: 'view:update' }, '*'), overview);
+  try {
+    await page.goto(origin); await page.waitForLoadState('networkidle');
+    const map = page.locator('.wb-run-mindmap'); await map.waitFor();
+    await page.mouse.move(1400, 30);
+    await page.waitForFunction(() => document.querySelectorAll('.wb-mm-flow').length === 3);
+    const activeKeys = await map.locator('g[data-flow=running]').evaluateAll(groups => groups.map(group =>
+      JSON.parse(group.dataset.to).find(value => typeof value === 'string' && /^(PLAN|TASK)-/.test(value))).sort());
+    assert.deepEqual(activeKeys, ['PLAN-901', 'TASK-901', 'TASK-905']);
+    const idlePulses = () => map.locator('g[data-to]:not([data-flow]) > .wb-mm-pulse').evaluateAll(nodes => nodes.every(node => +getComputedStyle(node).opacity === 0));
+    assert.ok(await idlePulses());
+    const flow = map.locator('.wb-mm-flow').first();
+    const before = await flow.evaluate(node => node.style.getPropertyValue('--mm-flow-progress'));
+    const beforeDash = await flow.locator('.wb-mm-flow-core').evaluate(node => getComputedStyle(node).strokeDashoffset);
+    await page.waitForTimeout(100);
+    assert.notEqual(await flow.evaluate(node => node.style.getPropertyValue('--mm-flow-progress')), before);
+    assert.notEqual(await flow.locator('.wb-mm-flow-core').evaluate(node => getComputedStyle(node).strokeDashoffset), beforeDash, 'the light travels along the tube');
+    await map.locator('[data-kind=task] button').filter({ hasText: 'Flow task 2' }).hover();
+    await page.waitForTimeout(300);
+    assert.equal(await map.locator('g[data-flow=running]').count(), 3, 'hovering a completed task does not start its flow');
+    assert.ok(await idlePulses());
+    assert.ok(await map.locator('g[data-flow=running]').evaluateAll(groups => groups.every(group => {
+      const d = group.querySelector('.wb-mm-edge').getAttribute('d');
+      return [...group.querySelectorAll('.wb-mm-glass-path')].every(path => path.getAttribute('d') === d);
+    })), 'tube and light follow the displaced curve together');
+    await page.mouse.move(1400, 30); await page.waitForTimeout(700);
+    for (const theme of ['dark', 'light']) {
+      await page.evaluate(theme => document.documentElement.dataset.taplTheme = theme, theme);
+      await page.waitForTimeout(300); await shot(page, `glass-flow-${theme}`);
+    }
+    await page.emulateMedia({ reducedMotion: 'reduce' }); await page.waitForTimeout(100);
+    assert.ok(await map.locator('.wb-mm-flow, .wb-mm-pulse').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display === 'none')));
+    const stopped = await flow.evaluate(node => node.style.getPropertyValue('--mm-flow-progress'));
+    await page.waitForTimeout(150);
+    assert.equal(await flow.evaluate(node => node.style.getPropertyValue('--mm-flow-progress')), stopped);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    overview.view.status.tasks.forEach(task => { task.status = 'Completed'; });
+    overview.view.status.task_counts = { Completed: 5 }; await publish();
+    await page.waitForFunction(() => document.querySelectorAll('.wb-mm-flow').length === 0);
+    assert.ok(await map.locator('.wb-mm-pulse').evaluateAll(nodes => nodes.every(node => +getComputedStyle(node).opacity === 0)), 'completed paths leave no stale light');
+    overview.view.status.tasks[0].status = 'In Progress'; await publish();
+    await page.waitForFunction(() => document.querySelectorAll('.wb-mm-flow').length === 2);
+    overview.view.status.active_run.status = 'archived'; await publish();
+    await page.waitForFunction(() => document.querySelectorAll('.wb-mm-flow').length === 0);
+    await page.locator('[data-wb-focus="nav:memories"]').click(); await page.locator('.wb-memory-mindmap').waitFor();
+    assert.equal(await page.locator('.wb-memory-mindmap .wb-mm-flow').count(), 0);
+    assert.ok(await page.locator('.wb-memory-mindmap .wb-mm-pulse').evaluateAll(nodes => nodes.every(node => +getComputedStyle(node).opacity === 0)), 'active memories are not executing work');
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test('large maps bound idle work, retain keyboard targets and refresh current graph geometry', { timeout: 60000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -204,7 +276,7 @@ test('large maps bound idle work, retain keyboard targets and refresh current gr
     const response = await route.fetch(), payload = await response.json();
     if (payload.view?.type === 'overview') {
       const s = payload.view.status, plan = s.plans[0], task = s.tasks[0];
-      s.plans = Array.from({ length: 40 }, (_, i) => ({ ...plan, id: 100000+i, stable_id: `PLAN-${i+1}`, title: `Large plan ${i+1}` }));
+      s.plans = Array.from({ length: 40 }, (_, i) => ({ ...plan, id: 100000+i, stable_id: `PLAN-${i+1}`, title: `Large plan ${i+1}`, status: 'Finalized' }));
       s.tasks = Array.from({ length: 1000 }, (_, i) => ({ ...task, id: 200000+i, stable_id: `TASK-${i+1}`, title: `Large task ${i+1}`, spec_id: s.plans[i%40].stable_id, status: 'Pending' }));
       s.task_counts = { Pending: 1000 }; overview = structuredClone(payload);
     }
@@ -217,7 +289,7 @@ test('large maps bound idle work, retain keyboard targets and refresh current gr
   });
   const idleWrites = () => page.locator('.wb-mindmap').evaluate(async host => {
     const counts = { node: 0, path: 0, pulse: 0, world: 0, light: 0 };
-    const selectors = { node: '.wb-mm-node', path: '.wb-mm-edge', pulse: '.wb-mm-pulse', world: '.wb-mm-world', light: '.wb-mm-pointer-light' };
+    const selectors = { node: '.wb-mm-node', path: '.wb-mm-edge, .wb-mm-glass-path', pulse: '.wb-mm-pulse, .wb-mm-flow', world: '.wb-mm-world', light: '.wb-mm-pointer-light' };
     const observer = new MutationObserver(records => {
       for (const { target } of records) for (const [key, selector] of Object.entries(selectors)) {
         if (target.matches(selector)) { counts[key]++; break; }
@@ -235,9 +307,9 @@ test('large maps bound idle work, retain keyboard targets and refresh current gr
       assert.equal(await map.locator('[data-mindmap-node]').count(), count, 'every keyboard target stays mounted');
       const writes = await idleWrites();
       assert.equal(writes.node+writes.path+writes.world+writes.light, 0, `${kind}: settled geometry sleeps`);
-      assert.ok(writes.pulse > 0 && writes.pulse < 3000, `${kind}: ambient work is bounded`);
+      assert.equal(writes.pulse, 0, `${kind}: no executing work means no ambient flow writes`);
       const pulses = await map.locator('.wb-mm-pulse').evaluateAll(nodes => nodes.filter(node => +getComputedStyle(node).opacity > 0).length);
-      assert.ok(pulses > 0 && pulses <= 24, 'default motion keeps a bounded visible budget');
+      assert.equal(pulses, 0, 'pending work and memories remain static');
       await page.emulateMedia({ reducedMotion: 'reduce' }); await page.waitForTimeout(100);
       assert.deepEqual(await idleWrites(), { node: 0, path: 0, pulse: 0, world: 0, light: 0 });
       const last = map.locator('[data-kind=task] button, [data-kind=cue] button').last();
@@ -830,6 +902,7 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
       assert.deepEqual(await rgba('.wb-run-mindmap','color'),hex(p.fg));
       assert.deepEqual(await rgba('.wb-run-mindmap [data-kind=task] button','backgroundColor'),hex(p.surface));
       assert.deepEqual(await rgba('.wb-run-mindmap .wb-mm-state[data-status=progress]','color'),hex(p.info));
+      assert.deepEqual(await rgba('.wb-run-mindmap .wb-mm-flow-tail','stroke'),hex(p.info));
       assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex(borders[index].editor));
       assert.deepEqual(await rgba('.wb-sidebar','borderRightColor'),hex(borders[index].editor));
       assert.deepEqual(await rgba('.wb-run-mindmap [data-kind=task] button','borderTopColor'),hex(borders[index].editor));
@@ -913,6 +986,9 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
     assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex('#ffe066'));
     assert.deepEqual(await rgba('.wb-sidebar','borderRightColor'),hex('#ffe066'));
     assert.deepEqual(await rgba('.wb-memory-mindmap','borderTopColor'),hex('#ffe066'));
+    await page.locator('[data-wb-focus="nav:current"]').click(); await page.locator('.wb-run-mindmap').waitFor();
+    assert.deepEqual(await rgba('.wb-mm-edge-running .wb-mm-edge','stroke'),hex('#ffe066'));
+    await page.locator('[data-wb-focus="nav:memories"]').click(); await page.locator('.wb-memory-mindmap').waitFor();
     await page.evaluate(()=>document.body.className='vscode-high-contrast-light');
     assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex('#ffe066'));
     assert.deepEqual(await rgba('.wb-memory-mindmap','borderTopColor'),hex('#ffe066'));

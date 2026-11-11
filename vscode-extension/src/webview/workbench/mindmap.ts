@@ -18,7 +18,7 @@ export interface MindmapNode {
 
 export interface MindmapGraph {
   nodes: MindmapNode[];
-  edges: { from: string; to: string }[];
+  edges: { from: string; to: string; flowing: boolean }[];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   completed: number;
   total: number;
@@ -148,6 +148,19 @@ export function buildRunMindmap(snapshot: TaplRunSnapshot): MindmapGraph {
   }
 
   const nodes = [root, ...branches.flatMap((branch) => [branch.node, ...branch.children])];
+  const byKey = new Map(nodes.map((node) => [node.key, node]));
+  const executing = new Set<string>();
+  if (snapshot.run.status === 'active') {
+    for (const node of nodes) {
+      if (node.kind === 'run' || node.status !== 'In Progress') continue;
+      // Mark the incoming edge and its ancestors, without lighting idle sibling branches.
+      let current: MindmapNode | undefined = node;
+      while (current?.parent && !executing.has(current.key)) {
+        executing.add(current.key);
+        current = byKey.get(current.parent);
+      }
+    }
+  }
   const bounds = { minX: -119, minY: -79, maxX: 119, maxY: 79 };
   for (const node of nodes) {
     bounds.minX = Math.min(bounds.minX, node.x - node.width / 2);
@@ -157,7 +170,7 @@ export function buildRunMindmap(snapshot: TaplRunSnapshot): MindmapGraph {
   }
   return {
     nodes,
-    edges: nodes.filter((node) => node.parent).map((node) => ({ from: node.parent!, to: node.key })),
+    edges: nodes.filter((node) => node.parent).map((node) => ({ from: node.parent!, to: node.key, flowing: executing.has(node.key) })),
     bounds,
     completed,
     total,

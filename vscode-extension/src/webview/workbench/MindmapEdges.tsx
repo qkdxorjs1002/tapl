@@ -1,8 +1,8 @@
 import { memo } from 'react';
 
-type Edge = { from: string; to: string; path: string; start: { x: number; y: number } };
+type Edge = { from: string; to: string; path: string; start: { x: number; y: number }; flowing?: boolean };
 
-/** Preserve one path and pulse per edge, in graph order, for the viewport's DOM arrays. */
+/** Keep the primary path and pulse in graph order; only executing edges gain glass/light layers. */
 export const MindmapEdge = memo(function MindmapEdge({
   edge,
   emphasis,
@@ -14,13 +14,28 @@ export const MindmapEdge = memo(function MindmapEdge({
 }): JSX.Element {
   return (
     <g
-      data-from={relation ? edge.from : undefined}
-      data-to={relation ? edge.to : undefined}
+      data-from={edge.from}
+      data-to={edge.to}
       data-relation={relation}
-      className={emphasis ? `wb-mm-edge-${emphasis}` : ''}
+      data-flow={edge.flowing ? 'running' : undefined}
+      className={[edge.flowing ? 'wb-mm-edge-running' : '', emphasis ? `wb-mm-edge-${emphasis}` : ''].filter(Boolean).join(' ')}
     >
       <path className="wb-mm-edge" d={edge.path} />
-      <circle className="wb-mm-pulse" r="2" cx={edge.start.x} cy={edge.start.y} />
+      {edge.flowing && (
+        <>
+          <path className="wb-mm-glass-path wb-mm-tube-channel" d={edge.path} />
+          <path className="wb-mm-glass-path wb-mm-tube-reflection" d={edge.path} />
+        </>
+      )}
+      <g className={edge.flowing ? 'wb-mm-pulse wb-mm-flow' : 'wb-mm-pulse'}>
+        {edge.flowing && (
+          <>
+            <path className="wb-mm-glass-path wb-mm-flow-halo" pathLength="100" d={edge.path} />
+            <path className="wb-mm-glass-path wb-mm-flow-tail" pathLength="100" d={edge.path} />
+            <path className="wb-mm-glass-path wb-mm-flow-core" pathLength="100" d={edge.path} />
+          </>
+        )}
+      </g>
     </g>
   );
 });

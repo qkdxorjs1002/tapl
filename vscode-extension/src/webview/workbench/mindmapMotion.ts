@@ -32,9 +32,11 @@ export function mindmapIntersects(a: MindmapView, b: MindmapView): boolean {
 }
 
 /** Keep a deterministic, evenly distributed budget when a zoomed-out view contains many edges. */
-export function mindmapVisiblePulses(edgeBounds: readonly MindmapView[], view: MindmapView, limit = MINDMAP_PULSE_LIMIT): number[] {
+export function mindmapVisiblePulses(edgeBounds: readonly MindmapView[], view: MindmapView, limit = MINDMAP_PULSE_LIMIT, eligible?: readonly boolean[]): number[] {
   const visible: number[] = [];
-  edgeBounds.forEach((bounds, index) => { if (mindmapIntersects(bounds, view)) visible.push(index); });
+  edgeBounds.forEach((bounds, index) => {
+    if ((!eligible || eligible[index]) && mindmapIntersects(bounds, view)) visible.push(index);
+  });
   const count = Math.max(0, Math.floor(limit));
   if (visible.length <= count) return visible;
   return Array.from({ length: count }, (_, index) => visible[Math.floor(index * visible.length / count)]);

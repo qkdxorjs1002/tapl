@@ -55,6 +55,16 @@ test('nearby lookup covers influence across cell boundaries and does not visit r
   assert.deepEqual(find({ x: 1e6, y: -1e6 }), []);
 });
 
+test('only executing edges consume the visible pulse budget', () => {
+  const view = { left: -10, right: 10, top: -10, bottom: 10 };
+  const edgeBounds = Array.from({ length: 1000 }, () => view);
+  const eligible = edgeBounds.map((_, index) => index === 997 || index === 999);
+  assert.deepEqual(pulsesFor(edgeBounds, view, 1, eligible), [997], 'filter execution before spreading the budget');
+  assert.deepEqual(pulsesFor(edgeBounds, view, 24, eligible), [997, 999]);
+  assert.deepEqual(pulsesFor(edgeBounds, view, 24, edgeBounds.map(() => false)), []);
+  assert.deepEqual(pulsesFor(edgeBounds, { left: 50, right: 60, top: 50, bottom: 60 }, 24, eligible), []);
+});
+
 test('magnetic offsets keep modest motion, settle exactly, and reset outside influence/reduced motion', () => {
   const node = { x: 0, y: 0 };
   const offset = offsetFor(node, { x: 100, y: -50 });

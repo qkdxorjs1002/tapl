@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { constrainMindmapCamera, mindmapMinimumZoom } from './mindmapCamera';
 import type { MindmapBounds, MindmapCamera } from './mindmapCamera';
-import { mindmapConnectionGeometry, mindmapConnectionPoint } from './mindmapGeometry';
+import { mindmapConnectionGeometry } from './mindmapGeometry';
 import type { MindmapRouting } from './mindmapGeometry';
 import {
   MINDMAP_DECORATION_INTERVAL,
@@ -14,10 +14,10 @@ import {
   mindmapWorldView
 } from './mindmapMotion';
 
-/** Layout-only graph contract shared by RUN trees and associative memory DAGs. */
+/** Layout and optional execution flags shared by RUN trees and associative memory DAGs. */
 export type MindmapViewportGraph = {
   nodes: { key: string; x: number; y: number; width: number; height: number }[];
-  edges: { from: string; to: string }[];
+  edges: { from: string; to: string; flowing?: boolean }[];
   bounds: MindmapBounds;
   routing?: MindmapRouting;
 };
@@ -84,8 +84,18 @@ export function useMindmapViewport({
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let reduced = motion.matches;
     const nodeElements = Array.from(canvas.querySelectorAll<HTMLElement>('[data-mindmap-node]'));
-    const pulses = Array.from(canvas.querySelectorAll<SVGCircleElement>('.wb-mm-pulse'));
+    const pulses = Array.from(canvas.querySelectorAll<SVGGElement>('.wb-mm-pulse'));
     const paths = Array.from(canvas.querySelectorAll<SVGPathElement>('.wb-mm-edge'));
+    const glassPaths = paths.map((path) => Array.from(path.parentElement?.querySelectorAll<SVGPathElement>('.wb-mm-glass-path') ?? []));
+    const eligiblePulses = edges.map((edge) => edge.flowing === true);
+    const setPath = (index: number, value: string) => {
+      for (const path of [paths[index], ...glassPaths[index]]) {
+        if (path && path.getAttribute('d') !== value) path.setAttribute('d', value);
+      }
+    };
+    const hidePulse = (index: number) => {
+      if (pulses[index]) pulses[index].style.opacity = '0';
+    };
     // React can retain imperative styles across an effect restart; restore the current graph once.
     nodeElements.forEach((element, index) => {
       const node = graph.nodes[index];
@@ -93,15 +103,12 @@ export function useMindmapViewport({
       const value = `translate(${node.x - node.width / 2}px, ${node.y - node.height / 2}px)`;
       if (element.style.transform !== value) element.style.transform = value;
     });
-    paths.forEach((path, index) => {
-      if (edges[index] && path.getAttribute('d') !== edges[index].path) path.setAttribute('d', edges[index].path);
-    });
+    edges.forEach((edge, index) => setPath(index, edge.path));
     const pointerLight = host.querySelector<HTMLElement>('.wb-mm-pointer-light');
     pointerLight?.style.setProperty('--mm-px', `${lastPointer.x}px`);
     pointerLight?.style.setProperty('--mm-py', `${lastPointer.y}px`);
     const nodeIndices = new Map(graph.nodes.map((node, index) => [node.key, index]));
     const nearbyNodes = mindmapNearbyNodes(graph.nodes);
-    const connections = edges.map((edge) => ({ ...edge }));
     const edgeBounds = edges.map(mindmapConnectionBounds);
     const incident = new Map<string, number[]>();
     edges.forEach((edge, index) => {
@@ -160,9 +167,9 @@ export function useMindmapViewport({
       if (time - lastDecoration >= MINDMAP_DECORATION_INTERVAL || reduced) {
         const view = mindmapWorldView(camera, bounds, 12);
         if (viewDirty) {
-          const nextPulses = reduced ? [] : mindmapVisiblePulses(edgeBounds, view);
+          const nextPulses = reduced ? [] : mindmapVisiblePulses(edgeBounds, view, undefined, eligiblePulses);
           const selected = new Set(nextPulses);
-          for (const index of pulseIndices) if (!selected.has(index) && pulses[index]) pulses[index].style.opacity = '0';
+          for (const index of pulseIndices) if (!selected.has(index)) hidePulse(index);
           pulseIndices = nextPulses;
           viewDirty = false;
         }
@@ -196,8 +203,7 @@ export function useMindmapViewport({
               byKey.get(edge.from)!, byKey.get(edge.to)!, graph.routing,
               offsets.get(nodeIndices.get(edge.from)!), offsets.get(nodeIndices.get(edge.to)!)
             );
-            connections[index] = { ...edge, ...connection };
-            paths[index]?.setAttribute('d', connection.path);
+            setPath(index, connection.path);
           }
           decorationDirty = false;
         }
@@ -205,10 +211,10 @@ export function useMindmapViewport({
           const pulse = pulses[index];
           if (!pulse || reduced) continue;
           const p = (time / 5200 + index * 0.173) % 1;
-          const { x, y } = mindmapConnectionPoint(connections[index], p);
-          pulse.setAttribute('cx', String(x));
-          pulse.setAttribute('cy', String(y));
-          pulse.style.opacity = String(Math.sin(p * Math.PI) * 0.65);
+          const opacity = String(Math.sin(p * Math.PI) * 0.92);
+          // Every light layer shares one normalized distance along the curve.
+          pulse.style.setProperty('--mm-flow-progress', String(p * 100));
+          pulse.style.opacity = opacity;
         }
         lastDecoration = time;
       }
@@ -480,7 +486,7 @@ export function useMindmapViewport({
       remember();
       disposed = true;
       suspend();
-      for (const index of pulseIndices) if (pulses[index]) pulses[index].style.opacity = '0';
+      for (const index of pulseIndices) hidePulse(index);
       controlsRef.current = undefined;
       resize.disconnect();
       intersection?.disconnect();

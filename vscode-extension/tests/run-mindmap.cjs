@@ -67,6 +67,27 @@ test('missing, unknown and ambiguous PLAN relationships connect directly to RUN 
   assertNoOverlap(graph);
 });
 
+test('flow follows executing items and their ancestors without lighting idle siblings or ended RUNs', () => {
+  const first = plan(1, { status: 'Finalized' });
+  const idle = plan(2, { status: 'Finalized' });
+  const workingPlan = plan(3, { status: 'In Progress' });
+  const tasks = ['In Progress', 'Pending', 'Completed', 'Blocked', 'Skipped', 'active'].map((status, i) =>
+    task(i + 1, { status, spec_id: first.stable_id }));
+  const orphan = task(10, { status: 'In Progress' });
+  const graph = buildRunMindmap(snapshot([first, idle, workingPlan], [...tasks, orphan]));
+  const flowing = graph.edges.filter(edge => edge.flowing).map(edge => edge.to).sort();
+  assert.deepEqual(flowing, [first, workingPlan, tasks[0], orphan].map(item => nodeFor(graph, item).key).sort());
+  assert.deepEqual(buildRunMindmap(snapshot([idle], [task(20)])).edges.map(edge => edge.flowing), [false, false], 'an active RUN alone does not animate');
+  for (const status of ['archived', 'completed', 'queued']) {
+    const ended = buildRunMindmap(snapshot([first, workingPlan], [...tasks, orphan], { ...run, status }));
+    assert.ok(ended.edges.every(edge => !edge.flowing), `${status}: stale executing records stay static`);
+  }
+  tasks[0].status = 'Completed';
+  orphan.status = 'Blocked';
+  workingPlan.status = 'Finalized';
+  assert.ok(buildRunMindmap(snapshot([first, idle, workingPlan], [...tasks, orphan])).edges.every(edge => !edge.flowing), 'status refresh removes the whole completed path');
+});
+
 test('explicit foreign sources and RUNs cannot attach or contribute to the selected RUN', () => {
   const localPlan = plan(1);
   const foreignSourcePlan = plan(2, { source_db: 'peer.sqlite3' });
