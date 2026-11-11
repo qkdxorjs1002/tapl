@@ -331,17 +331,6 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
             tapl
           </button>
           <div className="wb-brand-actions">
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm btn-square wb-navigation-pin"
-              data-wb-focus="sidebar-pin"
-              aria-label={t(sidebarPinned ? 'wbUnpinNavigation' : 'wbPinNavigation')}
-              aria-pressed={sidebarPinned}
-              aria-controls="wb-sidebar"
-              onClick={() => setSidebarPinned((value) => !value)}
-            >
-              <Icon name={sidebarPinned ? 'panel-collapse' : 'panel-expand'} />
-            </button>
             <details className="dropdown wb-language-menu" ref={languageRef}>
               <summary className="btn btn-ghost btn-sm btn-square" aria-label={t('wbLanguage')}>
                 <Icon name="languages" />
@@ -376,6 +365,17 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
               }}
             >
               <Icon name={darkTheme ? 'sun' : 'moon'} />
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm btn-square wb-navigation-pin"
+              data-wb-focus="sidebar-pin"
+              aria-label={t(sidebarPinned ? 'wbUnpinNavigation' : 'wbPinNavigation')}
+              aria-pressed={sidebarPinned}
+              aria-controls="wb-sidebar"
+              onClick={() => setSidebarPinned((value) => !value)}
+            >
+              <Icon name={sidebarPinned ? 'panel-collapse' : 'panel-expand'} />
             </button>
           </div>
         </div>

@@ -59,7 +59,8 @@ test('icon navigation morphs counters, expands over the map and preserves pinnin
       assert.equal(icon.width,17); assert.equal(icon.height,17);
     }
     const language = await page.locator('.wb-language-menu summary').boundingBox(), pinBox = await pin.boundingBox();
-    assert.ok(pinBox.x + pinBox.width <= language.x, 'pin sits left of the language control');
+    const theme = await page.locator('[data-wb-focus="theme-toggle"]').boundingBox();
+    assert.ok(language.x + language.width <= theme.x && theme.x + theme.width <= pinBox.x, 'pin is the rightmost control after language and theme');
     assert.equal(await page.locator('.wb-mm-top-controls button[aria-pressed]').count(),0,'map motion has no toggle');
     const tasks = page.locator('[data-wb-focus="nav:tasks"]');
     assert.equal(await tasks.locator('.wb-count-compact').innerText(), '24');
