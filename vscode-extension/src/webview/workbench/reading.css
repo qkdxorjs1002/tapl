@@ -24,7 +24,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 9px;
+  gap: 6px;
   margin-bottom: 12px;
 }
 .wb-reading-kind {
@@ -42,6 +42,24 @@
   letter-spacing: 1px;
   color: var(--wb-muted);
   overflow-wrap: anywhere;
+}
+.wb-record-context > :is(.wb-reading-kind, .wb-reading-id, .wb-status-label) {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--wb-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--wb-fg) 3%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.wb-record-context > .wb-reading-id {
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
 }
 .wb-record-hero h1 {
   margin: 0;

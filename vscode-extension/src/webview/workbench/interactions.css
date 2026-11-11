@@ -65,9 +65,8 @@
   border-color: color-mix(in srgb, var(--wb-status-progress) 55%, var(--wb-border));
 }
 .wb-record-context .wb-status-label {
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--wb-state) 4%, transparent);
+  border-color: color-mix(in srgb, var(--wb-state) 18%, var(--wb-border));
+  background: color-mix(in srgb, var(--wb-state) 7%, transparent);
 }
 .wb-dialog {
   width: min(480px, calc(100vw - 32px));
