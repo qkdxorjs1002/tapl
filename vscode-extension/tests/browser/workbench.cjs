@@ -409,6 +409,109 @@ test('Current RUN is a source-safe interactive mindmap with bounded camera and p
   } finally { await page.close(); }
 });
 
+test('associative memories branch left to right with shared cues, exact sources and a persistent gesture camera', { timeout: 60000 }, async () => {
+  const { page, errors } = await openPage();
+  try {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.locator('[data-wb-focus="nav:memories"]').click();
+    const map = page.locator('.wb-memory-mindmap');
+    await map.waitFor();
+    await page.mouse.move(1300, 100);
+    const world = map.locator('.wb-mm-world');
+    const camera = () => world.evaluate(el => { const m = new DOMMatrix(getComputedStyle(el).transform); return { x:m.e,y:m.f,z:m.a }; });
+    assert.equal(await map.locator('[data-kind=source]').count(),2);
+    assert.equal(await map.locator('[data-kind=memory]').count(),2);
+    assert.equal(await map.locator('[data-kind=cue]').count(),5);
+    assert.equal(await map.locator('g[data-relation]').count(),8);
+    assert.equal(await page.locator('.wb-memory-card').count(),0);
+    const edges = await map.evaluate(el => [...el.querySelectorAll('g[data-from]')].map(edge => {
+      const from = [...el.querySelectorAll('[data-mindmap-node]')].find(n => n.dataset.mindmapNode===edge.dataset.from);
+      const to = [...el.querySelectorAll('[data-mindmap-node]')].find(n => n.dataset.mindmapNode===edge.dataset.to);
+      return {from:from.getBoundingClientRect().right,to:to.getBoundingClientRect().left};
+    }));
+    assert.ok(edges.every(edge=>edge.to>edge.from),'every recorded relationship flows left to right');
+    const cue = map.locator('[data-kind=cue] button').filter({hasText:'interface evidence'});
+    await cue.hover();
+    assert.equal(await map.locator('[data-kind=memory].wb-mm-emphasis').count(),2,'shared cue highlights both related memories');
+    assert.equal(await map.locator('[data-kind=source].wb-mm-emphasis').count(),2);
+    await cue.click();
+    await page.waitForFunction(()=>document.querySelector('.wb-memory-mindmap')?.dataset.memoryCameraKey.includes('interface evidence'));
+    assert.equal(await map.locator('[data-kind=memory]').count(),2);
+    await page.mouse.move(850,450); await page.mouse.wheel(45,55); await page.waitForTimeout(50);
+    const panned=await camera();
+    await page.keyboard.down('Control'); await page.mouse.wheel(0,-25); await page.keyboard.up('Control');
+    await page.waitForTimeout(50);
+    assert.ok((await camera()).z>panned.z,'pinch zoom is distinct from ordinary pan');
+    const memory=map.locator('[data-kind=memory] button').filter({hasText:'original contrast finding'});
+    await memory.focus(); await page.waitForTimeout(50);
+    const prior=await camera();
+    await memory.click({force:true}); await page.locator('.wb-memory-source-preview').waitFor();
+    await page.locator('.wb-back').click(); await map.waitFor(); await page.waitForTimeout(50);
+    const returned=await camera();
+    assert.ok(Math.abs(prior.x-returned.x)<1 && Math.abs(prior.y-returned.y)<1 && Math.abs(prior.z-returned.z)<0.001);
+    const source=map.locator('[data-kind=source] button').filter({hasText:'Archived contrast finding'});
+    await source.focus(); await source.click({force:true}); await page.locator('.wb-record-page').waitFor();
+    assert.equal(await page.locator('.wb-record-page h1').innerText(),'Archived contrast finding');
+    assert.equal(await page.locator('.wb-run-tab-temporary').count(),1);
+    await page.locator('.wb-back').click(); await map.waitFor();
+    for (const locale of ['ko','en']) {
+      await page.setViewportSize({width:1440,height:1000});
+      await page.locator('.wb-language-menu summary').click();
+      await page.getByRole('button',{name:locale==='ko'?'한국어':'English',exact:true}).click();
+      for (const theme of ['light','dark']) {
+        if(await page.locator('html').getAttribute('data-tapl-theme')!==theme) await page.locator('[data-wb-focus="theme-toggle"]').click();
+        for (const [width,height] of [[1440,1000],[390,740],[1100,500]]) {
+          await page.setViewportSize({width,height}); await page.waitForTimeout(80);
+          assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+          assert.ok((await map.boundingBox()).height>=250,'graph keeps an operable viewport');
+          await page.locator('.wb-secondary-pagination').scrollIntoViewIfNeeded();
+          const pager=await page.locator('.wb-secondary-pagination').boundingBox();
+          assert.ok(pager.y+pager.height<=height+1,'pagination remains reachable on short screens');
+          await page.locator('.wb-page-scroll').evaluate(el=>el.scrollTop=0);
+          await shot(page,`memory-map-${locale}-${theme}-${width}x${height}`);
+        }
+      }
+    }
+    assert.deepEqual(errors,[]);
+  } finally {await page.close();}
+});
+
+test('memory graph search and pagination retain the query and return to first-page cue results', { timeout: 30000 }, async () => {
+  const {page,errors}=await openPage();
+  const requests=[];
+  await page.route('**/api/message',async route=>{
+    const request=route.request().postDataJSON();
+    if(request.command!=='memories') return route.continue();
+    requests.push(request);
+    const response=await route.fetch(); const payload=await response.json();
+    const offset=request.offset||0;
+    payload.view={...payload.view,offset,limit:1,memories:payload.view.memories.slice(0,1)};
+    return route.fulfill({response,json:payload});
+  });
+  try {
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await page.locator('[data-wb-focus="nav:memories"]').click();
+    const map=page.locator('.wb-memory-mindmap'); await map.waitFor();
+    await page.locator('[data-wb-focus="memory-query"]').fill('interface evidence');
+    await page.locator('[data-wb-focus="memory-submit"]').click();
+    await page.waitForFunction(()=>document.querySelector('.wb-memory-mindmap')?.dataset.memoryCameraKey.includes('interface evidence'));
+    await page.locator('.wb-secondary-pagination button').last().click();
+    await page.waitForFunction(()=>document.querySelector('.wb-search-context')?.textContent.includes('2–2'));
+    assert.equal(requests.at(-1).query,'interface evidence'); assert.equal(requests.at(-1).offset,1);
+    assert.equal(await map.locator('[data-kind=memory]').count(),1);
+    assert.equal(await map.locator('[data-kind=source]').count(),1,'only this page creates relationships');
+    await map.locator('[data-kind=cue] button').filter({hasText:'interface evidence'}).click();
+    await page.waitForFunction(()=>document.querySelector('.wb-search-context')?.textContent.includes('1–1'));
+    assert.equal(requests.at(-1).offset,0);
+    assert.equal(requests.at(-1).query,'interface evidence');
+    await page.locator('[data-wb-focus="memory-query"]').fill('zzzxqptnoresult980');
+    await page.locator('[data-wb-focus="memory-submit"]').click();
+    await page.getByRole('button',{name:'검색 초기화',exact:true}).waitFor();
+    assert.equal(await map.count(),0);
+    assert.deepEqual(errors,[]);
+  } finally {await page.close();}
+});
+
 test('PLAN, FINDING, memories and diagnostics use reading pages and nested vertical fields', { timeout: 45000 }, async () => {
   const { page, errors } = await openPage();
   try {
@@ -430,11 +533,11 @@ test('PLAN, FINDING, memories and diagnostics use reading pages and nested verti
     assert.ok((await page.locator('.wb-record-page').innerText()).includes('<script>window.untrusted = true</script>'));
     await shot(page, 'finding-detail-ko-light');
     await page.locator('[data-wb-focus="nav:memories"]').click();
-    await page.locator('.wb-memory-card').first().waitFor();
-    assert.equal(await page.locator('.wb-memory-card').count(), 2);
+    await page.locator('.wb-memory-mindmap [data-kind=memory]').first().waitFor();
+    assert.equal(await page.locator('.wb-memory-mindmap [data-kind=memory]').count(), 2);
     assert.equal(await page.locator('.tapl-memory-list,.tapl-card').count(), 0);
     await shot(page, 'memories-ko-light');
-    await page.locator('.wb-memory-card').filter({ hasText: 'original contrast finding' }).locator('.wb-memory-open').click();
+    await page.locator('.wb-memory-mindmap [data-kind=memory]').filter({ hasText: 'original contrast finding' }).locator('button').click();
     await page.locator('.wb-memory-source-preview').waitFor();
     await shot(page, 'memory-detail-ko-light');
     await page.locator('.wb-memory-origin button').click();
@@ -556,7 +659,7 @@ test('archive fallback, events, recoverable errors and unsupported memory share 
     unsupportedMemory = true;
     await page.locator('[data-wb-focus="nav:memories"]').click();
     await page.locator('.wb-empty').waitFor();
-    assert.equal(await page.locator('.wb-memory-card').count(), 0);
+    assert.equal(await page.locator('.wb-memory-mindmap').count(), 0);
     await shot(page, 'memory-unsupported-ko-light');
     assert.deepEqual(errors, []);
   } finally { await page.close(); }

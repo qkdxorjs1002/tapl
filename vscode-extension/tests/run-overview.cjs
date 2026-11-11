@@ -9,7 +9,7 @@ const { renderToStaticMarkup } = require('react-dom/server');
 const filename = path.join(__dirname, 'run-overview-render.cjs');
 const output = buildSync({
   stdin: {
-    contents: "export { CurrentRun, TaskStatus } from './src/webview/workbench/RunViews'; export { I18nProvider } from './src/webview/i18n'; export { translate } from './src/i18n';",
+    contents: "export { CurrentRun, TaskStatus } from './src/webview/workbench/RunViews'; export { I18nProvider } from './src/webview/i18n'; export { translate } from './src/i18n'; export { useMindmapViewport } from './src/webview/workbench/mindmapViewport';",
     resolveDir: path.resolve(__dirname, '..')
   },
   loader: { '.css': 'empty' }, bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react-dom']
@@ -51,6 +51,7 @@ test('Current RUN renders the actual mindmap and all TASK statuses in both langu
   const tasks = states.map((state, index) => task(index + 1, state, { status: state, spec_id: 'PLAN-001' }));
   for (const locale of ['en', 'ko']) {
     const html = render(snapshot({ plans: [plan(1)], tasks }), locale);
+    assert.match(html, /class="wb-mindmap wb-run-mindmap"/);
     assert.equal(occurrences(html, 'data-kind="run"'), 1);
     assert.equal(occurrences(html, 'data-kind="plan"'), 1);
     assert.equal(occurrences(html, 'data-kind="task"'), 7);
@@ -110,6 +111,45 @@ function interactionTree(Component, props) {
   }
   return nodes(load(react)[Component](props));
 }
+
+test('shared viewport accepts structural DAGs and calculates every valid edge without RUN topology', () => {
+  const react = {
+    ...React,
+    useRef: (current) => ({ current }),
+    useEffect() {},
+    useMemo: (factory) => factory()
+  };
+  const { useMindmapViewport } = load(react);
+  const graph = {
+    nodes: [
+      { key: 'source', x: -200, y: 0, width: 100, height: 60 },
+      { key: 'memory-a', x: 0, y: -80, width: 100, height: 60 },
+      { key: 'memory-b', x: 0, y: 80, width: 100, height: 60 },
+      { key: 'cue', x: 200, y: 0, width: 100, height: 60 }
+    ],
+    edges: [
+      { from: 'source', to: 'memory-a' }, { from: 'source', to: 'memory-b' },
+      { from: 'memory-a', to: 'cue' }, { from: 'memory-b', to: 'cue' },
+      { from: 'missing', to: 'cue' }
+    ],
+    bounds: { minX: -250, minY: -110, maxX: 250, maxY: 110 }
+  };
+  const viewport = useMindmapViewport({ graph, cameraKey: 'memory:source', setActive() {} });
+  assert.equal(viewport.hostRef.current, null);
+  assert.equal(viewport.worldRef.current, null);
+  assert.equal(viewport.controlsRef.current, undefined);
+  assert.deepEqual(viewport.edges.map(({ from, to, index }) => ({ from, to, index })), graph.edges.slice(0, 4).map((edge, index) => ({ ...edge, index })));
+  assert.deepEqual(viewport.edges[0], {
+    from: 'source', to: 'memory-a', index: 0,
+    start: { x: -150, y: 0 }, end: { x: -50, y: -80 }, middle: -100,
+    path: 'M -150 0 C -100 0, -100 -80, -50 -80'
+  });
+  assert.equal(viewport.edges.filter((edge) => edge.to === 'cue').length, 2);
+  viewport.suppressClickCapture({
+    preventDefault() { assert.fail('stationary click must remain available'); },
+    stopPropagation() { assert.fail('stationary click must propagate'); }
+  });
+});
 
 test('single-click nodes pass the original item and exact source RUN; invalid record IDs are guarded', () => {
   const selectedTask = task(12);

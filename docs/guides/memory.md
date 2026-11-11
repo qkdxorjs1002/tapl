@@ -63,7 +63,11 @@ the next active run.
 
 ## Read memories in the Viewer
 
-The shared Viewer lists notes as cards with cue matches and source actions. Details separate the note/source preview from properties and retain the original source database when opening a record or RUN. Recall strength is displayed as a rounded percentage; its exact stored value remains available in Additional fields. This is recall ease, not confidence in correctness. Structured source data uses expandable vertical fields. See [Viewer details](viewer.md#read-details-and-structured-fields).
+The shared browser and VS Code Viewer lays out **source → memory → cue** branches from left to right. Only actual recorded sources and identical normalized cues connect memories; this is a view of the current result page, not inferred similarity or the whole stored collection. Shared cues join multiple memories, and matching cues remain highlighted. Select a memory for details, a source for the original record/RUN, or a cue to search from the first page. Search, pagination, stored/matched counts and capture diagnostics remain available.
+
+Drag or two-finger scroll pans both axes; pinch or Ctrl+wheel zooms. The bounded camera, keyboard controls, pointer motion and reduced-motion behavior match the [RUN mindmap](viewer.md#navigate-the-viewer). Returning from details restores the camera for the same workspace, query and page during the Viewer session.
+
+Details separate the note/source preview from properties and retain the original source database when opening a record or RUN. Recall strength is displayed as a rounded percentage; its exact stored value remains available in Additional fields. This is recall ease, not confidence in correctness. Structured source data uses expandable vertical fields. See [Viewer details](viewer.md#read-details-and-structured-fields).
 
 ## Inspection, updates and deletion
 

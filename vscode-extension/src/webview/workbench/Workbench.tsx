@@ -175,7 +175,8 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
       if (
         (target instanceof Node && sidebarRef.current?.contains(target)) ||
         (target instanceof Element && target.closest('#wb-explore-panel,.wb-navigation-pin'))
-      ) return;
+      )
+        return;
       clearTimeout(hoverTimer.current);
       setSidebarHovered(false);
       setExploreActive(false);
@@ -550,6 +551,9 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
         ref={pageRef}
         className="wb-page-scroll"
         data-current-mindmap={page === 'current' && !!snapshot && !props.loading}
+        data-memory-mindmap={
+          (page === 'memories' || page === 'legacy') && shownView?.type === 'memories' && props.memorySupported && !props.loading
+        }
       >
         <div
           id="wb-page-content"

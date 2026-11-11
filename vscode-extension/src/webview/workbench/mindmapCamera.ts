@@ -1,12 +1,10 @@
-import type { MindmapGraph } from './mindmap';
-
-type Bounds = MindmapGraph['bounds'];
+export type MindmapBounds = { minX: number; minY: number; maxX: number; maxY: number };
 type Viewport = { width: number; height: number };
 export type MindmapCamera = { x: number; y: number; zoom: number };
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
-/** Zooming out stops once the graph fits, while a lone RUN stays readable. */
-export function mindmapMinimumZoom(bounds: Bounds, viewport: Viewport): number {
+/** Zooming out stops once the graph fits, while a lone node stays readable. */
+export function mindmapMinimumZoom(bounds: MindmapBounds, viewport: Viewport): number {
   return clamp(
     Math.min(
       (Math.max(1, viewport.width) - 64) / Math.max(1, bounds.maxX - bounds.minX),
@@ -18,8 +16,8 @@ export function mindmapMinimumZoom(bounds: Bounds, viewport: Viewport): number {
   );
 }
 
-/** Keep the graph edges within a small overscroll margin; retain RUN-centered views. */
-export function constrainMindmapCamera(camera: MindmapCamera, bounds: Bounds, viewport: Viewport): MindmapCamera {
+/** Keep the graph edges within a small overscroll margin; retain origin-centered views. */
+export function constrainMindmapCamera(camera: MindmapCamera, bounds: MindmapBounds, viewport: Viewport): MindmapCamera {
   const zoom = clamp(camera.zoom, mindmapMinimumZoom(bounds, viewport), 2.8);
   const axis = (value: number, min: number, max: number, size: number) => {
     const margin = clamp(size * 0.1, 32, 96);

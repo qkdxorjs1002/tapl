@@ -640,6 +640,21 @@ body:has(.tapl-workbench) {
   min-height: 0;
   padding: 0;
 }
+.tapl-workbench .wb-page-scroll[data-memory-mindmap='true'] > .wb-page-content {
+  max-width: none;
+  height: 100%;
+  padding: 24px clamp(16px, 2.5vw, 36px);
+}
+.wb-page-scroll[data-memory-mindmap='true'] .wb-route-view,
+.wb-page-scroll[data-memory-mindmap='true'] .wb-memory-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 560px;
+}
+.wb-page-scroll[data-memory-mindmap='true'] .wb-secondary-titlebar {
+  flex: 0 0 auto;
+}
 .wb-page-heading {
   display: flex;
   align-items: start;

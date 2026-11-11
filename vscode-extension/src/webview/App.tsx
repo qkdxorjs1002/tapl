@@ -188,7 +188,7 @@ export function App(): JSX.Element {
             persist({ locale: nextLocale, userLocale: nextLocale });
           }}
           renderPage={(page, send, back) => (
-            <ViewRenderer view={page} memorySupported={memorySupported} send={send} back={back} />
+            <ViewRenderer view={page} memorySupported={memorySupported} send={send} back={back} workspaceKey={workspace} />
           )}
           renderManagement={(run, context) => (
             <RunTabs
@@ -212,10 +212,12 @@ function ViewRenderer({
   view,
   memorySupported,
   send,
-  back
+  back,
+  workspaceKey
 }: {
   view: WebviewView;
   memorySupported: boolean;
+  workspaceKey?: string;
   send: (command: WebviewCommand) => void;
   back?: () => void;
 }): JSX.Element | null {
@@ -225,7 +227,7 @@ function ViewRenderer({
     case 'memories':
     case 'memory':
     case 'memorySource':
-      return <MemoryView view={view} supported={memorySupported} send={send} back={back} />;
+      return <MemoryView view={view} supported={memorySupported} send={send} back={back} workspaceKey={workspaceKey} />;
     case 'archive':
     case 'archiveEvents':
     case 'debug':

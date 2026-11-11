@@ -4,6 +4,7 @@ import type { AssociativeMemory, MemoryDiagnostics, WebviewCommand, WebviewView 
 import { useI18n } from './i18n';
 import { EmptyState, PageHeading } from './workbench/components';
 import { Icon } from './workbench/Icon';
+import { MemoryMindmap } from './workbench/MemoryMindmap';
 
 type MemoryScreen = Extract<WebviewView, { type: 'memories' | 'memory' | 'memorySource' }>;
 type Send = (message: WebviewCommand) => void;
@@ -12,12 +13,14 @@ export function MemoryView({
   view,
   supported,
   send,
-  back
+  back,
+  workspaceKey
 }: {
   view: MemoryScreen;
   supported: boolean;
   send: Send;
   back?: () => void;
+  workspaceKey?: string;
 }): JSX.Element {
   const { t } = useI18n();
   return (
@@ -42,7 +45,7 @@ export function MemoryView({
       {!supported ? (
         <EmptyState title={t('memoryUnsupported')} icon="book" />
       ) : view.type === 'memories' ? (
-        <MemoryList view={view} send={send} />
+        <MemoryList view={view} send={send} workspaceKey={workspaceKey} />
       ) : view.type === 'memory' ? (
         view.memory && view.memory.state !== 'deleted' ? (
           <MemoryDetail memory={view.memory} send={send} />
@@ -56,7 +59,15 @@ export function MemoryView({
   );
 }
 
-function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memories' }>; send: Send }): JSX.Element {
+function MemoryList({
+  view,
+  send,
+  workspaceKey
+}: {
+  view: Extract<WebviewView, { type: 'memories' }>;
+  send: Send;
+  workspaceKey?: string;
+}): JSX.Element {
   const { t } = useI18n();
   const [query, setQuery] = useState(view.query);
   useEffect(() => {
@@ -68,7 +79,7 @@ function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memori
   };
   const limit = Math.max(1, view.limit || 20);
   return (
-    <>
+    <div className="wb-memory-list">
       <div className="wb-memory-intro">
         <div className="wb-memory-scope">
           <span>{t('wbMemoryScope')}</span>
@@ -99,69 +110,14 @@ function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memori
           end: view.offset + view.memories.length,
           total: view.total
         })}
+        <span className="wb-memory-map-scope">{t('wbMemoryMapPage')}</span>
       </p>
       {view.memories.length ? (
-        <ul className="wb-memory-grid">
-          {view.memories.map((memory) => (
-            <li key={`${memory.source_db ?? ''}:${memory.id}`} className="wb-memory-card">
-              <div className="wb-memory-top">
-                <span className="badge badge-outline badge-sm">
-                  {t(
-                    memory.state === 'active'
-                      ? 'memoryActive'
-                      : memory.state === 'superseded'
-                        ? 'memorySuperseded'
-                        : 'memoryDeleted'
-                  )}
-                </span>
-                <span className="wb-mono">{memory.id}</span>
-              </div>
-              <button
-                type="button"
-                className="wb-memory-open"
-                data-wb-focus={`memory:${memory.source_db ?? ''}:${memory.id}`}
-                onClick={() =>
-                  send({
-                    command: 'openMemory',
-                    memoryId: memory.id,
-                    source_db: memory.source_db
-                  })
-                }
-              >
-                <p>{memory.note}</p>
-                <span className="wb-sr-only">{t('memoryDetail')}</span>
-              </button>
-              <Cues memory={memory} />
-              <MemoryUse memory={memory} compact />
-              <div className="wb-memory-footer">
-                <span title={memory.source.title || memory.source.run_id}>
-                  {memory.source.title || memory.source.run_id}
-                  <small className="wb-mono">
-                    {[memory.source.run_id, memory.source_db].filter(Boolean).join(' · ')}
-                  </small>
-                </span>
-                {memory.source_available ? (
-                  <button
-                    className="btn btn-ghost btn-xs"
-                    type="button"
-                    onClick={() =>
-                      send({
-                        command: 'openMemorySource',
-                        memoryId: memory.id,
-                        source_db: memory.source_db
-                      })
-                    }
-                  >
-                    {t('originalSource')}
-                    <Icon name="arrow" />
-                  </button>
-                ) : (
-                  <span className="wb-memory-source-unavailable">{t('sourceUnavailable')}</span>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+        <MemoryMindmap
+          memories={view.memories}
+          send={send}
+          cameraKey={JSON.stringify(['memories', workspaceKey ?? '', view.query, view.offset])}
+        />
       ) : (
         <EmptyState
           title={t(view.query ? 'noMemoryMatches' : 'noMemories')}
@@ -211,7 +167,7 @@ function MemoryList({ view, send }: { view: Extract<WebviewView, { type: 'memori
           <Icon name="arrow" />
         </button>
       </nav>
-    </>
+    </div>
   );
 }
 
@@ -285,11 +241,11 @@ function Cues({ memory }: { memory: AssociativeMemory }): JSX.Element | null {
   );
 }
 
-function MemoryUse({ memory, compact = false }: { memory: AssociativeMemory; compact?: boolean }): JSX.Element {
+function MemoryUse({ memory }: { memory: AssociativeMemory }): JSX.Element {
   const { t, locale } = useI18n();
   const ease = memory.strength >= 0.67 ? 'recallEasy' : memory.strength >= 0.33 ? 'recallModerate' : 'recallFaint';
   return (
-    <dl className={`wb-memory-use${compact ? ' is-compact' : ''}`}>
+    <dl className="wb-memory-use">
       <div>
         <dt>{t('recallEase')}</dt>
         <dd title={t('recallHelp')}>{t(ease)}</dd>

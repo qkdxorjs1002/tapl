@@ -21,7 +21,7 @@ def seed(workspace: Path) -> None:
         db.update_active_run_summary(conn, result_summary='Verified archived interface evidence')
         recall.finish_memories(conn, run_id=original['run_id'], candidates=[
             {'slot': 1, 'cue': ['contrast review', 'original finding', 'interface evidence'], 'note': 'Check the original contrast finding before selecting status colors.', 'source_run_id': original['run_id'], 'source_item_id': original['id']},
-            {'slot': 2, 'cue': ['archived design', 'source run', 'verified decisions'], 'note': 'Read the original RUN to retain the design decision context.', 'source_run_id': original['run_id']},
+            {'slot': 2, 'cue': ['archived design', 'source run', 'interface evidence'], 'note': 'Read the original RUN to retain the design decision context.', 'source_run_id': original['run_id']},
         ])
         db.archive_active_run(conn, slug='archived-design', memory_review_enabled=False)
         db.ensure_active_run(conn, request_summary='Viewer redesign', work_type='implementation', workflow_mode='strict')

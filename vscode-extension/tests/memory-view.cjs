@@ -14,6 +14,7 @@ const output = buildSync({
       "export { MemoryView } from './src/webview/MemoryView'; export { I18nProvider } from './src/webview/i18n';",
     resolveDir: path.resolve(__dirname, '..')
   },
+  loader: { '.css': 'empty' },
   bundle: true,
   write: false,
   platform: 'node',
@@ -21,11 +22,15 @@ const output = buildSync({
   jsx: 'automatic',
   external: ['react', 'react-dom']
 }).outputFiles[0].text;
-const compiled = new Module(filename, module);
-compiled.filename = filename;
-compiled.paths = module.paths;
-compiled._compile(output, filename);
-const { MemoryView, I18nProvider } = compiled.exports;
+function load(react = React) {
+  const compiled = new Module(filename, module);
+  compiled.filename = filename;
+  compiled.paths = module.paths;
+  compiled.require = (name) => name === 'react' ? react : module.require(name);
+  compiled._compile(output, filename);
+  return compiled.exports;
+}
+const { MemoryView, I18nProvider } = load();
 
 function render(locale, diagnostics) {
   return renderToStaticMarkup(
@@ -126,34 +131,101 @@ const memory = {
   }
 };
 
-test('memory cards use canonical notes and retain cues, source and actual use in both locales', () => {
-  for (const [locale, sourceLabel, recallLabel] of [
-    ['en', 'Original source', 'Easy to recall'],
-    ['ko', '원본 출처', '쉽게 떠오름']
+test('memory mindmap replaces cards with recorded source → memory → cue relationships in both locales', () => {
+  for (const [locale, sourceLabel, memoryLabel, cueLabel, scope] of [
+    ['en', 'Source', 'Memory', 'Cue', 'Relationships on this page'],
+    ['ko', '원문', '기억', '단서', '현재 페이지의 관계']
   ]) {
     const html = renderView(locale, {
-      type: 'memories',
-      query: '',
-      offset: 20,
-      limit: 20,
-      total: 45,
-      memories: [memory]
+      type: 'memories', query: '', offset: 20, limit: 20, total: 45, memories: [memory]
     });
     for (const value of [
-      'wb-memory-grid',
-      'wb-memory-card',
+      'wb-memory-mindmap', 'wb-mm-world', 'wb-mm-connections',
       'Keep the real canonical note.\n&lt;script&gt;source()&lt;/script&gt;',
-      'is-matched',
-      'Source title',
-      memory.source_db,
-      sourceLabel,
-      recallLabel
-    ])
-      assert.ok(html.includes(value), value);
-    assert.ok(html.includes(`dateTime="${memory.last_reinforced_at}"`));
+      'Source title', memory.source_db, sourceLabel, memoryLabel, cueLabel, scope,
+      'data-kind="source"', 'data-kind="memory"', 'data-kind="cue"',
+      'data-relation="source"', 'data-relation="cue"',
+      `data-wb-focus="memory:${memory.source_db}:${memory.id}"`
+    ]) assert.ok(html.includes(value), value);
+    assert.equal((html.match(/data-kind="source"/g) || []).length, 1);
+    assert.equal((html.match(/data-kind="memory"/g) || []).length, 1);
+    assert.equal((html.match(/data-kind="cue"/g) || []).length, 2);
     assert.equal((html.match(/<h1 /g) || []).length, 1);
-    assert.doesNotMatch(html, /tapl-card|tapl-topbar|tapl-eyebrow|<script>|<b>literal/);
+    assert.doesNotMatch(html, /wb-memory-grid|wb-memory-card|tapl-card|tapl-topbar|tapl-eyebrow|<script>|<b>literal/);
   }
+});
+
+function interactionTree(view, send) {
+  const react = {
+    ...React,
+    useContext: (context) => context._currentValue,
+    useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+    useRef: (current) => ({ current }), useEffect() {}, useLayoutEffect() {}, useMemo: (factory) => factory()
+  };
+  function nodes(node) {
+    if (!node || typeof node !== 'object') return [];
+    if (Array.isArray(node)) return node.flatMap(nodes);
+    return [node, ...(typeof node.type === 'function' ? nodes(node.type(node.props)) : nodes(node.props?.children))];
+  }
+  return nodes(load(react).MemoryView({ view, supported: true, send, workspaceKey: '/workspace-a' }));
+}
+
+test('graph clicks preserve exact source-qualified navigation and raw cue search', () => {
+  const first = { ...memory, cue: ['  ＲＥＬＥＡＳＥ  '], source_available: false };
+  const second = { ...memory, id: 'MEM-10', cue: ['release'] };
+  const otherSource = { ...memory, source_db: '/source-b/.tapl/tapl.db', cue: ['release'] };
+  const calls = [];
+  const nodes = interactionTree({
+    type: 'memories', query: 'old search', offset: 20, limit: 20, total: 45,
+    memories: [first, second, otherSource]
+  }, (command) => calls.push(command));
+  const graphNodes = nodes.filter((node) => node.props?.['data-mindmap-node']);
+  const button = (node) => nodes.find((candidate) => candidate === node.props.children);
+  const memoryButtons = graphNodes.filter((node) => node.props['data-kind'] === 'memory').map(button);
+  for (const item of memoryButtons) item.props.onClick();
+  assert.deepEqual(calls, [
+    { command: 'openMemory', memoryId: 'MEM-9', source_db: memory.source_db },
+    { command: 'openMemory', memoryId: 'MEM-10', source_db: memory.source_db },
+    { command: 'openMemory', memoryId: 'MEM-9', source_db: otherSource.source_db }
+  ]);
+  calls.length = 0;
+  const sources = graphNodes.filter((node) => node.props['data-kind'] === 'source').map(button);
+  assert.equal(sources.length, 2);
+  for (const item of sources) item.props.onClick();
+  assert.deepEqual(calls, [
+    { command: 'openMemorySource', memoryId: 'MEM-10', source_db: memory.source_db },
+    { command: 'openMemorySource', memoryId: 'MEM-9', source_db: otherSource.source_db }
+  ]);
+  calls.length = 0;
+  const cues = graphNodes.filter((node) => node.props['data-kind'] === 'cue').map(button);
+  assert.equal(cues.length, 1);
+  cues[0].props.onClick();
+  assert.deepEqual(calls, [{ command: 'memories', query: '  ＲＥＬＥＡＳＥ  ', offset: 0 }]);
+  const camera = nodes.find((node) => node.props?.['data-memory-camera-key']);
+  assert.equal(camera.props['data-memory-camera-key'], JSON.stringify(['memories', '/workspace-a', 'old search', 20]));
+});
+
+test('unavailable graph source is disabled, and paging and search keep their original commands', () => {
+  const calls = [];
+  const nodes = interactionTree({
+    type: 'memories', query: 'query', offset: 20, limit: 20, total: 45,
+    memories: [{ ...memory, source_available: false }]
+  }, (command) => calls.push(command));
+  const source = nodes.find((node) => node.props?.['data-kind'] === 'source').props.children;
+  assert.equal(source.props.disabled, true);
+  source.props.onClick();
+  assert.deepEqual(calls, []);
+  const nav = nodes.find((node) => node.type === 'nav');
+  for (const button of nav.props.children) button.props.onClick();
+  assert.deepEqual(calls, [
+    { command: 'memories', query: 'query', offset: 0 },
+    { command: 'memories', query: 'query', offset: 40 }
+  ]);
+  calls.length = 0;
+  let prevented = false;
+  nodes.find((node) => node.type === 'form').props.onSubmit({ preventDefault() { prevented = true; } });
+  assert.ok(prevented);
+  assert.deepEqual(calls, [{ command: 'memories', query: 'query', offset: 0 }]);
 });
 
 test('memory detail keeps provenance, precise strength, revision, decay and safe source preview', () => {
