@@ -60,7 +60,7 @@ body {
   max-height: calc(100dvh - 32px);
   margin: auto;
   padding: 26px 28px;
-  border: 1px solid var(--tapl-border-control);
+  border: 1px solid var(--tapl-border-panel);
   border-radius: 18px;
   color: var(--tapl-foreground);
   background: var(--tapl-surface);
@@ -221,7 +221,7 @@ body {
 }
 .wb-value-branch {
   min-width: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--wb-border) 65%, transparent);
+  border-bottom: 1px solid var(--tapl-border-subtle);
 }
 .wb-value-branch > summary {
   display: flex;
@@ -271,7 +271,7 @@ body {
   align-items: flex-start;
   gap: 3px;
   padding: 10px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--wb-border) 55%, transparent);
+  border-bottom: 1px solid var(--tapl-border-subtle);
   min-width: 0;
 }
 .wb-value-leaf:last-child,

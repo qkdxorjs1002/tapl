@@ -790,27 +790,34 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
     {mode:'vscode-dark',bg:'#101b2b',surface:'#1d2f43',fg:'#e8eff7',muted:'#a4b3c5',border:'#8d9bad',input:'#152337',inputFg:'#eaf2ff',button:'#27618c',buttonFg:'#ffffff',focus:'#f3bd66',link:'#7bbfff',code:'#0b1421',tip:'#283f58',tipFg:'#edf7ff',info:'#74bfff',passed:'#8ad8ac',error:'#f5a28a',warning:'#ffd075',skipped:'#ceafea',secondary:'#304359',secondaryFg:'#eef2f7'},
     {mode:'vscode-light',bg:'#f4f0e8',surface:'#fffcf6',fg:'#2d2434',muted:'#6d606e',border:'#8f798c',input:'#ede5df',inputFg:'#3b2a42',button:'#684386',buttonFg:'#ffffff',focus:'#ae4a2f',link:'#704398',code:'#e6dcd4',tip:'#f9e8d8',tipFg:'#3e2434',info:'#285ead',passed:'#247447',error:'#a63c36',warning:'#9b6b16',skipped:'#7d4892',secondary:'#e5d7e5',secondaryFg:'#4c3152'}
   ];
+  // Distinct roles catch using an input/focus/panel color for ordinary separators.
+  const borders=[
+    {editor:'#454a56',surface:'#515963',sidebar:'#5b6470',group:'#697580',input:'#788493',widget:'#8c99a8',tooltip:'#9eabba'},
+    {editor:'#c4c7cc',surface:'#b7bec6',sidebar:'#a8b2bd',group:'#929fae',input:'#7c8c9e',widget:'#687b91',tooltip:'#526b87'}
+  ];
   const rgba=(selector,property)=>page.locator(selector).first().evaluate((element,property)=>{
     const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d');
     context.fillStyle=getComputedStyle(element)[property];context.fillRect(0,0,1,1);return [...context.getImageData(0,0,1,1).data];
   },property);
   const hex=value=>[...value.slice(1).match(/../g).map(part=>parseInt(part,16)),255];
-  const native=async p=>{
+  const native=async (p,border=borders[0])=>{
     await page.evaluate(p=>{
       delete document.documentElement.dataset.taplTheme;
       document.body.className=p.mode;
       const values={
         'sideBar-background':p.bg,'panel-background':p.bg,'editor-background':p.bg,'editorWidget-background':p.surface,
-        'editor-foreground':p.fg,'descriptionForeground':p.muted,'panel-border':p.border,'input-border':p.border,
+        'editor-foreground':p.fg,'descriptionForeground':p.muted,'panel-border':p.border,'input-border':p.borders.input,
+        'editor-border':p.borders.editor,'surface-border':p.borders.surface,'sideBar-border':p.borders.sidebar,
+        'editorGroup-border':p.borders.group,'editorWidget-border':p.borders.widget,'widget-border':'#ff00ff',
         'input-background':p.input,'input-foreground':p.inputFg,'button-background':p.button,'button-foreground':p.buttonFg,
         'button-hoverBackground':p.button,'button-secondaryBackground':p.secondary,'button-secondaryForeground':p.secondaryFg,
         'focusBorder':p.focus,'textLink-foreground':p.link,'textLink-activeForeground':p.link,'textCodeBlock-background':p.code,
-        'editorHoverWidget-background':p.tip,'editorHoverWidget-foreground':p.tipFg,'editorHoverWidget-border':p.border,
+        'editorHoverWidget-background':p.tip,'editorHoverWidget-foreground':p.tipFg,'editorHoverWidget-border':p.borders.tooltip,
         'editorInfo-foreground':p.info,'testing-iconPassed':p.passed,'errorForeground':p.error,'editorWarning-foreground':p.warning,
         'testing-iconSkipped':p.skipped,'list-hoverBackground':p.secondary,'contrastBorder':'#ffe066'
       };
       for(const [key,value] of Object.entries(values)) document.body.style.setProperty(`--vscode-${key}`,value);
-    },p);
+    },{...p,borders:border});
     await page.waitForTimeout(350);
   };
   try {
@@ -818,19 +825,21 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
     for(const [index,p] of palettes.entries()) {
       await page.locator('[data-wb-focus="nav:current"]').click();
       await page.locator('.wb-run-mindmap').waitFor();await page.mouse.move(1400,30);
-      await native(p);
+      await native(p,borders[index]);
       assert.deepEqual(await rgba('.wb-run-mindmap','backgroundColor'),hex(p.bg));
       assert.deepEqual(await rgba('.wb-run-mindmap','color'),hex(p.fg));
       assert.deepEqual(await rgba('.wb-run-mindmap [data-kind=task] button','backgroundColor'),hex(p.surface));
       assert.deepEqual(await rgba('.wb-run-mindmap .wb-mm-state[data-status=progress]','color'),hex(p.info));
-      assert.ok((await rgba('.wb-topbar','borderBottomColor'))[3]<100,'chrome border remains subtle');
-      assert.ok((await rgba('.wb-sidebar','borderRightColor'))[3]<100);
+      assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex(borders[index].editor));
+      assert.deepEqual(await rgba('.wb-sidebar','borderRightColor'),hex(borders[index].editor));
+      assert.deepEqual(await rgba('.wb-run-mindmap [data-kind=task] button','borderTopColor'),hex(borders[index].editor));
       await page.keyboard.press('Tab');await page.locator('.wb-run-mindmap').focus();
       assert.deepEqual(await rgba('.wb-run-mindmap','outlineColor'),hex(p.focus));
       await shot(page,`native-${index}-run`);
       await page.locator('[data-wb-focus="nav:tasks"]').click();await page.locator('.wb-tasks-table').waitFor();
       assert.deepEqual(await rgba('[data-wb-focus="filter:all"]','backgroundColor'),hex(p.button));
       assert.deepEqual(await rgba('[data-wb-focus="filter:all"]','color'),hex(p.buttonFg));
+      assert.deepEqual(await rgba('.wb-pill-tabs','borderTopColor'),hex(borders[index].editor));
       assert.equal(new Set(await page.locator('.wb-tasks-table .wb-status-label').evaluateAll(nodes=>nodes.map(node=>getComputedStyle(node).color))).size,4);
       await page.locator('[data-wb-focus="nav:current"]').click();await page.locator('.wb-run-mindmap').waitFor();
       await page.mouse.move(1400,30);await page.waitForTimeout(650);
@@ -842,15 +851,27 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
       await page.locator('[data-wb-focus="nav:memories"]').click();await page.locator('.wb-memory-mindmap').waitFor();
       assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex(p.bg));
       assert.deepEqual(await rgba('.wb-memory-mindmap','color'),hex(p.fg));
+      assert.deepEqual(await rgba('.wb-memory-mindmap','borderTopColor'),hex(borders[index].editor));
       assert.deepEqual(await rgba('.wb-search-box .input','backgroundColor'),hex(p.input));
       assert.deepEqual(await rgba('.wb-search-box input','color'),hex(p.inputFg));
       await page.mouse.move(1400,30);await page.waitForTimeout(650);await shot(page,`native-${index}-memory`);
       await page.locator('[data-wb-focus="theme-toggle"]').hover();await page.getByRole('tooltip').waitFor();
       assert.deepEqual(await rgba('[role=tooltip]','backgroundColor'),hex(p.tip));
       assert.deepEqual(await rgba('[role=tooltip]','color'),hex(p.tipFg));
+      assert.deepEqual(await rgba('[role=tooltip]','borderTopColor'),hex(borders[index].tooltip));
       await page.keyboard.press('Escape');
       await page.locator('[data-wb-focus="workspace-picker"]').click();await page.getByRole('dialog').waitFor();
       assert.deepEqual(await rgba('.wb-dialog','backgroundColor'),hex(p.surface));
+      assert.deepEqual(await rgba('.wb-dialog','borderTopColor'),hex(borders[index].widget));
+      assert.deepEqual(await rgba('.wb-dialog-input','borderTopColor'),hex(borders[index].input));
+      await page.evaluate(()=>document.body.style.removeProperty('--vscode-editorWidget-border'));
+      assert.deepEqual(await rgba('.wb-dialog','borderTopColor'),hex('#ff00ff'),'widget fallback stays independent of input borders');
+      await page.evaluate(()=>document.body.style.removeProperty('--vscode-widget-border'));
+      assert.deepEqual(await rgba('.wb-dialog','borderTopColor'),hex(borders[index].editor));
+      await page.evaluate(border=>{
+        document.body.style.setProperty('--vscode-editorWidget-border',border.widget);
+        document.body.style.setProperty('--vscode-widget-border','#ff00ff');
+      },borders[index]);
       assert.deepEqual(await rgba('.wb-dialog-input','backgroundColor'),hex(p.input));
       assert.deepEqual(await rgba('.wb-dialog .btn-primary','backgroundColor'),hex(p.button));
       assert.deepEqual(await rgba('.wb-dialog .btn-primary','color'),hex(p.buttonFg));
@@ -860,6 +881,9 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
       const settingInput=page.locator('[id="setting-search.max_results"]'); await settingInput.waitFor();
       assert.deepEqual(await rgba('[id="setting-search.max_results"]','backgroundColor'),hex(p.input));
       assert.deepEqual(await rgba('[id="setting-search.max_results"]','color'),hex(p.inputFg));
+      assert.deepEqual(await rgba('[id="setting-search.max_results"]','borderTopColor'),hex(borders[index].input));
+      assert.deepEqual(await rgba('.wb-settings-card','borderTopColor'),hex(borders[index].editor));
+      assert.deepEqual(await rgba('.wb-settings-section-title','borderBottomColor'),hex(borders[index].editor));
       await settingInput.fill('0');
       assert.deepEqual(await rgba('.wb-settings-input-error','color'),hex(p.error));
       await shot(page,`native-${index}-settings`);
@@ -868,19 +892,44 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
     }
     // Body-scoped host variables change live without remounting either map.
     await native(palettes[0]);assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex(palettes[0].bg));
+    for(const [remove,expected] of [
+      ['editor-border',borders[0].surface],['surface-border',borders[0].sidebar],
+      ['sideBar-border',palettes[0].border],['panel-border',borders[0].group]
+    ]) {
+      await page.evaluate(key=>document.body.style.removeProperty(`--vscode-${key}`),remove);
+      assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex(expected),`fallback after ${remove}`);
+      assert.deepEqual(await rgba('.wb-sidebar','borderRightColor'),hex(expected));
+      assert.deepEqual(await rgba('.wb-memory-mindmap','borderTopColor'),hex(expected));
+    }
+    await page.evaluate(()=>document.body.style.removeProperty('--vscode-editorGroup-border'));
+    assert.equal((await rgba('.wb-topbar','borderBottomColor'))[3],255,'missing theme borders retain a neutral opaque fallback');
+    assert.notDeepEqual(await rgba('.wb-topbar','borderBottomColor'),hex(palettes[0].focus));
+    await page.evaluate(()=>document.body.style.setProperty('--vscode-panel-border','#ffffff80'));
+    assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),[255,255,255,128],'host alpha is preserved without extra mixing');
+    await page.evaluate(()=>document.body.style.setProperty('--vscode-editor-border','transparent'));
+    assert.equal((await rgba('.wb-topbar','borderBottomColor'))[3],0,'an intentionally transparent host border stays transparent');
+    await native(palettes[0]);
     await page.evaluate(()=>document.body.className='vscode-high-contrast');
     assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex('#ffe066'));
     assert.deepEqual(await rgba('.wb-sidebar','borderRightColor'),hex('#ffe066'));
+    assert.deepEqual(await rgba('.wb-memory-mindmap','borderTopColor'),hex('#ffe066'));
+    await page.evaluate(()=>document.body.className='vscode-high-contrast-light');
+    assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex('#ffe066'));
+    assert.deepEqual(await rgba('.wb-memory-mindmap','borderTopColor'),hex('#ffe066'));
     await page.evaluate(()=>document.documentElement.dataset.taplTheme='light');
     await page.waitForTimeout(350);
     assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex('#f7f8fa'));
     assert.deepEqual(await rgba('.wb-memory-mindmap','color'),hex('#222d3b'));
+    assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex('#e9edf2'));
+    assert.deepEqual(await rgba('.wb-memory-mindmap','borderTopColor'),hex('#dce2e9'));
     await page.evaluate(()=>document.body.style.setProperty('--vscode-sideBar-background','#ff00ff'));
     assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex('#f7f8fa'),'manual light palette wins over native body values');
     await page.evaluate(()=>document.documentElement.dataset.taplTheme='dark');
     await page.waitForTimeout(350);
     assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex('#151b24'));
     assert.deepEqual(await rgba('.wb-memory-mindmap','color'),hex('#e6edf5'));
+    assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex('#293545'));
+    assert.deepEqual(await rgba('.wb-memory-mindmap','borderTopColor'),hex('#364354'));
     assert.deepEqual(errors,[]);
   } finally {await page.close();}
 });

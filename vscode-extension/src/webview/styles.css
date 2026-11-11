@@ -47,13 +47,15 @@ html:not([data-tapl-theme]) > body {
   --tapl-info: var(--vscode-editorInfo-foreground, var(--tapl-highlight));
   --tapl-skipped: var(--vscode-testing-iconSkipped, var(--vscode-symbolIcon-enumeratorForeground, #b180d7));
   --tapl-focus: var(--vscode-focusBorder, var(--tapl-accent));
-  --tapl-border-base: var(--vscode-panel-border, color-mix(in srgb, var(--tapl-foreground) 24%, var(--tapl-panel)));
-  --tapl-border-subtle: color-mix(in srgb, var(--tapl-border-base) 24%, transparent);
-  --tapl-border: color-mix(in srgb, var(--tapl-border-base) 46%, transparent);
-  --tapl-border-panel: color-mix(in srgb, var(--tapl-border-base) 70%, transparent);
-  --tapl-border-item: color-mix(in srgb, var(--tapl-border-base) 46%, transparent);
+  /* Use the host's actual separator color, including its intended alpha.
+     Modern framed editors have their own border; older hosts use workbench separators. */
+  --tapl-border-base: var(--vscode-editor-border, var(--vscode-surface-border, var(--vscode-sideBar-border, var(--vscode-panel-border, var(--vscode-editorGroup-border, color-mix(in srgb, var(--tapl-foreground) 24%, var(--tapl-panel)))))));
+  --tapl-border-subtle: var(--tapl-border-base);
+  --tapl-border: var(--tapl-border-base);
+  --tapl-border-panel: var(--vscode-editorWidget-border, var(--vscode-widget-border, var(--tapl-border-base)));
+  --tapl-border-item: var(--tapl-border-base);
   --tapl-border-control: var(--vscode-input-border, var(--tapl-border-base));
-  --tapl-border-chrome: var(--tapl-border-subtle);
+  --tapl-border-chrome: var(--tapl-border-base);
   --tapl-border-strong: var(--vscode-focusBorder, var(--tapl-accent));
   --tapl-primary: var(--vscode-button-background, var(--tapl-accent));
   --tapl-primary-content: var(--vscode-button-foreground, #ffffff);

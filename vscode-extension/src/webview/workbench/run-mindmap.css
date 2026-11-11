@@ -4,7 +4,7 @@
   --mm-raised: var(--tapl-hover);
   --mm-fg: var(--tapl-foreground);
   --mm-muted: var(--tapl-muted);
-  --mm-line: var(--tapl-border-control);
+  --mm-line: var(--tapl-border-item);
   --mm-quiet: var(--tapl-surface-muted);
   --mm-accent: var(--tapl-highlight);
   --mm-focus: var(--tapl-focus);

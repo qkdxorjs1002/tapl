@@ -1023,7 +1023,7 @@ body:has(.tapl-workbench) {
   gap: 2px;
   max-width: 100%;
   padding: 3px;
-  border: 1px solid color-mix(in srgb, var(--wb-primary) 18%, transparent);
+  border: 1px solid var(--wb-border);
   border-radius: 999px;
 }
 .wb-pill-tabs .btn {
@@ -1369,7 +1369,7 @@ body:has(.tapl-workbench) {
   flex-direction: column;
   max-height: calc(100dvh - 96px);
   padding: 8px;
-  border: 1px solid var(--wb-border);
+  border: 1px solid var(--tapl-border-panel);
   border-radius: 12px;
   background: var(--wb-surface);
   box-shadow: var(--wb-shadow);
