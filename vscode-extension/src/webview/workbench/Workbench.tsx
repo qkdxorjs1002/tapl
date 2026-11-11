@@ -522,18 +522,15 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
             <div className="wb-section-heading">
               <h2 className="wb-nav-caption">{t('wbManagement')}</h2>
               <div className="wb-management-actions">
-                {(['refresh', 'debug'] as const).map((command) => (
-                  <button
-                    type="button"
-                    key={command}
-                    className="btn btn-ghost btn-xs btn-square"
-                    aria-label={t(command)}
-                    title={t(command)}
-                    onClick={() => navigation.wrappedSend({ command })}
-                  >
-                    <Icon name={command} />
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs btn-square"
+                  aria-label={t('debug')}
+                  title={t('debug')}
+                  onClick={() => navigation.wrappedSend({ command: 'debug' })}
+                >
+                  <Icon name="debug" />
+                </button>
               </div>
             </div>
             {props.renderManagement ? (

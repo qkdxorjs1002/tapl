@@ -53,7 +53,9 @@ test('icon navigation morphs counters, expands over the map and preserves pinnin
     assert.equal(await shell.getAttribute('data-sidebar-expanded'), 'false');
     assert.equal((await sidebar.boundingBox()).width, 72);
     const navIcon = await page.locator('[data-wb-focus="nav:current"] > .wb-icon').boundingBox();
-    for (const selector of ['[data-wb-focus="workspace-picker"] .wb-icon', '.wb-management-actions > button:first-child .wb-icon', '.wb-management-actions > button:last-child .wb-icon']) {
+    assert.equal(await page.locator('.wb-management-actions > button').count(),1);
+    assert.equal(await page.locator('.wb-management-actions > button').getAttribute('aria-label'),'디버그');
+    for (const selector of ['[data-wb-focus="workspace-picker"] .wb-icon', '.wb-management-actions > button .wb-icon']) {
       const icon = await page.locator(selector).boundingBox();
       assert.ok(Math.abs(icon.x+icon.width/2-navIcon.x-navIcon.width/2)<1, selector);
       assert.equal(icon.width,17); assert.equal(icon.height,17);

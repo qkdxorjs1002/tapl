@@ -1777,7 +1777,7 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .tapl-workbench {
   pointer-events: auto;
   position: absolute;
   top: 0;
-  right: 28px;
+  right: 0;
   width: 26px;
   height: 26px;
   min-width: 26px;
@@ -1786,22 +1786,16 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .tapl-workbench {
     right 320ms cubic-bezier(0.22, 1, 0.36, 1),
     width 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.wb-management-actions > .btn + .btn {
-  right: 0;
-}
 .tapl-workbench[data-mobile='false'][data-sidebar-expanded='false'] .wb-workspace-heading > .btn {
   right: calc(100% - 36.5px);
 }
 .tapl-workbench[data-mobile='false'][data-sidebar-expanded='false'] .wb-management .wb-section-heading {
-  min-height: 84px;
+  min-height: 42px;
 }
 .tapl-workbench[data-mobile='false'][data-sidebar-expanded='false'] .wb-management-actions > .btn {
   width: 42px;
   height: 36px;
   right: calc(100% - 41.5px);
-}
-.tapl-workbench[data-mobile='false'][data-sidebar-expanded='false'] .wb-management-actions > .btn + .btn {
-  top: 42px;
 }
 .wb-section-heading .btn {
   color: var(--wb-muted);

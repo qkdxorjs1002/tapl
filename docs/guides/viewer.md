@@ -34,7 +34,7 @@ The RUN bar stays fixed. Desktop navigation starts as an icon rail: hover or key
 - **TASK status** filters the full TASK list. Selecting a TASK opens its detailed page; **Back** returns to the preceding filter, query, scroll and focus.
 - **Explore** opens one PLAN, TASK or FINDING list to the right on hover or click. Its list scrolls independently. Keyboard users can open it with Enter or Right Arrow and close it with Escape.
 - **Record search** starts with all records and collapsed RUN groups. Switch between all records and the selected RUN, or grouped and flat results. See [Search](search.md#browse-records-in-the-viewer).
-- **Associative memory** retains read-only list, search, detail and original-source inspection. Refresh and Debug controls sit beside Management.
+- **Associative memory** retains read-only list, search, detail and original-source inspection. The Debug control sits beside Management.
 
 The top bar lists unarchived RUNs. Opening an archived source from records or memory adds one temporary tab at the right; selecting another RUN removes it. Source database and RUN ID remain paired during navigation. Internal links provide Back. Clicking the already selected RUN tab preserves its page and return trail; switching RUNs, direct sidebar navigation and reload clear the trail. Per-RUN filters and theme/language choices persist separately from that trail.
 
