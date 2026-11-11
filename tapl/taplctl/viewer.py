@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 from urllib.parse import unquote, urlsplit
 
-from . import config, db, embeddings, recall, sessions, validation
+from . import config, db, embeddings, recall, sessions, settings, validation
 from .application import WorkflowApplication, WorkflowApplicationError
 
 
@@ -417,11 +417,13 @@ class ViewerApplication:
         default_workspace: Path | None = None,
         asset_root: Path | None = None,
         json_runner: JsonRunner | None = None,
+        config_path: Path | None = None,
     ) -> None:
         self.default_db = default_db.expanduser().resolve() if default_db else None
         self.default_workspace = default_workspace.expanduser().resolve() if default_workspace else None
         self.asset_root = (asset_root or ASSET_ROOT).resolve()
         self.json_runner = json_runner or run_native_json
+        self.config_path = config_path.expanduser().resolve() if config_path is not None else None
 
     def resolve_database(self, raw_workspace: object) -> tuple[Path | None, Path]:
         if isinstance(raw_workspace, str) and raw_workspace.strip():
@@ -430,13 +432,15 @@ class ViewerApplication:
         if self.default_db is not None:
             if not self.default_db.is_file():
                 raise WorkspaceRequired(f"tapl database does not exist: {self.default_db}")
-            return self.default_workspace, self.default_db
+            return self.default_workspace or NativeJsonRunner._workspace_for_database(self.default_db), self.default_db
         if self.default_workspace is not None:
             workspace, db_path = workspace_database(self.default_workspace)
             return workspace, db_path
         raise WorkspaceRequired("Choose a workspace that contains a TAPL database in .tapl/.")
 
     def handle_message(self, payload: object) -> dict[str, Any]:
+        if isinstance(payload, dict) and payload.get("command") in {"getSettings", "saveSettings", "resetSettings"}:
+            return self._settings_message(payload)
         identity = payload.get("sessionId") if isinstance(payload, dict) else None
         try:
             if isinstance(payload, dict) and payload.get("command") == "discardRun":
@@ -448,6 +452,42 @@ class ViewerApplication:
         except ValueError as exc:
             locale = "ko" if isinstance(payload, dict) and str(payload.get("locale", "")).startswith("ko") else "en"
             return self._error_message(str(exc), locale=locale, layout="auto")
+
+    def _settings_message(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Handle user preferences independently of page, RUN, and read owner."""
+        action = {"getSettings": "get", "saveSettings": "save", "resetSettings": "reset"}[payload["command"]]
+        response: dict[str, Any] = {
+            "type": "settings:result", "requestId": payload.get("requestId"),
+            "workspace": payload.get("workspace") if isinstance(payload.get("workspace"), str) else "",
+            "action": action, "ok": False,
+        }
+        try:
+            if not isinstance(payload.get("requestId"), str) or not payload["requestId"].strip():
+                raise ValueError("Missing requestId.")
+            raw_workspace = payload.get("workspace")
+            if action != "get" and (not isinstance(raw_workspace, str) or not raw_workspace.strip()):
+                raise WorkspaceRequired("An explicit workspace is required to save or reset settings.")
+            workspace, _ = self.resolve_database(raw_workspace)
+            if workspace is None:
+                raise WorkspaceRequired("Choose an initialized workspace to edit settings.")
+            response["workspace"] = str(workspace)
+            service = settings.SettingsService(workspace, config_path=self.config_path)
+            if action == "get":
+                document = service.get()
+                return {**response, "ok": True, "settings": document,
+                        **self._display_metadata(workspace, payload, values=document["values"])}
+            if action == "reset" and payload.get("confirmed") is not True:
+                raise ValueError("Explicit confirmation is required to reset settings.")
+            result = service.save({} if action == "reset" else payload.get("values"),
+                                  payload.get("revision"), reset_all=action == "reset")
+            return {**response, **result,
+                    **self._display_metadata(workspace, payload, values=result["settings"]["values"])}
+        except settings.SettingsConflict as exc:
+            return {**response, "message": str(exc), "code": "settings_conflict"}
+        except WorkspaceRequired as exc:
+            return {**response, "message": str(exc), "code": "workspace_required"}
+        except (OSError, ValueError, TypeError) as exc:
+            return {**response, "message": str(exc), "code": "invalid_settings"}
 
     def _discard_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         locale = "ko" if str(payload.get("locale", "")).lower().startswith("ko") else "en"
@@ -473,6 +513,8 @@ class ViewerApplication:
             # Each browser captures its own workspace in the confirmation. The
             # stateless server resolves that explicit target without a default.
             workspace, db_path = workspace_database(raw_workspace.strip())
+            metadata = self._display_metadata(workspace, payload)
+            locale, layout = metadata["locale"], metadata["layout"]
             local = db.local_db_path(workspace, create_identity=False)
             source = payload.get("source_db")
             if local is None or not local.is_file() or (source is not None and source != local.name):
@@ -492,8 +534,8 @@ class ViewerApplication:
             with sessions.session_scope(selected):
                 view = self._overview(db_path, search_query="")
             view["workspace"] = str(workspace)
-            return {"type": "view:update", "view": view, "locale": locale, "layout": layout,
-                    "workspace": str(workspace), "capabilities": {"associativeMemory": True, "discardRun": True},
+            return {"type": "view:update", "view": view, **metadata,
+                    "workspace": str(workspace), "capabilities": {"associativeMemory": True, "discardRun": True, "settings": True},
                     "discardResult": {"runId": run_id, "ok": True}}
         except (ViewerError, WorkflowApplicationError, OSError, sqlite3.Error, ValueError) as exc:
             message = str(exc)
@@ -512,16 +554,19 @@ class ViewerApplication:
 
         raw_workspace = payload.get("workspace")
         workspace: Path | None = None
+        metadata = {"preferences": config.ViewerConfig().preferences(), "locale": locale, "layout": "auto"}
         try:
             workspace, db_path = self.resolve_database(raw_workspace)
             if payload["command"] == "revision":
                 return {
                     "type": "revision",
-                    "revision": self._revision(db_path),
+                    "revision": self._revision(db_path, workspace=workspace),
                     "workspace": str(workspace) if workspace else "",
                     "workspaceValid": True,
                     "message": "",
                 }
+            metadata = self._display_metadata(workspace, payload)
+            locale, layout = metadata["locale"], metadata["layout"]
             view = self._build_view(payload, db_path)
             if workspace is not None and view.get("type") in {"overview", "run"}:
                 view["workspace"] = str(workspace)
@@ -534,6 +579,7 @@ class ViewerApplication:
                     "workspaceValid": False,
                     "message": str(exc),
                 }
+            metadata = self._display_metadata(None, payload)
             view = {
                 "type": "workspace",
                 "workspace": raw_workspace if isinstance(raw_workspace, str) else "",
@@ -545,19 +591,43 @@ class ViewerApplication:
         return {
             "type": "hydrate" if payload["command"] == "ready" else "view:update",
             "view": view,
-            "locale": locale,
-            "layout": layout,
+            **metadata,
             "workspace": str(workspace) if workspace else "",
-            "capabilities": {"associativeMemory": True, "discardRun": True},
+            "capabilities": {"associativeMemory": True, "discardRun": True, "settings": True},
         }
 
     def _sources(self, db_path: Path) -> list[Path]:
         workspace = NativeJsonRunner._workspace_for_database(db_path)
         return db.discover_db_paths(workspace) if workspace else [db_path]
 
-    def _revision(self, db_path: Path) -> str:
+    def _display_metadata(
+        self, workspace: Path | None, payload: dict[str, Any], *, values: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if values is None:
+            selected_workspace = workspace or self.default_workspace
+            if selected_workspace is None and self.default_db is not None:
+                selected_workspace = NativeJsonRunner._workspace_for_database(self.default_db)
+            preferences = config.load(self.config_path, start=selected_workspace).viewer.preferences()
+        else:
+            preferences = {key: values[f"viewer.{key}"] for key in ("language", "layout", "mcp_path")}
+        locale = preferences["language"]
+        if locale == "auto":
+            locale = "ko" if str(payload.get("locale") or "").lower().startswith("ko") else "en"
+        return {"preferences": preferences, "locale": locale, "layout": preferences["layout"]}
+
+    def _revision(self, db_path: Path, *, workspace: Path | None = None) -> str:
         revisions = [(path.name, database_revision(path)) for path in self._sources(db_path)]
-        return hashlib.sha256(json.dumps(revisions).encode()).hexdigest()
+        selected_workspace = workspace or self.default_workspace or NativeJsonRunner._workspace_for_database(db_path)
+        path = config.resolve_config_path(self.config_path, start=selected_workspace).resolve()
+        try:
+            content = path.read_bytes()
+            exists = True
+        except FileNotFoundError:
+            content, exists = b"", False
+        except OSError as exc:
+            raise ViewerError(f"Could not read TAPL configuration revision: {exc}") from exc
+        identity = [str(selected_workspace or ""), str(path), exists]
+        return hashlib.sha256(json.dumps([revisions, identity]).encode() + b"\0" + content).hexdigest()
 
     def _read(self, db_path: Path, args: list[str], source_db: object = None) -> dict[str, Any]:
         sources = self._sources(db_path)
@@ -869,6 +939,14 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.FORBIDDEN, {"type": "error", "message": "An allowed Origin is required to discard a RUN.",
                 "discardResult": {"runId": payload.get("runId", ""), "ok": False}})
             return
+        if isinstance(payload, dict) and payload.get("command") in {"getSettings", "saveSettings", "resetSettings"} and not self.headers.get("Origin"):
+            self._send_json(HTTPStatus.FORBIDDEN, {
+                "type": "settings:result", "requestId": payload.get("requestId"),
+                "workspace": payload.get("workspace", ""), "ok": False,
+                "message": "An allowed Origin is required for settings.", "code": "origin_required",
+                "action": {"getSettings": "get", "saveSettings": "save", "resetSettings": "reset"}[payload["command"]],
+            })
+            return
         self._send_json(HTTPStatus.OK, self.server.app.handle_message(payload))
 
     def do_OPTIONS(self) -> None:  # noqa: N802
@@ -943,11 +1021,13 @@ def serve(
     default_db: Path | None = None,
     default_workspace: Path | None = None,
     asset_root: Path | None = None,
+    config_path: Path | None = None,
 ) -> None:
     app = ViewerApplication(
         default_db=default_db,
         default_workspace=default_workspace,
         asset_root=asset_root,
+        config_path=config_path,
     )
     index_path = app.asset_root / INDEX_PATH
     if not index_path.is_file():

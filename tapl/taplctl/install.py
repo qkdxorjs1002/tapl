@@ -780,6 +780,13 @@ authoring_detail = "{config.DEFAULT_AUTHORING_DETAIL}"
 enabled = true
 
 [viewer]
+# Display language: auto follows the host; explicit choices are ko and en.
+language = "auto"
+# Layout size: auto adapts to the available width; small, medium, or large fixes it.
+layout = "auto"
+# One MCP executable path or name, without shell arguments. Empty uses discovery.
+mcp_path = ""
+
 # Additional browser origins allowed to call the viewer API through a trusted proxy.
 # Type: array of unique strings. Each value must be an exact http:// or https://
 # origin (scheme + host + optional port) without credentials, a path, query, or fragment.

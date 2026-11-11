@@ -137,12 +137,12 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
   unavailable = false;
   await send({ command: 'chooseWorkspace' }); await tick();
   assert.equal(messages.at(-1).workspace, '/work/second');
-  assert.equal(watcherCount, 12);
+  assert.equal(watcherCount, 15);
   assert.ok(watchedPatterns.includes('.tapl/tapl-*.db'));
   assert.ok(watchedPatterns.includes('.tapl/tapl-*.db-wal'));
   assert.ok(watchedPatterns.includes('.tapl/tapl-*.db-shm'));
   folders.push(folder('third')); foldersChanged(); await tick();
-  assert.equal(watcherCount, 18, 'watch newly added workspace folders');
+  assert.equal(watcherCount, 22, 'watch newly added workspace folders and their config');
   folders.splice(1, 1); foldersChanged(); await tick();
   assert.equal(messages.at(-1).workspace, '/work/first');
   assert.equal(panel.title, 'first tapl');

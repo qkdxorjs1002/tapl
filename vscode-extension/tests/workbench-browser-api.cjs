@@ -55,7 +55,7 @@ test('browser exact routes preserve source/page and active owner across refresh/
   h.api.postMessage({ command: 'records', query: '50%_', scope: 'run', runId: 'past', source_db: 'tapl-peer.db', offset: 50, limit: 15 });
   await h.resolve(reply(records));
   h.api.postMessage({ command: 'refresh' });
-  assert.deepEqual(h.calls.at(-1).request, { command: 'refresh', sessionId: 'active-owner', workspace: '/work', locale: 'en', layout: 'auto',
+  assert.deepEqual(h.calls.at(-1).request, { command: 'refresh', sessionId: 'active-owner', workspace: '/work', locale: 'en',
     viewType: 'records', query: '50%_', scope: 'run', runId: 'past', source_db: 'tapl-peer.db', offset: 50, limit: 15 });
   await h.resolve(reply(records));
   h.api.postMessage({ command: 'openSearchResult', itemId: 1, source_db: 'tapl-peer.db' });
@@ -106,7 +106,7 @@ test('revision polling refreshes exact selectors and stale pages cannot overwrit
 });
 
 test('workspace modal validation preserves the selected source, exact view and history until success', async () => {
-  const h = harness({ workspace: '/work', selectedSessionId: 'active-owner', selectedSourceDb: 'tapl-local.db', view: records });
+  const h = harness({ workspace: '/work', selectedSessionId: 'active-owner', selectedSourceDb: 'tapl-local.db', view: records, locale: 'en', layout: 'auto' });
   const before = JSON.stringify(h.api.getState());
   h.api.postMessage({ command: 'selectWorkspace', workspace: '/invalid' });
   assert.equal(h.calls.at(-1).request.sessionId, undefined);

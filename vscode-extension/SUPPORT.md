@@ -7,7 +7,7 @@ Follow the [troubleshooting guide](https://github.com/qkdxorjs1002/tapl/blob/mai
 1. Confirm that the workspace contains `.tapl/tapl-{UUID}.db`.
 2. Run `tapl-mcp` from a terminal and confirm that the command is available.
 3. If the command is installed outside `PATH`, set
-   `taplWorkflow.taplMcpPath` to its absolute path.
+   `viewer.mcp_path` in the selected `config.toml` to its absolute path.
 4. Run **Developer: Show Running Extensions** and confirm that TAPL Workflow
    Viewer is active for the workspace.
 5. Run **TAPL Workflow: Refresh Workflow Views** after restarting VS Code.

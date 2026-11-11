@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
+import unicodedata
 from pathlib import Path
 from typing import Any
 import tomllib
@@ -103,6 +104,8 @@ AUTHORING_DETAILS = ("auto", *EFFECTIVE_AUTHORING_DETAILS)
 SEMANTIC_PROVIDERS = ("local", "daemon", "auto")
 SUBAGENT_STRATEGIES = ("conservative", "balanced", "aggressive")
 SUBAGENT_DELEGATION_BIASES = ("inherit", "prefer", "neutral", "avoid")
+VIEWER_LANGUAGES = ("auto", "ko", "en")
+VIEWER_LAYOUTS = ("auto", "small", "medium", "large")
 
 
 def resolve_authoring_detail(authoring_detail: str, workflow_mode: str | None = None) -> str:
@@ -182,6 +185,17 @@ EDITABLE_CONFIG_KEYS = (
         "search.searchd_model_idle_timeout_seconds",
         "SECONDS",
         "Idle model timeout; integer greater than or equal to 0.",
+    ),
+    EditableConfigKey(
+        "viewer.language", "LANGUAGE", "Viewer language; auto follows the host language.",
+        allowed=VIEWER_LANGUAGES,
+    ),
+    EditableConfigKey(
+        "viewer.layout", "LAYOUT", "Viewer layout; auto adapts to the available width.",
+        allowed=VIEWER_LAYOUTS,
+    ),
+    EditableConfigKey(
+        "viewer.mcp_path", "STRING", "MCP executable path or name without shell arguments; empty uses automatic discovery.",
     ),
     EditableConfigKey(
         "viewer.allowed_origins",
@@ -384,9 +398,15 @@ class SubagentsConfig:
 @dataclass(frozen=True)
 class ViewerConfig:
     allowed_origins: tuple[str, ...] = ()
+    language: str = "auto"
+    layout: str = "auto"
+    mcp_path: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {"allowed_origins": list(self.allowed_origins)}
+        return {"allowed_origins": list(self.allowed_origins), **self.preferences()}
+
+    def preferences(self) -> dict[str, str]:
+        return {"language": self.language, "layout": self.layout, "mcp_path": self.mcp_path}
 
 
 @dataclass(frozen=True)
@@ -553,6 +573,9 @@ def from_mapping(
     subagents = claude_subagents if client == "claude-code" else codex_subagents
     viewer_data = table(data, "viewer")
     viewer = ViewerConfig(
+        language=choice(setting(viewer_data, "language", default="auto"), VIEWER_LANGUAGES, "viewer.language"),
+        layout=choice(setting(viewer_data, "layout", default="auto"), VIEWER_LAYOUTS, "viewer.layout"),
+        mcp_path=executable_path(setting(viewer_data, "mcp_path", default=""), "viewer.mcp_path"),
         allowed_origins=origin_array(
             setting(
                 viewer_data,
@@ -705,6 +728,12 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
         return non_negative_int(value, key)
     if key == "viewer.allowed_origins":
         return list(origin_array(value, key))
+    if key == "viewer.language":
+        return choice(value, VIEWER_LANGUAGES, key)
+    if key == "viewer.layout":
+        return choice(value, VIEWER_LAYOUTS, key)
+    if key == "viewer.mcp_path":
+        return executable_path(value, key)
     if key in {"recall.enabled", "subagents.enabled"}:
         return boolean(value, key)
     if key == "subagents.strategy":
@@ -988,6 +1017,13 @@ def optional_string(value: Any, key: str) -> str:
 def string(value: Any, key: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{key} must be a string")
+    return value
+
+
+def executable_path(value: Any, key: str) -> str:
+    value = string(value, key)
+    if any(unicodedata.category(character) == "Cc" for character in value):
+        raise ValueError(f"{key} must not contain control characters")
     return value
 
 

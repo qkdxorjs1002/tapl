@@ -13,6 +13,10 @@ from taplctl import db, recall, viewer
 def seed(workspace: Path) -> None:
     path = workspace / '.tapl' / 'tapl.db'
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Settings UI tests must never fall through to the developer's user config.
+    config_path = path.parent / 'config.toml'
+    if not config_path.exists():
+        config_path.write_text('# Isolated Viewer fixture\n[search]\nmax_results = 12\n\n[custom]\nkeep = "fixture"\n', encoding='utf-8')
     if path.exists():
         return
     with closing(db.connect(path)) as conn:

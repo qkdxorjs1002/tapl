@@ -42,12 +42,13 @@ initialized by TAPL.
 4. Run **TAPL Workflow: Open TAPL Dashboard** for the complete workspace view.
 
 If the extension cannot find the MCP executable, set its command name or absolute
-path in VS Code settings:
+path in the selected `.tapl/config.toml` (or `~/.tapl/config.toml`):
 
-```json
-{
-  "taplWorkflow.taplMcpPath": "/opt/homebrew/bin/tapl-mcp"
-}
+```toml
+[viewer]
+mcp_path = "/opt/homebrew/bin/tapl-mcp"
+language = "auto"
+layout = "auto"
 ```
 
 With the setting empty, the extension searches `PATH` and common Homebrew
@@ -59,6 +60,8 @@ it uses `tapl-mcp.exe`.
 Use the Command Palette to find **TAPL Workflow** commands. The [extension guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#commands-and-settings) lists every command and setting.
 
 ## Make it fit your workspace
+
+Open **Management → Settings** to edit, save or reset CLI-supported configuration. Language and layout are stored in the same TOML file; the former VS Code extension settings are no longer used.
 
 See [workspace and session routing](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#workspace-and-session-routing) for multi-root workspaces, executable discovery, layout, and language settings.
 

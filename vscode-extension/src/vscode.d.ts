@@ -151,6 +151,7 @@ declare module 'vscode' {
   }
 
   export namespace workspace {
+    export const isTrusted: boolean;
     export const workspaceFolders: readonly WorkspaceFolder[] | undefined;
     export const fs: {
       stat(uri: Uri): Thenable<FileStat>;
@@ -159,6 +160,7 @@ declare module 'vscode' {
     };
     export function getConfiguration(section?: string, scope?: Uri | null): WorkspaceConfiguration;
     export function onDidChangeWorkspaceFolders(listener: () => unknown): Disposable;
+    export function onDidGrantWorkspaceTrust(listener: () => unknown): Disposable;
     export function onDidChangeConfiguration(listener: (event: ConfigurationChangeEvent) => unknown): Disposable;
     export function createFileSystemWatcher(globPattern: RelativePattern): FileSystemWatcher;
   }
@@ -174,7 +176,7 @@ declare module 'vscode' {
 }
 
 declare class TextDecoder {
-  constructor(label?: string);
+  constructor(label?: string, options?: { fatal?: boolean; ignoreBOM?: boolean });
   decode(input?: Uint8Array): string;
 }
 
@@ -188,4 +190,18 @@ declare const process: {
 declare module 'path' {
   export function dirname(path: string): string;
   export function join(...paths: string[]): string;
+}
+
+declare module 'node:path' {
+  export function isAbsolute(path: string): boolean;
+  export function join(...paths: string[]): string;
+}
+
+declare module 'node:os' {
+  export function homedir(): string;
+}
+
+declare module 'node:fs' {
+  export function readFileSync(path: string): Uint8Array;
+  export function statSync(path: string): unknown;
 }

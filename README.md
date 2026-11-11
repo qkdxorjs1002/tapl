@@ -241,6 +241,8 @@ list, search, detail, and original-source inspection. Ask the agent explicitly t
 edit or delete a memory through MCP. The command does not open a browser automatically;
 press `Ctrl+C` to stop it.
 
+Use **Management → Settings** to select the Viewer language and edit, save or reset CLI-supported configuration. See [configuration](docs/guides/configuration.md#viewer-settings) for file scope and behavior.
+
 Select **Management → Discard RUN** to open the confirmation dialog. Enter or paste the full
 RUN ID exactly to confirm. RUNs with records are force-archived with their dependent
 work; truly empty RUNs are deleted without an archive. Cancellation changes nothing.

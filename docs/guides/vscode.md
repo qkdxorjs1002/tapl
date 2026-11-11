@@ -16,12 +16,12 @@ The dashboard uses the workspace opened in VS Code and has no workspace-change b
 
 The default executable search uses `PATH`, `/opt/homebrew/bin/tapl-mcp`, and `/usr/local/bin/tapl-mcp`; Windows uses `tapl-mcp.exe`. Override it when necessary:
 
-```json
-{
-  "taplWorkflow.taplMcpPath": "/opt/homebrew/bin/tapl-mcp",
-  "taplWorkflow.layout": "auto",
-  "taplWorkflow.language": "auto"
-}
+```toml
+# .tapl/config.toml (or ~/.tapl/config.toml)
+[viewer]
+mcp_path = "/opt/homebrew/bin/tapl-mcp"
+layout = "auto"
+language = "auto"
 ```
 
 ## Commands and settings
@@ -37,13 +37,15 @@ Labels above are the English labels under **TAPL Workflow**; the UI also support
 
 | Setting | Accepted values | Default |
 | --- | --- | --- |
-| `taplWorkflow.taplMcpPath` | Command name or executable path | Empty string: automatic discovery |
-| `taplWorkflow.layout` | `auto`, `small`, `medium`, `large` | `auto` |
-| `taplWorkflow.language` | `auto`, `ko`, `en` | `auto`: follow VS Code's display language |
+| `viewer.mcp_path` | Command name or executable path | Empty string: automatic discovery |
+| `viewer.layout` | `auto`, `small`, `medium`, `large` | `auto` |
+| `viewer.language` | `auto`, `ko`, `en` | `auto`: follow VS Code's display language |
+
+Manage these fields in the [TAPL configuration file](configuration.md#workspace-and-file-selection), rather than VS Code settings. Native TOML bootstrap reads them before MCP starts, including a custom executable. Saving applies language/layout; external file edits also refresh the Viewer. Workspace-defined and workspace-relative executables respect Workspace Trust. If an invalid MCP path prevents connection, edit the file directly or run `taplctl config unset viewer.mcp_path` to restore discovery.
 
 ## Workspace and session routing
 
-The initial target is the first VS Code workspace folder. In a multi-root window, use the dashboard's workspace picker to choose another open folder. TAPL launches that folder's MCP process with the folder as its working directory and resolves executable settings for that folder. It does not search parent folders for a database.
+The initial target is the first VS Code workspace folder. Change folders in VS Code; the Viewer does not display a workspace picker. TAPL launches that folder's MCP process with the folder as its working directory and resolves executable settings for that folder. It does not search parent folders for a database.
 
 Connections are pooled by workspace. Database, WAL, and SHM changes (`.tapl/tapl-*.db`, `-wal`, `-shm`) trigger debounced refreshes. Changing the executable invalidates connections; changing workspace resets the dashboard route. RUN selection is retained per workspace and reads the selected owner's session. A stale read cannot overwrite a newer navigation or workspace selection.
 
@@ -51,9 +53,11 @@ Connections are pooled by workspace. Database, WAL, and SHM changes (`.tapl/tapl
 
 The browser and extension share React screens, CSS, and `src/viewer/types.ts`. VS Code supplies workspace/MCP adapters; the browser supplies HTTP and local folder selection. Both provide memory list/search/detail and original-source navigation. Memory editing and deletion require an explicit agent request.
 
-Capabilities come from the server. Older servers without memory support still show the other screens. **Management → Discard RUN** is available only when a current server advertises it; otherwise the Viewer remains read-only. The dialog requires the full matching RUN ID and explicit confirmation. Retained work is archived; truly empty RUNs are deleted. External agents keep running. See [Viewer](viewer.md#discard-a-run) for exact effects.
+Capabilities come from the server. Older servers without memory support still show the other screens. **Management → Discard RUN** is available only when a current server advertises it; otherwise RUN records remain read-only. The dialog requires the full matching RUN ID and explicit confirmation. Retained work is archived; truly empty RUNs are deleted. External agents keep running. See [Viewer](viewer.md#discard-a-run) for exact effects.
 
 The shared [Viewer navigation guide](viewer.md#navigate-the-viewer) describes the Current RUN and workspace-centered memory relationship mindmaps, fixed RUN tabs, collapsible icon navigation with pinning and hover expansion, Explore flyouts, per-RUN TASK filters, record browsing and Back. `small` uses a navigation drawer; other layout choices retain the fixed shell when width permits. Upgrade the workspace MCP server to use exact historical RUN pages and the record library; unsupported memory remains capability-gated.
+
+Open **Management → Settings** to edit, save or reset all `taplctl config` preferences; language selection also lives there. The MCP server must support the settings tools. Older versions show an update notice. See [Viewer settings](configuration.md#viewer-settings) for file scope, revision conflicts and reset behavior.
 
 ## Validate or diagnose
 

@@ -144,7 +144,7 @@ class TaplRuntimeTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         by_name = {tool.name: tool for tool in tools}
 
-        self.assertEqual(len(tools), 30)
+        self.assertEqual(len(tools), 34)
         self.assertIn("tapl_get_status", by_name)
         self.assertIn("tapl_get_context", by_name)
         self.assertIn("tapl_list_archives", by_name)
@@ -339,7 +339,7 @@ class TaplRuntimeTests(unittest.TestCase):
                     return tools, result
 
             tools, result = asyncio.run(exercise())
-            self.assertEqual(len(tools.tools), 30)
+            self.assertEqual(len(tools.tools), 34)
             self.assertFalse(result.is_error)
             receipt = result.structured_content
             self.assertEqual(receipt["operation"], "run_summarize")
@@ -1379,6 +1379,9 @@ class TaplRuntimeTests(unittest.TestCase):
                 "search.hybrid_semantic_ratio",
                 "search.semantic_provider",
                 "search.searchd_model_idle_timeout_seconds",
+                "viewer.language",
+                "viewer.layout",
+                "viewer.mcp_path",
                 "viewer.allowed_origins",
                 "subagents.enabled",
                 "subagents.strategy",
@@ -1395,6 +1398,9 @@ class TaplRuntimeTests(unittest.TestCase):
             ("search.hybrid_semantic_ratio", "0.4", 0.4),
             ("search.semantic_provider", "daemon", "daemon"),
             ("search.searchd_model_idle_timeout_seconds", "0", 0),
+            ("viewer.language", "ko", "ko"),
+            ("viewer.layout", "small", "small"),
+            ("viewer.mcp_path", '"/a directory/tapl-mcp"', "/a directory/tapl-mcp"),
             ("viewer.allowed_origins", '["HTTPS://Example.COM:443"]', ["https://example.com"]),
             ("subagents.enabled", "false", False),
             ("subagents.strategy", "conservative", "conservative"),

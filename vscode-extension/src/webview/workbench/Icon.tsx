@@ -23,6 +23,7 @@ const icons: Record<string, ReactNode> = {
       <path d="m14.5 14.5 6 6M7.5 10.5l1.7 1.7 3.3-3.4" />
     </>
   ),
+  settings: <><path d="m9 3-1 3-3 1-2 3 2 2-1 3 2 3 3-1 3 2 3-2 3 1 2-3-1-3 2-2-2-3-3-1-1-3z" /><circle cx="12" cy="12" r="3" /></>,
   languages: <path d="M3 5h12M9 3v2M5 5c0 6 5 9 8 10M13 5c0 6-5 9-8 10M14 21l4-10 4 10M15.5 18h5" />,
   refresh: <path d="M20 7v5h-5M4 17v-5h5M5.5 8a7 7 0 0 1 11.6-3L20 8M4 16l2.9 3A7 7 0 0 0 18.5 16" />,
   debug: <path d="M3 12h4l3-8 4 16 3-8h4" />,

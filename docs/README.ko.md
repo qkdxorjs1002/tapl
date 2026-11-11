@@ -28,7 +28,7 @@ TAPL은 Codex와 Claude Code의 계획·승인·실행·검증과 작업 이력�
 
 | 페이지 | 내용 |
 | --- | --- |
-| [설정](guides/configuration.ko.md) | 사용자·저장소 설정과 실제 적용값을 확인합니다. |
+| [설정](guides/configuration.ko.md) | 설정 파일을 선택하고 CLI·Viewer에서 편집·저장·초기화합니다. |
 | [로컬 식별자와 공유 이력](guides/storage.ko.md) | 영속 UUID, 기존 DB 이전과 다른 환경 이력 조회를 안내합니다. |
 | [작성 상세도](guides/authoring-detail.ko.md) | 모드에 따른 자동 상세도 또는 고정 수준을 개수·분량 목표 없이 선택합니다. |
 | [SubAgent](guides/subagents.ko.md) | 모델 선호를 설정하고 독립 작업을 병렬로 실행합니다. |

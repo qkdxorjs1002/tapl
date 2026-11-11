@@ -47,6 +47,16 @@ taplctl config set viewer.allowed_origins '["https://viewer.example.invalid"]'
 
 예제 origin은 자리표시자이며 실제 신뢰하는 브라우저 origin으로 바꿉니다. scheme, host, 선택적 port만 허용하고 자격 증명·경로·query·fragment는 넣지 않습니다. Viewer는 계속 loopback에서 수신합니다. 프록시는 [Viewer와 서비스](viewer.ko.md)를 참고하세요.
 
+## Viewer 설정
+
+브라우저 Viewer나 VS Code 확장에서 **관리 → 설정**을 엽니다. CLI의 편집 레지스트리에 있는 모든 키를 다루며, Codex와 Claude Code의 모델 허용 목록 및 순서가 있는 프로필·후보를 구분합니다. 모델 ID, 추론 강도 목록, 프로필과 Origin은 구조화된 입력으로 편집합니다. 표시 언어·레이아웃·확장 MCP 실행 파일은 같은 파일의 `viewer.language`, `viewer.layout`, `viewer.mcp_path`로 관리합니다. 저장하면 적용하며 `auto`는 호스트 언어와 화면 폭을 따릅니다.
+
+표시된 파일 경로를 확인하세요. 현재 작업공간에서 위 우선순위를 따르며, 명시적 `--config PATH`로 시작한 브라우저 Viewer는 그 파일에 고정됩니다. 과거 RUN이나 다른 원본 DB를 선택해도 설정 대상은 바뀌지 않습니다. **변경 사항 저장**은 전체 후보를 검증하고 변경된 값을 한 번에 원자적으로 기록하며 주석과 무관한 설정을 유지합니다. 외부에서 설정이 바뀌면 문서 revision이 무효화되므로 다시 불러온 뒤 저장하세요. 저장에 실패해도 입력은 유지되며 작업공간을 바꾸거나 Viewer를 새로 열기 전까지 설정 페이지로 돌아와 편집을 이어갈 수 있습니다.
+
+**모두 기본값으로 초기화**는 확인 후 두 클라이언트의 모든 편집 가능 재정의와 기존 별칭을 이 파일에서 제거합니다. 내장 기본값을 적용하며 주석·무관한 키·저장된 모델 카탈로그는 유지합니다. 개별 항목의 **기본값 사용**은 입력값을 바꾸므로 저장해야 반영됩니다. 초기화하면 표시 언어와 레이아웃도 `auto`로 돌아갑니다. Origin 변경은 브라우저 Viewer 서비스를 재시작해야 적용됩니다. 설정을 지원하지 않는 백엔드는 업데이트 안내를 표시합니다. TAPL을 업데이트하고 MCP/Viewer 프로세스를 다시 시작하세요. 위 CLI 명령도 계속 사용할 수 있습니다.
+
+확장은 MCP 시작 전에 이 초기 연결 필드를 직접 읽습니다. 설정 페이지 조회·저장은 MCP로, 브라우저는 HTTP로 같은 Python 검증 서비스에 요청합니다. 작업공간·사용자 설정 파일 변경은 Viewer를 갱신하며 MCP 실행 파일 변경은 진행 중 저장 응답을 받은 뒤 재연결합니다. 이전 VS Code 설정 `taplWorkflow.language`, `taplWorkflow.layout`, `taplWorkflow.taplMcpPath`는 무시합니다. 새 TOML 키를 직접 지정하며 사용자 파일에 자동 이관하지 않습니다.
+
 ## 공개 설정 키
 
 아래 표의 canonical key를 `config set`·`config unset`에서 지원합니다. 런타임 기본값은 설치나 최초 설정에서 선택한 값과 다를 수 있습니다. 표는 Codex의 `subagents.*` 키를 사용하며 Claude Code의 같은 위임 설정에는 `clients.claude-code.subagents.*`를 사용합니다.
@@ -60,6 +70,9 @@ taplctl config set viewer.allowed_origins '["https://viewer.example.invalid"]'
 | `search.hybrid_semantic_ratio` | 0.0–1.0 숫자 | `0.65` |
 | `search.semantic_provider` | `local`, `daemon`, `auto` | `auto` |
 | `search.searchd_model_idle_timeout_seconds` | 0 이상 정수; `0`이면 유휴 모델 해제 안 함 | `1800` |
+| `viewer.language` | `auto`, `ko`, `en` | `auto`: 호스트 언어 사용 |
+| `viewer.layout` | `auto`, `small`, `medium`, `large` | `auto`: 화면 폭에 맞춤 |
+| `viewer.mcp_path` | 실행 파일 경로나 명령 이름 하나; shell 인자 미지원 | `""`: 확장에서 자동 검색 |
 | `viewer.allowed_origins` | 중복 없는 HTTP(S) origin의 TOML 문자열 배열 | `[]` |
 | `subagents.enabled` | Boolean; 실제 위임에는 설정 완료도 필요 | `true` |
 | `subagents.strategy` | `conservative`, `balanced`, `aggressive` | `aggressive` |

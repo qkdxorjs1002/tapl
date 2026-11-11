@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [한국어](mcp.ko.md)
 
-`tapl-mcp` exposes the workflow application over MCP stdio. Management commands belong to [the CLI](cli.md). This page covers all **32 public tools** registered by [`mcp_server.py`](../../tapl/taplctl/mcp_server.py); the connected server's JSON schema is the authority for exact validation.
+`tapl-mcp` exposes the workflow application over MCP stdio. Management commands belong to [the CLI](cli.md). This page covers all **34 public tools** registered by [`mcp_server.py`](../../tapl/taplctl/mcp_server.py); the connected server's JSON schema is the authority for exact validation.
 
 Claude Code requires the exact `claude-code:<native-session-id>` hook owner on every call, even reads. Its missing/raw/foreign-client IDs are rejected; the legacy omission behavior below applies only to Codex. Approval source `request_user_input` remains the stable tool-confirmed provenance value, including Claude `AskUserQuestion` answers. Host-specific policy and model setup are described in the [Claude guide](../getting-started/claude-code.md).
 
@@ -59,6 +59,12 @@ For a user-requested settings comparison, supply the **complete live delegation-
 When a RUN summary, split, archive or other RUN transition changes mode or effective detail, its receipt preserves `policy_refresh_required=true`, `authoring_policy` and a highest-priority `tapl_get_next` recommendation. Refresh policy, then supplement the current PLAN and unfinished TASK evidence for the new rigor. Completed/archived records are not automatically rewritten. Required evidence and Strict typed-field warnings are described in [Authoring detail](../guides/authoring-detail.md#selection-example-and-verification).
 
 State validation uses one transactionally consistent snapshot. Reuse successful write recommendations directly: writes, read-only status checks, and Stop hooks do not require another entry call. Refresh after failure/truncation, policy/context loss, or possible workflow changes by another actor.
+
+## User settings
+
+`tapl_get_settings` reads the current workspace's effective configuration path, editable field schema, values, defaults, stored overrides and revision. It does not initialize or mutate a workflow database.
+
+`tapl_save_settings` requires `values` (an object keyed by canonical editable field names) and `expected_revision` from that document. Use it only for changes the user explicitly requested. Model maps and profiles are structured values and validate together before one atomic write. Optional `reset_all=true` requires `values={}` and an explicitly confirmed reset; it removes all supported Codex/Claude overrides while retaining unrelated content and catalogs. Stale revisions fail without overwriting changes. Do not automatically retry a save after a lost acknowledgement; reload first. There is no arbitrary file-path argument. Both tools retain the common client/session identity rules and operate independently of selected RUN/source ownership. See [Viewer settings](../guides/configuration.md#viewer-settings).
 
 ## History and memory
 

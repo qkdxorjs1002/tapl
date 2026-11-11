@@ -507,7 +507,8 @@ def cmd_viewer(args: argparse.Namespace) -> int:
         selected_db = db.local_db_path(workspace)
         if selected_db is None or not selected_db.is_file():
             selected_db = next(iter(db.discover_db_paths(workspace)), None)
-    settings = load_config(args, start=workspace)
+    settings_workspace = workspace or (viewer.NativeJsonRunner._workspace_for_database(selected_db) if selected_db else None)
+    settings = load_config(args, start=settings_workspace)
     allowed_origins = tuple(
         dict.fromkeys(
             (*settings.viewer.allowed_origins, *(args.allowed_origins or ()))
@@ -518,6 +519,7 @@ def cmd_viewer(args: argparse.Namespace) -> int:
         allowed_origins=allowed_origins,
         default_db=selected_db,
         default_workspace=workspace,
+        config_path=args.config,
     )
     return 0
 

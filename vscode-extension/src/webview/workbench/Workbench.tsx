@@ -5,6 +5,7 @@ import { I18nProvider, useI18n } from '../i18n';
 import type {
   DisplayLayout,
   RunDiscardResult,
+  SettingsResult,
   TaplItem,
   TaplRunSnapshot,
   TaplSearchResult,
@@ -14,6 +15,7 @@ import type {
   WorkspaceSelectionResult
 } from '../types';
 import { Icon } from './Icon';
+import { SettingsView } from './SettingsView';
 import { IconTooltips, WorkspaceDialog } from './InteractionLayers';
 import { PageLoading } from './SecondaryViews';
 import { Explore } from './Explore';
@@ -29,13 +31,13 @@ export interface WorkbenchProps {
   memorySupported: boolean;
   discardSupported: boolean;
   discardResult?: RunDiscardResult;
+  settingsResult?: SettingsResult;
   send: (command: WebviewCommand) => void;
   renderPage: (view: WebviewView, send: (command: WebviewCommand) => void, back?: () => void) => ReactNode;
   loading?: boolean;
   workspaceResult?: WorkspaceSelectionResult;
   renderManagement?: (run: TaplWorkflowRun | undefined, context?: TaplRunSnapshot) => ReactNode;
   locale: SupportedLocale;
-  onLocaleChange: (locale: SupportedLocale) => void;
   initialState?: unknown;
   onStateChange?: (state: unknown) => void;
   browser?: boolean;
@@ -88,7 +90,6 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
   const [exploreActive, setExploreActive] = useState(false);
   const pinnedRef = useRef(sidebarPinned);
   pinnedRef.current = sidebarPinned;
-  const languageRef = useRef<HTMLDetailsElement>(null);
   const [theme, setTheme] = useState<'light' | 'dark' | undefined>(() => {
     const restored = props.initialState as { theme?: unknown } | undefined;
     return restored?.theme === 'light' || restored?.theme === 'dark' ? restored.theme : undefined;
@@ -208,27 +209,19 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.key !== 'Escape') return;
-      if (languageRef.current?.open) {
-        languageRef.current.open = false;
-        languageRef.current.querySelector<HTMLElement>('summary')?.focus();
-      } else if (mobile && menuOpen) closeMenu(true);
-    };
-    const outside = (event: PointerEvent) => {
-      if (languageRef.current?.open && !languageRef.current.contains(event.target as Node))
-        languageRef.current.open = false;
+      if (mobile && menuOpen) closeMenu(true);
     };
     document.addEventListener('keydown', escape);
-    document.addEventListener('pointerdown', outside);
     return () => {
       document.removeEventListener('keydown', escape);
-      document.removeEventListener('pointerdown', outside);
     };
   }, [mobile, menuOpen]);
   useEffect(() => {
     closeMenu();
   }, [selectedKey, page]);
   const selectPage = (target: WorkbenchPage) => {
-    if (target === 'memories' && !props.memorySupported) navigation.go({ page: 'memories', runKey: selectedKey });
+    if (target === 'settings') navigation.go({ page: 'settings', runKey: selectedKey }, undefined, page === 'settings' ? 'replace' : true);
+    else if (target === 'memories' && !props.memorySupported) navigation.go({ page: 'memories', runKey: selectedKey });
     else navigation.selectPage(target);
     closeMenu();
   };
@@ -342,30 +335,6 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
             tapl
           </button>
           <div className="wb-brand-actions">
-            <details className="dropdown wb-language-menu" ref={languageRef}>
-              <summary className="btn btn-ghost btn-sm btn-square" aria-label={t('wbLanguage')}>
-                <Icon name="languages" />
-              </summary>
-              <ul className="menu dropdown-content wb-language-options">
-                {(['ko', 'en'] as const).map((locale) => (
-                  <li key={locale}>
-                    <button
-                      type="button"
-                      lang={locale}
-                      aria-pressed={props.locale === locale}
-                      onClick={() => {
-                        props.onLocaleChange(locale);
-                        if (languageRef.current) languageRef.current.open = false;
-                        languageRef.current?.querySelector<HTMLElement>('summary')?.focus();
-                      }}
-                    >
-                      {locale === 'ko' ? '한국어' : 'English'}
-                      {props.locale === locale && <Icon name="check" />}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </details>
             <button
               type="button"
               className="btn btn-ghost btn-sm btn-square"
@@ -519,6 +488,7 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
                 </button>
               </div>
             </div>
+            <nav className="menu wb-main-menu">{navButton('settings', 'settings', t('wbSettings'))}</nav>
             {props.renderManagement ? (
               props.renderManagement(selectedRun, snapshot)
             ) : (
@@ -551,7 +521,10 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
           }
           tabIndex={-1}
         >
-          {props.loading ? (
+          <div hidden={page !== 'settings'}>
+            <SettingsView active={page === 'settings'} workspace={props.workspace} result={props.settingsResult} send={props.send} back={back} />
+          </div>
+          {page === 'settings' ? null : props.loading ? (
             <PageLoading />
           ) : (
             <>

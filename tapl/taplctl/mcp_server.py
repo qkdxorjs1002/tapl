@@ -12,7 +12,7 @@ from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import __version__, db, install as tapl_install, prompt as tapl_prompt, sessions
+from . import __version__, db, install as tapl_install, prompt as tapl_prompt, sessions, settings
 from .application import WorkflowApplication
 from .command_runtime import configure_stdio
 from .clients import client_scope, resolve_client, validate_session_key
@@ -470,6 +470,37 @@ def _create_server(
         instructions=server_instructions,
         version=__version__,
     )
+
+    async def call_settings(session_id: str | None, *, values: dict[str, Any] | None = None,
+                            expected_revision: str = "", reset_all: bool = False) -> dict[str, Any]:
+        # Configuration actions do not borrow a RUN owner or touch workflow DBs.
+        try:
+            owner = validate_session_key(session_id, selected_client)
+            if selected_client == "claude-code" and not owner:
+                raise ValueError("session_id is required for every Claude Code TAPL call; pass the exact claude-code: identity from this session's hook")
+            service = settings.SettingsService(root)
+            if values is None:
+                return {"ok": True, "settings": await asyncio.to_thread(service.get)}
+            return await asyncio.to_thread(service.save, values, expected_revision, reset_all=reset_all)
+        except settings.SettingsConflict as exc:
+            return {"ok": False, "error": str(exc), "code": "settings_conflict"}
+        except (OSError, ValueError, TypeError) as exc:
+            return {"ok": False, "error": str(exc), "code": "invalid_settings"}
+
+    @server.tool(name="tapl_get_settings", title="Read TAPL settings", annotations=READ_ONLY)
+    async def get_settings(session_id: SessionId = None) -> dict[str, Any]:
+        """Read all CLI-editable preferences, defaults, overrides and revision for this workspace's effective config. Independent of RUNs and workflow state; never writes files."""
+        return await call_settings(session_id)
+
+    @server.tool(name="tapl_save_settings", title="Save TAPL settings", annotations=WRITE)
+    async def save_settings(
+        values: Annotated[dict[str, Any], Field(description="Canonical settings keys and structured values from tapl_get_settings. Save only changes explicitly requested by the user. Use {} for reset_all.")],
+        expected_revision: Annotated[str, Field(min_length=1, description="Exact revision from the settings document being edited; rejects changed files or targets.")],
+        reset_all: Annotated[bool, Field(strict=True, description="True only for an explicitly user-confirmed reset of all supported Codex and Claude settings overrides.")] = False,
+        session_id: SessionId = None,
+    ) -> dict[str, Any]:
+        """Atomically save or reset preferences only as an explicit user settings action. Never call during ordinary workflow entry. No workflow approval, RUN, task or database mutation occurs. Reject stale revisions; reload after conflicts instead of retrying writes."""
+        return await call_settings(session_id, values=values, expected_revision=expected_revision, reset_all=reset_all)
 
     @server.tool(
         name="tapl_get_status",

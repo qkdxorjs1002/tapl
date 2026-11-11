@@ -2,6 +2,12 @@ import type { SupportedLocale } from '../i18n';
 
 export type DisplayLayout = 'auto' | 'small' | 'medium' | 'large';
 
+export interface ViewerPreferences {
+  language: 'auto' | SupportedLocale;
+  layout: DisplayLayout;
+  mcp_path: string;
+}
+
 export type TaplJsonValue = string | number | boolean | null | TaplJsonValue[] | {
   [key: string]: TaplJsonValue;
 };
@@ -245,12 +251,47 @@ export type WebviewView =
   | { type: 'searchItem'; result: TaplSearchResult; detail?: TaplItemDetail; context?: TaplRunSnapshot }
   | { type: 'error'; message: string };
 
+export interface SettingsField {
+  key: string;
+  section: string;
+  type: 'boolean' | 'integer' | 'number' | 'string' | 'select' | 'string-list' | 'models' | 'profiles';
+  description: string;
+  allowed?: string[];
+  min?: number;
+  max?: number;
+}
+export interface SettingsDocument {
+  path: string;
+  exists: boolean;
+  revision: string;
+  fields: SettingsField[];
+  values: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+  overrides: string[];
+  restart_required?: string[];
+}
+export interface SettingsResult {
+  type: 'settings:result';
+  requestId: string;
+  workspace: string;
+  ok: boolean;
+  settings?: SettingsDocument;
+  message?: string;
+  code?: string;
+  changed?: boolean;
+  action?: 'get' | 'save' | 'reset';
+  locale?: SupportedLocale;
+  layout?: DisplayLayout;
+  preferences?: ViewerPreferences;
+}
+
 export type WorkspaceSelectionResult = { type: 'workspace:result'; ok: boolean; message?: string; workspace?: string };
 
 export type HostMessage =
   | WorkspaceSelectionResult
-  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; discardResult?: RunDiscardResult }
-  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; discardResult?: RunDiscardResult }
+  | SettingsResult
+  | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; preferences?: ViewerPreferences; discardResult?: RunDiscardResult }
+  | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; preferences?: ViewerPreferences; discardResult?: RunDiscardResult }
   | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout; discardResult?: RunDiscardResult };
 
 /** Lightweight standalone-viewer response used to detect workspace changes. */
@@ -268,6 +309,9 @@ export type WebviewCommand = (
   | { command: 'memories'; query?: string; offset?: number }
   | { command: 'openMemory'; memoryId: string }
   | { command: 'openMemorySource'; memoryId: string }
+  | { command: 'getSettings'; requestId: string; workspace?: string }
+  | { command: 'saveSettings'; requestId: string; workspace: string; revision: string; values: Record<string, unknown> }
+  | { command: 'resetSettings'; requestId: string; workspace: string; revision: string; confirmed: true }
   | { command: 'ready' }
   | { command: 'chooseWorkspace' }
   | { command: 'selectWorkspace'; workspace: string }

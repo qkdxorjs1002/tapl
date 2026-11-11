@@ -110,7 +110,10 @@ allowed_origins = [
                     "allowed_origins": [
                         "https://example.com",
                         "http://viewer.example.com:9000",
-                    ]
+                    ],
+                    "language": "auto",
+                    "layout": "auto",
+                    "mcp_path": "",
                 },
             )
 
@@ -309,6 +312,7 @@ allowed_origins = [
                 ),
                 default_db=db_path.resolve(),
                 default_workspace=None,
+                config_path=config_path,
             )
 
     def test_view_messages_use_read_only_cli_contract(self) -> None:

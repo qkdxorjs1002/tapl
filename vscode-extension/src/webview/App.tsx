@@ -5,6 +5,8 @@ import type {
   HostMessage,
   HostCapabilities,
   RunDiscardResult,
+  SettingsResult,
+  ViewerPreferences,
   TaplWorkflowRun,
   WebviewCommand,
   WebviewView,
@@ -33,6 +35,10 @@ const BOOTSTRAP_VIEW: WebviewView = {
     schema: {}
   }
 };
+function systemLanguage(): string {
+  return typeof navigator === 'undefined' ? 'en' : navigator.language;
+}
+
 function resolveDisplayLayout(value: unknown): DisplayLayout {
   return value === 'small' || value === 'medium' || value === 'large' ? value : 'auto';
 }
@@ -40,8 +46,7 @@ function resolveDisplayLayout(value: unknown): DisplayLayout {
 interface PersistedAppState {
   view?: WebviewView;
   locale?: SupportedLocale;
-  hostLocale?: SupportedLocale;
-  userLocale?: SupportedLocale;
+  preferences?: ViewerPreferences;
   layout?: unknown;
   capabilities?: HostCapabilities;
   workspace?: string;
@@ -61,18 +66,15 @@ export function App(): JSX.Element {
   const [memorySupported, setMemorySupported] = useState(restored?.capabilities?.associativeMemory === true);
   const [discardSupported, setDiscardSupported] = useState(restored?.capabilities?.discardRun === true);
   const [discardResult, setDiscardResult] = useState<RunDiscardResult>();
+  const [settingsResult, setSettingsResult] = useState<SettingsResult>();
   const [workspaceResult, setWorkspaceResult] = useState<WorkspaceSelectionResult>();
   const [view, setView] = useState<WebviewView | undefined>(restored?.view);
-  const userLocale = useRef<SupportedLocale | undefined>(restored?.userLocale);
-  const hostLocale = useRef<SupportedLocale | undefined>(restored?.hostLocale);
   const [locale, setLocale] = useState<SupportedLocale>(() =>
-    resolveLocale(
-      restored?.userLocale ??
-        restored?.locale ??
-        (typeof document === 'undefined' ? 'en' : document.documentElement.lang || navigator.language)
-    )
+    resolveLocale(restored?.preferences?.language === 'auto'
+      ? systemLanguage()
+      : restored?.preferences?.language ?? systemLanguage())
   );
-  const [layout, setLayout] = useState<DisplayLayout>(() => resolveDisplayLayout(restored?.layout));
+  const [layout, setLayout] = useState<DisplayLayout>(() => resolveDisplayLayout(restored?.preferences?.layout));
   const [workspace, setWorkspace] = useState(restored?.workspace);
   const workspaceRef = useRef(workspace);
   const [workbenchSeed, setWorkbenchSeed] = useState(() =>
@@ -82,8 +84,10 @@ export function App(): JSX.Element {
   );
   const persist = (values: Partial<PersistedAppState>) => {
     const previous = api.getState();
+    const { userLocale: _legacyUserLocale, hostLocale: _legacyHostLocale, ...current } =
+      (previous && typeof previous === 'object' ? previous : {}) as Record<string, unknown>;
     api.setState({
-      ...(previous && typeof previous === 'object' ? previous : {}),
+      ...current,
       ...values
     });
   };
@@ -92,15 +96,27 @@ export function App(): JSX.Element {
     const listener = (event: MessageEvent<HostMessage>) => {
       const message = event.data;
       if (!message || typeof message.type !== 'string') return;
+      if (message.type === 'settings:result') {
+        if (message.workspace === workspaceRef.current) {
+          if (message.ok) {
+            const preferences = message.preferences;
+            const language = preferences?.language ?? message.settings?.values['viewer.language'];
+            const nextLocale = resolveLocale(message.locale ?? (language === 'ko' || language === 'en' ? language : systemLanguage()));
+            const nextLayout = resolveDisplayLayout(message.layout ?? preferences?.layout ?? message.settings?.values['viewer.layout']);
+            setLocale(nextLocale);
+            setLayout(nextLayout);
+            persist({ locale: nextLocale, layout: nextLayout, preferences });
+          }
+          setSettingsResult(message);
+        }
+        return;
+      }
       if (message.type === 'workspace:result') {
         setWorkspaceResult(message);
         return;
       }
       if (message.type === 'hydrate' || message.type === 'view:update') {
-        const receivedLocale = resolveLocale(message.locale);
-        if (hostLocale.current && hostLocale.current !== receivedLocale) userLocale.current = undefined;
-        hostLocale.current = receivedLocale;
-        const nextLocale = userLocale.current ?? receivedLocale;
+        const nextLocale = resolveLocale(message.locale ?? systemLanguage());
         const nextLayout = resolveDisplayLayout(message.layout);
         const nextWorkspace =
           message.workspace ??
@@ -109,6 +125,7 @@ export function App(): JSX.Element {
         const state = api.getState() as PersistedAppState | undefined;
         const workspaceChanged = nextWorkspace !== workspaceRef.current;
         if (workspaceChanged) {
+          setSettingsResult(undefined);
           workspaceRef.current = nextWorkspace;
           setWorkspace(nextWorkspace);
           setWorkbenchSeed(savedTheme(state?.workbench));
@@ -122,8 +139,7 @@ export function App(): JSX.Element {
         persist({
           view: message.view,
           locale: nextLocale,
-          hostLocale: receivedLocale,
-          userLocale: userLocale.current,
+          preferences: message.preferences,
           layout: nextLayout,
           capabilities: message.capabilities,
           workspace: nextWorkspace,
@@ -140,7 +156,7 @@ export function App(): JSX.Element {
           setDiscardResult(message.discardResult);
           return;
         }
-        const nextLocale = userLocale.current ?? resolveLocale(message.locale);
+        const nextLocale = resolveLocale(message.locale ?? systemLanguage());
         const nextLayout = resolveDisplayLayout(message.layout);
         const errorView: WebviewView = {
           type: 'error',
@@ -172,6 +188,7 @@ export function App(): JSX.Element {
           view={view ?? BOOTSTRAP_VIEW}
           loading={!view}
           workspaceResult={workspaceResult}
+          settingsResult={settingsResult}
           layout={layout}
           workspace={workspace}
           memorySupported={memorySupported}
@@ -182,11 +199,6 @@ export function App(): JSX.Element {
           browser={!!api.setPollingActive}
           initialState={workbenchSeed}
           onStateChange={(workbench) => persist({ workbench, workbenchWorkspace: workspaceRef.current })}
-          onLocaleChange={(nextLocale) => {
-            userLocale.current = nextLocale;
-            setLocale(nextLocale);
-            persist({ locale: nextLocale, userLocale: nextLocale });
-          }}
           renderPage={(page, send, back) => (
             <ViewRenderer view={page} memorySupported={memorySupported} send={send} back={back} workspaceKey={workspace} />
           )}

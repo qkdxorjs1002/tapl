@@ -111,6 +111,76 @@ def unset_value(path: Path | str, key: str) -> ConfigEditResult:
     return ConfigEditResult(str(config_path), key, candidate != original)
 
 
+def prepare_values(
+    original: str,
+    values: dict[str, Any],
+    *,
+    remove: tuple[str, ...] = (),
+) -> str:
+    """Render a complete settings transaction without writing or validating it.
+
+    Keys are canonical persisted paths, never host-relative aliases. Callers
+    allowlist/type-check them and validate the complete candidate before writing.
+    This permits changing model allowlists and their profiles together.
+    """
+    candidate = original
+    for key in remove:
+        candidate = _remove_setting(candidate, _key_path(key))
+    for key, value in values.items():
+        target = _key_path(key)
+        if key.endswith((".models", ".profiles")):
+            candidate = _remove_setting(candidate, target)
+        base = (tuple(config.CLAUDE_SUBAGENTS_PREFIX.split("."))
+                if key.startswith(config.CLAUDE_SUBAGENTS_PREFIX + ".") else target[:1])
+        candidate = _replace_or_add_subagent_setting(
+            candidate, target, _render_value(value), base=base,
+        )
+    return candidate
+
+
+def _remove_setting(text: str, target: tuple[str, ...]) -> str:
+    """Remove one scalar or aggregate while retaining unrelated TOML/comments."""
+    inline = _edit_inline_ancestor(text, target, None)
+    if inline is not None:
+        return inline
+    assignments, tables = _scan(text)
+    ranges = [(item.start, item.end) for item in assignments
+              if item.path[:len(target)] == target]
+    ranges.extend((item.start, item.content_start) for item in tables
+                  if item.path[:len(target)] == target)
+    for start, end in sorted(ranges, reverse=True):
+        text = text[:start] + _comments_only(text[start:end]) + text[end:]
+    return text
+
+
+def _comments_only(text: str) -> str:
+    """Keep actual TOML comments when deleting an owned statement/header."""
+    comments: list[str] = []
+    index = 0
+    quote = ""
+    while index < len(text):
+        if quote:
+            if text.startswith(quote, index):
+                index += len(quote)
+                quote = ""
+            elif quote.startswith('"') and text[index] == "\\":
+                index += 2
+            else:
+                index += 1
+        elif text[index] in "\"'":
+            quote = text[index] * (3 if text.startswith(text[index] * 3, index) else 1)
+            index += len(quote)
+        elif text[index] == "#":
+            end = text.find("\n", index)
+            end = len(text) if end < 0 else end + 1
+            comment = text[index:end]
+            comments.append(comment if comment.endswith("\n") else comment + "\n")
+            index = end
+        else:
+            index += 1
+    return "".join(comments)
+
+
 def configure_subagents(
     path: Path | str,
     *,
@@ -328,9 +398,21 @@ def _replace_or_add_subagent_setting(
         return _replace_or_add(text, target, rendered)
     if any(assignment.path[:len(base)] == base for assignment in assignments):
         newline = "\r\n" if "\r\n" in text else "\n"
-        line = ".".join(_render_key(part) for part in target)
+        # A dotted setting may live inside an explicit ancestor table, e.g.
+        # [clients.claude-code] followed by subagents.preference = "...".
+        # Inserting the fully-qualified key at the document root would declare
+        # that ancestor twice. Keep new dotted siblings in its existing scope.
+        ancestors = [table for table in tables
+                     if not table.array and len(table.path) < len(base)
+                     and base[:len(table.path)] == table.path]
+        ancestor = max(ancestors, key=lambda table: len(table.path), default=None)
+        local_target = target[len(ancestor.path):] if ancestor else target
+        line = ".".join(_render_key(part) for part in local_target)
         line = f"{line} = {rendered}{newline}"
-        position = min((table.start for table in tables), default=len(text))
+        position = (max((assignment.end for assignment in assignments
+                         if ancestor.content_start <= assignment.start < ancestor.end),
+                        default=ancestor.content_start)
+                    if ancestor else min((table.start for table in tables), default=len(text)))
         prefix = text[:position]
         if prefix and not prefix.endswith(("\n", "\r")):
             line = newline + line

@@ -1,7 +1,7 @@
-const { test, before, after } = require('node:test');
+const { test, before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
-const { mkdtempSync, mkdirSync, rmSync } = require('node:fs');
+const { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { chromium } = require('@playwright/test');
@@ -28,6 +28,13 @@ before(async () => {
   assert.equal(seeded.status, 0, seeded.stderr);
   browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
 });
+beforeEach(() => {
+  // Display preferences now belong to the shared fixture config, not each page's storage.
+  for (const folder of [workspace, secondWorkspace]) {
+    const result = spawnSync(python, ['-c', 'import sys; from pathlib import Path; from taplctl.settings import SettingsService; s=SettingsService(Path(sys.argv[1])); d=s.get(); s.save({"viewer.language":"auto","viewer.layout":"auto"}, d["revision"])', folder], { encoding: 'utf8', env: { ...process.env, PYTHONPATH: path.resolve(__dirname, '../../../tapl') } });
+    assert.equal(result.status, 0, result.stderr);
+  }
+});
 after(async () => { await browser?.close(); if (server) { const done = new Promise(resolve => server.once('exit', resolve)); server.kill(); await done; } rmSync(workspace, { recursive: true, force: true }); });
 async function shot(page, name) {
   const directory = process.env.TAPL_SCREENSHOT_DIR;
@@ -43,6 +50,151 @@ async function openPage() {
   await page.locator('.wb-run-mindmap').waitFor();
   return { page, errors };
 }
+
+async function setLanguage(page, locale) {
+  await page.locator('[data-wb-focus="nav:settings"]').click();
+  const language = page.locator('[id="setting-viewer.language"]'); await language.waitFor();
+  if (await language.inputValue() !== locale) {
+    await language.selectOption(locale);
+    await page.locator('.wb-settings-savebar button[type=submit]').click();
+    await page.waitForFunction(expected => document.documentElement.lang === expected, locale);
+  }
+  await page.locator('.wb-settings .wb-back').click();
+}
+
+test('settings edits all CLI sections, saves model/profile changes together, and confirms reset', { timeout: 60000 }, async () => {
+  const { page, errors } = await openPage();
+  const configPath = path.join(workspace, '.tapl/config.toml');
+  const readSettings = () => {
+    const result = spawnSync(python, ['-c', 'import json,sys; from pathlib import Path; from taplctl.settings import SettingsService; print(json.dumps(SettingsService(Path(sys.argv[1])).get()))', workspace], { encoding: 'utf8', env: { ...process.env, PYTHONPATH: path.resolve(__dirname, '../../../tapl') } });
+    assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout);
+  };
+  try {
+    await page.locator('[data-wb-focus="nav:settings"]').click();
+    await page.locator('[id="setting-search.max_results"]').waitFor();
+    await page.mouse.move(1400, 30); await page.waitForTimeout(650);
+    assert.equal(await page.locator('.wb-topbar .wb-language-menu').count(), 0);
+    assert.equal(await page.locator('.wb-settings-field-copy > label').count(), 23);
+    await page.locator('[id="setting-viewer.language"]').selectOption('en');
+    await page.locator('.wb-settings-savebar button[type=submit]').click();
+    await page.waitForFunction(() => document.documentElement.lang === 'en');
+    const field = key => page.locator(`[id="setting-${key}"]`);
+    await field('workflow.authoring_detail').selectOption('normal');
+    await field('recall.enabled').uncheck();
+    await field('search.mode').selectOption('bm25');
+    await field('search.max_results').fill('27');
+    await field('search.hybrid_semantic_ratio').fill('0.4');
+    await field('search.semantic_provider').selectOption('local');
+    await field('search.searchd_model_idle_timeout_seconds').fill('0');
+    const origins = field('viewer.allowed_origins');
+    await origins.getByRole('button', { name: /Add entry/ }).click();
+    await origins.locator('input').fill('https://settings.example.invalid');
+    await field('subagents.setup_complete').check();
+    await field('subagents.preference').fill('Keep independent verification.');
+    const models = field('subagents.models');
+    await models.getByRole('button', { name: /Add model/ }).click();
+    await models.getByLabel('Model ID', { exact: true }).fill('qa-model.with.dot');
+    await models.getByRole('button', { name: /Add entry/ }).click();
+    await models.locator('.wb-settings-list input').fill('high');
+    const profile = field('subagents.profiles').locator('.wb-settings-repeater').first();
+    await profile.getByRole('button', { name: /Add candidate/ }).click();
+    await profile.locator('.wb-settings-candidate input').nth(0).fill('qa-model.with.dot');
+    await profile.locator('.wb-settings-candidate input').nth(1).fill('high');
+    const claude = field('clients.claude-code.subagents.models');
+    await claude.getByRole('button', { name: /Add model/ }).click();
+    await claude.getByLabel('Model ID', { exact: true }).fill('inherit');
+    await field('clients.claude-code.subagents.setup_complete').check();
+    await field('clients.claude-code.subagents.strategy').selectOption('balanced');
+    await page.locator('.wb-settings-savebar button[type=submit]').click();
+    await page.getByText('Configuration saved.', { exact: true }).waitFor();
+    const saved = readSettings();
+    assert.equal(saved.values['search.max_results'], 27);
+    assert.equal(saved.values['recall.enabled'], false);
+    assert.deepEqual(saved.values['subagents.models'], { 'qa-model.with.dot': ['high'] });
+    assert.deepEqual(saved.values['subagents.profiles'][0].candidates, [{ model: 'qa-model.with.dot', reasoning_effort: 'high' }]);
+    assert.deepEqual(saved.values['clients.claude-code.subagents.models'], { inherit: [] });
+    const prior = readFileSync(configPath, 'utf8');
+    await page.getByRole('button', { name: 'Reset all to defaults', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+    assert.equal(readFileSync(configPath, 'utf8'), prior);
+    await page.getByRole('button', { name: 'Reset all to defaults', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Reset configuration', exact: true }).click();
+    await page.waitForFunction(() => document.getElementById('setting-viewer.language').value === 'auto');
+    const reset = readSettings(); assert.deepEqual(reset.values, reset.defaults); assert.deepEqual(reset.overrides, []);
+    assert.match(readFileSync(configPath, 'utf8'), /# Isolated Viewer fixture/); assert.match(readFileSync(configPath, 'utf8'), /keep = "fixture"/);
+    assert.equal(await field('viewer.language').inputValue(), 'auto');
+    await page.reload(); await page.locator('.wb-run-mindmap').waitFor();
+    assert.equal(await page.locator('html').getAttribute('lang'), 'ko');
+    await page.locator('[data-wb-focus="nav:settings"]').click(); await field('search.max_results').waitFor();
+    assert.equal(await field('search.max_results').inputValue(), '12');
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('settings retains invalid and conflicting drafts, restores pages, and keeps controls in short viewports', { timeout: 45000 }, async () => {
+  const { page, errors } = await openPage();
+  try {
+    await page.locator('[data-wb-focus="nav:settings"]').click();
+    const input = page.locator('[id="setting-search.max_results"]'); await input.waitFor();
+    await page.mouse.move(1400, 30); await page.waitForTimeout(650);
+    await input.fill('0'); assert.equal(await page.locator('.wb-settings-savebar button[type=submit]').isDisabled(), true);
+    assert.equal(await input.getAttribute('aria-invalid'), 'true');
+    await input.fill('25');
+    await page.locator('[data-wb-focus="nav:tasks"]').click(); await page.locator('.wb-tasks-table').waitFor();
+    await page.locator('[data-wb-focus="nav:settings"]').click(); assert.equal(await input.inputValue(), '25');
+    const configPath = path.join(workspace, '.tapl/config.toml');
+    writeFileSync(configPath, readFileSync(configPath, 'utf8')+'\n# changed in another editor\n');
+    await page.locator('.wb-settings-savebar button[type=submit]').click();
+    await page.locator('.wb-settings-error').waitFor(); assert.equal(await input.inputValue(), '25');
+    await page.locator('.wb-settings-error button').click();
+    await page.getByRole('dialog').getByRole('button').first().click(); assert.equal(await input.inputValue(), '25');
+    await page.locator('.wb-settings-error button').click(); await page.getByRole('dialog').getByRole('button').last().click();
+    await page.waitForFunction(() => document.getElementById('setting-search.max_results').value === '12');
+    for (const locale of ['en', 'ko']) {
+      const language = page.locator('[id="setting-viewer.language"]'); await language.waitFor();
+      if (await language.inputValue() !== locale) {
+        await language.selectOption(locale);
+        await page.locator('.wb-settings-savebar button[type=submit]').click();
+        await page.waitForFunction(expected => document.documentElement.lang === expected, locale);
+      }
+      for (const theme of ['light', 'dark']) {
+        if (await page.locator('html').getAttribute('data-tapl-theme') !== theme) await page.locator('[data-wb-focus="theme-toggle"]').click();
+        for (const [width, height] of [[1440, 1000], [1100, 420], [390, 740]]) {
+          await page.setViewportSize({ width, height }); await page.mouse.move(width-10, 30); await page.waitForTimeout(100);
+          await page.locator('.wb-page-scroll').evaluate(el => el.scrollTop=0);
+          const bar = await page.locator('.wb-settings-savebar').boundingBox();
+          assert.ok(bar.y >= 72 && bar.y+bar.height <= height, `visible Save controls: ${width}x${height}`);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+          await shot(page, `settings-${locale}-${theme}-${width}x${height}`);
+        }
+      }
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('settings works without an active RUN and keeps unsaved inputs through background hydration', { timeout: 30000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR' });
+  let overview;
+  await page.route('**/api/message', async route => {
+    const response = await route.fetch(), payload = await response.json();
+    if (payload.view?.type === 'overview') {
+      Object.assign(payload.view.status, { active_run: null, active_runs: [], plans: [], tasks: [], findings: [], task_counts: {} });
+      overview = structuredClone(payload);
+    }
+    await route.fulfill({ response, json: payload });
+  });
+  try {
+    await page.goto(origin); await page.waitForLoadState('networkidle');
+    await page.locator('[data-wb-focus="nav:settings"]').click();
+    const input = page.locator('[id="setting-search.max_results"]'); await input.waitFor(); await input.fill('19');
+    await page.evaluate(payload => window.postMessage({ ...payload, type: 'view:update' }, '*'), overview);
+    assert.equal(await input.inputValue(), '19');
+    assert.equal(await page.locator('[data-wb-focus="nav:settings"]').getAttribute('aria-current'), 'page');
+    assert.equal(await page.locator('.wb-settings-field-copy > label').count(), 23);
+  } finally { await page.close(); }
+});
 
 test('large maps bound idle work, retain keyboard targets and refresh current graph geometry', { timeout: 60000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
@@ -122,7 +274,17 @@ test('icon navigation hides collapsed counts, expands over the map and preserves
   try {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     assert.equal(await shell.getAttribute('data-sidebar-expanded'), 'false');
-    assert.equal((await sidebar.boundingBox()).width, 72);
+    assert.equal((await sidebar.boundingBox()).width, 64);
+    const railBox = await sidebar.boundingBox();
+    const aligned = await sidebar.locator('.wb-nav-button > .wb-icon:first-child, .wb-fold-trigger > .wb-icon:first-child, .wb-workspace-heading > button .wb-icon, .wb-management-actions > button .wb-icon').evaluateAll(icons => icons.map(icon => {
+      const b = icon.getBoundingClientRect(), hit = icon.closest('button').getBoundingClientRect();
+      return { label: icon.closest('button').getAttribute('aria-label'), center: b.x+b.width/2, width: hit.width, height: hit.height };
+    }));
+    assert.ok(aligned.length >= 9);
+    for (const icon of aligned) {
+      assert.ok(Math.abs(icon.center-railBox.x-railBox.width/2) <= 1, `collapsed icon ${JSON.stringify(icon)} must center at ${railBox.x+railBox.width/2}`);
+      assert.ok(icon.width >= 44 && icon.height >= 44, 'collapsed targets stay operable');
+    }
     const navIcon = await page.locator('[data-wb-focus="nav:current"] > .wb-icon').boundingBox();
     assert.equal(await page.locator('.wb-management-actions > button').count(),1);
     assert.equal(await page.locator('.wb-management-actions > button').getAttribute('aria-label'),'디버그');
@@ -131,9 +293,10 @@ test('icon navigation hides collapsed counts, expands over the map and preserves
       assert.ok(Math.abs(icon.x+icon.width/2-navIcon.x-navIcon.width/2)<1, selector);
       assert.equal(icon.width,17); assert.equal(icon.height,17);
     }
-    const language = await page.locator('.wb-language-menu summary').boundingBox(), pinBox = await pin.boundingBox();
+    assert.equal(await page.locator('.wb-topbar .wb-language-menu').count(), 0);
+    const pinBox = await pin.boundingBox();
     const theme = await page.locator('[data-wb-focus="theme-toggle"]').boundingBox();
-    assert.ok(language.x + language.width <= theme.x && theme.x + theme.width <= pinBox.x, 'pin is the rightmost control after language and theme');
+    assert.ok(theme.x + theme.width <= pinBox.x, 'pin is the rightmost control after theme');
     assert.equal(await page.locator('.wb-mm-top-controls button[aria-pressed]').count(),0,'map motion has no toggle');
     const tasks = page.locator('[data-wb-focus="nav:tasks"]');
     assert.equal(await page.locator('.wb-count-compact').count(),0);
@@ -297,8 +460,7 @@ test('real Viewer keeps RUN context, record navigation, preferences and fixed sh
     assert.equal(await page.locator('.wb-mm-node[data-kind=task]').count(), 1);
     assert.equal(await page.locator('.wb-mm-node[data-kind=task]').isVisible(), true);
 
-    await page.locator('.wb-language-menu summary').click();
-    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await setLanguage(page, 'en');
     await page.getByRole('button', { name: 'Use dark theme', exact: true }).click();
     await page.reload();
     await page.locator('.wb-run-mindmap').waitFor();
@@ -463,8 +625,7 @@ test('Current RUN is a source-safe interactive mindmap with bounded camera and p
     assert.ok(Math.abs(position.x-returned.x)<1 && Math.abs(position.y-returned.y)<1, 'return restores the RUN camera');
     for (const locale of ['ko','en']) {
       await page.setViewportSize({ width:1440, height:1000 });
-      await page.locator('.wb-language-menu summary').click();
-      await page.getByRole('button',{name:locale==='ko'?'한국어':'English',exact:true}).click();
+      await setLanguage(page, locale);
       for (const theme of ['light','dark']) {
         if(await page.locator('html').getAttribute('data-tapl-theme')!==theme) await page.locator('[data-wb-focus="theme-toggle"]').click();
         for (const width of [1440,390]) {
@@ -532,8 +693,7 @@ test('associative memories branch around the workspace with shared cues, exact s
     await page.locator('.wb-back').click(); await map.waitFor();
     for (const locale of ['ko','en']) {
       await page.setViewportSize({width:1440,height:1000});
-      await page.locator('.wb-language-menu summary').click();
-      await page.getByRole('button',{name:locale==='ko'?'한국어':'English',exact:true}).click();
+      await setLanguage(page, locale);
       for (const theme of ['light','dark']) {
         if(await page.locator('html').getAttribute('data-tapl-theme')!==theme) await page.locator('[data-wb-focus="theme-toggle"]').click();
         for (const [width,height] of [[1440,1000],[390,740],[1100,500]]) {
@@ -685,7 +845,7 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
       assert.deepEqual(await rgba('.wb-search-box .input','backgroundColor'),hex(p.input));
       assert.deepEqual(await rgba('.wb-search-box input','color'),hex(p.inputFg));
       await page.mouse.move(1400,30);await page.waitForTimeout(650);await shot(page,`native-${index}-memory`);
-      await page.locator('.wb-language-menu summary').hover();await page.getByRole('tooltip').waitFor();
+      await page.locator('[data-wb-focus="theme-toggle"]').hover();await page.getByRole('tooltip').waitFor();
       assert.deepEqual(await rgba('[role=tooltip]','backgroundColor'),hex(p.tip));
       assert.deepEqual(await rgba('[role=tooltip]','color'),hex(p.tipFg));
       await page.keyboard.press('Escape');
@@ -696,6 +856,15 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
       assert.deepEqual(await rgba('.wb-dialog .btn-primary','color'),hex(p.buttonFg));
       await shot(page,`native-${index}-dialog`);
       await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
+      await page.locator('[data-wb-focus="nav:settings"]').click();
+      const settingInput=page.locator('[id="setting-search.max_results"]'); await settingInput.waitFor();
+      assert.deepEqual(await rgba('[id="setting-search.max_results"]','backgroundColor'),hex(p.input));
+      assert.deepEqual(await rgba('[id="setting-search.max_results"]','color'),hex(p.inputFg));
+      await settingInput.fill('0');
+      assert.deepEqual(await rgba('.wb-settings-input-error','color'),hex(p.error));
+      await shot(page,`native-${index}-settings`);
+      await settingInput.fill('12');
+      await page.locator('[data-wb-focus="nav:memories"]').click(); await page.locator('.wb-memory-mindmap').waitFor();
     }
     // Body-scoped host variables change live without remounting either map.
     await native(palettes[0]);assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex(palettes[0].bg));
@@ -778,9 +947,9 @@ test('icon tooltips work on hover/focus and actual status colors stay distinct i
     const rect = await page.getByRole('tooltip').boundingBox();
     assert.ok(rect.x >= 0 && rect.x + rect.width <= 1440);
     await page.keyboard.press('Escape');
-    await page.locator('.wb-language-menu summary').focus();
+    await page.locator('[data-wb-focus="theme-toggle"]').focus();
     await page.getByRole('tooltip').waitFor();
-    assert.equal(await page.getByRole('tooltip').innerText(), '언어');
+    assert.equal(await page.getByRole('tooltip').innerText(), await page.locator('[data-wb-focus="theme-toggle"]').getAttribute('aria-label'));
     await page.keyboard.press('Escape');
     await page.locator('[data-wb-focus="nav:tasks"]').click();
     const colors = () => page.locator('.wb-tasks-table .wb-status-label').evaluateAll(elements => elements.map(el => getComputedStyle(el).color));

@@ -229,6 +229,8 @@ Python 3.11 이상이 필요합니다. Homebrew의 세 formula는 서로 충돌�
 
 웹과 VS Code 확장은 같은 Viewer 화면·기능·메시지 타입을 공유합니다. 고정 RUN 탐색, TASK 상세, 기록 검색과 언어·테마 선택을 제공하며, 확장은 처음에 VS Code 테마를 따릅니다.
 
+**관리 → 설정**에서 Viewer 언어와 CLI 지원 설정을 편집·저장·초기화합니다. 파일 범위와 동작은 [설정 안내](docs/guides/configuration.ko.md#viewer-설정)를 참고하세요.
+
 연상 기억의 목록·검색·상세·원본을 읽기 전용으로 확인할 수 있습니다.
 기억 수정이나 삭제가 필요하면 Agent에게 지시합니다.
 저장 기준과 반복 사용에 따른 강화는 [연상 기억 안내](docs/guides/memory.ko.md)를 참고하세요.

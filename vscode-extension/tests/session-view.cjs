@@ -51,7 +51,8 @@ test('one selected RUN keeps the header tab and shared navigation visible', () =
   assert.match(html, /role="tabpanel" aria-labelledby="wb-run-tab-0"/);
   assert.match(html, /wb-sidebar/);
   assert.match(html, /TASK status/);
-  assert.doesNotMatch(html, /tapl-hero|<select/);
+  assert.doesNotMatch(html, /tapl-hero/);
+  assert.doesNotMatch(html.match(/<header class="wb-topbar"[\s\S]*?<\/header>/)[0], /<select|wb-language-menu/);
 });
 
 test('multiple RUNs keep full titles and one keyboard entry', () => {

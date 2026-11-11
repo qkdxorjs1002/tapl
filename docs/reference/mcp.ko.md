@@ -2,7 +2,7 @@
 
 [문서 홈](../README.ko.md) · [English](mcp.md)
 
-`tapl-mcp`는 MCP stdio로 워크플로 애플리케이션을 제공합니다. 관리 명령은 [CLI](cli.ko.md)를 사용합니다. 이 페이지는 [`mcp_server.py`](../../tapl/taplctl/mcp_server.py)에 등록된 **공개 도구 32개 전체**를 다룹니다. 정확한 입력 검증은 연결된 서버의 JSON schema가 기준입니다.
+`tapl-mcp`는 MCP stdio로 워크플로 애플리케이션을 제공합니다. 관리 명령은 [CLI](cli.ko.md)를 사용합니다. 이 페이지는 [`mcp_server.py`](../../tapl/taplctl/mcp_server.py)에 등록된 **공개 도구 34개 전체**를 다룹니다. 정확한 입력 검증은 연결된 서버의 JSON schema가 기준입니다.
 
 Claude Code는 읽기를 포함해 모든 호출에 정확한 hook 소유자 `claude-code:<native-session-id>`가 필요합니다. 생략·원본 ID·다른 클라이언트 ID를 거부하며, 아래 legacy 생략 동작은 Codex에만 적용됩니다. 승인 source `request_user_input`은 Claude `AskUserQuestion` 응답을 포함한 도구 확인 이력의 기존 값으로 유지합니다. 호스트별 정책·모델 설정은 [Claude 가이드](../getting-started/claude-code.ko.md)를 참고하세요.
 
@@ -59,6 +59,12 @@ MCP 초기화는 짧은 진입 안내를 제공합니다. 단순하지 않거나
 RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌면 쓰기 응답은 `policy_refresh_required=true`·`authoring_policy`와 최우선 `tapl_get_next` 권고를 유지합니다. 정책을 다시 조회한 뒤 현재 PLAN·미완료 TASK의 근거를 새 엄격도에 맞게 보완합니다. 완료·보관 기록은 자동으로 다시 쓰지 않습니다. 필수 근거와 Strict typed 필드 경고는 [작성 상세도](../guides/authoring-detail.ko.md#선택-예시와-검증)를 참고하세요.
 
 상태 검증은 트랜잭션상 일관된 스냅샷 하나를 사용합니다. 성공한 쓰기 응답의 권고를 바로 따르세요. 쓰기·읽기 전용 상태 조회·Stop hook 때문에 진입 호출을 반복할 필요는 없습니다. 실패·잘린 응답, 정책·문맥 유실, 다른 주체에 의한 워크플로 변경 가능성이 있으면 새로 읽습니다.
+
+## 사용자 설정
+
+`tapl_get_settings`는 현재 작업공간의 유효 설정 경로·편집 필드 스키마·현재값·기본값·저장된 재정의·revision을 읽습니다. 워크플로 DB를 초기화하거나 변경하지 않습니다.
+
+`tapl_save_settings`는 canonical 편집 키를 사용하는 `values` 객체와 해당 문서의 `expected_revision`이 필수입니다. 사용자가 명시적으로 요청한 변경에만 사용하세요. 모델 맵과 프로필을 구조화된 값으로 함께 검증한 뒤 한 번에 원자적으로 기록합니다. 선택 인자 `reset_all=true`는 `values={}`와 사용자의 명시적 초기화 확인이 필요하며 무관한 내용과 카탈로그를 유지한 채 두 클라이언트의 지원 재정의를 제거합니다. 오래된 revision은 덮어쓰기 없이 실패합니다. 저장 응답이 유실되어도 자동 재시도하지 말고 먼저 다시 읽으세요. 임의 파일 경로 인자는 없습니다. 두 도구는 공통 클라이언트/세션 식별 규칙을 유지하며 선택 RUN·원본 소유권과 독립적입니다. [Viewer 설정](../guides/configuration.ko.md#viewer-설정)을 참고하세요.
 
 ## 이력과 메모리
 

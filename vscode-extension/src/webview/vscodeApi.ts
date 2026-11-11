@@ -5,6 +5,8 @@ import type {
   HostMessage,
   HostCapabilities,
   RevisionMessage,
+  SettingsResult,
+  ViewerPreferences,
   WebviewCommand,
   WebviewView
 } from './types';
@@ -20,6 +22,7 @@ type PersistedState = {
   view?: WebviewView;
   locale?: 'en' | 'ko';
   layout?: DisplayLayout;
+  preferences?: ViewerPreferences;
   capabilities?: HostCapabilities;
   workspace?: string;
   selectedSessionId?: string;
@@ -61,6 +64,10 @@ class BrowserApi implements VsCodeApi {
   private trailingRefreshIsManual = false;
   private autoRefreshPending = false;
   private discardPending = false;
+  private settingsGeneration = 0;
+  private settingsPending = 0;
+  private settingsWritePending = false;
+  private settingsRevision: { workspace: string; revision: string } | undefined;
   private workspaceSelecting = false;
   private workspaceSelectionId = 0;
 
@@ -73,6 +80,9 @@ class BrowserApi implements VsCodeApi {
   };
 
   postMessage(message: WebviewCommand): void {
+    if (message.command === 'getSettings' || message.command === 'saveSettings' || message.command === 'resetSettings') {
+      void this.settingsRequest(message); return;
+    }
     if (message.command === 'selectWorkspace') { void this.selectWorkspace(message.workspace); return; }
     if (message.command === 'discardRun') {
       const workspace = this.activeWorkspace ?? this.state.workspace ?? readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
@@ -117,6 +127,59 @@ class BrowserApi implements VsCodeApi {
     this.navigate(message);
   }
 
+  /** Settings travel independently from page navigation and never replace the route snapshot. */
+  private async settingsRequest(message: Extract<WebviewCommand, { command: 'getSettings' | 'saveSettings' | 'resetSettings' }>): Promise<void> {
+    const workspace = this.activeWorkspace ?? this.state.workspace ?? readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
+    const action = message.command === 'getSettings' ? 'get' : message.command === 'saveSettings' ? 'save' : 'reset';
+    const error = (text: string, code: string) => dispatchHostMessage({ type: 'settings:result', requestId: message.requestId,
+      workspace, action, ok: false, message: text, code });
+    if (typeof message.requestId !== 'string' || !message.requestId || message.requestId.length > 128
+      || !workspace || (message.workspace !== undefined && message.workspace !== workspace)) {
+      error('Settings require the current workspace.', 'workspace_mismatch'); return;
+    }
+    if (this.workspaceSelecting || this.settingsWritePending) {
+      error('A settings write or workspace selection is already in progress.', 'busy'); return;
+    }
+    if (action !== 'get' && (message.workspace !== workspace || !('revision' in message)
+      || typeof message.revision !== 'string' || !message.revision
+      || this.settingsRevision?.workspace !== workspace || this.settingsRevision.revision !== message.revision
+      || (message.command === 'resetSettings' && message.confirmed !== true)
+      || (message.command === 'saveSettings' && (!isRecord(message.values) || Array.isArray(message.values))))) {
+      error('Reload settings before saving; reset also requires explicit confirmation.', 'invalid_request'); return;
+    }
+    const generation = ++this.settingsGeneration;
+    const workspaceGeneration = this.workspaceGeneration;
+    const current = () => generation === this.settingsGeneration && workspaceGeneration === this.workspaceGeneration
+      && workspace === (this.activeWorkspace ?? this.state.workspace ?? readStorage<string>(localStorage, WORKSPACE_KEY) ?? '');
+    this.settingsPending += 1;
+    this.settingsWritePending = action !== 'get';
+    this.clearRevisionTimer();
+    try {
+      const response = await fetch('/api/message', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...message, workspace, locale: navigator.language }) });
+      const payload = await response.json() as SettingsResult;
+      if (!current()) return;
+      if (payload.type !== 'settings:result' || payload.requestId !== message.requestId || payload.workspace !== workspace) {
+        error('This Viewer server does not support settings. Update TAPL and restart the Viewer.', 'unsupported'); return;
+      }
+      if (payload.ok && (!response.ok || !isRecord(payload.settings) || typeof payload.settings.revision !== 'string'
+        || !Array.isArray(payload.settings.fields) || !isRecord(payload.settings.values) || !isRecord(payload.settings.defaults))) {
+        error('Settings response was invalid.', 'invalid_response'); return;
+      }
+      if (payload.ok && payload.settings) {
+        this.settingsRevision = { workspace, revision: payload.settings.revision };
+        this.rememberPreferences(payload);
+      }
+      dispatchHostMessage({ ...payload, action });
+    } catch (failure) {
+      if (current()) error(failure instanceof Error ? failure.message : 'Settings request failed.', 'request_failed');
+    } finally {
+      this.settingsPending -= 1;
+      if (action !== 'get') this.settingsWritePending = false;
+      this.scheduleRevisionCheck();
+    }
+  }
+
   /** Validate a candidate without replacing the page or changing its selected owner. */
   private async selectWorkspace(candidate: string): Promise<void> {
     const selection = ++this.workspaceSelectionId;
@@ -132,7 +195,7 @@ class BrowserApi implements VsCodeApi {
     };
     try {
       const response = await fetch('/api/message', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'selectWorkspace', workspace: candidate.trim(), locale: navigator.language, layout: this.state.layout ?? 'auto' }) });
+        body: JSON.stringify({ command: 'selectWorkspace', workspace: candidate.trim(), locale: navigator.language }) });
       const payload = await response.json() as HostMessage;
       if (!currentSelection()) { settleSuperseded(); return; }
       if (!response.ok || payload.type === 'error'
@@ -144,6 +207,7 @@ class BrowserApi implements VsCodeApi {
       if ((payload.type !== 'hydrate' && payload.type !== 'view:update') || payload.view.type !== 'overview' || !payload.workspace) {
         throw new Error('Workspace response was invalid.');
       }
+      this.rememberPreferences(payload);
       if (payload.workspace === current && this.state.view?.type !== 'workspace') {
         dispatchHostMessage({ type: 'workspace:result', ok: true, workspace: payload.workspace });
         return;
@@ -227,7 +291,6 @@ class BrowserApi implements VsCodeApi {
       ...(this.state.selectedSessionId !== undefined ? { sessionId: this.state.selectedSessionId } : {}),
       workspace: requestWorkspace,
       locale: navigator.language,
-      layout: this.state.layout ?? 'auto',
       ...refreshContext(message, previous)
     };
 
@@ -266,6 +329,7 @@ class BrowserApi implements VsCodeApi {
       ) {
         return false;
       }
+      if (payload.type === 'hydrate' || payload.type === 'view:update') this.rememberPreferences(payload);
       if ((payload.type === 'hydrate' || payload.type === 'view:update') && 'workspace' in payload) {
         if ((this.activeWorkspace ?? this.state.workspace) !== payload.workspace) {
           this.history = [];
@@ -324,7 +388,7 @@ class BrowserApi implements VsCodeApi {
   }
 
   private requestRefresh(background: boolean): void {
-    if (this.workspaceSelecting || this.pendingNavigation || this.state.view?.type === 'workspace') {
+    if (this.settingsPending || this.workspaceSelecting || this.pendingNavigation || this.state.view?.type === 'workspace') {
       return;
     }
     if (this.refreshInFlight) {
@@ -468,6 +532,7 @@ class BrowserApi implements VsCodeApi {
   private shouldPoll(): boolean {
     return this.pollingActive
       && !this.workspaceSelecting
+      && !this.settingsPending
       && !this.pendingNavigation
       && document.visibilityState === 'visible'
       && !!this.state.view
@@ -500,6 +565,7 @@ class BrowserApi implements VsCodeApi {
 
   private setActiveWorkspace(workspace: string | undefined): void {
     const nextWorkspace = workspace ?? '';
+    if ((this.activeWorkspace ?? this.state.workspace ?? '') !== nextWorkspace) this.settingsRevision = undefined;
     if (this.activeWorkspace !== nextWorkspace) {
       this.activeWorkspace = nextWorkspace;
       this.resetRevisionBaseline();
@@ -548,6 +614,14 @@ class BrowserApi implements VsCodeApi {
       capabilities: this.state.capabilities,
       workspace: this.activeWorkspace
     });
+  }
+
+  /** Store presentation metadata without replacing the current route or its unsaved settings draft. */
+  private rememberPreferences(message: Extract<HostMessage, { type: 'hydrate' | 'view:update' | 'settings:result' }>): void {
+    if (message.locale === 'en' || message.locale === 'ko') this.state.locale = message.locale;
+    if (message.layout) this.state.layout = message.layout;
+    if (message.preferences) this.state.preferences = message.preferences;
+    writeStorage(sessionStorage, SESSION_STATE_KEY, this.state);
   }
 
   private persistHistory(): void {

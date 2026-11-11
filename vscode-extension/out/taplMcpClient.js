@@ -22,7 +22,9 @@ class WorkspaceTaplMcpClient {
     }
     async callTool(name, args = {}) {
         let lastError;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
+        // A lost save acknowledgement must not replay a configuration mutation.
+        const attempts = name === 'tapl_save_settings' ? 1 : 2;
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
             const connection = await this.getConnection();
             try {
                 const result = await connection.client.callTool({ name, arguments: args }, undefined, { timeout: REQUEST_TIMEOUT_MS });
@@ -177,9 +179,11 @@ class TaplMcpClientPool {
 }
 exports.TaplMcpClientPool = TaplMcpClientPool;
 function taplMcpCommandCandidates(configuredMcpPath, platform = process.platform) {
+    // A configured value is one executable, passed unchanged without a shell.
+    if (configuredMcpPath !== '')
+        return [configuredMcpPath];
     const executable = platform === 'win32' ? 'tapl-mcp.exe' : 'tapl-mcp';
     return uniqueStrings([
-        configuredMcpPath.trim() || undefined,
         executable,
         platform === 'win32' ? undefined : '/opt/homebrew/bin/tapl-mcp',
         platform === 'win32' ? undefined : '/usr/local/bin/tapl-mcp'

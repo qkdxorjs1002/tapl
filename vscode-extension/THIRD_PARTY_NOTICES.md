@@ -11,7 +11,7 @@ components below. The project itself is licensed separately under `LICENSE.md`.
 | `ajv` | 8.20.0 | MIT | Copyright (c) 2015-2021 Evgeny Poberezkin |
 | `ajv-formats` | 3.0.1 | MIT | Copyright (c) 2020 Evgeny Poberezkin |
 | `cross-spawn` | 7.0.6 | MIT | Copyright (c) 2018 Made With MOXY Lda <hello@moxy.studio> |
-| `daisyui` | 4.12.24 | MIT | Copyright (c) 2020 Pouya Saadeghi |
+| `daisyui` | 5.7.50 | MIT | Copyright (c) 2020 Pouya Saadeghi |
 | `fast-deep-equal` | 3.1.3 | MIT | Copyright (c) 2017 Evgeny Poberezkin |
 | `fast-uri` | 3.1.5 | BSD-3-Clause | Copyright (c) 2011-2021 Gary Court; Copyright (c) 2021-present The Fastify team |
 | `github-markdown-css` | 5.9.0 | MIT | Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> |
@@ -23,7 +23,8 @@ components below. The project itself is licensed separately under `LICENSE.md`.
 | `scheduler` | 0.23.2 | MIT | Copyright (c) Facebook, Inc. and its affiliates. |
 | `shebang-command` | 2.0.0 | MIT | Copyright (c) Kevin Mårtensson <kevinmartensson@gmail.com> |
 | `shebang-regex` | 3.0.0 | MIT | Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> |
-| `tailwindcss` | 3.4.17 | MIT | Copyright (c) Tailwind Labs, Inc. |
+| `smol-toml` | 1.4.2 | BSD-3-Clause | Copyright (c) Squirrel Chat et al., All rights reserved. |
+| `tailwindcss` | 4.3.5 | MIT | Copyright (c) Tailwind Labs, Inc. |
 | `which` | 2.0.2 | ISC | Copyright (c) Isaac Z. Schlueter and Contributors |
 | `zod` | 4.4.3 | MIT | Copyright (c) 2025 Colin McDonnell |
 | `zod-to-json-schema` | 3.25.2 | ISC | Copyright (c) 2020 Stefan Terdell |

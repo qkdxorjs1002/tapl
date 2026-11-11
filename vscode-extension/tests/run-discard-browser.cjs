@@ -44,7 +44,7 @@ test('browser discard sends captured target and workspace, keeps selected owner,
   const h = harness(); await ready(h);
   h.api.postMessage(discard());
   assert.equal(h.calls.at(-1).method, 'POST');
-  assert.deepEqual({ ...h.calls.at(-1).request }, { ...discard(), sessionId: 'a', locale: 'en', layout: 'auto' });
+  assert.deepEqual({ ...h.calls.at(-1).request }, { ...discard(), sessionId: 'a', locale: 'en' });
   await h.resolve(reply(board('a', ['a']), { discardResult: { runId: 'run-b', ok: true } }));
   assert.equal(h.api.getState().selectedSessionId, 'a');
   assert.deepEqual(JSON.parse(h.sessionStorage.getItem('tapl.viewer.history.v1') ?? '[]'), []);

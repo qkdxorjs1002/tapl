@@ -47,6 +47,16 @@ taplctl config set viewer.allowed_origins '["https://viewer.example.invalid"]'
 
 The example origin is a placeholder; replace it with the exact trusted browser origin. Origin values contain a scheme, host and optional port, with no credentials, path, query or fragment. The Viewer still listens on loopback. See [Viewer and services](viewer.md) for proxy configuration.
 
+## Viewer settings
+
+Open **Management → Settings** in the browser Viewer or VS Code extension. The page covers every key in the CLI's editable registry, including separate Codex and Claude Code model allowlists and ordered profiles/candidates. Model IDs, effort lists, profiles and origins use structured inputs. Display language, layout and the extension MCP executable use `viewer.language`, `viewer.layout` and `viewer.mcp_path` in this same file. Save to apply changes. `auto` follows the host language and available width.
+
+Check the displayed file path: selection follows the precedence above for the current workspace. A browser Viewer started with explicit `--config PATH` stays pinned to that file. Selecting an archived RUN or another source database does not change the configuration target. **Save changes** validates the complete candidate and writes all changed values atomically, retaining comments and unrelated settings. Concurrent external changes invalidate the document revision; reload before saving again. Failed saves preserve the draft. Returning to Settings retains edits until the workspace changes or the Viewer reloads.
+
+**Reset all to defaults** requires confirmation and removes every editable override for both clients from that file, including legacy aliases. Built-in defaults apply; comments, unrelated keys and saved model catalogs remain. A field's **Use default** control changes its draft value; save to apply it. Reset returns display language and layout to `auto`. Origin changes require restarting the browser Viewer service. A backend without settings support shows an update notice; update TAPL and restart its MCP/Viewer process. The CLI commands above remain available.
+
+The extension reads these bootstrap fields directly before starting MCP; settings-page reads and writes use MCP, while the browser uses HTTP to the same validated Python settings service. Workspace and user config changes refresh the Viewer; changing the MCP executable reconnects after an in-flight save reply. The retired VS Code settings `taplWorkflow.language`, `taplWorkflow.layout` and `taplWorkflow.taplMcpPath` are ignored. Set the new TOML keys explicitly; no automatic migration writes user files.
+
 ## Public configuration keys
 
 These canonical keys are accepted by `config set` and `config unset`. Runtime defaults below can differ from values selected during installation or first-use setup. The table uses Codex's `subagents.*` keys; the same delegation settings for Claude Code use `clients.claude-code.subagents.*`.
@@ -60,6 +70,9 @@ These canonical keys are accepted by `config set` and `config unset`. Runtime de
 | `search.hybrid_semantic_ratio` | Number 0.0–1.0 | `0.65` |
 | `search.semantic_provider` | `local`, `daemon`, `auto` | `auto` |
 | `search.searchd_model_idle_timeout_seconds` | Integer ≥ 0; `0` disables idle model unloading | `1800` |
+| `viewer.language` | `auto`, `ko`, `en` | `auto`: follow the host language |
+| `viewer.layout` | `auto`, `small`, `medium`, `large` | `auto`: adapt to available width |
+| `viewer.mcp_path` | One executable path or command name; no shell arguments | `""`: automatic discovery in the extension |
 | `viewer.allowed_origins` | Unique HTTP(S) origins as a TOML string array | `[]` |
 | `subagents.enabled` | Boolean; effective delegation also needs completed setup | `true` |
 | `subagents.strategy` | `conservative`, `balanced`, `aggressive` | `aggressive` |

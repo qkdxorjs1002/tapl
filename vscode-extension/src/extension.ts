@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { homedir } from 'node:os';
 import {
   resolveLocale,
   translate,
@@ -12,11 +13,11 @@ import {
   taplMcpCommandCandidates,
   type TaplMcpWorkspace
 } from './taplMcpClient';
+import { defaultViewerPreferences, loadViewerConfig, viewerConfigRequiresTrust, type ViewerConfig } from './viewerConfig';
 
-import type { DisplayLayout, AssociativeMemory, MemoryDiagnostics, HostCapabilities, RunDiscardResult, TaplRunSnapshot, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
+import type { ViewerPreferences, DisplayLayout, AssociativeMemory, MemoryDiagnostics, SettingsDocument, SettingsResult, HostCapabilities, RunDiscardResult, TaplRunSnapshot, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
 
 type NodeKind = 'overview' | 'task' | 'archive' | 'empty';
-type DisplayLanguage = 'auto' | SupportedLocale;
 
 type PanelView = (
   | { type: 'run'; runId: string }
@@ -30,13 +31,12 @@ type PanelView = (
 
 const COMMAND_PREFIX = "taplWorkflow";
 const TAPL_DB_WATCH_DEBOUNCE_MS = 2000;
-const TAPL_MCP_PATH_SETTING = "taplMcpPath";
-const LANGUAGE_SETTING = "language";
-const LAYOUT_SETTING = "layout";
 let taplMcpClients: TaplMcpClientPool | undefined;
 let selectedWorkspacePath: string | undefined;
 const selectedRunSessions = new Map<string, string>();
 const selectedRunSources = new Map<string, string>();
+// Keep the transport command stable until a save acknowledgement has been delivered.
+const settingsWriteConfigs = new Map<string, ViewerConfig>();
 
 function localize(key: TranslationKey, params?: TranslationParams): string {
   return translate(displayLocale(), key, params);
@@ -61,7 +61,10 @@ export function activate(context: vscode.ExtensionContext): void {
   taplMcpClients = new TaplMcpClientPool();
   const activeProvider = new ActiveProvider();
   const archiveProvider = new ArchiveProvider();
-  const webviewManager = new WorkflowWebviewManager(context.extensionUri);
+  const webviewManager = new WorkflowWebviewManager(context.extensionUri, () => {
+    taplMcpClients?.invalidate();
+    refreshAll();
+  });
 
   const refreshTrees = () => {
     activeProvider.refresh();
@@ -90,20 +93,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(`${COMMAND_PREFIX}.search`, async () => {
       await webviewManager.searchFromCommand();
     }),
-    vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration(`${COMMAND_PREFIX}.${TAPL_MCP_PATH_SETTING}`)) {
-        taplMcpClients?.invalidate();
-        refreshAll();
-        return;
-      }
-      if (
-        !event.affectsConfiguration(`${COMMAND_PREFIX}.${LANGUAGE_SETTING}`)
-        && !event.affectsConfiguration(`${COMMAND_PREFIX}.${LAYOUT_SETTING}`)
-      ) {
-        return;
-      }
-      refreshAll();
-    })
+    // VS Code preferences are intentionally not used for TAPL configuration.
+    // Workspace trust is enforced before launching a workspace-selected executable.
+    ...(vscode.workspace.onDidGrantWorkspaceTrust ? [vscode.workspace.onDidGrantWorkspaceTrust(() => webviewManager.configurationChanged())] : [])
   );
 
   const workspaceWatchers = new Map<string, vscode.Disposable[]>();
@@ -122,11 +114,18 @@ export function activate(context: vscode.ExtensionContext): void {
         const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, pattern));
         watchers.push(watcher, watcher.onDidChange(debouncedRefresh.schedule), watcher.onDidCreate(debouncedRefresh.schedule), watcher.onDidDelete(debouncedRefresh.schedule));
       }
+      const configWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '.tapl/config.toml'));
+      const configChanged = () => webviewManager.configurationChanged();
+      watchers.push(configWatcher, configWatcher.onDidChange(configChanged), configWatcher.onDidCreate(configChanged), configWatcher.onDidDelete(configChanged));
       workspaceWatchers.set(root.uri.fsPath, watchers);
     }
   };
   syncWatchers();
+  // Watch even a missing user file so creation and local-file deletion update fallback.
+  const userConfigWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(homedir(), '.tapl/config.toml'));
+  const userConfigChanged = () => webviewManager.configurationChanged();
   context.subscriptions.push(
+    userConfigWatcher, userConfigWatcher.onDidChange(userConfigChanged), userConfigWatcher.onDidCreate(userConfigChanged), userConfigWatcher.onDidDelete(userConfigChanged),
     { dispose: () => { for (const watchers of workspaceWatchers.values()) { watchers.forEach((watcher) => watcher.dispose()); } } },
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       syncWatchers();
@@ -271,8 +270,23 @@ class WorkflowWebviewManager {
   private generation = 0;
   private capabilities: HostCapabilities = { associativeMemory: false };
   private discardPending = false;
+  private settingsGeneration = 0;
+  private settingsWorkspaceGeneration = 0;
+  private settingsWritePending = false;
+  private settingsRevision: { workspace: string; revision: string } | undefined;
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  private deferredConfigRefresh = false;
+
+  constructor(private readonly extensionUri: vscode.Uri, private readonly refreshConfiguration: () => void) {}
+
+  configurationChanged(): void {
+    if (this.settingsWritePending) {
+      this.deferredConfigRefresh = true;
+      return;
+    }
+    this.deferredConfigRefresh = false;
+    this.refreshConfiguration();
+  }
 
   async openOverview(): Promise<void> {
     this.backStack.length = 0;
@@ -284,6 +298,8 @@ class WorkflowWebviewManager {
   }
 
   resetWorkspace(): void {
+    this.settingsWorkspaceGeneration += 1;
+    this.settingsRevision = undefined;
     this.generation += 1;
     this.backStack.length = 0;
     this.currentView = { type: 'overview' };
@@ -329,6 +345,8 @@ class WorkflowWebviewManager {
     });
     this.panel.webview.onDidReceiveMessage((message: unknown) => { void this.handleMessage(message); });
     this.panel.onDidDispose(() => {
+      this.settingsWorkspaceGeneration += 1;
+      this.settingsRevision = undefined;
       this.generation += 1;
       this.panel = undefined;
       this.shellReady = false;
@@ -369,6 +387,7 @@ class WorkflowWebviewManager {
     panel.title = workspaceTaplTitle();
     const message: HostWebviewMessage = {
       type, view, locale: displayLocale(), layout: displayLayout(),
+      preferences: displayPreferences(),
       workspace: root?.uri.fsPath, capabilities: this.capabilities,
       ...(discardResult ? { discardResult } : {})
     };
@@ -460,6 +479,9 @@ class WorkflowWebviewManager {
       case 'ready': await this.postCurrentView('hydrate'); return;
       case 'refresh': await this.refresh(); return;
       case 'discardRun': await this.discardRun(message); return;
+      case 'getSettings':
+      case 'saveSettings':
+      case 'resetSettings': await this.settingsRequest(message); return;
       case 'openRun':
         if (typeof message.runId === 'string' && message.runId && message.runId.length <= 256) {
           await this.navigate({ type: 'run', runId: message.runId,
@@ -494,6 +516,10 @@ class WorkflowWebviewManager {
       case 'chooseWorkspace': {
         const root = await vscode.window.showWorkspaceFolderPick();
         if (root) {
+          if (root.uri.fsPath !== getWorkspaceRoot()?.uri.fsPath) {
+            this.settingsWorkspaceGeneration += 1;
+            this.settingsRevision = undefined;
+          }
           selectedWorkspacePath = root.uri.fsPath;
           this.capabilities = { associativeMemory: false };
           await this.openOverview();
@@ -528,6 +554,78 @@ class WorkflowWebviewManager {
           await this.navigate({ type: message.command === 'openMemory' ? 'memory' : 'memorySource', memoryId: message.memoryId, source_db: typeof message.source_db === "string" ? message.source_db : undefined }, { pushHistory: true });
         }
         return;
+    }
+  }
+
+  private async settingsRequest(message: Record<string, unknown>): Promise<void> {
+    const panel = this.panel, root = getWorkspaceRoot();
+    if (!panel) return;
+    const workspace = root?.uri.fsPath ?? '';
+    const requestId = typeof message.requestId === 'string' ? message.requestId : '';
+    const action = message.command === 'getSettings' ? 'get' : message.command === 'saveSettings' ? 'save' : 'reset';
+    const workspaceGeneration = this.settingsWorkspaceGeneration;
+    const inWorkspace = () => panel === this.panel && root === getWorkspaceRoot()
+      && workspaceGeneration === this.settingsWorkspaceGeneration;
+    const reply = async (result: Omit<SettingsResult, 'type' | 'requestId' | 'workspace' | 'action'>) => {
+      if (inWorkspace()) await panel.webview.postMessage({ type: 'settings:result', requestId, workspace, action,
+        locale: displayLocale(), layout: displayLayout(), preferences: displayPreferences(), ...result } satisfies SettingsResult);
+    };
+    if (!requestId || requestId.length > 128 || !root || (message.workspace !== undefined && message.workspace !== workspace)) {
+      await reply({ ok: false, code: 'workspace_mismatch', message: 'Settings require the current workspace and a request ID.' }); return;
+    }
+    if (this.settingsWritePending) {
+      await reply({ ok: false, code: 'busy', message: 'A settings write is already in progress.' }); return;
+    }
+    const revision = message.revision;
+    if (action !== 'get' && (message.workspace !== workspace || typeof revision !== 'string' || !revision
+      || this.settingsRevision?.workspace !== workspace || this.settingsRevision.revision !== revision
+      || (action === 'reset' && message.confirmed !== true)
+      || (action === 'save' && (!isRecord(message.values) || Array.isArray(message.values))))) {
+      await reply({ ok: false, code: 'invalid_request', message: 'Reload settings before saving; reset also requires explicit confirmation.' }); return;
+    }
+    const generation = ++this.settingsGeneration;
+    this.settingsWritePending = action !== 'get';
+    try {
+      if (action !== 'get') {
+        try { settingsWriteConfigs.set(workspace, loadViewerConfig(workspace)); }
+        catch (error) {
+          await reply({ ok: false, code: 'invalid_settings', message: error instanceof Error ? error.message : String(error) });
+          return;
+        }
+      }
+      // Configuration belongs to this workspace, independent of selected RUN and source database.
+      // Missing optional session_id deliberately retains the server's runtime identity resolution.
+      if (!inWorkspace()) return;
+      const result = action === 'get'
+        ? await callTaplMcp('tapl_get_settings', {}, root)
+        : await callTaplMcp('tapl_save_settings', {
+          expected_revision: revision, values: action === 'reset' ? {} : message.values,
+          ...(action === 'reset' ? { reset_all: true } : {})
+        }, root);
+      if (!inWorkspace() || generation !== this.settingsGeneration) return;
+      if (!result.ok || result.value.ok === false) {
+        const text = result.ok ? String(result.value.error ?? result.value.message ?? 'Settings request failed.') : result.error;
+        const unsupported = /unknown tool|not found|not supported|does not exist|unrecognized|not available/i.test(text);
+        await reply({ ok: false, code: unsupported ? 'unsupported' : result.ok && typeof result.value.code === 'string' ? result.value.code : 'request_failed',
+          message: unsupported ? 'This TAPL MCP server does not support settings. Update TAPL or set viewer.mcp_path in .tapl/config.toml, then restart the Viewer.' : text });
+        return;
+      }
+      const settings = result.value.settings;
+      if (!isRecord(settings) || typeof settings.revision !== 'string' || !Array.isArray(settings.fields)
+        || !isRecord(settings.values) || !isRecord(settings.defaults)) {
+        await reply({ ok: false, code: 'invalid_response', message: 'The TAPL MCP server returned an invalid settings document.' }); return;
+      }
+      this.settingsRevision = { workspace, revision: settings.revision };
+      await reply({ ok: true, settings: settings as unknown as SettingsDocument,
+        ...(typeof result.value.changed === 'boolean' ? { changed: result.value.changed } : {}) });
+    } finally {
+      if (action !== 'get') {
+        settingsWriteConfigs.delete(workspace);
+        this.settingsWritePending = false;
+      }
+      // Invalidate only after delivering the save reply, including when a watcher
+      // observed the atomic config replacement before the MCP response arrived.
+      if (this.deferredConfigRefresh) this.configurationChanged();
     }
   }
 
@@ -753,7 +851,7 @@ async function searchTapl(query: string): Promise<{ ok: true; value: TaplSearchP
 }
 
 async function callTaplMcp(
-  tool: 'tapl_get_status' | 'tapl_get_run' | 'tapl_list_records' | 'tapl_get_item' | 'tapl_search_history' | 'tapl_list_archives' | 'tapl_get_archive' | 'tapl_recall' | 'tapl_get_memory' | 'tapl_discard_run',
+  tool: 'tapl_get_status' | 'tapl_get_run' | 'tapl_list_records' | 'tapl_get_item' | 'tapl_search_history' | 'tapl_list_archives' | 'tapl_get_archive' | 'tapl_recall' | 'tapl_get_memory' | 'tapl_discard_run' | 'tapl_get_settings' | 'tapl_save_settings',
   args: Record<string, unknown>,
   root: vscode.WorkspaceFolder | undefined = getWorkspaceRoot()
 ): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false; error: string }> {
@@ -767,37 +865,38 @@ async function callTaplMcp(
     const message = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
-      error: `${message} Configure ${COMMAND_PREFIX}.${TAPL_MCP_PATH_SETTING} with the tapl-mcp executable path if it is not on PATH.`
+      error: `${message} Set viewer.mcp_path in .tapl/config.toml to the tapl-mcp executable path if it is not on PATH.`
     };
   }
 }
 
 function taplMcpWorkspace(root: vscode.WorkspaceFolder): TaplMcpWorkspace {
-  const configuration = vscode.workspace.getConfiguration(COMMAND_PREFIX, root.uri);
+  const config = settingsWriteConfigs.get(root.uri.fsPath) ?? loadViewerConfig(root.uri.fsPath);
+  if (viewerConfigRequiresTrust(config) && vscode.workspace.isTrusted === false) {
+    throw new Error(`Trust this workspace before running viewer.mcp_path from ${config.path}.`);
+  }
   return {
     key: root.uri.fsPath,
     cwd: root.uri.fsPath,
-    commands: taplMcpCommandCandidates(configuration.get<string>(TAPL_MCP_PATH_SETTING, ''))
+    commands: taplMcpCommandCandidates(config.preferences.mcp_path)
   };
 }
 
 function displayLocale(): SupportedLocale {
-  const configured = vscode.workspace
-    .getConfiguration(COMMAND_PREFIX)
-    .get<unknown>(LANGUAGE_SETTING, 'auto');
-  const language: DisplayLanguage = configured === 'ko' || configured === 'en'
-    ? configured
-    : 'auto';
+  const language = displayPreferences().language;
   return resolveLocale(language === 'auto' ? vscode.env.language : language);
 }
 
 function displayLayout(): DisplayLayout {
-  const configured = vscode.workspace
-    .getConfiguration(COMMAND_PREFIX)
-    .get<unknown>(LAYOUT_SETTING, 'auto');
-  return configured === 'small' || configured === 'medium' || configured === 'large'
-    ? configured
-    : 'auto';
+  return displayPreferences().layout;
+}
+
+function displayPreferences(): ViewerPreferences {
+  try { return loadViewerConfig(getWorkspaceRoot()?.uri.fsPath).preferences; }
+  catch {
+    // Keep error messages renderable; MCP calls surface the selected-file error.
+    return defaultViewerPreferences();
+  }
 }
 
 function getWorkspaceRoot(): vscode.WorkspaceFolder | undefined {

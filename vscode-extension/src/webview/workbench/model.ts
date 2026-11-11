@@ -1,7 +1,7 @@
 import type { TaplItem, TaplRunSnapshot, TaplWorkflowRun, WebviewView } from '../types';
 
 export const TASK_STATUSES = ['Pending', 'In Progress', 'Blocked', 'Completed', 'Skipped'] as const;
-export type WorkbenchPage = 'current' | 'tasks' | 'records' | 'memories' | 'management' | 'legacy';
+export type WorkbenchPage = 'current' | 'tasks' | 'records' | 'memories' | 'management' | 'settings' | 'legacy';
 export interface PagePosition {
   top: number;
   tracks: Record<string, number>;
@@ -236,6 +236,7 @@ export function back(state: NavigationState, expected?: string): NavigationState
 /** Polling refreshes data, while explicit navigation owns the selected page. */
 export function receiveView(state: NavigationState, view: WebviewView): NavigationState {
   const identity = viewIdentity(view);
+  if (state.route.page === 'settings' && !state.pending) return { ...state, hostIdentity: identity };
   if (state.pending && view.type === 'error')
     return {
       ...state,

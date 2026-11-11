@@ -28,7 +28,7 @@ TAPL connects planning, approval, execution and verification in Codex and Claude
 
 | Page | Purpose |
 | --- | --- |
-| [Configuration](guides/configuration.md) | Select user or repository configuration and inspect effective settings. |
+| [Configuration](guides/configuration.md) | Select configuration files and edit, save or reset settings through the CLI or Viewer. |
 | [Local identity and shared history](guides/storage.md) | Keep a persistent UUID, migrate existing databases, and read peer history. |
 | [Authoring detail](guides/authoring-detail.md) | Use automatic mode-based detail or a fixed level without task or length targets. |
 | [SubAgents](guides/subagents.md) | Configure model preferences and run independent work in parallel. |
