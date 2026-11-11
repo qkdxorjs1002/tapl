@@ -4,6 +4,14 @@
 
 **The integrated layout is implemented in the shared Viewer; the galleries remain synthetic design references. [Viewer](../guides/viewer.md) and [VS Code extension](../guides/vscode.md) describe current product behavior.**
 
+<a id="run-mindmap-concept"></a>
+
+## RUN mindmap concept
+
+The [standalone mindmap prototype](../design/run-mindmap/index.html) places RUN at the center, PLANs on its branches and compact TASKs at their ends. Hover or select a node to highlight its connections. Drag or scroll with two fingers to pan in both directions; pinch to zoom around the gesture position. Mouse wheel pans, Shift+wheel pans horizontally, and Ctrl+wheel zooms. Touchscreens support drag and two-finger pinch; Safari gesture events are handled separately. Press Escape or Center view to recenter; narrow screens keep nodes readable and allow panning. Node and edge motion share a damped spring response. Korean/English, light/dark themes, keyboard navigation and reduced motion are supported.
+
+All records are illustrative. This prototype is independent of the shipping Viewer and makes no workspace or workflow writes.
+
 ## Integrated concept
 
 The [integrated Viewer concept](../design/viewer-workbench/index.html) combines RUN context and PLAN summaries, the Flow kanban of 02 and the TASK status view of 01 in a fixed shell. Screenshots show [current RUN](../design/viewer-workbench/current-ko.png), [Explore details](../design/viewer-workbench/explore-ko.png), [Explore flyout](../design/viewer-workbench/explore-panel-ko.png), [integrated search](../design/viewer-workbench/search-ko.png) and [English with a dark theme](../design/viewer-workbench/current-en-dark.png).

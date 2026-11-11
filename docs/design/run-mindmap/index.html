@@ -1,0 +1,1516 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>TAPL · RUN Mindmap</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        overscroll-behavior: none;
+        --bg: #141b24;
+        --surface: #1c2632;
+        --raised: #24313e;
+        --fg: #e5edf5;
+        --muted: #a1afc0;
+        --line: #38495b;
+        --quiet: #263442;
+        --accent: #a7cccd;
+        --accent-rgb: 167, 204, 205;
+        --progress: #91b8ff;
+        --completed: #80d3ae;
+        --blocked: #efa58b;
+        --pending: #a5afbf;
+        --shadow: 0 12px 36px #080e1726;
+        --grid: #879aaa15;
+      }
+      :root[data-theme="light"] {
+        color-scheme: light;
+        --bg: #f5f7fa;
+        --surface: #fff;
+        --raised: #edf2f5;
+        --fg: #243243;
+        --muted: #607185;
+        --line: #d0dbe5;
+        --quiet: #e7edf2;
+        --accent: #376e73;
+        --accent-rgb: 55, 110, 115;
+        --progress: #3567ba;
+        --completed: #247354;
+        --blocked: #a34e36;
+        --pending: #6c788a;
+        --shadow: 0 10px 30px #26384f0b;
+        --grid: #617d9b18;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font:
+          14px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          "Apple SD Gothic Neo",
+          "Noto Sans KR",
+          sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+        overflow: hidden;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+      }
+      button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 5px;
+      }
+      svg {
+        display: block;
+      }
+      button svg {
+        width: 17px;
+        height: 17px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      button {
+        touch-action: manipulation;
+      }
+      #app {
+        position: relative;
+        width: 100%;
+        height: 100dvh;
+        isolation: isolate;
+      }
+      #map {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        touch-action: none;
+        overscroll-behavior: none;
+        cursor: grab;
+        outline-offset: -8px;
+        background-image: radial-gradient(
+          circle,
+          var(--grid) 0.8px,
+          transparent 1px
+        );
+        background-size: 26px 26px;
+      }
+      #map.dragging {
+        cursor: grabbing;
+      }
+      #map::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: radial-gradient(
+          ellipse at 50% 50%,
+          rgba(var(--accent-rgb), 0.045),
+          transparent 61%
+        );
+      }
+      #pointer-light {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: radial-gradient(
+          360px circle at var(--px, 50%) var(--py, 50%),
+          rgba(var(--accent-rgb), 0.045),
+          transparent
+        );
+        opacity: 0;
+        transition: opacity 0.6s;
+      }
+      #map.pointer-inside #pointer-light {
+        opacity: 1;
+      }
+      #world {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 0;
+        height: 0;
+        will-change: transform;
+      }
+      #connections {
+        position: absolute;
+        left: -1000px;
+        top: -700px;
+        width: 2000px;
+        height: 1400px;
+        overflow: visible;
+        pointer-events: none;
+      }
+      .edge {
+        fill: none;
+        stroke: var(--line);
+        stroke-width: 1.2;
+        transition:
+          stroke 0.25s,
+          opacity 0.3s,
+          stroke-width 0.25s;
+      }
+      .edge.active {
+        stroke: var(--accent);
+        stroke-width: 1.65;
+      }
+      .edge.dim {
+        opacity: 0.17;
+      }
+      .pulse {
+        fill: var(--accent);
+        filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.6));
+        transition: opacity 0.3s;
+      }
+      .node {
+        position: absolute;
+        left: 0;
+        top: 0;
+        will-change: transform;
+        opacity: 0;
+        transition: opacity 0.5s;
+        transition-delay: calc(var(--order) * 25ms);
+      }
+      #app[data-ready="true"] .node {
+        opacity: 1;
+      }
+      .node-button {
+        display: flex;
+        width: 100%;
+        height: 100%;
+        flex-direction: column;
+        justify-content: center;
+        gap: 7px;
+        padding: 13px 16px;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        text-align: left;
+        cursor: pointer;
+        position: relative;
+        transition:
+          background 0.25s,
+          border-color 0.25s,
+          box-shadow 0.3s,
+          opacity 0.3s;
+        transform: perspective(700px) rotateX(var(--rx, 0deg))
+          rotateY(var(--ry, 0deg));
+        overflow: visible;
+      }
+      .node-button:hover,
+      .node-button:focus-visible,
+      .node.emphasis .node-button {
+        border-color: color-mix(in srgb, var(--accent) 68%, var(--line));
+        box-shadow:
+          0 0 0 4px rgba(var(--accent-rgb), 0.035),
+          0 12px 38px rgba(var(--accent-rgb), 0.045);
+        background: color-mix(in srgb, var(--accent) 3%, var(--surface));
+      }
+      .node.selected .node-button {
+        border-color: var(--accent);
+        box-shadow:
+          0 0 0 4px rgba(var(--accent-rgb), 0.08),
+          var(--shadow);
+      }
+      .node.dim .node-button {
+        opacity: 0.31;
+      }
+      .node[data-kind="run"] .node-button {
+        padding: 22px 24px;
+        border-color: color-mix(in srgb, var(--accent) 54%, var(--line));
+        border-radius: 22px;
+        background: linear-gradient(
+          145deg,
+          color-mix(in srgb, var(--accent) 6%, var(--surface)),
+          var(--surface)
+        );
+        box-shadow:
+          0 0 0 8px rgba(var(--accent-rgb), 0.025),
+          0 22px 80px rgba(var(--accent-rgb), 0.055);
+      }
+      .node[data-kind="run"]::before {
+        content: "";
+        position: absolute;
+        inset: -22px;
+        border: 1px solid rgba(var(--accent-rgb), 0.075);
+        border-radius: 42px;
+        pointer-events: none;
+      }
+      .node[data-kind="plan"] .node-button {
+        border-radius: 15px;
+        padding: 15px 17px;
+        gap: 9px;
+      }
+      .meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-width: 0;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.2;
+      }
+      .stable-id {
+        font:
+          10px/1.3 ui-monospace,
+          SFMono-Regular,
+          Consolas,
+          monospace;
+        letter-spacing: 0.055em;
+        white-space: nowrap;
+      }
+      .node-title {
+        display: block;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.45;
+        letter-spacing: -0.15px;
+      }
+      .node[data-kind="plan"] .node-title {
+        font-size: 14px;
+      }
+      .node[data-kind="run"] .node-title {
+        font-size: 19px;
+        font-weight: 600;
+        letter-spacing: -0.6px;
+        margin: 1px 0 8px;
+      }
+      .state[hidden] {
+        display: none;
+      }
+      .state {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        white-space: nowrap;
+        font-size: 10px;
+        line-height: 1.2;
+        color: var(--muted);
+      }
+      .state-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        display: inline-block;
+        background: currentColor;
+        flex: none;
+      }
+      .state[data-status="progress"] {
+        color: var(--progress);
+      }
+      .state[data-status="completed"] {
+        color: var(--completed);
+      }
+      .state[data-status="blocked"] {
+        color: var(--blocked);
+      }
+      .state[data-status="pending"] {
+        color: var(--pending);
+      }
+      .state[data-status="pending"] .state-dot {
+        background: transparent;
+        border: 1px solid currentColor;
+      }
+      .state[data-status="blocked"] .state-dot {
+        border-radius: 1px;
+        transform: rotate(45deg);
+      }
+      .plan-foot {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .plan-track {
+        height: 2px;
+        background: var(--quiet);
+        width: 54px;
+        border-radius: 4px;
+        overflow: hidden;
+        flex: none;
+      }
+      .plan-track i {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        border-radius: 4px;
+      }
+      .run-foot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .run-numbers {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .run-percent {
+        font-size: 25px;
+        line-height: 1.1;
+        color: var(--accent);
+        font-weight: 400;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -1px;
+      }
+      .run-percent small {
+        font-size: 12px;
+        letter-spacing: 0;
+        margin-left: 2px;
+      }
+      .ring {
+        width: 48px;
+        height: 48px;
+        transform: rotate(-90deg);
+      }
+      .ring-track {
+        fill: none;
+        stroke: var(--quiet);
+        stroke-width: 2;
+      }
+      .ring-value {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 2;
+        stroke-linecap: round;
+      }
+      .topbar {
+        position: absolute;
+        inset: 24px 26px auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        pointer-events: none;
+        z-index: 2;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        letter-spacing: 0.13em;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--muted);
+      }
+      .concept {
+        font-size: 10px;
+        letter-spacing: 0;
+        color: var(--muted);
+        opacity: 0.65;
+      }
+      .preferences,
+      .camera-controls {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        pointer-events: auto;
+      }
+      .icon-button {
+        border: 1px solid transparent;
+        background: transparent;
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+        color: var(--muted);
+        cursor: pointer;
+        position: relative;
+      }
+      .icon-button:hover {
+        background: var(--raised);
+        color: var(--fg);
+      }
+      .icon-button[aria-pressed="true"] {
+        color: var(--accent);
+        background: rgba(var(--accent-rgb), 0.06);
+      }
+      .icon-button::after {
+        content: attr(data-tip);
+        position: absolute;
+        top: 43px;
+        right: 0;
+        padding: 6px 9px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        color: var(--fg);
+        border-radius: 7px;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(-3px);
+        transition:
+          opacity 0.14s,
+          transform 0.14s;
+        font-size: 11px;
+        box-shadow: var(--shadow);
+      }
+      .icon-button:is(:hover, :focus-visible)::after {
+        opacity: 1;
+        transform: none;
+      }
+      .bottom-bar {
+        position: absolute;
+        left: 26px;
+        right: 26px;
+        bottom: 22px;
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 16px;
+        pointer-events: none;
+        z-index: 2;
+      }
+      .legend {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        pointer-events: none;
+      }
+      .legend .state {
+        font-size: 11px;
+        gap: 6px;
+      }
+      .camera-controls {
+        gap: 3px;
+        padding: 5px;
+        border: 1px solid var(--quiet);
+        background: var(--surface);
+        border-radius: 13px;
+        box-shadow: var(--shadow);
+      }
+      .camera-controls .icon-button {
+        width: 32px;
+        height: 32px;
+      }
+      .camera-controls .icon-button::after {
+        top: auto;
+        bottom: 44px;
+      }
+      .zoom-label {
+        font:
+          11px/1 ui-monospace,
+          SFMono-Regular,
+          Consolas,
+          monospace;
+        color: var(--muted);
+        min-width: 45px;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+      .key-hint {
+        position: absolute;
+        left: 50%;
+        bottom: 29px;
+        transform: translateX(-50%);
+        color: var(--muted);
+        opacity: 0.48;
+        font-size: 10px;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+      }
+      #app[data-still="true"] *,
+      #app[data-still="true"] *::before {
+        transition: none !important;
+        animation: none !important;
+      }
+      #app[data-still="true"] #pointer-light {
+        display: none;
+      }
+      @media (max-width: 700px) {
+        .topbar {
+          inset: 17px 16px auto;
+        }
+        .bottom-bar {
+          left: 16px;
+          right: 16px;
+          bottom: 16px;
+          align-items: center;
+        }
+        .legend {
+          gap: 8px;
+          max-width: 165px;
+          row-gap: 7px;
+        }
+        .legend .state {
+          font-size: 10px;
+        }
+        .key-hint {
+          display: none;
+        }
+        .brand {
+          gap: 8px;
+          font-size: 10px;
+          letter-spacing: 0.08em;
+        }
+        .concept {
+          font-size: 9px;
+        }
+        .preferences {
+          gap: 1px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before {
+          transition: none !important;
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app" data-ready="false">
+      <div id="map" role="region" tabindex="0" aria-label="RUN 마인드맵">
+        <div id="pointer-light"></div>
+        <div id="world">
+          <svg
+            id="connections"
+            viewBox="-1000 -700 2000 1400"
+            aria-hidden="true"
+          ></svg>
+          <div id="nodes"></div>
+        </div>
+      </div>
+      <header class="topbar">
+        <div class="brand">
+          RUN MINDMAP
+          <span class="concept" data-copy="concept">시안 · 예시 데이터</span>
+        </div>
+        <div class="preferences">
+          <button class="icon-button" data-action="language" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M3 5h12M9 3v2M5 5c0 6 5 9 8 10M13 5c0 6-5 9-8 10M14 21l4-10 4 10M15.5 18h5"
+              />
+            </svg>
+          </button>
+          <button class="icon-button" data-action="theme" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.5 14.5A9 9 0 0 1 9.5 3.5a9 9 0 1 0 11 11z" />
+            </svg>
+          </button>
+          <button class="icon-button" data-action="motion" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 5v14M16 5v14" />
+            </svg>
+          </button>
+        </div>
+      </header>
+      <footer class="bottom-bar">
+        <div class="legend" aria-label="상태">
+          <span class="state" data-status="progress"
+            ><i class="state-dot"></i
+            ><span data-copy="progress">진행 중</span></span
+          >
+          <span class="state" data-status="blocked"
+            ><i class="state-dot"></i
+            ><span data-copy="blocked">막힘</span></span
+          >
+          <span class="state" data-status="pending"
+            ><i class="state-dot"></i
+            ><span data-copy="pending">대기</span></span
+          >
+          <span class="state" data-status="completed"
+            ><i class="state-dot"></i
+            ><span data-copy="completed">완료</span></span
+          >
+        </div>
+        <div class="camera-controls">
+          <button class="icon-button" data-action="minus" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h14" />
+            </svg>
+          </button>
+          <span class="zoom-label">100%</span>
+          <button class="icon-button" data-action="plus" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h14M12 5v14" />
+            </svg>
+          </button>
+          <button class="icon-button" data-action="fit" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+        </div>
+      </footer>
+      <span class="key-hint" data-copy="hint"
+        >두 손가락 이동 · 핀치 확대 · Esc 중앙으로</span
+      >
+      <div class="sr-only" id="announcement" aria-live="polite"></div>
+    </main>
+    <script>
+      (() => {
+        "use strict";
+        const $ = (s) => document.querySelector(s);
+        const app = $("#app"),
+          map = $("#map"),
+          world = $("#world"),
+          svg = $("#connections");
+        const copy = {
+          ko: {
+            concept: "시안 · 예시 데이터",
+            progress: "진행 중",
+            blocked: "막힘",
+            pending: "대기",
+            completed: "완료",
+            language: "English로 전환",
+            theme: "테마 전환",
+            motion: "모션 켜기 / 끄기",
+            minus: "축소",
+            plus: "확대",
+            fit: "중앙으로",
+            hint: "두 손가락 이동 · 핀치 확대 · Esc 중앙으로",
+            map: "RUN → PLAN → TASK 마인드맵. 방향키로 이동, +와 -로 확대, Escape로 중앙 복귀.",
+            plans: "PLAN 4개",
+            tasks: "TASK 12개",
+            done: (n) => `완료 ${n}개`,
+            count: (n) => `TASK ${n}개`,
+            finished: (n, t) => `${n}/${t} 완료`,
+            selected: "선택",
+            run: "Viewer 경험 개편",
+          },
+          en: {
+            concept: "Concept · Sample data",
+            progress: "In progress",
+            blocked: "Blocked",
+            pending: "Pending",
+            completed: "Done",
+            language: "한국어로 전환",
+            theme: "Switch theme",
+            motion: "Toggle motion",
+            minus: "Zoom out",
+            plus: "Zoom in",
+            fit: "Center view",
+            hint: "Two-finger pan · Pinch to zoom · Esc to center",
+            map: "RUN → PLAN → TASK mindmap. Arrow keys pan, + and - zoom, Escape centers the map.",
+            plans: "4 PLANs",
+            tasks: "12 TASKs",
+            done: (n) => `${n} done`,
+            count: (n) => `${n} TASKs`,
+            finished: (n, t) => `${n}/${t} done`,
+            selected: "Selected",
+            run: "Viewer experience",
+          },
+        };
+        const groups = [
+          {
+            id: "PLAN-001",
+            x: -310,
+            y: -172,
+            label: ["화면 구조 정리", "Layout & navigation"],
+            tasks: [
+              ["탐색 구조 통합", "Unify navigation", "completed"],
+              ["헤더·패널 정렬", "Align header & sidebar", "completed"],
+              ["반응형 여백 보정", "Refine responsive spacing", "progress"],
+            ],
+          },
+          {
+            id: "PLAN-002",
+            x: 310,
+            y: -172,
+            label: ["기록 탐색 개선", "Record exploration"],
+            tasks: [
+              ["PLAN 상세 정돈", "Refine PLAN details", "completed"],
+              ["TASK 카드 다듬기", "Polish TASK cards", "progress"],
+              ["원본 이동 연결", "Connect source navigation", "pending"],
+            ],
+          },
+          {
+            id: "PLAN-003",
+            x: -310,
+            y: 172,
+            label: ["데이터 흐름 연결", "Data & context"],
+            tasks: [
+              ["RUN 문맥 유지", "Preserve RUN context", "completed"],
+              ["동기화 예외 확인", "Review sync exceptions", "blocked"],
+              ["기록 검색 연결", "Connect record search", "pending"],
+            ],
+          },
+          {
+            id: "PLAN-004",
+            x: 310,
+            y: 172,
+            label: ["검증과 배포", "Validation & release"],
+            tasks: [
+              ["테마 대비 검증", "Verify theme contrast", "completed"],
+              ["모션·접근성 확인", "Check motion & access", "progress"],
+              ["릴리스 점검", "Review release readiness", "pending"],
+            ],
+          },
+        ];
+        const nodes = [
+          {
+            id: "RUN-024",
+            kind: "run",
+            bx: 0,
+            by: 0,
+            w: 238,
+            h: 158,
+            parent: null,
+            label: ["Viewer 경험 개편", "Viewer experience"],
+          },
+        ];
+        let taskIndex = 0;
+        for (const g of groups) {
+          nodes.push({
+            ...g,
+            kind: "plan",
+            bx: g.x,
+            by: g.y,
+            w: 216,
+            h: 100,
+            parent: "RUN-024",
+          });
+          g.tasks.forEach((task, i) =>
+            nodes.push({
+              id: `TASK-${String(++taskIndex).padStart(3, "0")}`,
+              kind: "task",
+              bx: Math.sign(g.x) * 610,
+              by: g.y + (i - 1) * 88,
+              w: 210,
+              h: 66,
+              parent: g.id,
+              label: task.slice(0, 2),
+              status: task[2],
+            }),
+          );
+        }
+        const byId = new Map(nodes.map((n) => [n.id, n]));
+        const total = nodes.filter((n) => n.kind === "task").length,
+          done = nodes.filter((n) => n.status === "completed").length;
+        const percent = Math.round((done / total) * 100);
+        let settings = { language: "ko", theme: "dark", motion: true };
+        try {
+          const saved = JSON.parse(
+            localStorage.getItem("tapl-mindmap-concept") || "{}",
+          );
+          if (["ko", "en"].includes(saved.language))
+            settings.language = saved.language;
+          if (["dark", "light"].includes(saved.theme))
+            settings.theme = saved.theme;
+          if (typeof saved.motion === "boolean") settings.motion = saved.motion;
+        } catch {}
+        const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+        let selected = null,
+          hovered = null,
+          focusId = null,
+          drag = null,
+          suppressUntil = 0,
+          raf = 0,
+          last = 0;
+        const camera = { x: 0, y: 0, z: 1, tx: 0, ty: 0, tz: 1 };
+        const pointer = { x: 0, y: 0, sx: null, sy: null, inside: false };
+        const touches = new Map();
+        let touchPinch = null,
+          nativePinch = null,
+          nativeWheelUntil = 0;
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+        const moving = () => settings.motion && !reduced.matches;
+        const t = () => copy[settings.language];
+        const title = (n) => n.label[settings.language === "ko" ? 0 : 1];
+        function save() {
+          try {
+            localStorage.setItem(
+              "tapl-mindmap-concept",
+              JSON.stringify(settings),
+            );
+          } catch {}
+        }
+        function wake() {
+          if (!raf && !document.hidden) raf = requestAnimationFrame(frame);
+        }
+        function fit() {
+          camera.tx = 0;
+          camera.ty = 0;
+          camera.tz = clamp(
+            Math.min(
+              (map.clientWidth - 72) / 1440,
+              (map.clientHeight - 160) / 600,
+            ),
+            0.72,
+            1,
+          );
+          wake();
+        }
+        function setZoom(
+          value,
+          px = map.clientWidth / 2,
+          py = map.clientHeight / 2,
+        ) {
+          const z = clamp(value, 0.45, 1.7);
+          const wx = (px - map.clientWidth / 2 - camera.tx) / camera.tz,
+            wy = (py - map.clientHeight / 2 - camera.ty) / camera.tz;
+          camera.tx = px - map.clientWidth / 2 - wx * z;
+          camera.ty = py - map.clientHeight / 2 - wy * z;
+          camera.tz = z;
+          wake();
+        }
+        function pan(x, y) {
+          camera.tx = clamp(x, -1400, 1400);
+          camera.ty = clamp(y, -900, 900);
+          wake();
+        }
+        function pinchOrigin(x, y, scale) {
+          return {
+            z: camera.tz,
+            scale,
+            wx: (x - map.clientWidth / 2 - camera.tx) / camera.tz,
+            wy: (y - map.clientHeight / 2 - camera.ty) / camera.tz,
+          };
+        }
+        function applyPinch(origin, x, y, scale) {
+          const z = clamp((origin.z * scale) / origin.scale, 0.45, 1.7);
+          camera.tz = z;
+          camera.tx = x - map.clientWidth / 2 - origin.wx * z;
+          camera.ty = y - map.clientHeight / 2 - origin.wy * z;
+          wake();
+        }
+        function touchPair() {
+          const [a, b] = [...touches.values()];
+          return {
+            x: (a.x + b.x) / 2,
+            y: (a.y + b.y) / 2,
+            distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+          };
+        }
+        function emphasize() {
+          const id = hovered || focusId || selected;
+          const current = byId.get(id),
+            group = current?.kind === "plan" ? id : null;
+          const related = new Set(["RUN-024"]);
+          if (current?.kind === "task") {
+            related.add(current.id);
+            related.add(current.parent);
+          }
+          if (group)
+            nodes
+              .filter((n) => n.id === group || n.parent === group)
+              .forEach((n) => related.add(n.id));
+          const active = !!current && current.kind !== "run";
+          for (const n of nodes) {
+            n.el.classList.toggle("dim", active && !related.has(n.id));
+            n.el.classList.toggle("emphasis", active && related.has(n.id));
+            n.el.classList.toggle("selected", n.id === selected);
+          }
+          for (const e of edges) {
+            e.highlight =
+              active && related.has(e.from.id) && related.has(e.to.id);
+            e.dim = active && !e.highlight;
+            e.path.classList.toggle("active", e.highlight);
+            e.path.classList.toggle("dim", e.dim);
+          }
+          app.dataset.selection = selected || "";
+          wake();
+        }
+        function select(n) {
+          selected = n.kind === "run" || selected === n.id ? null : n.id;
+          $("#announcement").textContent = selected
+            ? `${t().selected}: ${n.id} ${title(n)}`
+            : "";
+          emphasize();
+        }
+        for (const [i, n] of nodes.entries()) {
+          n.x = n.bx;
+          n.y = n.by;
+          n.vx = 0;
+          n.vy = 0;
+          n.scale = 1;
+          n.phase = i * 1.37;
+          const el = document.createElement("div");
+          el.className = "node";
+          el.dataset.id = n.id;
+          el.dataset.kind = n.kind;
+          if (n.parent) el.dataset.parent = n.parent;
+          el.style.width = n.w + "px";
+          el.style.height = n.h + "px";
+          el.style.setProperty(
+            "--order",
+            String(n.kind === "run" ? 0 : n.kind === "plan" ? 1 : (i % 4) + 2),
+          );
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "node-button";
+          button.innerHTML =
+            '<span class="meta"><span class="stable-id"></span><span class="state"><i class="state-dot"></i><span class="state-text"></span></span></span><strong class="node-title"></strong>';
+          button.querySelector(".stable-id").textContent = n.id;
+          if (n.kind === "plan")
+            button.insertAdjacentHTML(
+              "beforeend",
+              '<span class="plan-foot"><span class="plan-count"></span><span class="plan-track"><i></i></span></span>',
+            );
+          if (n.kind === "run")
+            button.insertAdjacentHTML(
+              "beforeend",
+              `<span class="run-foot"><span class="run-numbers"><span class="run-percent">${percent}<small>%</small></span><span class="run-count"></span></span><svg class="ring" viewBox="0 0 48 48" role="progressbar" aria-label="TASK completion" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"><circle class="ring-track" cx="24" cy="24" r="20"/><circle class="ring-value" cx="24" cy="24" r="20" stroke-dasharray="${(done / total) * 125.664} 125.664"/></svg></span>`,
+            );
+          button.addEventListener("pointerenter", (e) => {
+            if (e.pointerType === "mouse" && !drag) {
+              hovered = n.id;
+              emphasize();
+            }
+          });
+          button.addEventListener("pointerleave", () => {
+            if (hovered === n.id) {
+              hovered = null;
+              emphasize();
+            }
+          });
+          button.addEventListener("click", () => {
+            if (performance.now() > suppressUntil) select(n);
+          });
+          button.addEventListener("focus", () => {
+            focusId = n.id;
+            emphasize();
+            const r = button.getBoundingClientRect();
+            if (
+              r.left < 12 ||
+              r.right > innerWidth - 12 ||
+              r.top < 75 ||
+              r.bottom > innerHeight - 75
+            ) {
+              if (map.clientWidth < 600) camera.tz = Math.max(camera.tz, 1);
+              camera.tx = -n.bx * camera.tz;
+              camera.ty = -n.by * camera.tz;
+              wake();
+            }
+          });
+          button.addEventListener("blur", () => {
+            focusId = null;
+            emphasize();
+          });
+          el.append(button);
+          $("#nodes").append(el);
+          n.el = el;
+          n.button = button;
+        }
+        const edges = nodes
+          .filter((n) => n.parent)
+          .map((n, i) => {
+            const path = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "path",
+            );
+            path.classList.add("edge");
+            path.dataset.from = n.parent;
+            path.dataset.to = n.id;
+            svg.append(path);
+            const dot = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "circle",
+            );
+            dot.classList.add("pulse");
+            dot.setAttribute("r", "2");
+            svg.append(dot);
+            return {
+              from: byId.get(n.parent),
+              to: n,
+              path,
+              dot,
+              phase: i * 0.173,
+              highlight: false,
+              dim: false,
+            };
+          });
+        function labels() {
+          document.documentElement.lang = settings.language;
+          document.documentElement.dataset.theme = settings.theme;
+          document
+            .querySelectorAll("[data-copy]")
+            .forEach((el) => (el.textContent = t()[el.dataset.copy]));
+          document.querySelectorAll("[data-action]").forEach((el) => {
+            const label = t()[el.dataset.action];
+            el.setAttribute("aria-label", label);
+            el.dataset.tip = label;
+          });
+          document
+            .querySelector("[data-action=motion]")
+            .setAttribute("aria-pressed", String(moving()));
+          document
+            .querySelector(".legend")
+            .setAttribute(
+              "aria-label",
+              settings.language === "ko" ? "작업 상태" : "Task status",
+            );
+          map.setAttribute("aria-label", t().map);
+          app.dataset.still = String(!moving());
+          for (const n of nodes) {
+            n.button.querySelector(".node-title").textContent = title(n);
+            const state = n.button.querySelector(".state"),
+              status = n.kind === "task" ? n.status : "progress";
+            state.dataset.status = status;
+            state.querySelector(".state-text").textContent = t()[status];
+            if (n.kind === "plan") {
+              state.hidden = true;
+              const children = nodes.filter((c) => c.parent === n.id),
+                finished = children.filter(
+                  (c) => c.status === "completed",
+                ).length;
+              n.button.querySelector(".plan-count").textContent = t().finished(
+                finished,
+                children.length,
+              );
+              n.button.querySelector(".plan-track i").style.width =
+                (finished / children.length) * 100 + "%";
+            }
+            if (n.kind === "run") {
+              n.button.querySelector(".run-count").textContent =
+                `${t().tasks} · ${t().done(done)}`;
+              n.button
+                .querySelector(".ring")
+                .setAttribute(
+                  "aria-label",
+                  settings.language === "ko"
+                    ? "TASK 완료율"
+                    : "TASK completion",
+                );
+            }
+            n.button.setAttribute(
+              "aria-label",
+              `${n.id} ${title(n)}${n.status ? " · " + t()[n.status] : ""}`,
+            );
+          }
+          wake();
+        }
+        document.querySelectorAll("[data-action]").forEach((button) =>
+          button.addEventListener("click", () => {
+            switch (button.dataset.action) {
+              case "language":
+                settings.language = settings.language === "ko" ? "en" : "ko";
+                labels();
+                save();
+                break;
+              case "theme":
+                settings.theme = settings.theme === "dark" ? "light" : "dark";
+                labels();
+                save();
+                break;
+              case "motion":
+                settings.motion = !settings.motion;
+                labels();
+                save();
+                break;
+              case "plus":
+                setZoom(camera.tz * 1.15);
+                break;
+              case "minus":
+                setZoom(camera.tz / 1.15);
+                break;
+              case "fit":
+                selected = null;
+                hovered = null;
+                focusId = null;
+                fit();
+                emphasize();
+                break;
+            }
+          }),
+        );
+        map.addEventListener("pointerdown", (e) => {
+          if (e.button !== 0) return;
+          if (e.pointerType === "touch") {
+            touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (touches.size >= 2) {
+              const p = touchPair();
+              touchPinch = pinchOrigin(p.x, p.y, p.distance);
+              drag = null;
+              hovered = null;
+              suppressUntil = Infinity;
+              map.classList.add("dragging");
+              for (const id of touches.keys())
+                if (!map.hasPointerCapture(id)) map.setPointerCapture(id);
+              emphasize();
+              return;
+            }
+          }
+          if (drag || nativePinch) return;
+          drag = {
+            id: e.pointerId,
+            x: e.clientX,
+            y: e.clientY,
+            tx: camera.tx,
+            ty: camera.ty,
+            moved: false,
+          };
+        });
+        map.addEventListener("pointermove", (e) => {
+          const x = e.clientX,
+            y = e.clientY;
+          pointer.sx = x;
+          pointer.sy = y;
+          if (touches.has(e.pointerId)) {
+            touches.set(e.pointerId, { x, y });
+            if (touchPinch && touches.size >= 2) {
+              const p = touchPair();
+              applyPinch(touchPinch, p.x, p.y, p.distance);
+              return;
+            }
+          }
+          pointer.x = (x - map.clientWidth / 2 - camera.x) / camera.z;
+          pointer.y = (y - map.clientHeight / 2 - camera.y) / camera.z;
+          pointer.inside = e.pointerType === "mouse";
+          map.style.setProperty("--px", x + "px");
+          map.style.setProperty("--py", y + "px");
+          map.classList.toggle("pointer-inside", pointer.inside);
+          if (drag && drag.id === e.pointerId) {
+            const dx = x - drag.x,
+              dy = y - drag.y;
+            if (Math.hypot(dx, dy) > 5) drag.moved = true;
+            if (drag.moved) {
+              if (!map.hasPointerCapture(e.pointerId))
+                map.setPointerCapture(e.pointerId);
+              pan(drag.tx + dx, drag.ty + dy);
+              map.classList.add("dragging");
+              hovered = null;
+              emphasize();
+            }
+          }
+          wake();
+        });
+        function endDrag(e) {
+          if (touches.delete(e.pointerId) && touchPinch) {
+            suppressUntil = performance.now() + 250;
+            touchPinch = null;
+            if (touches.size >= 2) {
+              const p = touchPair();
+              touchPinch = pinchOrigin(p.x, p.y, p.distance);
+            } else if (touches.size === 1) {
+              const [id, p] = [...touches.entries()][0];
+              drag = {
+                id,
+                x: p.x,
+                y: p.y,
+                tx: camera.tx,
+                ty: camera.ty,
+                moved: true,
+              };
+            } else {
+              drag = null;
+              map.classList.remove("dragging");
+            }
+            if (map.hasPointerCapture(e.pointerId))
+              map.releasePointerCapture(e.pointerId);
+            wake();
+            return;
+          }
+          if (!drag || drag.id !== e.pointerId) return;
+          if (drag.moved) suppressUntil = performance.now() + 180;
+          drag = null;
+          map.classList.remove("dragging");
+          if (map.hasPointerCapture(e.pointerId))
+            map.releasePointerCapture(e.pointerId);
+          wake();
+        }
+        map.addEventListener("pointerup", endDrag);
+        map.addEventListener("pointercancel", endDrag);
+        window.addEventListener("pointerup", endDrag);
+        window.addEventListener("pointercancel", endDrag);
+        function cancelDrag() {
+          const ids = new Set(touches.keys());
+          if (drag) ids.add(drag.id);
+          if (drag || touchPinch || nativePinch)
+            suppressUntil = performance.now() + 250;
+          drag = touchPinch = nativePinch = null;
+          touches.clear();
+          map.classList.remove("dragging");
+          for (const id of ids)
+            if (map.hasPointerCapture(id)) map.releasePointerCapture(id);
+          pointer.inside = false;
+          hovered = null;
+          emphasize();
+        }
+        window.addEventListener("blur", cancelDrag);
+        map.addEventListener("lostpointercapture", (e) => {
+          if (touches.has(e.pointerId) || drag?.id === e.pointerId)
+            cancelDrag();
+        });
+        map.addEventListener("pointerleave", () => {
+          pointer.inside = false;
+          map.classList.remove("pointer-inside");
+          hovered = null;
+          emphasize();
+        });
+        map.addEventListener("click", (e) => {
+          if (
+            !e.target.closest(".node-button") &&
+            performance.now() > suppressUntil
+          ) {
+            selected = null;
+            focusId = null;
+            map.focus({ preventScroll: true });
+            emphasize();
+          }
+        });
+        map.addEventListener(
+          "wheel",
+          (e) => {
+            e.preventDefault();
+            if (
+              nativePinch ||
+              performance.now() < nativeWheelUntil ||
+              touches.size
+            )
+              return;
+            const dx =
+              e.deltaX *
+              (e.deltaMode === 1
+                ? 16
+                : e.deltaMode === 2
+                  ? map.clientWidth
+                  : 1);
+            const dy =
+              e.deltaY *
+              (e.deltaMode === 1
+                ? 16
+                : e.deltaMode === 2
+                  ? map.clientHeight
+                  : 1);
+            // Browsers expose trackpad pinch as ctrl+wheel; ordinary wheel input always pans.
+            if (e.ctrlKey)
+              setZoom(camera.tz * Math.exp(-dy * 0.01), e.clientX, e.clientY);
+            else
+              pan(
+                camera.tx - (e.shiftKey && dx === 0 ? dy : dx),
+                camera.ty - (e.shiftKey && dx === 0 ? 0 : dy),
+              );
+            hovered = null;
+            pointer.inside = false;
+            map.classList.remove("pointer-inside");
+            emphasize();
+          },
+          { passive: false },
+        );
+        // Safari's native GestureEvent is separate from ctrl+wheel. Pointer Events own touchscreen input.
+        map.addEventListener(
+          "gesturestart",
+          (e) => {
+            e.preventDefault();
+            if (touches.size) return;
+            cancelDrag();
+            const x = e.clientX || pointer.sx || map.clientWidth / 2;
+            const y = e.clientY || pointer.sy || map.clientHeight / 2;
+            nativePinch = pinchOrigin(x, y, e.scale > 0 ? e.scale : 1);
+            nativeWheelUntil = performance.now() + 120;
+          },
+          { passive: false },
+        );
+        map.addEventListener(
+          "gesturechange",
+          (e) => {
+            e.preventDefault();
+            if (!nativePinch || !(e.scale > 0)) return;
+            applyPinch(
+              nativePinch,
+              e.clientX || pointer.sx || map.clientWidth / 2,
+              e.clientY || pointer.sy || map.clientHeight / 2,
+              e.scale,
+            );
+            nativeWheelUntil = performance.now() + 120;
+          },
+          { passive: false },
+        );
+        map.addEventListener(
+          "gestureend",
+          (e) => {
+            e.preventDefault();
+            if (!nativePinch) return;
+            nativePinch = null;
+            nativeWheelUntil = performance.now() + 120;
+          },
+          { passive: false },
+        );
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            cancelDrag();
+            selected = null;
+            hovered = null;
+            focusId = null;
+            document.activeElement?.blur();
+            map.focus({ preventScroll: true });
+            fit();
+            emphasize();
+            return;
+          }
+          if (e.target !== map) return;
+          if (
+            [
+              "ArrowLeft",
+              "ArrowRight",
+              "ArrowUp",
+              "ArrowDown",
+              "+",
+              "=",
+              "-",
+              "0",
+            ].includes(e.key)
+          )
+            e.preventDefault();
+          if (e.key === "ArrowLeft") camera.tx += 80;
+          if (e.key === "ArrowRight") camera.tx -= 80;
+          if (e.key === "ArrowUp") camera.ty += 80;
+          if (e.key === "ArrowDown") camera.ty -= 80;
+          if (e.key === "+" || e.key === "=") setZoom(camera.tz * 1.15);
+          if (e.key === "-") setZoom(camera.tz / 1.15);
+          if (e.key === "0") fit();
+          wake();
+        });
+        function point(a, b, c, d, p) {
+          const q = 1 - p;
+          return (
+            q * q * q * a +
+            3 * q * q * p * b +
+            3 * q * p * p * c +
+            p * p * p * d
+          );
+        }
+        function frame(now) {
+          raf = 0;
+          const dt = Math.min((now - (last || now - 16.67)) / 16.67, 2);
+          last = now;
+          const live = moving(),
+            ease = live ? 1 - Math.pow(0.84, dt) : 1;
+          camera.x += (camera.tx - camera.x) * ease;
+          camera.y += (camera.ty - camera.y) * ease;
+          camera.z += (camera.tz - camera.z) * ease;
+          world.style.transform = `translate3d(${camera.x.toFixed(3)}px,${camera.y.toFixed(3)}px,0) scale(${camera.z.toFixed(5)})`;
+          $(".zoom-label").textContent = Math.round(camera.z * 100) + "%";
+          for (const n of nodes) {
+            const clock = now * 0.00032 + n.phase,
+              dx = pointer.x - n.bx,
+              dy = pointer.y - n.by,
+              distance = Math.hypot(dx, dy),
+              near =
+                pointer.inside && !drag ? Math.max(0, 1 - distance / 250) : 0;
+            const strength = n.kind === "run" ? 0.45 : 1;
+            const ox = live
+                ? (Math.sin(clock) * 1.6 + dx * near * 0.045) * strength
+                : 0,
+              oy = live
+                ? (Math.cos(clock * 0.83) * 1.4 + dy * near * 0.045) * strength
+                : 0;
+            if (live) {
+              n.vx =
+                (n.vx + (n.bx + ox - n.x) * 0.11 * dt) * Math.pow(0.68, dt);
+              n.vy =
+                (n.vy + (n.by + oy - n.y) * 0.11 * dt) * Math.pow(0.68, dt);
+              n.x += n.vx * dt;
+              n.y += n.vy * dt;
+            } else {
+              n.x = n.bx;
+              n.y = n.by;
+              n.vx = n.vy = 0;
+            }
+            const targetScale = live && hovered === n.id ? 1.025 : 1;
+            n.scale += (targetScale - n.scale) * (live ? 0.16 : 1);
+            n.el.style.transform = `translate3d(${(n.x - n.w / 2).toFixed(3)}px,${(n.y - n.h / 2).toFixed(3)}px,0) scale(${n.scale.toFixed(4)})`;
+            n.button.style.setProperty(
+              "--rx",
+              (live && hovered === n.id
+                ? clamp(-dy * 0.025, -2, 2)
+                : 0
+              ).toFixed(2) + "deg",
+            );
+            n.button.style.setProperty(
+              "--ry",
+              (live && hovered === n.id ? clamp(dx * 0.025, -2, 2) : 0).toFixed(
+                2,
+              ) + "deg",
+            );
+          }
+          for (const e of edges) {
+            const a = e.from,
+              b = e.to,
+              s = Math.sign(b.bx - a.bx),
+              x1 = a.x + s * (a.w / 2 + 4),
+              y1 = a.y,
+              x2 = b.x - s * (b.w / 2 + 4),
+              y2 = b.y,
+              k = Math.abs(x2 - x1) * 0.55;
+            e.path.setAttribute(
+              "d",
+              `M${x1.toFixed(2)},${y1.toFixed(2)} C${(x1 + s * k).toFixed(2)},${y1.toFixed(2)} ${(x2 - s * k).toFixed(2)},${y2.toFixed(2)} ${x2.toFixed(2)},${y2.toFixed(2)}`,
+            );
+            const activeChild =
+              b.kind === "task"
+                ? b.status === "progress"
+                : nodes.some(
+                    (n) => n.parent === b.id && n.status === "progress",
+                  );
+            const show = live && !e.dim && (e.highlight || activeChild),
+              p = (now / 4200 + e.phase) % 1;
+            e.dot.style.opacity = show
+              ? String(Math.sin(p * Math.PI) * 0.72)
+              : "0";
+            e.dot.setAttribute(
+              "cx",
+              point(x1, x1 + s * k, x2 - s * k, x2, p).toFixed(2),
+            );
+            e.dot.setAttribute("cy", point(y1, y1, y2, y2, p).toFixed(2));
+          }
+          if (
+            live ||
+            Math.abs(camera.x - camera.tx) +
+              Math.abs(camera.y - camera.ty) +
+              Math.abs(camera.z - camera.tz) >
+              0.01
+          )
+            wake();
+        }
+        reduced.addEventListener("change", labels);
+        window.addEventListener("resize", () => {
+          cancelDrag();
+          pointer.inside = false;
+          fit();
+        });
+        document.addEventListener("visibilitychange", () => {
+          if (document.hidden) {
+            cancelDrag();
+            cancelAnimationFrame(raf);
+            raf = 0;
+          } else {
+            last = 0;
+            wake();
+          }
+        });
+        labels();
+        fit();
+        camera.z = camera.tz;
+        requestAnimationFrame(() => {
+          app.dataset.ready = "true";
+          wake();
+        });
+      })();
+    </script>
+  </body>
+</html>

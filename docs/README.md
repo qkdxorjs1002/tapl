@@ -51,7 +51,7 @@ TAPL connects planning, approval, execution and verification in Codex and Claude
 | Page | Purpose |
 | --- | --- |
 | [Architecture](development/architecture.md) | Follow the CLI, MCP, hooks, database and Viewer boundaries. |
-| [Viewer UX design](development/viewer-ux-design.md) | Review the implemented Workbench design, DaisyUI 5 migration and ten alternatives. |
+| [Viewer UX design](development/viewer-ux-design.md) | Review the Workbench design, DaisyUI 5 migration, ten alternatives and [mindmap prototype](development/viewer-ux-design.md#run-mindmap-concept). |
 | [Contributing and verification](development/contributing.md) | Set up development, validate changes and maintain documentation. |
 | [Releases](development/releases.md) | Understand release channels, installers, signing and extension publishing. |
 

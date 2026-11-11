@@ -4,6 +4,14 @@
 
 **통합 구성을 공유 Viewer에 적용했으며 갤러리는 합성 데이터 기반 설계 참고 자료입니다. 제품의 현재 동작은 [Viewer](../guides/viewer.ko.md)와 [VS Code 확장](../guides/vscode.ko.md)이 기준입니다.**
 
+<a id="run-mindmap-concept"></a>
+
+## RUN 마인드맵 시안
+
+[독립 마인드맵 시안](../design/run-mindmap/index.html)은 중앙 RUN에서 PLAN 가지와 컴팩트한 TASK로 이어집니다. 노드를 호버하거나 선택하면 연결된 경로를 강조합니다. 드래그나 두 손가락 스크롤로 가로·세로 이동하고 핀치 위치를 기준으로 확대·축소합니다. 마우스 휠은 이동, Shift+휠은 수평 이동, Ctrl+휠은 확대·축소입니다. 터치 화면의 드래그·두 손가락 핀치와 Safari 제스처 이벤트를 각각 처리합니다. Escape 또는 중앙으로 버튼으로 복귀하며, 좁은 화면에서는 노드를 읽을 수 있는 크기로 유지하고 이동해 탐색합니다. 노드와 연결선은 감쇠된 스프링 반응으로 함께 움직입니다. 한영·라이트/다크·키보드 탐색과 모션 줄이기를 지원합니다.
+
+모든 기록은 예시입니다. 실제 Viewer와 독립적으로 동작하며 워크스페이스나 워크플로를 수정하지 않습니다.
+
 ## 통합 시안
 
 [통합 Viewer 시안](../design/viewer-workbench/index.html)은 RUN 정보·PLAN 요약, 02의 Flow 칸반과 01의 TASK 현황을 하나의 고정 셸로 결합합니다. [현재 RUN](../design/viewer-workbench/current-ko.png) · [Explore 상세](../design/viewer-workbench/explore-ko.png) · [탐색 확장 패널](../design/viewer-workbench/explore-panel-ko.png) · [통합 검색](../design/viewer-workbench/search-ko.png) · [영문·어두운 테마](../design/viewer-workbench/current-en-dark.png) 이미지에서도 확인할 수 있습니다.
