@@ -73,3 +73,22 @@
   .wb-settings-candidate > .wb-settings-reorder { grid-column: 2; justify-content: flex-end; }
   .wb-settings-savebar { padding: 12px; }
 }
+
+.wb-settings-fields {
+  transition: opacity 160ms ease-out;
+}
+.wb-settings-fields:disabled {
+  opacity: .65;
+}
+.wb-settings-message,
+.wb-settings-input-error {
+  animation: wb-settings-feedback 160ms ease-out;
+}
+@keyframes wb-settings-feedback {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-settings-fields { transition: none; }
+  .wb-settings-message, .wb-settings-input-error { animation: none; }
+}

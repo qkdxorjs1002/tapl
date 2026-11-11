@@ -4,6 +4,7 @@ import { useI18n } from '../i18n';
 import type { SettingsDocument, SettingsField, SettingsResult, WebviewCommand } from '../types';
 import { PageHeading } from './components';
 import { Icon } from './Icon';
+import { useDialogMotion } from './workbenchMotion';
 import './settings.css';
 
 type Values = Record<string, unknown>;
@@ -128,6 +129,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
     const labels: Record<string, TranslationKey> = { workflow: 'settingsWorkflow', recall: 'settingsRecall', search: 'settingsSearch', viewer: 'settingsViewer', subagents: 'settingsCodex', 'clients.claude-code.subagents': 'settingsClaude' };
     return labels[section] ? t(labels[section]) : section;
   };
+  useEffect(() => { if (!props.active) setConfirmation(undefined); }, [props.active]);
   const groups = document ? [...new Set(document.fields.map((field) => field.section))] : [];
   return <section className="wb-settings" aria-label={t('wbSettings')}>
     {props.active && <PageHeading title={t('wbSettings')} back={props.back} />}
@@ -166,19 +168,19 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
       </div>
       {document.restart_required?.length ? <p className="wb-settings-footnote">{t('settingsRestart')}</p> : null}
     </>}
-    {confirmation && <SettingsConfirmation title={t(confirmation === 'reset' ? 'settingsResetTitle' : 'settingsReloadTitle')} help={t(confirmation === 'reset' ? 'settingsResetHelp' : 'settingsReloadHelp')} confirm={t(confirmation === 'reset' ? 'settingsConfirmReset' : 'settingsConfirmReload')} cancel={t('settingsCancel')} close={() => setConfirmation(undefined)} accept={() => { setConfirmation(undefined); issue(confirmation === 'reset' ? 'reset' : 'get'); }} />}
+    <SettingsConfirmation open={!!confirmation && props.active} title={t(confirmation === 'reset' ? 'settingsResetTitle' : 'settingsReloadTitle')} help={t(confirmation === 'reset' ? 'settingsResetHelp' : 'settingsReloadHelp')} confirm={t(confirmation === 'reset' ? 'settingsConfirmReset' : 'settingsConfirmReload')} cancel={t('settingsCancel')} close={() => setConfirmation(undefined)} accept={() => { setConfirmation(undefined); issue(confirmation === 'reset' ? 'reset' : 'get'); }} />
   </section>;
 }
 
-function SettingsConfirmation({ title, help, confirm, cancel, close, accept }: { title: string; help: string; confirm: string; cancel: string; close: () => void; accept: () => void }): JSX.Element {
+function SettingsConfirmation({ open, title, help, confirm, cancel, close, accept }: { open: boolean; title: string; help: string; confirm: string; cancel: string; close: () => void; accept: () => void }): JSX.Element | null {
   const dialog = useRef<HTMLDialogElement>(null), cancelRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const opener = globalThis.document?.activeElement as HTMLElement | null;
-    dialog.current?.showModal(); cancelRef.current?.focus();
-    return () => { dialog.current?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }); };
-  }, []);
-  return <dialog ref={dialog} className="wb-dialog wb-settings-dialog" aria-labelledby="settings-confirm-title" aria-describedby="settings-confirm-help" onCancel={(event) => { event.preventDefault(); close(); }}>
-    <h2 id="settings-confirm-title">{title}</h2><p id="settings-confirm-help">{help}</p><div className="wb-settings-actions"><button ref={cancelRef} type="button" className="btn btn-secondary btn-sm" onClick={close}>{cancel}</button><button type="button" className="btn btn-primary btn-sm" onClick={accept}>{confirm}</button></div>
+  const present = useDialogMotion(open, dialog, cancelRef);
+  // Retain the closing prompt's copy while its parent clears confirmation.
+  const copy = useRef({ title, help, confirm, cancel });
+  if (open) copy.current = { title, help, confirm, cancel };
+  if (!present) return null;
+  return <dialog ref={dialog} className="wb-dialog wb-settings-dialog" data-wb-motion="presence" aria-hidden={!open} aria-labelledby="settings-confirm-title" aria-describedby="settings-confirm-help" onCancel={(event) => { event.preventDefault(); close(); }}>
+    <h2 id="settings-confirm-title">{copy.current.title}</h2><p id="settings-confirm-help">{copy.current.help}</p><div className="wb-settings-actions"><button ref={cancelRef} type="button" className="btn btn-secondary btn-sm" onClick={close}>{copy.current.cancel}</button><button type="button" className="btn btn-primary btn-sm" onClick={accept}>{copy.current.confirm}</button></div>
   </dialog>;
 }
 

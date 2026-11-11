@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useBrowserLayoutEffect } from './effects';
+import { useMotionPresence, usePageMotion, workbenchMotionIdentity } from './workbenchMotion';
+import './motion.css';
 import type { SupportedLocale } from '../../i18n';
 import { I18nProvider, useI18n } from '../i18n';
 import type {
@@ -53,6 +55,8 @@ export function Workbench(props: WorkbenchProps): JSX.Element {
 function WorkbenchShell(props: WorkbenchProps): JSX.Element {
   const { t } = useI18n();
   const pageRef = useRef<HTMLElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const scrimRef = useRef<HTMLButtonElement>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(props.view.type === 'workspace');
   const stableView = useRef<WebviewView>(
     props.view.type === 'workspace'
@@ -142,6 +146,8 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
   const currentLegacy = state.route.view;
   const memoryPage = state.route.page === 'memories' || currentLegacy?.type === 'memorySource';
   const page = state.route.page;
+  usePageMotion(contentRef, workbenchMotionIdentity(state.route), !props.loading && !state.pending);
+  const scrimPresent = useMotionPresence(mobile && menuOpen, scrimRef, 'scrim');
   const back = state.trail.length ? navigation.goBack : undefined;
   const isPending = !!state.pending;
   const sidebarExpanded = mobile || sidebarPinned || sidebarHovered || sidebarFocused || exploreActive;
@@ -511,6 +517,7 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
         }
       >
         <div
+          ref={contentRef}
           id="wb-page-content"
           className="wb-page-content"
           role="tabpanel"
@@ -611,10 +618,12 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
         />
       )}
       <IconTooltips navigationKey={`${routeIdentity(state.route)}:${props.locale}:${workspaceOpen}`} />
-      {mobile && menuOpen && (
+      {scrimPresent && (
         <button
           type="button"
+          ref={scrimRef}
           className="wb-sidebar-scrim"
+          aria-hidden={!menuOpen}
           aria-label={t('wbMenuClose')}
           onClick={() => closeMenu(true)}
           tabIndex={-1}

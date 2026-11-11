@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { useBrowserLayoutEffect } from './effects';
+import { useMotionPresence } from './workbenchMotion';
 import { createPortal } from 'react-dom';
 import { useI18n } from '../i18n';
 import type { TaplItem, TaplRunSnapshot } from '../types';
@@ -40,6 +41,10 @@ export function Explore({
     return () => onActiveChange?.(false);
   }, [kind, onActiveChange]);
   const panel = useRef<HTMLElement>(null);
+  const lastKind = useRef<Kind>('PLAN');
+  if (kind) lastKind.current = kind;
+  const shownKind = kind ?? lastKind.current;
+  const present = useMotionPresence(!!kind, panel, 'panel', kind ?? undefined);
   const triggers = useRef<Partial<Record<Kind, HTMLButtonElement | null>>>({});
   const kindRef = useRef<Kind | null>(null);
   const mode = useRef<Mode>('pointer');
@@ -79,7 +84,6 @@ export function Explore({
     captureScroll();
     kindRef.current = null;
     if (panel.current) {
-      panel.current.hidden = true;
       panel.current.inert = true;
     }
     setKind(null);
@@ -250,12 +254,14 @@ export function Explore({
           </button>
         ))}
       </div>
-      {kind &&
+      {present &&
         createPortal(
           <section
             ref={panel}
             id="wb-explore-panel"
             className="wb-explore-panel"
+            data-wb-motion="presence"
+            aria-hidden={!kind}
             role="dialog"
             aria-modal="false"
             aria-labelledby="wb-explore-title"
@@ -285,11 +291,11 @@ export function Explore({
           >
             <header>
               <h2 id="wb-explore-title">
-                <Icon name={kind.toLowerCase()} />
-                {kind}
+                <Icon name={shownKind.toLowerCase()} />
+                {shownKind}
               </h2>
               <span>
-                <ItemCount count={itemsFor(kind).length} />
+                <ItemCount count={itemsFor(shownKind).length} />
               </span>
               <button
                 type="button"
@@ -301,7 +307,7 @@ export function Explore({
               </button>
             </header>
             <div className="wb-fold-list" aria-labelledby="wb-explore-title">
-              {itemsFor(kind).map((item) => (
+              {itemsFor(shownKind).map((item) => (
                 <button
                   key={item.id ?? item.stable_id}
                   type="button"
@@ -318,7 +324,7 @@ export function Explore({
                   <span>{item.title}</span>
                 </button>
               ))}
-              {!itemsFor(kind).length && <p className="wb-fold-empty">{t('wbNoRecords')}</p>}
+              {!itemsFor(shownKind).length && <p className="wb-fold-empty">{t('wbNoRecords')}</p>}
             </div>
           </section>,
           document.body

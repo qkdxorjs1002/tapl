@@ -425,7 +425,7 @@ test('icon navigation hides collapsed counts, expands over the map and preserves
     await page.locator('.wb-fold-list button').first().waitFor();
     await page.locator('.wb-fold-list button').first().focus();
     await page.keyboard.press('Escape');
-    assert.equal(await page.locator('.wb-explore-panel').count(), 0);
+    await page.locator('.wb-explore-panel').waitFor({ state: 'detached' });
     await page.keyboard.press('Tab');
     await page.locator('[data-wb-focus="nav:current"]').focus();
     assert.equal(await shell.getAttribute('data-sidebar-expanded'), 'true', 'keyboard focus expands labels');
@@ -565,7 +565,7 @@ test('Explore stays reachable on short screens and closes across responsive navi
     assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
     await page.locator('.wb-fold-list button').first().click();
     await page.locator('.wb-record-page').waitFor();
-    assert.equal(await page.locator('.wb-explore-panel').count(), 0);
+    await page.locator('.wb-explore-panel').waitFor({ state: 'detached' });
     await page.setViewportSize({ width: 1280, height: 420 });
     const sidebar = page.locator('.wb-sidebar');
     assert.ok(await sidebar.evaluate(el => el.scrollHeight > el.clientHeight));
@@ -575,12 +575,12 @@ test('Explore stays reachable on short screens and closes across responsive navi
     await page.locator('.wb-explore-panel').waitFor();
     await page.setViewportSize({ width: 600, height: 750 });
     await page.waitForFunction(() => document.querySelector('.wb-sidebar').inert);
-    assert.equal(await page.locator('.wb-explore-panel').count(), 0);
+    await page.locator('.wb-explore-panel').waitFor({ state: 'detached' });
     await page.locator('.wb-mobile-menu').click();
     await page.locator('[data-wb-focus="explore:PLAN"]').click();
     await page.locator('.wb-explore-panel').waitFor();
     await page.keyboard.press('Escape');
-    assert.equal(await page.locator('.wb-explore-panel').count(), 0);
+    await page.locator('.wb-explore-panel').waitFor({ state: 'detached' });
     assert.equal(await page.evaluate(() => document.body.scrollWidth <= innerWidth), true);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
@@ -614,10 +614,12 @@ test('workspace modal preserves RUN, filters, scroll and focus on cancel, invali
     assert.equal(await page.locator('.wb-page-scroll').evaluate(el => el.scrollTop), scroll);
     await shot(page, 'workspace-modal-ko-light');
     await page.keyboard.press('Escape');
-    assert.equal(await modal.count(), 0);
+    await modal.waitFor({ state: 'detached' });
     assert.equal(await picker.evaluate(el => el === document.activeElement), true);
     assert.equal(await page.locator('.wb-run-tab[aria-selected="true"]').getAttribute('title'), current);
     await page.locator('[data-wb-focus="nav:tasks"]').click();
+    await page.mouse.move(1400, 30);
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.sidebarExpanded === 'false');
     await page.locator('[data-wb-focus="filter:In Progress"]').click();
     await page.locator('[data-wb-focus="task-query"]').fill('task 1');
     await picker.click();
@@ -1023,7 +1025,7 @@ test('PLAN, FINDING, memories and diagnostics use reading pages and nested verti
     assert.equal(await page.getByText('Legacy PLAN body repeats the structured fields.', { exact: false }).isVisible(), false);
     const additional = page.locator('.wb-record-disclosures > details').first();
     await additional.locator('summary').first().click();
-    assert.equal(await page.getByText('Legacy PLAN body repeats the structured fields.', { exact: false }).isVisible(), true);
+    await page.getByText('Legacy PLAN body repeats the structured fields.', { exact: false }).waitFor();
     await shot(page, 'plan-detail-ko-light');
     await page.locator('.wb-back').click();
     await page.locator('[data-wb-focus="explore:FINDING"]').click();
@@ -1303,6 +1305,107 @@ test('RUN follows executing TASKs with elastic drag release, refresh, resize and
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'reload resets to following');
     await page.locator('[data-wb-focus="nav:memories"]').click(); await page.locator('.wb-memory-mindmap').waitFor();
     assert.equal(await toggle.count(), 0); assert.equal(await page.locator('.wb-memory-mindmap').getAttribute('data-following'), null);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+async function observeWorkbenchMotion(page) {
+  await page.addInitScript(() => {
+    const animate = Element.prototype.animate;
+    window.__wbMotion = []; window.__wbHeldExits = []; window.__wbHoldExits = false;
+    Element.prototype.animate = function(frames, options) {
+      const animation = animate.call(this, frames, options);
+      window.__wbMotion.push({ id: this.id, className: this.className, frames });
+      if (window.__wbHoldExits && frames.at(-1)?.opacity === 0) {
+        animation.pause(); window.__wbHeldExits.push(animation);
+      }
+      return animation;
+    };
+  });
+}
+
+test('page motion waits for route content, ignores polling/filter/locale updates, and retains settings DOM', { timeout: 45000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await observeWorkbenchMotion(page);
+  let overview, releaseRecords;
+  const recordsGate = new Promise(resolve => { releaseRecords = resolve; });
+  await page.route('**/api/message', async route => {
+    const command = route.request().postDataJSON().command;
+    if (command === 'records') await recordsGate;
+    const response = await route.fetch(), payload = await response.json();
+    if (payload.view?.type === 'overview') overview = structuredClone(payload);
+    await route.fulfill({ response, json: payload });
+  });
+  const count = () => page.evaluate(() => window.__wbMotion.filter(entry => entry.id === 'wb-page-content').length);
+  try {
+    await page.goto(origin); await page.locator('.wb-run-mindmap').waitFor();
+    await page.locator('#wb-page-content').evaluate(el => { el.__retained = true; });
+    const initial = await count();
+    await page.locator('[data-wb-focus="nav:tasks"]').click(); await page.locator('.wb-tasks-table').waitFor();
+    assert.equal(await count(), initial + 1);
+    await page.locator('[data-wb-focus="task-query"]').fill('task 1');
+    await page.locator('[data-wb-focus="filter:In Progress"]').click();
+    const afterFilter = await count();
+    await page.evaluate(payload => window.postMessage({ ...payload, locale: 'en', type: 'view:update' }, '*'), overview);
+    await page.waitForFunction(() => document.documentElement.lang === 'en');
+    assert.equal(await count(), afterFilter, 'background hydration and locale changes do not replay page entry');
+    await page.locator('[data-wb-focus="nav:records"]').click();
+    await page.waitForTimeout(220);
+    assert.equal(await count(), afterFilter, 'pending placeholder does not consume destination entry');
+    releaseRecords(); await page.locator('.wb-search-group').first().waitFor();
+    assert.equal(await count(), afterFilter + 1, 'actual response enters once');
+    await page.locator('.wb-search-group-header').first().click();
+    await page.locator('.wb-search-result').first().click(); await page.locator('.wb-record-page').waitFor();
+    assert.equal(await count(), afterFilter + 2, 'a record detail has its own route entry');
+    await page.locator('[data-wb-focus="nav:settings"]').click();
+    const input = page.locator('[id="setting-search.max_results"]'); await input.waitFor();
+    await input.fill('37'); await input.evaluate(el => { el.__retainedDraft = true; });
+    await page.locator('[data-wb-focus="nav:tasks"]').click(); await page.locator('.wb-tasks-table').waitFor();
+    await page.locator('[data-wb-focus="nav:settings"]').click();
+    assert.equal(await input.inputValue(), '37');
+    assert.equal(await input.evaluate(el => el.__retainedDraft), true);
+    assert.equal(await page.locator('#wb-page-content').evaluate(el => el.__retained), true);
+    assert.deepEqual(errors, []);
+  } finally { releaseRecords(); await page.close(); }
+});
+
+test('surface exits are inert, reopen cancels cleanup, and reduced motion clears modal and mobile scrim immediately', { timeout: 45000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await observeWorkbenchMotion(page);
+  try {
+    await page.goto(origin); await page.locator('.wb-run-mindmap').waitFor();
+    await page.evaluate(() => { window.__wbHoldExits = true; });
+    const trigger = page.locator('[data-wb-focus="explore:TASK"]'), panel = page.locator('.wb-explore-panel');
+    await trigger.focus(); await page.keyboard.press('ArrowRight'); await panel.waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.querySelector('.wb-explore-panel')?.inert);
+    assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+    assert.equal(await trigger.evaluate(el => el === document.activeElement), true);
+    await page.keyboard.press('ArrowRight');
+    await page.waitForFunction(() => document.querySelector('.wb-explore-panel')?.inert === false);
+    await page.evaluate(() => window.__wbHeldExits.forEach(animation => animation.dispatchEvent(new Event('finish'))));
+    assert.equal(await panel.count(), 1, 'stale exit cannot remove the reopened panel');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.querySelector('.wb-explore-panel')?.inert);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await panel.waitFor({ state: 'detached' });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const picker = page.locator('[data-wb-focus="workspace-picker"]'), modal = page.locator('.wb-workspace-dialog');
+    await picker.click(); await modal.waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.querySelector('.wb-workspace-dialog')?.inert);
+    assert.equal(await modal.evaluate(el => el.open), true, 'native top layer lasts through exit');
+    await page.emulateMedia({ reducedMotion: 'reduce' }); await modal.waitFor({ state: 'detached' });
+    assert.equal(await picker.evaluate(el => el === document.activeElement), true);
+    await picker.click(); await modal.waitFor(); await page.keyboard.press('Escape');
+    await modal.waitFor({ state: 'detached' });
+    await page.setViewportSize({ width: 390, height: 740 });
+    await page.locator('.wb-mobile-menu').click(); await page.locator('.wb-sidebar-scrim').waitFor();
+    await page.keyboard.press('Escape'); await page.locator('.wb-sidebar-scrim').waitFor({ state: 'detached' });
+    assert.equal(await page.locator('.wb-sidebar').evaluate(el => el.inert), true);
+    assert.equal(await page.locator('.wb-page-scroll').evaluate(el => el.inert), false);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });

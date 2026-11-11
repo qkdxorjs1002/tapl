@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useBrowserLayoutEffect } from './effects';
+import { useDialogMotion } from './workbenchMotion';
 import { useI18n } from '../i18n';
 import type { WorkspaceSelectionResult } from '../types';
 import { Icon } from './Icon';
@@ -157,22 +158,14 @@ export function WorkspaceDialog({
   const [pending, setPending] = useState(false),
     [error, setError] = useState('');
   const pendingRef = useRef(false);
+  const present = useDialogMotion(open, dialog, input, fallbackFocus);
   useEffect(() => {
     if (!open) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setPath(workspace ?? '');
     setError(message ?? '');
     setPending(false);
     pendingRef.current = false;
-    const element = dialog.current;
-    element?.showModal();
-    input.current?.focus();
     input.current?.select();
-    return () => {
-      element?.close();
-      const target = opener?.isConnected && !opener.closest('[inert]') ? opener : fallbackFocus();
-      target?.focus({ preventScroll: true });
-    };
   }, [open]);
   useEffect(() => {
     if (!result || !open || !pendingRef.current) return;
@@ -182,13 +175,15 @@ export function WorkspaceDialog({
     else setError(result.message ?? t('taplUnavailable'));
   }, [result]);
   const cancel = () => {
-    if (!pendingRef.current) close();
+    if (open && !pendingRef.current) close();
   };
-  if (!open) return null;
+  if (!present) return null;
   return (
     <dialog
       ref={dialog}
       className="wb-dialog wb-workspace-dialog"
+      data-wb-motion="presence"
+      aria-hidden={!open}
       aria-labelledby="wb-workspace-title"
       aria-busy={pending}
       onCancel={(event) => {

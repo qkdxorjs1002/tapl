@@ -1,0 +1,37 @@
+/* Presence owns these animations, including cancellation and reduced-motion changes. */
+.wb-explore-panel[data-wb-motion],
+.wb-dialog[data-wb-motion] {
+  animation: none;
+}
+.wb-explore-panel[inert],
+.wb-dialog[data-wb-motion][inert],
+.wb-sidebar-scrim[inert] {
+  pointer-events: none;
+}
+.wb-dialog[data-wb-motion]::backdrop {
+  transition: background-color 160ms ease-out, backdrop-filter 160ms ease-out;
+}
+.wb-dialog[data-wb-motion][inert]::backdrop {
+  background-color: transparent;
+  backdrop-filter: blur(0);
+}
+/* Keep native details semantics and focus behavior. Supporting browsers also animate closing. */
+@supports (interpolate-size: allow-keywords) and (transition-behavior: allow-discrete) {
+  :is(.wb-reading-disclosure, .wb-secondary-disclosure, .wb-value-branch, .wb-language-menu)::details-content {
+    interpolate-size: allow-keywords;
+    block-size: 0;
+    opacity: 0;
+    overflow: clip;
+    transition: block-size 160ms ease-out, opacity 160ms ease-out, content-visibility 160ms allow-discrete;
+  }
+  :is(.wb-reading-disclosure, .wb-secondary-disclosure, .wb-value-branch, .wb-language-menu)[open]::details-content {
+    block-size: auto;
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-dialog[data-wb-motion]::backdrop,
+  :is(.wb-reading-disclosure, .wb-secondary-disclosure, .wb-value-branch, .wb-language-menu)::details-content {
+    transition: none;
+  }
+}

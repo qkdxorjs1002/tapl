@@ -30,6 +30,7 @@ export const MindmapEdge = memo(function MindmapEdge({
       <g className={edge.flowing ? 'wb-mm-pulse wb-mm-flow' : 'wb-mm-pulse'}>
         {edge.flowing && (
           <>
+            <path className="wb-mm-glass-path wb-mm-flow-glow" pathLength="100" d={edge.path} />
             <path className="wb-mm-glass-path wb-mm-flow-halo" pathLength="100" d={edge.path} />
             <path className="wb-mm-glass-path wb-mm-flow-tail" pathLength="100" d={edge.path} />
             <path className="wb-mm-glass-path wb-mm-flow-core" pathLength="100" d={edge.path} />
