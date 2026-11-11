@@ -155,20 +155,85 @@ test('navigation handlers preserve the actual source for record, RUN and archive
   assert.equal(button('back').props.title, 'Back');
 });
 
-test('PLAN semantic fields are visible reading sections rather than hidden additional JSON', () => {
+test('PLAN typed narratives appear once while canonical and legacy bodies stay in collapsed additional fields', () => {
   const fields = { kind: 'plan', summary: 'Plan summary', objective: 'Plan purpose', requirements_trace: 'Real requirements', selected_approach: 'Chosen approach', affected_files: 'src/viewer', execution_order: 'First build then verify', risks: 'Real constraint', validation: 'Verify real output', approval_needs: 'Already authorized', notes: 'Original note' };
   const labels = [['summary','Summary'],['objective','Objective'],['requirements_trace','Requirements trace'],['selected_approach','Selected approach'],['affected_files','Affected files'],['execution_order','Execution order'],['risks','Risks'],['validation','Validation'],['approval_needs','Approval needs'],['notes','Notes']];
-  fields.body = labels.map(([key,label]) => `### ${label}\n${fields[key]}`).join('\n\n');
-  for (const locale of ['en','ko']) {
-    const html = render(view(fields), locale);
-    const visible = html.split('class="wb-record-disclosures"')[0];
+  const bodies = [
+    labels.map(([key,label]) => `### ${label}\n${fields[key]}`).join('\n\n'),
+    `Legacy PLAN export\r\n\r\n${labels.map(([key,label]) => `## ${label}\r\n\r\n${fields[key]}`).join('\r\n\r\n')}`,
+    '# Custom imported body\nRetain **original** prose and <img src=x onerror=alert(1)>'
+  ];
+  for (const locale of ['en','ko']) for (const body of bodies) {
+    const html = render(view({ ...fields, body, raw_text: 'Original raw PLAN source' }), locale);
+    const [visible, retained] = html.split('class="wb-record-disclosures"');
     for (const [key] of labels) {
       assert.ok(visible.includes(fields[key]));
       assert.equal(visible.split(escape(fields[key])).length - 1, 1, `${key} appears once in the reading body`);
       assert.ok(!html.includes(`class="wb-value-key">${key}</span>`), `${key} is promoted out of additional fields`);
     }
+    assert.ok(!section(html, translate(locale, 'content')));
+    assert.doesNotMatch(visible, /Legacy PLAN export|Custom imported body|Original raw PLAN source|Search fallback/);
+    assert.ok(retained.includes(`<span class="wb-value-key">body</span><span class="wb-value-scalar">${escape(body)}</span>`));
+    assert.ok(retained.includes('class="wb-value-key">raw_text</span>'));
+    assert.ok(retained.includes('Original raw PLAN source'));
+    assert.ok(retained.includes('class="wb-value-key">snippet</span>'));
+    assert.ok(retained.includes('Search fallback'));
+    assert.ok(retained.includes(`<details class="wb-reading-disclosure"><summary><span>${translate(locale, 'wbAdditionalFields')}</span>`));
+    assert.doesNotMatch(html, /<img|<details class="wb-reading-disclosure"[^>]*\sopen(?:[\s=>])/);
     assert.doesNotMatch(html, /data-wb-focus="back"/);
     assert.ok(!html.includes(`<span>${translate(locale,'execution')}</span>`), 'no artificial execution section');
+  }
+});
+
+test('sparse PLAN source text stays inspectable without a Content section or a false empty state', () => {
+  for (const locale of ['en','ko']) for (const detail of [
+    { body: '# Body-only PLAN\nUnstructured **original** plan text <script>unsafe()</script>' },
+    { body: '', raw_text: 'Raw-only PLAN source' },
+    { body: '   ', raw_text: 'Raw PLAN source beside a blank body' },
+    { body: '', raw_text: '' }
+  ]) {
+    const html = render(view({ kind: 'plan', ...detail }), locale);
+    const [visible, retained] = html.split('class="wb-record-disclosures"');
+    const source = [detail.body, detail.raw_text, 'Search fallback'].find((value) => value?.trim());
+    assert.ok(!section(html, translate(locale, 'content')));
+    assert.ok(!visible.includes(escape(source)));
+    assert.ok(retained.includes(escape(source)));
+    assert.doesNotMatch(visible, /class="wb-reading-empty"/);
+    assert.doesNotMatch(html, /<script>/);
+  }
+  const empty = view({ kind: 'plan', body: '', raw_text: '' });
+  delete empty.result.snippet;
+  assert.ok(render(empty).includes(`<p class="wb-reading-empty">${translate('en', 'notRecorded')}</p>`));
+});
+
+test('missing PLAN detail keeps the fallback snippet in additional fields and reports unavailable detail', () => {
+  const missing = view();
+  missing.result.kind = 'plan';
+  missing.result.stable_id = 'PLAN-012';
+  delete missing.detail;
+  for (const locale of ['en','ko']) {
+    const html = render(missing, locale);
+    const [visible, retained] = html.split('class="wb-record-disclosures"');
+    assert.ok(!section(html, translate(locale, 'content')));
+    assert.doesNotMatch(visible, /Search fallback/);
+    assert.ok(visible.includes(translate(locale, 'detailUnavailable')));
+    assert.ok(retained.includes('class="wb-value-key">snippet</span>'));
+    assert.ok(retained.includes('Search fallback'));
+  }
+});
+
+test('TASK canonical suppression and FINDING bodies retain their existing reading behavior', () => {
+  for (const locale of ['en','ko']) {
+    for (const kind of ['task', 'finding']) {
+      const html = render(view({ kind, body: 'Original **record** narrative', impact: kind === 'finding' ? 'Actual impact' : undefined }), locale);
+      const visible = html.split('class="wb-record-disclosures"')[0];
+      assert.ok(section(visible, translate(locale, kind === 'finding' ? 'finding' : 'content')));
+      assert.ok(visible.includes('Original <strong>record</strong> narrative'));
+    }
+    const canonical = render(view({ goal: 'Recorded task goal', body: '### Goal\nRecorded task goal' }), locale);
+    const visible = canonical.split('class="wb-record-disclosures"')[0];
+    assert.ok(!section(visible, translate(locale, 'content')));
+    assert.equal(visible.split('Recorded task goal').length - 1, 1);
   }
 });
 

@@ -92,6 +92,14 @@ export interface TaplItem {
   source?: string;
   updated_at?: string;
   custom_fields?: Record<string, TaplJsonValue>;
+  summary?: string | null;
+  objective?: string | null;
+  selected_approach?: string | null;
+  validation?: string | null;
+  spec_id?: string;
+  goal?: string;
+  action?: string;
+  verification?: string;
   execution_mode?: string;
   executor_kind?: string;
   parallel_group?: string;
@@ -162,14 +170,10 @@ export interface TaplArchiveDetail {
 export interface TaplItemDetail extends TaplItem {
   created_at?: string;
   plan_id?: string | null;
-  summary?: string | null;
-  objective?: string | null;
   requirements_trace?: string | null;
-  selected_approach?: string | null;
   affected_files?: string | null;
   execution_order?: string | null;
   risks?: string | null;
-  validation?: string | null;
   approval_needs?: string | null;
   notes?: string | null;
 
@@ -182,10 +186,6 @@ export interface TaplItemDetail extends TaplItem {
   archive_id?: string;
   archive_slug?: string;
   archive_created_at?: string;
-  spec_id?: string;
-  goal?: string;
-  action?: string;
-  verification?: string;
   result?: string;
   blocker?: string;
   next_action?: string;

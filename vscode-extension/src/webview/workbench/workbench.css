@@ -575,6 +575,7 @@ body:has(.tapl-workbench) {
   min-width: 0;
 }
 .wb-run-information {
+  position: relative;
   min-width: 0;
   overflow-x: auto;
   border-radius: 12px;
@@ -668,196 +669,154 @@ body:has(.tapl-workbench) {
   outline-offset: 3px;
   border-radius: 14px;
 }
-.wb-plan-board {
-  align-items: stretch;
+.wb-active-section,
+.wb-plan-section {
+  min-width: 0;
 }
+.wb-active-section {
+  container-type: inline-size;
+}
+.wb-active-tasks {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wb-active-tasks > li {
+  min-width: 0;
+}
+.wb-active-task.card,
 .wb-plan-summary.card {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  flex: 0 0 calc((100% - 14px) / 2);
-  min-width: min(300px, calc(100% - 28px));
-  max-width: calc(100% - 28px);
-  min-height: 144px;
-  padding: 16px;
-  gap: 10px;
+  gap: 18px;
+  min-width: 0;
+  padding: 22px 24px;
   border: 1px solid var(--wb-border);
   border-radius: 14px;
   background: var(--wb-surface);
   color: var(--wb-fg);
+  font: inherit;
   text-align: left;
+  overflow-wrap: anywhere;
+}
+.wb-active-task.card {
+  width: 100%;
+  border-top: 2px solid color-mix(in srgb, var(--wb-status-progress, var(--wb-primary)) 48%, var(--wb-border));
+}
+.wb-plan-board {
+  align-items: stretch;
+}
+.wb-plan-summary.card {
+  flex: 0 0 min(720px, calc(100% - 64px));
+  min-width: min(420px, calc(100% - 28px));
+  max-width: calc(100% - 28px);
 }
 .wb-single-plan .wb-plan-summary {
   flex-basis: 100%;
   min-width: 0;
   max-width: none;
 }
-.wb-plan-summary:hover,
-.wb-flow-task:hover {
+.wb-plan-summary:not(:disabled):hover,
+.wb-active-task:not(:disabled):hover {
   border-color: color-mix(in srgb, var(--wb-primary) 45%, var(--wb-border));
   background: color-mix(in srgb, var(--wb-primary) 3%, var(--wb-surface));
 }
-.wb-plan-meta {
+.wb-overview-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  font-size: 11px;
+  gap: 8px 16px;
   color: var(--wb-muted);
+  font-size: 11px;
 }
-.wb-plan-heading {
+.wb-overview-heading {
   display: flex;
   align-items: start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
 }
-.wb-plan-heading strong {
-  font-size: 16px;
-  line-height: 1.5;
-  font-weight: 600;
-}
-.wb-plan-heading .wb-icon {
-  width: 16px;
-  height: 16px;
-  margin-top: 4px;
-  color: var(--wb-primary);
-}
-.wb-plan-heading strong,
-.wb-plan-goal {
+.wb-overview-heading strong {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  font-size: 18px;
+  line-height: 1.5;
+  font-weight: 600;
 }
-.wb-plan-goal {
-  color: var(--wb-muted);
-  font-size: 13px;
-  line-height: 1.65;
+.wb-overview-heading .wb-icon {
+  width: 16px;
+  height: 16px;
+  margin-top: 5px;
+  color: var(--wb-primary);
 }
-.wb-plan-placeholder {
+.wb-overview-fields {
   display: grid;
-  place-items: center;
-  min-height: 120px;
-  padding: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 18px 24px;
+  min-width: 0;
+}
+.wb-overview-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.wb-overview-label {
+  color: var(--wb-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.wb-overview-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-line;
+}
+.wb-plan-summary .wb-overview-fields {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+.wb-overview-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--tapl-border-subtle, var(--wb-border));
+  font-size: 12px;
+  line-height: 1.7;
+}
+.wb-overview-fact {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  min-width: 0;
+}
+.wb-overview-fact .wb-overview-label {
+  white-space: nowrap;
+}
+.wb-active-empty,
+.wb-plan-placeholder {
+  padding: 20px 24px;
   border: 1px dashed var(--wb-border);
   border-radius: 14px;
   background: var(--wb-soft);
   color: var(--wb-muted);
   font-size: 13px;
 }
-.wb-blocker {
-  display: flex;
-  align-items: start;
-  gap: 12px;
-  padding: 17px 19px;
-  border: 1px solid color-mix(in srgb, var(--tapl-warning) 27%, var(--wb-border));
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--tapl-warning) 5%, var(--wb-surface));
-}
-.wb-blocker > .wb-icon {
-  width: 16px;
-  height: 16px;
-  color: var(--tapl-warning);
-  margin-top: 2px;
-}
-.wb-blocker h2 {
-  font-size: 13px;
-  font-weight: 550;
-}
-.wb-blocker p {
-  font-size: 12px;
-  line-height: 1.8;
-  color: var(--wb-muted);
-  margin-top: 5px;
-}
-.wb-blocker .btn {
-  min-height: 20px;
-  height: auto;
-  padding: 0;
-  margin-top: 6px;
-  color: var(--wb-primary);
-  font-size: 12px;
-}
-.wb-blocker .btn .wb-icon {
-  width: 14px;
-  height: 14px;
-}
-.wb-flow-section {
-  min-width: 0;
-}
-.wb-flow-lane {
-  flex: 0 0 320px;
-  min-width: 0;
-  max-width: calc(100% - 28px);
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--wb-border) 70%, transparent);
-  border-radius: 14px;
-  background: var(--wb-soft);
-}
-.wb-flow-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 3px 2px 15px;
-}
-.wb-flow-heading h3 {
-  font-size: 12px;
-  font-weight: 600;
-}
-.wb-flow-heading > span,
-.wb-flow-empty {
-  font-size: 11px;
-  color: var(--wb-muted);
-}
-.wb-flow-lane ul {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.wb-flow-task.card {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
-  width: 100%;
-  padding: 16px;
-  border: 1px solid var(--wb-border);
-  border-radius: 10px;
-  background: var(--wb-surface);
-  color: var(--wb-fg);
-  text-align: left;
-}
-.wb-flow-task[data-status='In Progress'] {
-  border-color: color-mix(in srgb, var(--wb-primary) 40%, var(--wb-border));
-}
-.wb-flow-id,
-.wb-flow-footer {
-  font-size: 11px;
-  color: var(--wb-muted);
-}
-.wb-flow-task strong {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-.wb-flow-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px 10px;
-  flex-wrap: wrap;
-  min-height: 0;
-}
-.wb-flow-footer:empty {
-  display: none;
-}
-.wb-flow-empty {
-  padding: 18px 4px;
-  text-align: center;
+@container (max-width: 680px) {
+  .wb-active-task .wb-overview-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .wb-status-label {
   display: inline-flex;
@@ -1443,18 +1402,19 @@ body:has(.tapl-workbench) {
   .wb-run-facts > div {
     padding-inline: 13px;
   }
+  .wb-active-task.card,
   .wb-plan-summary.card {
-    min-height: 144px;
+    padding: 18px;
+    gap: 16px;
+  }
+  .wb-plan-summary.card {
     flex-basis: calc(100% - 28px);
   }
   .wb-single-plan .wb-plan-summary.card {
     flex-basis: 100%;
   }
-  .wb-plan-heading strong {
-    font-size: 15px;
-  }
-  .wb-flow-lane {
-    flex-basis: 290px;
+  .wb-overview-heading strong {
+    font-size: 16px;
   }
   .wb-pill-tabs {
     border-radius: 14px;

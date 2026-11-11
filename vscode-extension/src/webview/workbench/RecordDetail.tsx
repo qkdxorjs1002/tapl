@@ -166,18 +166,6 @@ const planNarrative: Array<[keyof TaplItemDetail, TranslationKey]> = [
   ['approval_needs', 'approvalNeeds'],
   ['notes', 'wbNotes']
 ];
-const planBodyLabels = [
-  ['summary', 'Summary'],
-  ['objective', 'Objective'],
-  ['requirements_trace', 'Requirements trace'],
-  ['selected_approach', 'Selected approach'],
-  ['affected_files', 'Affected files'],
-  ['execution_order', 'Execution order'],
-  ['risks', 'Risks'],
-  ['validation', 'Validation'],
-  ['approval_needs', 'Approval needs'],
-  ['notes', 'Notes']
-] as const;
 const taskBodyLabels = [
   ['goal', 'Goal'],
   ['action', 'Action'],
@@ -201,15 +189,15 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
   const originalContent = detail?.body || detail?.raw_text || result.snippet || '';
   const narrativeFields: Array<[keyof TaplItemDetail, TranslationKey]> =
     kindValue === 'plan' ? planNarrative : kindValue === 'finding' ? [['impact', 'impact']] : taskNarrative;
-  const canonicalFields = kindValue === 'plan' ? planBodyLabels : taskBodyLabels;
   const canonicalBody =
-    detail && kindValue !== 'finding'
-      ? canonicalFields
+    detail && kindValue === 'task'
+      ? taskBodyLabels
           .filter(([key]) => typeof detail[key] === 'string' && detail[key]?.trim())
           .map(([key, label]) => `### ${label}\n${detail[key]?.trim()}`)
           .join('\n\n')
       : '';
-  const content = canonicalBody && detail?.body?.trim() === canonicalBody ? '' : originalContent;
+  const content =
+    kindValue === 'plan' || (canonicalBody && detail?.body?.trim() === canonicalBody) ? '' : originalContent;
   const runId = detail?.run_id ?? result.run_id ?? context?.run.id;
   const runTitle =
     context?.run.request_summary ||
@@ -243,7 +231,11 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
           >
             {runId}
           </button>
-          {runTitle && <span className="wb-property-caption" title={runTitle}>{runTitle}</span>}
+          {runTitle && (
+            <span className="wb-property-caption" title={runTitle}>
+              {runTitle}
+            </span>
+          )}
         </>
       ) : (
         runTitle
@@ -273,7 +265,6 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
     'stable_id',
     'kind',
     'title',
-    'body',
     'status',
     'source',
     'updated_at',
@@ -298,6 +289,8 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
     'related_ids',
     'impact'
   ]);
+  // PLAN bodies remain inspectable source data; their typed narrative is the reading view.
+  if (kindValue !== 'plan') displayed.add('body');
   const additional: Record<string, TaplJsonValue> = Object.create(null);
   for (const [key, value] of Object.entries(detail ?? result)) {
     if (!displayed.has(key) && !narrativeFields.some(([field]) => field === key) && value !== undefined)
@@ -309,6 +302,8 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
   if (result.score !== undefined) additional.score = result.score;
   if (result.snippet) additional.snippet = result.snippet;
   const hasNarrative = narrativeFields.some(([field]) => isRecorded(detail?.[field]));
+  const hasRetainedPlanContent =
+    kindValue === 'plan' && [detail?.body, detail?.raw_text, result.snippet].some((value) => !!value?.trim());
   return (
     <article className="wb-record-page">
       <header className="wb-record-hero">
@@ -370,7 +365,7 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
               <ReadableContent content={content} />
             </ReadingSection>
           )}
-          {!content && !hasNarrative && (
+          {!content && !hasNarrative && (!hasRetainedPlanContent || !detail) && (
             <p className="wb-reading-empty">{t(detail ? 'notRecorded' : 'detailUnavailable')}</p>
           )}
           {!!detail?.depends_on?.length && (

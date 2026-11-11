@@ -13,17 +13,16 @@
   --wb-status-completed: #7ed4ad;
   --wb-status-skipped: #baa2e4;
 }
-.wb-status-label[data-status],
-.wb-flow-lane[data-status] {
+.wb-status-label[data-status] {
   --wb-state: var(--wb-status-pending);
 }
-:is(.wb-status-label, .wb-flow-lane):is([data-status='In Progress'], [data-status='Open']) {
+.wb-status-label:is([data-status='In Progress'], [data-status='Open']) {
   --wb-state: var(--wb-status-progress);
 }
-:is(.wb-status-label, .wb-flow-lane):is([data-status='Blocked'], [data-status='Rejected']) {
+.wb-status-label:is([data-status='Blocked'], [data-status='Rejected']) {
   --wb-state: var(--wb-status-blocked);
 }
-:is(.wb-status-label, .wb-flow-lane):is(
+.wb-status-label:is(
   [data-status='Completed'],
   [data-status='Finalized'],
   [data-status='Resolved'],
@@ -31,7 +30,7 @@
 ) {
   --wb-state: var(--wb-status-completed);
 }
-:is(.wb-status-label, .wb-flow-lane):is([data-status='Skipped'], [data-status='Superseded']) {
+.wb-status-label:is([data-status='Skipped'], [data-status='Superseded']) {
   --wb-state: var(--wb-status-skipped);
 }
 .wb-status-label[data-status] {
@@ -57,12 +56,6 @@
 }
 .wb-status-label[data-status='Skipped'] .wb-status-dot {
   border-radius: 2px;
-}
-.wb-flow-lane[data-status] {
-  border-top: 2px solid color-mix(in srgb, var(--wb-state) 60%, var(--wb-border));
-}
-.wb-flow-task[data-status='In Progress'] {
-  border-color: color-mix(in srgb, var(--wb-status-progress) 55%, var(--wb-border));
 }
 .wb-record-context .wb-status-label {
   border-color: color-mix(in srgb, var(--wb-state) 18%, var(--wb-border));
@@ -314,5 +307,15 @@
   }
 }
 
-.wb-property-caption { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
-.tapl-discard-dialog.wb-dialog .tapl-discard-run-title { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; overflow:hidden; }
+.wb-property-caption {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.tapl-discard-dialog.wb-dialog .tapl-discard-run-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}

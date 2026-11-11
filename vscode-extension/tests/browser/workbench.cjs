@@ -50,7 +50,7 @@ test('real Viewer keeps RUN context, record navigation, preferences and fixed sh
     assert.equal(await page.getByRole('tab').count(), 2);
     assert.equal(await page.locator('.wb-run-facts > div').count(), 3, 'missing difficulty is omitted');
     assert.equal(await page.locator('[data-wb-focus="nav:current"] .wb-nav-counter').textContent(), '25%');
-    const lane = page.locator('[data-wb-track="flow"]');
+    const lane = page.locator('[data-wb-track="plans"]');
     await lane.evaluate(el => el.scrollLeft = 500);
     assert.ok(await lane.evaluate(el => el.scrollLeft) > 0);
     const before = await page.locator('.wb-topbar').boundingBox();
@@ -96,7 +96,8 @@ test('real Viewer keeps RUN context, record navigation, preferences and fixed sh
     await page.locator('.wb-current-overview').waitFor();
     assert.equal(await page.locator('.wb-run-tab-temporary').count(), 0);
     assert.equal(await page.getByRole('tab').count(), 2);
-    assert.ok((await page.locator('.wb-current-overview').innerText()).includes('Second RUN task'));
+    assert.equal(await page.locator('.wb-active-task').count(), 0);
+    assert.equal(await page.locator('.wb-active-empty').isVisible(), true);
 
     await page.locator('.wb-language-menu summary').click();
     await page.getByRole('button', { name: 'English', exact: true }).click();
@@ -113,7 +114,8 @@ test('real Viewer keeps RUN context, record navigation, preferences and fixed sh
     await page.locator('#tapl-workspace-path').waitFor();
     await page.locator('dialog.wb-workspace-dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.locator('.wb-current-overview').waitFor();
-    assert.ok((await page.locator('.wb-current-overview').innerText()).includes('Second RUN task'));
+    assert.equal(await page.locator('.wb-active-task').count(), 0);
+    assert.equal(await page.locator('.wb-active-empty').isVisible(), true);
 
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
@@ -212,6 +214,66 @@ test('workspace modal preserves RUN, filters, scroll and focus on cancel, invali
   } finally { await page.close(); }
 });
 
+test('Current RUN shows only active TASKs and useful PLAN previews with responsive reading', { timeout: 60000 }, async () => {
+  const { page, errors } = await openPage();
+  try {
+    assert.equal(await page.locator('.wb-flow-board,.wb-blocker').count(), 0);
+    const tasks = page.locator('.wb-active-task');
+    assert.equal(await tasks.count(), 6);
+    assert.deepEqual(await tasks.locator('.wb-overview-meta > .wb-mono').allTextContents(), ['TASK-001', 'TASK-005', 'TASK-009', 'TASK-013', 'TASK-017', 'TASK-021']);
+    assert.equal(await tasks.locator('.wb-status-label:not([data-status="In Progress"])').count(), 0);
+    assert.equal(await tasks.first().locator('.wb-overview-field').count(), 3);
+    assert.ok((await tasks.first().innerText()).includes('Make interface task 1 readable.'));
+    assert.ok((await tasks.first().innerText()).includes('Check both locales and responsive layouts.'));
+    assert.ok((await tasks.first().locator('.wb-overview-facts').innerText()).includes('PLAN-001'));
+    const section = await page.locator('.wb-active-section').boundingBox(), plans = await page.locator('.wb-plan-section').boundingBox();
+    assert.ok(section.y < plans.y);
+    assert.equal(await page.locator('.wb-plan-summary').count(), 3);
+    const plan = page.locator('.wb-plan-summary').first();
+    assert.equal(await plan.locator('.wb-overview-field').count(), 3);
+    assert.ok((await plan.innerText()).includes('Use a shared reading layout.'));
+    assert.ok((await plan.innerText()).includes('Verify the original record and both Viewer hosts.'));
+    const track = page.locator('[data-wb-track="plans"]');
+    await track.evaluate(el => el.scrollLeft = 400);
+    const horizontal = await track.evaluate(el => el.scrollLeft);
+    assert.ok(horizontal > 0);
+    await tasks.first().click();
+    await page.locator('.wb-record-page').waitFor();
+    assert.equal(await page.locator('.wb-record-page h1').innerText(), 'Interface task 1');
+    assert.ok((await page.locator('.wb-reading-body').innerText()).split('Keep the actual data and source context.').length > 10, 'full action remains readable in detail');
+    await page.locator('.wb-back').click();
+    await page.locator('.wb-active-task').first().waitFor();
+    assert.equal(await track.evaluate(el => el.scrollLeft), horizontal);
+
+    for (const locale of ['ko', 'en']) {
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.mobile === 'false');
+      await page.locator('.wb-language-menu summary').click();
+      await page.getByRole('button', { name: locale === 'ko' ? '한국어' : 'English', exact: true }).click();
+      for (const theme of ['light', 'dark']) {
+        if (await page.locator('html').getAttribute('data-tapl-theme') !== theme) await page.locator('.wb-brand-actions > button').click();
+        await page.waitForFunction(theme => document.documentElement.dataset.taplTheme === theme, theme);
+        for (const width of [1440, 390]) {
+          await page.setViewportSize({ width, height: 1000 });
+          await page.waitForFunction(mobile => document.querySelector('.tapl-workbench').dataset.mobile === mobile, width < 800 ? 'true' : 'false');
+          await page.locator('.wb-page-scroll').evaluate(el => el.scrollTop = 0);
+          await shot(page, `overview-${locale}-${theme}-${width}`);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true,
+            JSON.stringify(await page.evaluate(() => ({ inner: innerWidth, root: document.documentElement.scrollWidth, body: document.body.scrollWidth, overflow: [...document.querySelectorAll('body *')].map(el => ({ name: el.className, right: el.getBoundingClientRect().right, width: el.getBoundingClientRect().width })).filter(el => el.right > innerWidth + 1).slice(-10) }))));
+          const action = page.locator('.wb-active-task').first().locator('.wb-overview-text').nth(1);
+          const geometry = await action.evaluate(el => ({ height: el.clientHeight, scroll: el.scrollHeight, line: parseFloat(getComputedStyle(el).lineHeight) }));
+          assert.ok(geometry.height <= geometry.line * 4 + 1, 'bounded action preview');
+          assert.ok(geometry.scroll > geometry.height, 'long action is available in full detail');
+          await shot(page, `overview-${locale}-${theme}-${width}`);
+          await plan.scrollIntoViewIfNeeded();
+          await shot(page, `plans-${locale}-${theme}-${width}`);
+        }
+      }
+    }
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test('PLAN, FINDING, memories and diagnostics use reading pages and nested vertical fields', { timeout: 45000 }, async () => {
   const { page, errors } = await openPage();
   try {
@@ -219,6 +281,11 @@ test('PLAN, FINDING, memories and diagnostics use reading pages and nested verti
     await page.locator('.wb-record-page').waitFor();
     assert.equal(await page.locator('.wb-reading-section h2').filter({ hasText: '목적' }).count(), 1);
     assert.equal(await page.locator('.wb-reading-section h2').filter({ hasText: '요구사항' }).count(), 1);
+    assert.equal(await page.locator('.wb-reading-section h2').filter({ hasText: /^내용$/ }).count(), 0);
+    assert.equal(await page.getByText('Legacy PLAN body repeats the structured fields.', { exact: false }).isVisible(), false);
+    const additional = page.locator('.wb-record-disclosures > details').first();
+    await additional.locator('summary').first().click();
+    assert.equal(await page.getByText('Legacy PLAN body repeats the structured fields.', { exact: false }).isVisible(), true);
     await shot(page, 'plan-detail-ko-light');
     await page.locator('.wb-back').click();
     await page.locator('[data-wb-focus="explore:FINDING"]').click();
@@ -269,13 +336,15 @@ test('icon tooltips work on hover/focus and actual status colors stay distinct i
     await page.getByRole('tooltip').waitFor();
     assert.equal(await page.getByRole('tooltip').innerText(), '언어');
     await page.keyboard.press('Escape');
-    const colors = () => page.locator('.wb-flow-heading .wb-status-label').evaluateAll(elements => elements.map(el => getComputedStyle(el).color));
+    await page.locator('[data-wb-focus="nav:tasks"]').click();
+    const colors = () => page.locator('.wb-tasks-table .wb-status-label').evaluateAll(elements => elements.map(el => getComputedStyle(el).color));
     assert.equal(new Set(await colors()).size, 4);
     await page.locator('.wb-brand-actions > button').click();
     await page.waitForFunction(() => document.documentElement.dataset.taplTheme === 'dark');
     assert.equal(new Set(await colors()).size, 4);
+    await page.locator('[data-wb-focus="nav:current"]').click();
     await shot(page, 'current-ko-dark');
-    await page.locator('.wb-flow-task').first().click();
+    await page.locator('.wb-active-task').first().click();
     await page.locator('.wb-record-page').waitFor();
     await page.locator('.wb-record-disclosures > details').filter({ hasText: 'nested' }).locator('summary').first().click();
     assert.ok(await page.locator('.wb-value-branch').count() > 0);

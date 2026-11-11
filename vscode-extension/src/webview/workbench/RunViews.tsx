@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { TranslationKey } from '../../i18n';
 import { useI18n } from '../i18n';
 import type { TaplItem, TaplRunSnapshot, TaplWorkflowRun } from '../types';
@@ -54,69 +55,132 @@ function owner(item: TaplItem): string | undefined {
   const value = item.custom_fields?.owner ?? item.custom_fields?.assignee ?? item.executor_kind;
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
-function TaskFlow({ snapshot, open }: { snapshot: TaplRunSnapshot; open: OpenItem }): JSX.Element | null {
-  const { t, status } = useI18n();
-  if (!snapshot.tasks.length) return null;
-  const states: string[] = [
-    ...TASK_STATUSES.filter((value) => value !== 'Skipped' || snapshot.tasks.some((task) => task.status === value)),
-    ...new Set(
-      snapshot.tasks
-        .map((task) => task.status)
-        .filter((value): value is string => !!value && !(TASK_STATUSES as readonly string[]).includes(value))
-    )
-  ];
-  if (snapshot.tasks.some((task) => !task.status)) states.push('');
-  const ordered = [...snapshot.tasks].sort((a, b) =>
-    a.stable_id.localeCompare(b.stable_id, undefined, { numeric: true })
-  );
+function recordedText(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === 'string' && !!value.trim())?.trim();
+}
+function canOpen(item: TaplItem): boolean {
+  return typeof item.id === 'number' && Number.isFinite(item.id);
+}
+type OverviewField = { label: TranslationKey; text: string };
+function overviewFields(item: TaplItem, fields: Array<[keyof TaplItem, TranslationKey]>): OverviewField[] {
+  const seen = new Set<string>();
+  const values = fields.flatMap(([key, label]) => {
+    const text = recordedText(item[key]);
+    const normalized = text?.replace(/\s+/g, ' ');
+    if (!text || !normalized || seen.has(normalized)) return [];
+    seen.add(normalized);
+    return [{ label, text }];
+  });
+  if (values.length) return values;
+  const text = itemSummary(item);
+  return text ? [{ label: 'summary', text }] : [];
+}
+function OverviewFields({ fields }: { fields: OverviewField[] }): JSX.Element | null {
+  const { t } = useI18n();
+  if (!fields.length) return null;
   return (
-    <section className="wb-flow-section">
+    <span className="wb-overview-fields">
+      {fields.map(({ label, text }) => (
+        <span className="wb-overview-field" key={label}>
+          <span className="wb-overview-label">{t(label)}</span>
+          <span className="wb-overview-text">{text}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+function ActiveTasks({ snapshot, open }: { snapshot: TaplRunSnapshot; open: OpenItem }): JSX.Element {
+  const { t } = useI18n();
+  const tasks = snapshot.tasks
+    .filter((item) => item.status === 'In Progress')
+    .sort((a, b) => a.stable_id.localeCompare(b.stable_id, undefined, { numeric: true }));
+  return (
+    <section className="wb-active-section" aria-label={t('wbActiveTasks')}>
       <div className="wb-section-title">
-        <h2>{t('wbFlow')}</h2>
+        <h2>{t('wbActiveTasks')}</h2>
+        <span>
+          <ItemCount count={tasks.length} />
+        </span>
       </div>
-      <HorizontalTrack name="flow" label={t('wbFlow')} className="wb-flow-board">
-        {states.map((value) => {
-          const tasks = ordered.filter((item) => (item.status ?? '') === value);
-          return (
-            <section className="wb-flow-lane" key={value} data-status={value} aria-label={status(value) || t('status')}>
-              <header className="wb-flow-heading">
-                <h3>{value ? <StatusMark value={value} /> : t('status')}</h3>
-                <span>
-                  <ItemCount count={tasks.length} />
-                </span>
-              </header>
-              <ul>
-                {tasks.map((item) => (
-                  <li key={item.id ?? item.stable_id}>
-                    <button
-                      type="button"
-                      className="card wb-flow-task"
-                      data-status={item.status}
-                      data-wb-focus={`flow:${item.id ?? item.stable_id}`}
-                      onClick={() => open(item, snapshot.run)}
-                      disabled={item.id == null}
-                      title={item.id == null ? t('wbRecordUnavailable') : undefined}
-                    >
-                      <span className="wb-mono wb-flow-id">{item.stable_id}</span>
-                      <strong>{item.title}</strong>
-                      <span className="wb-flow-footer">
-                        {owner(item) && <span>{owner(item)}</span>}
-                        {!!item.depends_on?.length && (
-                          <span>
-                            {t('wbPrerequisites')} <ItemCount count={item.depends_on.length} />
-                          </span>
-                        )}
-                        <TaskDuration item={item} />
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {!tasks.length && <p className="wb-flow-empty">{t('wbEmptyLane')}</p>}
-            </section>
-          );
-        })}
-      </HorizontalTrack>
+      {tasks.length ? (
+        <ul className="wb-active-tasks">
+          {tasks.map((item) => {
+            const execution = item.active_execution;
+            const assigned = recordedText(item.custom_fields?.owner, item.custom_fields?.assignee);
+            const executorRef = recordedText(execution?.executor_ref);
+            const executorKind = recordedText(execution?.executor_kind, item.executor_kind);
+            const executionMode = recordedText(execution?.execution_mode, item.execution_mode);
+            const dependencies = item.depends_on?.filter((id) => recordedText(id)).length ?? 0;
+            const facts: Array<[TranslationKey, ReactNode]> = [
+              ['wbOwner', assigned],
+              ['wbExecutionRef', executorRef !== assigned ? executorRef : undefined],
+              [
+                'executor',
+                executorKind === 'main' ? undefined : executorKind === 'subagent' ? t('wbSubagent') : executorKind
+              ],
+              [
+                'executionMode',
+                executionMode === 'sequential'
+                  ? undefined
+                  : executionMode === 'parallel'
+                    ? t('wbParallel')
+                    : executionMode
+              ],
+              ['wbParentPlan', recordedText(item.spec_id)],
+              ['dependencies', dependencies ? <ItemCount count={dependencies} /> : undefined]
+            ];
+            const present = facts.filter(([, value]) => value);
+            const fields = overviewFields(item, [
+              ['goal', 'goal'],
+              ['action', 'action'],
+              ['verification', 'verification']
+            ]);
+            return (
+              <li key={item.id ?? item.stable_id}>
+                <button
+                  type="button"
+                  className="card wb-active-task"
+                  data-status={item.status}
+                  data-wb-focus={`active-task:${item.id ?? item.stable_id}`}
+                  onClick={() => {
+                    if (canOpen(item)) open(item, snapshot.run);
+                  }}
+                  disabled={!canOpen(item)}
+                  title={!canOpen(item) ? t('wbRecordUnavailable') : undefined}
+                >
+                  <span className="wb-overview-meta">
+                    <span className="wb-mono">{item.stable_id}</span>
+                    <StatusMark value={item.status} />
+                  </span>
+                  <span className="wb-overview-heading">
+                    <strong>{item.title}</strong>
+                    <Icon name="arrow" />
+                  </span>
+                  <OverviewFields fields={fields} />
+                  {(present.length > 0 || item.execution_timing) && (
+                    <span className="wb-overview-facts">
+                      {present.map(([label, value]) => (
+                        <span className="wb-overview-fact" key={label}>
+                          <span className="wb-overview-label">{t(label)}</span>
+                          <span>{value}</span>
+                        </span>
+                      ))}
+                      {item.execution_timing && (
+                        <span className="wb-overview-fact">
+                          <span className="wb-overview-label">{t('elapsedTime')}</span>
+                          <TaskDuration item={item} />
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="wb-active-empty">{t('wbNoActiveTasks')}</p>
+      )}
     </section>
   );
 }
@@ -139,12 +203,12 @@ export function CurrentRun({
         <EmptyState title={t('wbNoRun')} help={t('wbNoRunHelp')} />
       </>
     );
-  const blocked = snapshot.tasks.find((item) => item.status === 'Blocked');
   return (
     <>
       <PageHeading title={title} back={back} />
       <div className="wb-current-overview">
         <RunInformation run={snapshot.run} />
+        <ActiveTasks snapshot={snapshot} open={open} />
         <section className="wb-plan-section">
           <div className="wb-section-title">
             <h2>PLAN</h2>
@@ -163,12 +227,14 @@ export function CurrentRun({
                   type="button"
                   key={plan.id ?? plan.stable_id}
                   className="card wb-plan-summary"
-                  onClick={() => open(plan, snapshot.run)}
+                  onClick={() => {
+                    if (canOpen(plan)) open(plan, snapshot.run);
+                  }}
                   data-wb-focus={`plan:${plan.id ?? plan.stable_id}`}
-                  disabled={plan.id == null}
-                  title={plan.id == null ? t('wbRecordUnavailable') : undefined}
+                  disabled={!canOpen(plan)}
+                  title={!canOpen(plan) ? t('wbRecordUnavailable') : undefined}
                 >
-                  <span className="wb-plan-meta">
+                  <span className="wb-overview-meta">
                     <span className="wb-mono">{plan.stable_id}</span>
                     {plan.status && (
                       <span className="badge badge-outline badge-sm">
@@ -176,11 +242,19 @@ export function CurrentRun({
                       </span>
                     )}
                   </span>
-                  <span className="wb-plan-heading">
+                  <span className="wb-overview-heading">
                     <strong>{plan.title}</strong>
                     <Icon name="arrow" />
                   </span>
-                  {itemSummary(plan) && <span className="wb-plan-goal">{itemSummary(plan)}</span>}
+                  <OverviewFields
+                    fields={overviewFields(plan, [
+                      ['summary', 'summary'],
+                      ['objective', 'wbObjective'],
+                      ['goal', 'goal'],
+                      ['selected_approach', 'wbApproach'],
+                      ['validation', 'wbValidation']
+                    ])}
+                  />
                 </button>
               ))}
             </HorizontalTrack>
@@ -188,33 +262,6 @@ export function CurrentRun({
             <p className="wb-plan-placeholder">{t('wbNoPlans')}</p>
           )}
         </section>
-        {blocked && (
-          <section className="wb-blocker">
-            <Icon name="alert" />
-            <div>
-              <h2>{t('wbBlockerTitle')}</h2>
-              <p>
-                {blocked.stable_id} · {blocked.title}
-              </p>
-              {blocked.id != null && (
-                <button
-                  className="btn btn-link btn-xs"
-                  type="button"
-                  onClick={() => open(blocked, snapshot.run)}
-                  data-wb-focus="blocker"
-                >
-                  {t('wbBlockerLink')}
-                  <Icon name="arrow" />
-                </button>
-              )}
-            </div>
-          </section>
-        )}
-        {snapshot.tasks.length ? (
-          <TaskFlow snapshot={snapshot} open={open} />
-        ) : (
-          <EmptyState title={t('wbNoTasks')} help={t('wbNoTasksHelp')} />
-        )}
       </div>
     </>
   );
