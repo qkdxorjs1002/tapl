@@ -473,7 +473,7 @@ body:has(.tapl-workbench) {
   pointer-events: none;
 }
 .tapl-workbench[data-mobile='false'][data-sidebar-expanded='false']
-  :is(.wb-fold-trigger, .wb-discard-button, .wb-workspace-switch)
+  :is(.wb-fold-trigger, .wb-discard-button)
   > .wb-icon:last-child:not(:first-child) {
   opacity: 0;
 }
@@ -1667,35 +1667,6 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .tapl-workbench {
 .wb-legacy-view [data-legacy-back] {
   display: none;
 }
-.wb-workspace-switch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  margin-bottom: 12px;
-  color: var(--wb-muted);
-  background: none;
-  border: 0;
-  border-radius: 8px;
-  text-align: left;
-}
-.wb-workspace-switch:hover {
-  background: var(--wb-soft);
-  color: var(--wb-fg);
-}
-.wb-workspace-switch span {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wb-workspace-switch > .wb-icon:last-child {
-  width: 12px;
-  height: 12px;
-}
-
 .wb-section-heading {
   display: flex;
   align-items: center;

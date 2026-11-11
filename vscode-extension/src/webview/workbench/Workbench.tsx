@@ -453,21 +453,6 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
         }}
       >
         <section>
-          {props.workspace && !props.browser && (
-            <button
-              type="button"
-              className="wb-workspace-switch"
-              title={props.workspace}
-              aria-label={t('changeWorkspace')}
-              onClick={() => props.send({ command: 'chooseWorkspace' })}
-            >
-              <Icon name="folder" />
-              <span className="wb-nav-label" aria-hidden="true">
-                {props.workspace.split(/[\\/]/).filter(Boolean).pop()}
-              </span>
-              <Icon name="chevron" />
-            </button>
-          )}
           <div className="wb-section-heading wb-workspace-heading">
             <h2 className="wb-nav-caption">{t('wbWorkspace')}</h2>
             {props.browser && (

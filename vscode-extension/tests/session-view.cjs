@@ -15,15 +15,16 @@ const output = buildSync({
 
 const run = { id: 'run-b', session_id: 'session-b', request_summary: 'Remaining work' };
 
-function render(activeRun, runs = [run]) {
+function render(activeRun, runs = [run], { browser = false, locale = 'en', layout = 'auto', view } = {}) {
   global.acquireVsCodeApi = () => ({
-    getState: () => ({ locale: 'en', layout: 'auto', view: {
+    getState: () => ({ locale, layout, workspace: '/actual/editor-workspace', view: view ?? {
       type: 'overview', archives: [], searchQuery: '', status: {
         session_id: activeRun ? 'session-b' : 'session-a', active_run: activeRun ? run : null,
         active_runs: runs, tasks: [], plans: [], findings: [], task_counts: {}, incomplete_tasks: 0
       }
     } }),
-    setState() {}, postMessage() {}
+    setState() {}, postMessage() {},
+    ...(browser ? { setPollingActive() {} } : {})
   });
   try {
     const compiled = new Module(filename, module);
@@ -71,4 +72,25 @@ test('no RUNs keeps the navigation and an actionable empty state', () => {
 
 test('the selected RUN remains a tab when the inventory omits it', () => {
   assert.match(render(true, []), /aria-selected="true"[^>]*id="wb-run-tab-0"/);
+});
+
+test('VS Code never shows workspace-change controls for an opened workspace', () => {
+  for (const locale of ['ko', 'en']) {
+    for (const layout of ['auto', 'small', 'medium', 'large']) {
+      const html = render(true, [run], { locale, layout });
+      assert.doesNotMatch(html, /wb-workspace-switch|data-wb-focus="workspace-picker"/);
+      assert.doesNotMatch(html, /aria-label="(?:Change workspace|워크스페이스 변경)"/);
+      assert.match(html, /data-wb-focus="nav:current"/);
+    }
+  }
+});
+
+test('workspace selection stays available only to the browser host', () => {
+  for (const locale of ['ko', 'en']) {
+    const html = render(true, [run], { browser: true, locale });
+    assert.equal((html.match(/data-wb-focus="workspace-picker"/g) || []).length, 1);
+    assert.doesNotMatch(html, /wb-workspace-switch/);
+  }
+  const html = render(false, [], { view: { type: 'workspace', workspace: '/missing' } });
+  assert.doesNotMatch(html, /data-wb-focus="workspace-picker"|role="dialog"/);
 });

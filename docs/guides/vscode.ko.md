@@ -12,6 +12,8 @@ VS Code **1.90+**, `.tapl/tapl-{UUID}.db`가 있는 초기화된 워크스페이
 
 Marketplace에서 `paragonnov.tapl-workflow-viewer`를 설치하거나 [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases)에서 `.vsix`를 받아 **Extensions: Install from VSIX…**를 실행합니다. 초기화한 폴더를 열고 활동 표시줄에서 **TAPL**을 선택한 뒤 **TAPL Workflow: Open TAPL Dashboard**를 실행하세요.
 
+대시보드는 VS Code에서 연 워크스페이스를 사용하며 워크스페이스 변경 버튼이나 폴더 선택 모달을 표시하지 않습니다. Viewer 내부의 폴더 선택은 [웹 Viewer](viewer.ko.md#viewer-탐색)에서만 제공합니다.
+
 기본 검색 경로는 `PATH`, `/opt/homebrew/bin/tapl-mcp`, `/usr/local/bin/tapl-mcp`이며 Windows에서는 `tapl-mcp.exe`를 사용합니다. 필요하면 다음처럼 지정합니다.
 
 ```json
