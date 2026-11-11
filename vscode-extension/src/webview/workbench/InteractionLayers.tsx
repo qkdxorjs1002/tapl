@@ -44,6 +44,8 @@ export function IconTooltips({ navigationKey }: { navigationKey: string }): JSX.
         target.matches(':disabled')
       )
         return;
+      if (target.dataset.wbTooltip === 'false') return;
+      if (target.dataset.wbTooltip === 'true') return target;
       const copy = target.cloneNode(true) as HTMLElement;
       copy.querySelectorAll('svg,[aria-hidden="true"],.wb-sr-only,.sr-only').forEach((element) => element.remove());
       return copy.textContent?.trim() ? undefined : target;

@@ -40,19 +40,124 @@ async function openPage() {
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(origin);
-  await page.locator('.wb-current-overview').waitFor();
+  await page.locator('.wb-run-mindmap').waitFor();
   return { page, errors };
 }
+
+test('icon navigation morphs counters, expands over the map and preserves pinning and Explore focus', { timeout: 60000 }, async () => {
+  const { page, errors } = await openPage();
+  const shell = page.locator('.tapl-workbench'), sidebar = page.locator('.wb-sidebar');
+  const pin = page.locator('[data-wb-focus="sidebar-pin"]');
+  try {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    assert.equal(await shell.getAttribute('data-sidebar-expanded'), 'false');
+    assert.equal((await sidebar.boundingBox()).width, 72);
+    const navIcon = await page.locator('[data-wb-focus="nav:current"] > .wb-icon').boundingBox();
+    for (const selector of ['[data-wb-focus="workspace-picker"] .wb-icon', '.wb-management-actions > button:first-child .wb-icon', '.wb-management-actions > button:last-child .wb-icon']) {
+      const icon = await page.locator(selector).boundingBox();
+      assert.ok(Math.abs(icon.x+icon.width/2-navIcon.x-navIcon.width/2)<1, selector);
+      assert.equal(icon.width,17); assert.equal(icon.height,17);
+    }
+    const language = await page.locator('.wb-language-menu summary').boundingBox(), pinBox = await pin.boundingBox();
+    assert.ok(pinBox.x + pinBox.width <= language.x, 'pin sits left of the language control');
+    assert.equal(await page.locator('.wb-mm-top-controls button[aria-pressed]').count(),0,'map motion has no toggle');
+    const tasks = page.locator('[data-wb-focus="nav:tasks"]');
+    assert.equal(await tasks.locator('.wb-count-compact').innerText(), '24');
+    assert.equal(await tasks.locator('.wb-count-full').textContent(), '24개');
+    assert.ok((await tasks.getAttribute('aria-label')).includes('24개'));
+    const canvas = await page.locator('.wb-run-mindmap').boundingBox();
+    await tasks.hover();
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.sidebarExpanded === 'true');
+    assert.equal((await sidebar.boundingBox()).width, 256);
+    assert.deepEqual(await page.locator('.wb-run-mindmap').boundingBox(), canvas, 'hover overlays rather than moves the canvas');
+    await page.getByRole('tooltip').waitFor();
+    assert.ok((await page.getByRole('tooltip').innerText()).includes('24개'));
+    await page.mouse.move(1000, 800);
+    await page.waitForTimeout(250);
+    assert.equal(await shell.getAttribute('data-sidebar-expanded'),'true','brief pointer departure keeps the panel open');
+    await tasks.hover();
+    await page.waitForTimeout(400);
+    assert.equal(await shell.getAttribute('data-sidebar-expanded'),'true','re-entry cancels the pending collapse');
+    await page.mouse.move(1000,800);
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.sidebarExpanded === 'false');
+    await pin.click();
+    assert.equal(await shell.getAttribute('data-sidebar-pinned'), 'true');
+    assert.equal((await page.locator('.wb-run-mindmap').boundingBox()).x, 256);
+    await page.locator('[data-wb-focus="theme-toggle"]').click();
+    await page.reload();
+    await page.locator('.wb-run-mindmap').waitFor();
+    assert.equal(await shell.getAttribute('data-sidebar-pinned'), 'true', 'theme persistence retains pin state');
+    await pin.click();
+    await page.mouse.move(1000, 800);
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.sidebarExpanded === 'false');
+    await page.locator('[data-wb-focus="explore:TASK"]').hover();
+    await page.locator('.wb-fold-list button').first().hover();
+    assert.equal(await shell.getAttribute('data-sidebar-expanded'), 'true', 'portal hover keeps navigation expanded');
+    const box = await sidebar.boundingBox(), flyout = await page.locator('.wb-explore-panel').boundingBox();
+    assert.ok(flyout.x >= box.x + box.width);
+    await page.locator('.wb-fold-list button').first().focus();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('.wb-explore-panel').count(), 0);
+    await page.keyboard.press('Tab');
+    await page.locator('[data-wb-focus="nav:current"]').focus();
+    assert.equal(await shell.getAttribute('data-sidebar-expanded'), 'true', 'keyboard focus expands labels');
+    await page.locator('.wb-run-mindmap').focus();
+    await page.mouse.move(1000, 800);
+    await page.waitForTimeout(250);
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.sidebarExpanded === 'false');
+    await page.setViewportSize({ width: 1280, height: 420 });
+    assert.ok(await sidebar.evaluate(el => el.scrollHeight > el.clientHeight));
+    await page.locator('.wb-discard-button').scrollIntoViewIfNeeded();
+    assert.ok(await page.locator('.wb-discard-button').isVisible());
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForFunction(() => document.querySelector('.wb-sidebar').inert);
+    assert.equal(await pin.isVisible(), false);
+    await page.locator('.wb-mobile-menu').click();
+    await page.locator('[data-wb-focus="explore:PLAN"]').click();
+    await page.locator('.wb-explore-panel').waitFor();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    assert.equal(await sidebar.evaluate(el => el.inert), true);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('large rail counts retain their full names and captions stay on one line throughout expansion', { timeout: 30000 }, async () => {
+  const page = await browser.newPage({ viewport:{width:1440,height:1000},locale:'ko-KR' });
+  try {
+    await page.route('**/api/message',async route => {
+      const response=await route.fetch(), payload=await response.json();
+      const status=payload.view?.type==='overview' ? payload.view.status : undefined;
+      if(status?.active_run && status.tasks?.length) {
+        const item=status.tasks[0];
+        status.tasks=Array.from({length:137},(_,i)=>({...item,id:1000+i,stable_id:`TASK-${i+1000}`,status:'Pending'}));
+        status.task_counts={Pending:137};
+      }
+      await route.fulfill({response,json:payload});
+    });
+    await page.goto(origin);await page.locator('.wb-run-mindmap').waitFor();
+    const task=page.locator('[data-wb-focus="nav:tasks"]');
+    assert.equal(await task.locator('.wb-count-compact').innerText(),'99+');
+    assert.ok((await task.getAttribute('aria-label')).includes('137개'));
+    assert.ok((await task.locator('.wb-rail-count').boundingBox()).width<30);
+    await page.locator('.wb-sidebar').hover({position:{x:20,y:4}});
+    const heights=await page.locator('.wb-workspace-heading .wb-nav-caption').evaluate(async el=>{
+      const values=[];for(let i=0;i<24;i++){await new Promise(requestAnimationFrame);values.push({height:el.getBoundingClientRect().height,line:parseFloat(getComputedStyle(el).lineHeight),wrap:getComputedStyle(el).whiteSpace});}return values;
+    });
+    assert.ok(heights.every(value=>value.wrap==='nowrap' && value.height<=value.line+1),'caption never wraps during the width transition');
+    assert.equal(await page.locator('.wb-mm-world').evaluate(el=>getComputedStyle(el).willChange),'auto');
+    assert.equal(await page.locator('.wb-mm-node-button').first().evaluate(el=>getComputedStyle(el).transform),'none');
+  } finally {await page.close();}
+});
 
 test('real Viewer keeps RUN context, record navigation, preferences and fixed shell', { timeout: 90000 }, async () => {
   const { page, errors } = await openPage();
   try {
     assert.equal(await page.getByRole('tab').count(), 2);
-    assert.equal(await page.locator('.wb-run-facts > div').count(), 3, 'missing difficulty is omitted');
-    assert.equal(await page.locator('[data-wb-focus="nav:current"] .wb-nav-counter').textContent(), '25%');
-    const lane = page.locator('[data-wb-track="plans"]');
-    await lane.evaluate(el => el.scrollLeft = 500);
-    assert.ok(await lane.evaluate(el => el.scrollLeft) > 0);
+    assert.equal(await page.locator('.wb-run-facts').count(), 0);
+    assert.equal(await page.locator('.wb-mm-percent').innerText(), '25%');
+    assert.equal(await page.locator('[data-wb-focus="nav:current"] .wb-count-full').textContent(), '25%');
+    assert.equal(await page.locator('.wb-mm-node').count(), 28);
     const before = await page.locator('.wb-topbar').boundingBox();
     await page.locator('.wb-page-scroll').evaluate(el => el.scrollTop = 400);
     assert.deepEqual(await page.locator('.wb-topbar').boundingBox(), before);
@@ -93,17 +198,17 @@ test('real Viewer keeps RUN context, record navigation, preferences and fixed sh
     await archive.locator('.wb-source-run-link').click();
     await page.locator('.wb-run-tab-temporary').waitFor();
     await page.getByRole('tab', { name: /Second active RUN/ }).click();
-    await page.locator('.wb-current-overview').waitFor();
+    await page.locator('.wb-run-mindmap').waitFor();
     assert.equal(await page.locator('.wb-run-tab-temporary').count(), 0);
     assert.equal(await page.getByRole('tab').count(), 2);
-    assert.equal(await page.locator('.wb-active-task').count(), 0);
-    assert.equal(await page.locator('.wb-active-empty').isVisible(), true);
+    assert.equal(await page.locator('.wb-mm-node[data-kind=task]').count(), 1);
+    assert.equal(await page.locator('.wb-mm-node[data-kind=task]').isVisible(), true);
 
     await page.locator('.wb-language-menu summary').click();
     await page.getByRole('button', { name: 'English', exact: true }).click();
     await page.getByRole('button', { name: 'Use dark theme', exact: true }).click();
     await page.reload();
-    await page.locator('.wb-current-overview').waitFor();
+    await page.locator('.wb-run-mindmap').waitFor();
     assert.equal(await page.locator('html').getAttribute('lang'), 'en');
     assert.equal(await page.locator('html').getAttribute('data-tapl-theme'), 'dark');
     assert.equal(await page.locator('.wb-back').count(), 0, 'reload clears historical Back');
@@ -113,9 +218,9 @@ test('real Viewer keeps RUN context, record navigation, preferences and fixed sh
     await picker.click();
     await page.locator('#tapl-workspace-path').waitFor();
     await page.locator('dialog.wb-workspace-dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
-    await page.locator('.wb-current-overview').waitFor();
-    assert.equal(await page.locator('.wb-active-task').count(), 0);
-    assert.equal(await page.locator('.wb-active-empty').isVisible(), true);
+    await page.locator('.wb-run-mindmap').waitFor();
+    assert.equal(await page.locator('.wb-mm-node[data-kind=task]').count(), 1);
+    assert.equal(await page.locator('.wb-mm-node[data-kind=task]').isVisible(), true);
 
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
@@ -158,7 +263,7 @@ test('theme control reflects automatic dark mode and follows system changes unti
   page.setDefaultTimeout(6000);
   try {
     await page.goto(origin);
-    await page.locator('.wb-current-overview').waitFor();
+    await page.locator('.wb-run-mindmap').waitFor();
     await page.getByRole('button', { name: 'Use light theme', exact: true }).waitFor();
     await page.emulateMedia({ colorScheme: 'light' });
     await page.getByRole('button', { name: 'Use dark theme', exact: true }).click();
@@ -204,7 +309,7 @@ test('workspace modal preserves RUN, filters, scroll and focus on cancel, invali
     await modal.locator('input').fill(secondWorkspace);
     await modal.locator('button[type=submit]').click();
     await modal.waitFor({ state: 'detached' });
-    await page.locator('.wb-current-overview').waitFor();
+    await page.locator('.wb-run-mindmap').waitFor();
     assert.ok((await picker.getAttribute('title')).includes(secondWorkspace));
     assert.notEqual(await page.locator('.wb-run-tab[aria-selected="true"]').getAttribute('title'), current);
     await page.locator('[data-wb-focus="nav:tasks"]').click();
@@ -214,93 +319,78 @@ test('workspace modal preserves RUN, filters, scroll and focus on cancel, invali
   } finally { await page.close(); }
 });
 
-test('Current RUN shows only active TASKs and useful PLAN previews with responsive reading', { timeout: 60000 }, async () => {
+test('Current RUN is a source-safe interactive mindmap with bounded camera and pointer-only focus cleanup', { timeout: 60000 }, async () => {
   const { page, errors } = await openPage();
   try {
-    assert.equal(await page.locator('.wb-flow-board,.wb-blocker').count(), 0);
-    const tasks = page.locator('.wb-active-task');
-    assert.equal(await tasks.count(), 6);
-    assert.deepEqual(await tasks.locator('.wb-overview-meta > .wb-mono').allTextContents(), ['TASK-001', 'TASK-005', 'TASK-009', 'TASK-013', 'TASK-017', 'TASK-021']);
-    assert.equal(await tasks.locator('.wb-status-label:not([data-status="In Progress"])').count(), 0);
-    assert.equal(await tasks.locator('.wb-overview-field').count(), 0);
-    assert.ok(!(await tasks.first().innerText()).includes('Make interface task 1 readable.'));
-    assert.ok(!(await tasks.first().innerText()).includes('Check both locales and responsive layouts.'));
-    assert.ok((await tasks.first().locator('.wb-overview-facts').innerText()).includes('PLAN-001'));
-    const section = await page.locator('.wb-active-section').boundingBox(), plans = await page.locator('.wb-plan-section').boundingBox();
-    assert.ok(plans.y < section.y);
-    assert.equal(await page.locator('.wb-plan-summary').count(), 3);
-    const plan = page.locator('.wb-plan-summary').first();
-    assert.equal(await plan.locator('.wb-overview-field').count(), 3);
-    assert.ok((await plan.innerText()).includes('Use a shared reading layout.'));
-    assert.ok((await plan.innerText()).includes('Verify the original record and both Viewer hosts.'));
-    const track = page.locator('[data-wb-track="plans"]');
-    await track.evaluate(el => el.scrollLeft = 400);
-    const horizontal = await track.evaluate(el => el.scrollLeft);
-    assert.ok(horizontal > 0);
-    const taskTrack = page.locator('[data-wb-track="active-tasks"]');
-    const cards = await tasks.evaluateAll(elements => elements.slice(0, 2).map(el => el.getBoundingClientRect().toJSON()));
-    assert.equal(cards[0].y, cards[1].y, 'TASKs share one horizontal row');
-    assert.ok(cards[1].x > cards[0].x + cards[0].width);
-    assert.ok(cards[0].width <= 420 && cards[0].height < 240, 'compact desktop TASK card');
-    const footers = await tasks.locator('.wb-overview-facts').evaluateAll(elements => elements.slice(0, 2).map(el => el.getBoundingClientRect().bottom));
-    assert.ok(Math.abs(footers[0] - footers[1]) < 1, 'TASK metadata aligns at the bottom of each card');
-    await taskTrack.focus();
-    await page.keyboard.press('End');
-    await page.waitForFunction(() => document.querySelector('[data-wb-track="active-tasks"]').style.getPropertyValue('--wb-track-left-opacity') === '0');
-    assert.equal(await track.evaluate(el => el.scrollLeft), horizontal, 'PLAN and TASK positions are independent');
-    assert.equal(await taskTrack.evaluate(el => el.style.getPropertyValue('--wb-track-left-opacity')), '0');
-    await page.keyboard.press('Home');
-    await page.waitForFunction(() => document.querySelector('[data-wb-track="active-tasks"]').scrollLeft === 0);
-    await tasks.first().click();
-    await page.locator('.wb-record-page').waitFor();
-    assert.equal(await page.locator('.wb-record-page h1').innerText(), 'Interface task 1');
-    assert.ok((await page.locator('.wb-reading-body').innerText()).split('Keep the actual data and source context.').length > 10, 'full action remains readable in detail');
-    await page.locator('.wb-back').click();
-    await page.locator('.wb-active-task').first().waitFor();
-    assert.equal(await track.evaluate(el => el.scrollLeft), horizontal);
-    await tasks.nth(3).scrollIntoViewIfNeeded();
-    const taskHorizontal = await taskTrack.evaluate(el => el.scrollLeft);
-    assert.ok(taskHorizontal > 0);
-    await tasks.nth(3).click();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const map = page.locator('.wb-run-mindmap');
+    const world = page.locator('.wb-mm-world');
+    const camera = () => world.evaluate(el => { const m = new DOMMatrix(getComputedStyle(el).transform); return { x: m.e, y: m.f, z: m.a }; });
+    assert.equal(await page.locator('.wb-mm-node').count(), 28);
+    assert.equal(await page.locator('.wb-mm-edge').count(), 27);
+    assert.equal(await page.locator('.wb-run-information,.wb-plan-section,.wb-active-section,.wb-flow-board').count(), 0);
+    assert.equal(new Set(await page.locator('.wb-mm-node[data-kind="task"] button').evaluateAll(els => els.map(el => el.dataset.status))).size, 4);
+    assert.deepEqual(await map.boundingBox(), await page.locator('.wb-page-scroll').boundingBox());
+    await page.keyboard.press('Tab');
+    await map.click({ position: { x: 500, y: 45 } });
+    assert.equal(await map.evaluate(el => getComputedStyle(el).outlineStyle), 'none', 'pointer interaction has no canvas focus outline');
+    await page.keyboard.press('Tab');
+    await map.focus();
+    assert.equal(await map.evaluate(el => getComputedStyle(el).outlineStyle), 'solid', 'keyboard focus remains visible');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(30);
+    const before = await camera();
+    await page.mouse.move(850, 150);
+    await page.mouse.wheel(40, 55);
+    await page.waitForTimeout(50);
+    const panned = await camera();
+    assert.equal(panned.z, before.z);
+    assert.ok(panned.x < before.x && panned.y < before.y);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -20);
+    await page.keyboard.up('Control');
+    await page.waitForTimeout(50);
+    assert.ok((await camera()).z > panned.z);
+    for (const direction of [1, -1]) {
+      await page.mouse.wheel(direction * 1e6, direction * 1e6);
+      await page.waitForTimeout(50);
+      const bounded = await camera();
+      assert.ok(Math.abs(bounded.x) < 2500 && Math.abs(bounded.y) < 5000, 'camera cannot leave the graph bounds');
+    }
+    await map.focus(); await page.keyboard.press('Escape');
+    const leaf = page.locator('.wb-mm-node[data-kind="task"] button').filter({ hasText: 'TASK-013' });
+    await leaf.focus(); await page.waitForTimeout(30);
+    const position = await camera();
+    await leaf.click({ force: true });
     await page.locator('.wb-record-page').waitFor();
     assert.equal(await page.locator('.wb-record-page h1').innerText(), 'Interface task 13');
-    await page.locator('.wb-back').click();
-    await page.locator('.wb-active-task').first().waitFor();
-    assert.equal(await taskTrack.evaluate(el => el.scrollLeft), taskHorizontal, 'TASK horizontal position returns from detail');
-    await taskTrack.evaluate(el => el.scrollLeft = 0);
-
-    for (const locale of ['ko', 'en']) {
-      await page.setViewportSize({ width: 1440, height: 1000 });
-      await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.mobile === 'false');
+    await page.locator('.wb-back').click(); await map.waitFor();
+    await page.waitForTimeout(30);
+    const returned = await camera();
+    assert.ok(Math.abs(position.x-returned.x)<1 && Math.abs(position.y-returned.y)<1, 'return restores the RUN camera');
+    for (const locale of ['ko','en']) {
+      await page.setViewportSize({ width:1440, height:1000 });
       await page.locator('.wb-language-menu summary').click();
-      await page.getByRole('button', { name: locale === 'ko' ? '한국어' : 'English', exact: true }).click();
-      for (const theme of ['light', 'dark']) {
-        if (await page.locator('html').getAttribute('data-tapl-theme') !== theme) await page.locator('.wb-brand-actions > button').click();
-        await page.waitForFunction(theme => document.documentElement.dataset.taplTheme === theme, theme);
-        for (const width of [1440, 390]) {
-          await page.setViewportSize({ width, height: 1000 });
-          await page.waitForFunction(mobile => document.querySelector('.tapl-workbench').dataset.mobile === mobile, width < 800 ? 'true' : 'false');
-          await page.locator('.wb-page-scroll').evaluate(el => el.scrollTop = 0);
-          await shot(page, `overview-${locale}-${theme}-${width}`);
-          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true,
-            JSON.stringify(await page.evaluate(() => ({ inner: innerWidth, root: document.documentElement.scrollWidth, body: document.body.scrollWidth, overflow: [...document.querySelectorAll('body *')].map(el => ({ name: el.className, right: el.getBoundingClientRect().right, width: el.getBoundingClientRect().width })).filter(el => el.right > innerWidth + 1).slice(-10) }))));
-          assert.equal(await tasks.locator('.wb-overview-text').count(), 0);
-          const geometry = await tasks.first().boundingBox();
-          assert.ok(geometry.height < 260, 'compact TASK height in both locales and themes');
-          await shot(page, `overview-${locale}-${theme}-${width}`);
-          await plan.scrollIntoViewIfNeeded();
-          await shot(page, `plans-${locale}-${theme}-${width}`);
+      await page.getByRole('button',{name:locale==='ko'?'한국어':'English',exact:true}).click();
+      for (const theme of ['light','dark']) {
+        if(await page.locator('html').getAttribute('data-tapl-theme')!==theme) await page.locator('[data-wb-focus="theme-toggle"]').click();
+        for (const width of [1440,390]) {
+          await page.setViewportSize({ width,height:1000 });
+          await page.waitForTimeout(50);
+          assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+          assert.deepEqual(await map.boundingBox(),await page.locator('.wb-page-scroll').boundingBox());
+          await shot(page,`mindmap-${locale}-${theme}-${width}`);
         }
       }
     }
-    assert.deepEqual(errors, []);
+    assert.deepEqual(errors,[]);
   } finally { await page.close(); }
 });
 
 test('PLAN, FINDING, memories and diagnostics use reading pages and nested vertical fields', { timeout: 45000 }, async () => {
   const { page, errors } = await openPage();
   try {
-    await page.locator('.wb-plan-summary').first().click();
+    await page.locator('.wb-mm-node[data-kind=plan] button').first().click({ force:true });
     await page.locator('.wb-record-page').waitFor();
     assert.equal(await page.locator('.wb-reading-section h2').filter({ hasText: '목적' }).count(), 1);
     assert.equal(await page.locator('.wb-reading-section h2').filter({ hasText: '요구사항' }).count(), 1);
@@ -349,6 +439,8 @@ test('icon tooltips work on hover/focus and actual status colors stay distinct i
   const { page, errors } = await openPage();
   try {
     const picker = page.locator('[data-wb-focus="workspace-picker"]');
+    await page.locator('.wb-sidebar').hover({ position: { x: 20, y: 5 } });
+    await page.waitForTimeout(350);
     await picker.hover();
     await page.getByRole('tooltip').waitFor();
     assert.equal(await page.getByRole('tooltip').innerText(), await picker.getAttribute('aria-label'));
@@ -362,12 +454,15 @@ test('icon tooltips work on hover/focus and actual status colors stay distinct i
     await page.locator('[data-wb-focus="nav:tasks"]').click();
     const colors = () => page.locator('.wb-tasks-table .wb-status-label').evaluateAll(elements => elements.map(el => getComputedStyle(el).color));
     assert.equal(new Set(await colors()).size, 4);
-    await page.locator('.wb-brand-actions > button').click();
+    await page.locator('[data-wb-focus="theme-toggle"]').click();
     await page.waitForFunction(() => document.documentElement.dataset.taplTheme === 'dark');
     assert.equal(new Set(await colors()).size, 4);
     await page.locator('[data-wb-focus="nav:current"]').click();
+    await page.mouse.move(1000,800);
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.sidebarExpanded === 'false');
     await shot(page, 'current-ko-dark');
-    await page.locator('.wb-active-task').first().click();
+    await page.locator('.wb-mm-node[data-kind=task] button').first().focus();
+    await page.locator('.wb-mm-node[data-kind=task] button').first().click();
     await page.locator('.wb-record-page').waitFor();
     await page.locator('.wb-record-disclosures > details').filter({ hasText: 'nested' }).locator('summary').first().click();
     assert.ok(await page.locator('.wb-value-branch').count() > 0);
@@ -393,7 +488,7 @@ test('an unselected initial workspace opens the same modal over the fixed shell'
     await page.locator('#tapl-workspace-path').fill(workspace);
     await page.locator('.wb-workspace-dialog button[type=submit]').click();
     await page.locator('dialog.wb-workspace-dialog').waitFor({ state: 'detached' });
-    await page.locator('.wb-current-overview').waitFor();
+    await page.locator('.wb-run-mindmap').waitFor();
     await shot(page, 'workspace-initial-en');
   } finally { await page.close(); extra.process.kill(); }
 });
@@ -435,7 +530,7 @@ test('archive fallback, events, recoverable errors and unsupported memory share 
     assert.ok((await page.getByRole('alert').innerText()).includes('Temporary viewer connection failure'));
     await shot(page, 'error-ko-light');
     await page.locator('.wb-secondary-actions > button').first().click();
-    await page.locator('.wb-current-overview').waitFor();
+    await page.locator('.wb-run-mindmap').waitFor();
     unsupportedMemory = true;
     await page.locator('[data-wb-focus="nav:memories"]').click();
     await page.locator('.wb-empty').waitFor();
@@ -457,6 +552,6 @@ test('initial loading retains the fixed shell', { timeout: 30000 }, async () => 
     assert.equal(await page.locator('.wb-sidebar').count(), 1);
     await shot(page, 'loading-en-light');
     release();
-    await page.locator('.wb-current-overview').waitFor();
+    await page.locator('.wb-run-mindmap').waitFor();
   } finally { release(); await page.close(); }
 });

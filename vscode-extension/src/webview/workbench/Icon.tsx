@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 
 const icons: Record<string, ReactNode> = {
+  'panel-expand': <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18m4-12 3 3-3 3" /></>,
+  'panel-collapse': <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18m7-12-3 3 3 3" /></>,
   plan: (
     <>
       <rect x="8" y="3" width="8" height="5" rx="1" />

@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { useI18n } from '../i18n';
 import type { TaplItem, TaplRunSnapshot } from '../types';
 import { Icon } from './Icon';
-import { ItemCount, StatusMark } from './components';
+import { ItemCount, NavCount, StatusMark } from './components';
 import { runKey, type RunPageState } from './model';
 import type { OpenItem } from './RunViews';
 
@@ -19,7 +19,8 @@ export function Explore({
   prefs,
   update,
   openItem,
-  navigationKey
+  navigationKey,
+  onActiveChange
 }: {
   snapshot?: TaplRunSnapshot;
   enabled: boolean;
@@ -30,9 +31,14 @@ export function Explore({
   update: (patch: Partial<RunPageState>, key?: string) => void;
   openItem: OpenItem;
   navigationKey: string;
+  onActiveChange?: (active: boolean) => void;
 }): JSX.Element {
   const { t } = useI18n();
   const [kind, setKind] = useState<Kind | null>(null);
+  useEffect(() => {
+    onActiveChange?.(!!kind);
+    return () => onActiveChange?.(false);
+  }, [kind, onActiveChange]);
   const panel = useRef<HTMLElement>(null);
   const triggers = useRef<Partial<Record<Kind, HTMLButtonElement | null>>>({});
   const kindRef = useRef<Kind | null>(null);
@@ -113,13 +119,16 @@ export function Explore({
     if (!current || !box || !side || !trigger) return;
     const sidebar = side.getBoundingClientRect(),
       anchor = trigger.getBoundingClientRect();
+    const edge = mobile
+      ? sidebar.right
+      : sidebar.left + (parseFloat(getComputedStyle(side).getPropertyValue('--wb-expanded-rail')) || 256);
     if (!enabledRef.current || side.inert || anchor.bottom <= sidebar.top || anchor.top >= sidebar.bottom) {
       close(false, true);
       return;
     }
     const width = Math.min(336, window.innerWidth - 24);
     box.style.width = `${width}px`;
-    box.style.left = `${sidebar.right + width + 8 <= window.innerWidth - 12 ? sidebar.right + 8 : 12}px`;
+    box.style.left = `${edge + width + 8 <= window.innerWidth - 12 ? edge + 8 : 12}px`;
     box.style.top = `${Math.max(sidebar.top + 8, Math.min(anchor.top, window.innerHeight - box.offsetHeight - 12))}px`;
   };
   const scheduleClose = () => {
@@ -129,7 +138,7 @@ export function Explore({
       const current = kindRef.current;
       if (!current || panel.current?.contains(document.activeElement)) return;
       if (!triggers.current[current]?.matches(':hover') && !panel.current?.matches(':hover')) close();
-    }, 180);
+    }, 440);
   };
   useBrowserLayoutEffect(() => {
     if (!enabled) close(false, true);
@@ -179,12 +188,15 @@ export function Explore({
     document.addEventListener('focusin', focusOutside);
     document.addEventListener('keydown', escape, true);
     window.addEventListener('resize', position);
+    const resize = new ResizeObserver(position);
+    if (sidebarRef.current) resize.observe(sidebarRef.current);
     sidebarRef.current?.addEventListener('scroll', position);
     return () => {
       document.removeEventListener('pointerdown', outside);
       document.removeEventListener('focusin', focusOutside);
       document.removeEventListener('keydown', escape, true);
       window.removeEventListener('resize', position);
+      resize.disconnect();
       sidebarRef.current?.removeEventListener('scroll', position);
     };
   }, [kind]);
@@ -196,6 +208,8 @@ export function Explore({
           <button
             type="button"
             className="wb-fold-trigger"
+            aria-label={`${value} · ${t(itemsFor(value).length === 1 ? 'wbItem' : 'wbItems', { count: itemsFor(value).length })}`}
+            data-wb-tooltip="true"
             key={value}
             ref={(element) => {
               triggers.current[value] = element;
@@ -228,10 +242,10 @@ export function Explore({
             }}
           >
             <Icon name={value.toLowerCase()} />
-            <span>{value}</span>
-            <span className="wb-fold-count">
-              <ItemCount count={itemsFor(value).length} />
+            <span className="wb-nav-label" aria-hidden="true">
+              {value}
             </span>
+            <NavCount className="wb-fold-count" count={itemsFor(value).length} />
             <Icon name="chevron" />
           </button>
         ))}

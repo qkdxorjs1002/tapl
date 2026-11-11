@@ -12,7 +12,7 @@ const output = buildSync({
     contents: "export { CurrentRun, TaskStatus } from './src/webview/workbench/RunViews'; export { I18nProvider } from './src/webview/i18n'; export { translate } from './src/i18n';",
     resolveDir: path.resolve(__dirname, '..')
   },
-  bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react-dom']
+  loader: { '.css': 'empty' }, bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react-dom']
 }).outputFiles[0].text;
 function load(react = React) {
   const compiled = new Module(filename, module);
@@ -24,7 +24,7 @@ function load(react = React) {
 }
 const { CurrentRun, TaskStatus, I18nProvider, translate } = load();
 const run = {
-  id: 'same-run', source_db: '/actual/peer.sqlite3', slug: 'Actual RUN', status: 'active',
+  request_summary: 'Actual recorded request', id: 'same-run', source_db: '/actual/peer.sqlite3', slug: 'Actual RUN', status: 'active',
   work_type: 'implementation', workflow_mode: 'planned', record_mode: 'full'
 };
 const task = (id, status = 'In Progress', extra = {}) => ({
@@ -46,99 +46,54 @@ function render(value, locale = 'en', Component = CurrentRun, extra = {}) {
 }
 const occurrences = (html, text) => html.split(text).length - 1;
 
-test('Current RUN shows PLAN before exact In Progress tasks and preserves compact RUN information', () => {
-  const inactive = ['Pending', 'Blocked', 'Completed', 'Skipped', 'Custom status', undefined, 'In Progress ', 'in progress'];
-  const tasks = [task(10), task(2), ...inactive.map((status, index) => task(index + 20, status, { status }))];
+test('Current RUN renders the actual mindmap and all TASK statuses in both languages', () => {
+  const states = ['Pending', 'In Progress', 'Blocked', 'Completed', 'Skipped', 'Custom status', undefined];
+  const tasks = states.map((state, index) => task(index + 1, state, { status: state, spec_id: 'PLAN-001' }));
   for (const locale of ['en', 'ko']) {
-    const html = render(snapshot({ tasks, plans: [plan(1)] }), locale);
-    assert.equal(occurrences(html, 'class="card wb-active-task"'), 2);
-    assert.ok(html.indexOf('TASK-002') < html.indexOf('TASK-010'), 'stable IDs sort numerically');
-    for (const item of tasks.slice(2)) assert.ok(!html.includes(item.title), item.status);
-    assert.ok(html.indexOf('wb-run-information') < html.indexOf('wb-active-section'));
-    assert.ok(html.indexOf('wb-plan-section') < html.indexOf('wb-active-section'));
-    assert.ok(html.includes('data-wb-track="active-tasks"'));
-    assert.ok(html.includes(translate(locale, 'wbActiveTasks')));
-    for (const key of ['wbMetadataImplementation', 'wbMetadataPlanned', 'wbMetadataFull']) {
-      assert.ok(html.includes(translate(locale, key)));
-    }
-    assert.equal(occurrences(html, '<h1 '), 1);
-    assert.doesNotMatch(html, /wb-flow|wb-blocker|data-wb-track="flow"/);
+    const html = render(snapshot({ plans: [plan(1)], tasks }), locale);
+    assert.equal(occurrences(html, 'data-kind="run"'), 1);
+    assert.equal(occurrences(html, 'data-kind="plan"'), 1);
+    assert.equal(occurrences(html, 'data-kind="task"'), 7);
+    assert.equal(occurrences(html, 'class="wb-mm-edge"'), 8);
+    for (const item of tasks) assert.ok(html.includes(item.title), String(item.status));
+    assert.ok(html.includes('Actual recorded request'));
+    assert.ok(html.includes('Actual plan 1'));
+    assert.ok(html.includes(`aria-label="${translate(locale, 'wbMindmap')}"`));
+    for (const key of ['wbCompleted', 'wbMindmapZoomOut', 'wbMindmapZoomIn', 'wbMindmapFit']) assert.ok(html.includes(translate(locale, key)), key);
+    for (const key of ['pending', 'inProgress', 'blocked', 'completed', 'skipped']) assert.ok(html.includes(translate(locale, key)), key);
+    assert.match(html, /wb-mm-percent">14<small>%/);
+    assert.match(html, /wb-mm-plan-track/);
+    assert.doesNotMatch(html, /wb-run-information|wb-current-overview|wb-active-section|wb-active-task|wb-plan-section|wb-plan-summary|wb-overview-fields|wb-overview-facts|data-wb-track|<h1/);
+    assert.ok(!html.includes(translate(locale, 'wbActiveTasks')));
   }
 });
 
-test('no-active state stays explicit for empty tasks and RUNs with only other statuses', () => {
-  for (const tasks of [[], [task(1, 'Blocked'), task(2, 'Completed'), task(3, 'Pending')]]) {
-    for (const locale of ['en', 'ko']) {
-      const html = render(snapshot({ tasks, plans: [plan(1)] }), locale);
-      assert.ok(html.includes(`<p class="wb-active-empty">${translate(locale, 'wbNoActiveTasks')}</p>`));
-      assert.ok(html.includes('Actual plan 1'));
-      assert.doesNotMatch(html, /class="card wb-active-task"|wb-flow|wb-blocker/);
-      assert.ok(!html.includes(translate(locale, 'wbNoTasksHelp')), 'no unrelated instructional text');
-    }
-  }
-  assert.ok(render(undefined).includes(translate('en', 'wbNoRun')));
-  const missingMetadata = render(snapshot({ run: { id: run.id } }));
-  assert.doesNotMatch(missingMetadata, /wb-run-information/);
-});
-
-test('compact TASK cards omit narratives and retain actual localized execution metadata', () => {
-  const item = task(3, 'In Progress', {
-    goal: 'Recorded goal <script>unsafe()</script>', action: 'First action\nSecond action', verification: 'Recorded verification',
-    body: 'Duplicate body should not appear', spec_id: 'PLAN-007', depends_on: ['TASK-001', 'TASK-002'],
-    custom_fields: { owner: 'Actual owner', goal: 'Legacy goal should not override the typed field' },
-    executor_kind: 'main', execution_mode: 'sequential',
-    active_execution: { execution_id: 'actual-execution', executor_ref: 'Actual executor', executor_kind: 'subagent', execution_mode: 'parallel' },
-    execution_timing: { started_at: '2026-11-11T00:00:00Z', finished_at: null, elapsed_seconds: 0, running_since: null, as_of: '2026-11-11T00:00:00Z' }
-  });
+test('empty RUN has one real root and missing RUN retains its localized guidance', () => {
   for (const locale of ['en', 'ko']) {
-    const html = render(snapshot({ tasks: [item] }), locale);
-    for (const text of ['Actual task 3', 'Actual owner', 'Actual executor', 'PLAN-007']) {
-      assert.ok(html.includes(text), text);
-    }
-    for (const key of ['wbOwner', 'wbExecutionRef', 'executor', 'executionMode', 'wbParentPlan', 'dependencies', 'elapsedTime', 'wbSubagent', 'wbParallel']) {
-      assert.ok(html.includes(translate(locale, key)), key);
-    }
-    assert.ok(html.includes(translate(locale, 'wbItems', { count: 2 })));
-    assert.ok(html.includes(locale === 'ko' ? '0초' : '0s'), 'zero is measured');
-    assert.doesNotMatch(html, /wb-overview-fields|Recorded goal|First action|Recorded verification|<script>|Duplicate body should|Legacy goal should|TASK-001|TASK-002|>main<|>sequential</);
-    assert.ok(!html.includes(translate(locale, 'notMeasured')));
+    const html = render(snapshot(), locale);
+    assert.equal(occurrences(html, 'data-kind="run"'), 1);
+    assert.equal(occurrences(html, 'data-kind="task"'), 0);
+    assert.equal(occurrences(html, 'data-kind="plan"'), 0);
+    assert.match(html, /wb-mm-percent">0<small>%/);
+    assert.ok(!html.includes(translate(locale, 'wbNoPlans')));
+    assert.ok(!html.includes(translate(locale, 'wbNoActiveTasks')));
+    const missing = render(undefined, locale);
+    assert.ok(missing.includes(translate(locale, 'wbNoRun')));
+    assert.ok(missing.includes(translate(locale, 'wbNoRunHelp')));
+    assert.doesNotMatch(missing, /wb-run-mindmap/);
   }
 });
 
-test('sparse TASK cards omit properties and narrative fallbacks', () => {
-  const sparse = render(snapshot({ tasks: [task(1)] }));
-  assert.doesNotMatch(sparse, /wb-overview-fields|wb-overview-facts/);
-  for (const key of ['wbOwner', 'wbParentPlan', 'dependencies', 'notMeasured']) assert.ok(!sparse.includes(translate('en', key)));
-  const fallback = render(snapshot({ tasks: [
-    task(1, 'In Progress', { body: '## Original heading\n\nActual **body** summary', execution_mode: 'sequential', executor_kind: 'main' }),
-    task(2, 'In Progress', { custom_fields: { goal: 'Actual legacy goal', owner: false, assignee: 'Actual assignee' } })
+test('nodes stay compact, escape recorded titles, and exclude other sources and RUNs', () => {
+  const html = render(snapshot({ plans: [plan(1, { summary: 'Hidden plan narrative', selected_approach: 'Hidden approach' })], tasks: [
+    task(1, 'Blocked', { title: 'Actual <script>title</script>', spec_id: 'PLAN-001', goal: 'Hidden goal', custom_fields: { owner: 'Hidden owner' } }),
+    task(2, 'Completed', { source_db: '/other/source.sqlite3', title: 'Foreign source item' }),
+    task(3, 'Completed', { run_id: 'other-run', title: 'Foreign RUN item' })
   ] }));
-  assert.doesNotMatch(fallback, /Actual body summary|Actual legacy goal|wb-overview-fields/);
-  assert.match(fallback, /Actual assignee/);
-  assert.doesNotMatch(fallback, /Original heading|>main<|>sequential<|Not measured/);
-});
-
-test('rich and sparse PLAN cards preserve the horizontal track and deduplicate repeated summaries', () => {
-  const value = snapshot({ plans: [
-    plan(1, { summary: 'A shared plan purpose', objective: ' A shared\nplan purpose ', selected_approach: 'Actual selected approach', validation: 'Actual validation', body: 'A shared plan purpose' }),
-    plan(2, { objective: 'Actual objective', goal: 'Actual plan goal' }),
-    plan(3),
-    plan(4, { body: '## Imported heading\n\nActual imported plan summary' })
-  ] });
-  for (const locale of ['en', 'ko']) {
-    const html = render(value, locale);
-    assert.equal(occurrences(html, 'class="card wb-plan-summary"'), 4);
-    assert.match(html, /data-wb-track="plans" role="region" aria-label="PLAN" tabindex="0"/);
-    assert.doesNotMatch(html, /wb-single-plan/);
-    assert.equal(occurrences(html, 'A shared plan purpose'), 1);
-    for (const text of ['Actual selected approach', 'Actual validation', 'Actual objective', 'Actual plan goal', 'Actual imported plan summary']) {
-      assert.ok(html.includes(text), text);
-    }
-    for (const key of ['wbApproach', 'wbValidation', 'wbObjective', 'goal']) assert.ok(html.includes(translate(locale, key)), key);
-    assert.doesNotMatch(html, /Imported heading|Verify record context/);
-  }
-  assert.match(render(snapshot({ plans: [plan(1)] })), /wb-single-plan/);
-  assert.ok(render(snapshot()).includes(translate('en', 'wbNoPlans')));
+  assert.match(html, /Actual &lt;script&gt;title&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /Hidden plan narrative|Hidden approach|Hidden goal|Hidden owner|Foreign source item|Foreign RUN item|<script>/);
+  assert.equal(occurrences(html, 'data-kind="task"'), 1);
+  assert.match(html, /wb-mm-percent">0<small>%/);
 });
 
 function interactionTree(Component, props) {
@@ -156,8 +111,8 @@ function interactionTree(Component, props) {
   return nodes(load(react)[Component](props));
 }
 
-test('whole-card handlers pass the original item and exact source RUN, and guard all nonnumeric IDs', () => {
-  const selectedTask = task(12, 'In Progress', { source_db: '/actual/item-source.sqlite3' });
+test('single-click nodes pass the original item and exact source RUN; invalid record IDs are guarded', () => {
+  const selectedTask = task(12);
   const selectedPlan = plan(3);
   const calls = [];
   const invalidIds = [undefined, '12', NaN, Infinity];
@@ -167,19 +122,18 @@ test('whole-card handlers pass the original item and exact source RUN, and guard
   });
   let backed = 0;
   const nodes = interactionTree('CurrentRun', { snapshot: value, title: 'Actual RUN', open: (...args) => calls.push(args), back: () => backed++ });
-  const cards = nodes.filter((node) => node.type === 'button' && /wb-(active-task|plan-summary)/.test(node.props.className));
+  const cards = nodes.filter((node) => node.type === 'button' && node.props.className === 'wb-mm-node-button');
   assert.equal(cards.length, 10);
   for (const card of cards) card.props.onClick();
   assert.equal(calls.length, 2);
-  assert.strictEqual(calls[0][0], selectedPlan);
-  assert.strictEqual(calls[1][0], selectedTask);
+  assert.ok(calls.some(([actual]) => actual === selectedPlan));
+  assert.ok(calls.some(([actual]) => actual === selectedTask));
   for (const [, actualRun] of calls) assert.strictEqual(actualRun, run);
-  assert.equal(calls[1][0].source_db, '/actual/item-source.sqlite3');
-  assert.equal(calls[1][1].source_db, '/actual/peer.sqlite3');
   assert.equal(cards.filter((card) => card.props.disabled).length, 8);
   assert.ok(cards.filter((card) => card.props.disabled).every((card) => card.props.title === translate('en', 'wbRecordUnavailable')));
   nodes.find((node) => node.props?.['data-wb-focus'] === 'back').props.onClick();
   assert.equal(backed, 1);
+  assert.equal(nodes.filter((node) => node.props?.onDoubleClick).length, 0);
 });
 
 test('standalone TASK status retains every status, filtering, search and exact record navigation', () => {

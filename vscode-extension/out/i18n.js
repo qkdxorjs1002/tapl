@@ -6,6 +6,11 @@ exports.translateStatus = translateStatus;
 exports.translateKind = translateKind;
 const EN_MESSAGES = {
     wbWorkspaceSelectionChanged: 'The page changed. Please choose again.',
+    wbMindmap: 'RUN mindmap',
+    wbMindmapHelp: 'Drag or scroll to pan. Pinch or Ctrl + scroll to zoom. Arrow keys pan; + and − zoom; Escape centers the RUN.',
+    wbMindmapFit: 'Center view',
+    wbMindmapZoomIn: 'Zoom in',
+    wbMindmapZoomOut: 'Zoom out',
     wbRun: 'RUN',
     wbRunStatus: 'RUN status',
     wbObjective: 'Objective',
@@ -45,6 +50,8 @@ const EN_MESSAGES = {
     wbRetry: 'Retry',
     wbSkip: 'Skip to page content',
     wbNavigation: 'Navigation',
+    wbPinNavigation: 'Pin navigation',
+    wbUnpinNavigation: 'Unpin navigation',
     wbLanguage: 'Language',
     wbTheme: 'Change theme',
     wbLight: 'Use light theme',
@@ -345,6 +352,11 @@ const EN_MESSAGES = {
 };
 const KO_MESSAGES = {
     wbWorkspaceSelectionChanged: '화면이 변경되었습니다. 다시 선택해 주세요.',
+    wbMindmap: 'RUN 마인드맵',
+    wbMindmapHelp: '드래그하거나 스크롤하여 이동합니다. 핀치 또는 Ctrl + 스크롤로 확대합니다. 방향키로 이동, +와 −로 확대·축소, Escape로 RUN 중앙으로 돌아갑니다.',
+    wbMindmapFit: '중앙으로',
+    wbMindmapZoomIn: '확대',
+    wbMindmapZoomOut: '축소',
     wbRun: 'RUN',
     wbRunStatus: 'RUN 상태',
     wbObjective: '목적',
@@ -384,6 +396,8 @@ const KO_MESSAGES = {
     wbRetry: '다시 시도',
     wbSkip: '본문으로 건너뛰기',
     wbNavigation: '탐색',
+    wbPinNavigation: '탐색 패널 고정',
+    wbUnpinNavigation: '탐색 패널 고정 해제',
     wbLanguage: '언어',
     wbTheme: '테마 전환',
     wbLight: '밝은 테마 사용',

@@ -379,6 +379,8 @@ export function RunTabs({
           className="wb-nav-button wb-discard-button"
           type="button"
           data-wb-focus="discard"
+          aria-label={t('wbDiscard')}
+          data-wb-tooltip="true"
           disabled={
             !discardSupported ||
             !workspace ||
@@ -391,7 +393,7 @@ export function RunTabs({
           onClick={() => requestDiscard(managedRun)}
         >
           <WorkbenchIcon name="trash" />
-          <span>{t('wbDiscard')}</span>
+          <span className="wb-nav-label" aria-hidden="true">{t('wbDiscard')}</span>
           <WorkbenchIcon name="arrow" />
         </button>
       ) : (

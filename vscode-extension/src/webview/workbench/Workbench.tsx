@@ -17,7 +17,7 @@ import { Icon } from './Icon';
 import { IconTooltips, WorkspaceDialog } from './InteractionLayers';
 import { PageLoading } from './SecondaryViews';
 import { Explore } from './Explore';
-import { EmptyState, ItemCount, PageHeading } from './components';
+import { EmptyState, NavCount, PageHeading } from './components';
 import { CurrentRun, TaskStatus } from './RunViews';
 import { RecordsView } from './RecordsView';
 import { commandForRun, useWorkbench } from './useWorkbench';
@@ -79,6 +79,15 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
 
   const sidebarRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [sidebarPinned, setSidebarPinned] = useState(
+    () => (props.initialState as { sidebarPinned?: unknown } | undefined)?.sidebarPinned === true
+  );
+  const [sidebarHovered, setSidebarHovered] = useState(false);
+  const [sidebarFocused, setSidebarFocused] = useState(false);
+  const [exploreActive, setExploreActive] = useState(false);
+  const pinnedRef = useRef(sidebarPinned);
+  pinnedRef.current = sidebarPinned;
   const languageRef = useRef<HTMLDetailsElement>(null);
   const [theme, setTheme] = useState<'light' | 'dark' | undefined>(() => {
     const restored = props.initialState as { theme?: unknown } | undefined;
@@ -122,7 +131,8 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
     view: visibleView,
     pageRef,
     sidebarRef,
-    onStateChange: (state) => persistRef.current?.({ ...(state as object), theme: themeRef.current })
+    onStateChange: (state) =>
+      persistRef.current?.({ ...(state as object), theme: themeRef.current, sidebarPinned: pinnedRef.current })
   });
   const { state, prefs, snapshot, selectedRun, activeRuns } = navigation;
   const selectedKey = state.route.runKey;
@@ -133,6 +143,7 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
   const page = state.route.page;
   const back = state.trail.length ? navigation.goBack : undefined;
   const isPending = !!state.pending;
+  const sidebarExpanded = mobile || sidebarPinned || sidebarHovered || sidebarFocused || exploreActive;
   const closeMenu = (returnFocus = false) => {
     setMenuOpen(false);
     if (returnFocus) menuRef.current?.focus({ preventScroll: true });
@@ -148,6 +159,30 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
     query.addEventListener('change', resize);
     return () => query.removeEventListener('change', resize);
   }, [props.layout]);
+  useEffect(() => {
+    const focus = () => {
+      const element = document.activeElement;
+      const inNavigation = sidebarRef.current?.contains(element) || element?.closest('#wb-explore-panel');
+      setSidebarFocused(!!inNavigation && !!element?.matches(':focus-visible'));
+      if (!sidebarRef.current?.matches(':hover')) {
+        clearTimeout(hoverTimer.current);
+        hoverTimer.current = setTimeout(() => setSidebarHovered(false), 600);
+      }
+    };
+    const pointer = () => setSidebarFocused(false);
+    document.addEventListener('focusin', focus);
+    document.addEventListener('pointerdown', pointer, true);
+    return () => {
+      clearTimeout(hoverTimer.current);
+      document.removeEventListener('focusin', focus);
+      document.removeEventListener('pointerdown', pointer, true);
+    };
+  }, []);
+  useEffect(() => {
+    clearTimeout(hoverTimer.current);
+    setSidebarHovered(false);
+    setSidebarFocused(false);
+  }, [mobile]);
   useBrowserLayoutEffect(() => {
     if (sidebarRef.current) sidebarRef.current.inert = mobile && !menuOpen;
     if (pageRef.current) pageRef.current.inert = mobile && menuOpen;
@@ -157,8 +192,8 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
     if (theme) root.dataset.taplTheme = theme;
     else if (props.browser) root.dataset.taplTheme = systemDark ? 'dark' : 'light';
     else delete root.dataset.taplTheme;
-    persistRef.current?.({ version: 1, pages: state.pages, theme });
-  }, [theme, props.browser, systemDark]);
+    persistRef.current?.({ version: 1, pages: state.pages, theme, sidebarPinned });
+  }, [theme, props.browser, systemDark, sidebarPinned]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.key !== 'Escape') return;
@@ -214,17 +249,35 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
     navigation.go({ page: 'current', runKey: runKey(run) }, command, internal, run);
     closeMenu();
   };
-  const navButton = (target: WorkbenchPage, icon: string, title: string, counter?: ReactNode) => (
+  const navButton = (
+    target: WorkbenchPage,
+    icon: string,
+    title: string,
+    counter?: { count: number; percentage?: boolean }
+  ) => (
     <button
       type="button"
       className="wb-nav-button"
+      aria-label={[
+        title,
+        counter
+          ? counter.percentage
+            ? `${counter.count}%`
+            : t(counter.count === 1 ? 'wbItem' : 'wbItems', { count: counter.count })
+          : undefined
+      ]
+        .filter(Boolean)
+        .join(' · ')}
+      data-wb-tooltip={!mobile && !sidebarPinned ? 'true' : 'false'}
       aria-current={page === target || (target === 'memories' && memoryPage) ? 'page' : undefined}
       onClick={() => selectPage(target)}
       data-wb-focus={`nav:${target}`}
     >
       <Icon name={icon} />
-      <span>{title}</span>
-      {counter != null && <span className="wb-nav-counter">{counter}</span>}
+      <span className="wb-nav-label" aria-hidden="true">
+        {title}
+      </span>
+      {counter != null && <NavCount {...counter} className="wb-nav-counter" />}
     </button>
   );
   const shownView = currentLegacy ?? (page === 'legacy' && !isPending ? visibleView : undefined);
@@ -240,7 +293,14 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
   };
 
   return (
-    <div className="tapl-workbench" data-layout={props.layout} data-mobile={mobile} data-menu-open={menuOpen}>
+    <div
+      className="tapl-workbench"
+      data-layout={props.layout}
+      data-mobile={mobile}
+      data-menu-open={menuOpen}
+      data-sidebar-pinned={sidebarPinned}
+      data-sidebar-expanded={sidebarExpanded}
+    >
       <a
         className="wb-skip-link"
         href="#wb-page-content"
@@ -271,6 +331,17 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
             tapl
           </button>
           <div className="wb-brand-actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm btn-square wb-navigation-pin"
+              data-wb-focus="sidebar-pin"
+              aria-label={t(sidebarPinned ? 'wbUnpinNavigation' : 'wbPinNavigation')}
+              aria-pressed={sidebarPinned}
+              aria-controls="wb-sidebar"
+              onClick={() => setSidebarPinned((value) => !value)}
+            >
+              <Icon name={sidebarPinned ? 'panel-collapse' : 'panel-expand'} />
+            </button>
             <details className="dropdown wb-language-menu" ref={languageRef}>
               <summary className="btn btn-ghost btn-sm btn-square" aria-label={t('wbLanguage')}>
                 <Icon name="languages" />
@@ -299,6 +370,7 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
               type="button"
               className="btn btn-ghost btn-sm btn-square"
               aria-label={t(darkTheme ? 'wbLight' : 'wbDark')}
+              data-wb-focus="theme-toggle"
               onClick={() => {
                 setTheme(darkTheme ? 'light' : 'dark');
               }}
@@ -353,7 +425,22 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
           })}
         </nav>
       </header>
-      <aside ref={sidebarRef} id="wb-sidebar" className="wb-sidebar" aria-label={t('wbNavigation')}>
+      <aside
+        ref={sidebarRef}
+        id="wb-sidebar"
+        className="wb-sidebar"
+        aria-label={t('wbNavigation')}
+        onPointerEnter={(event) => {
+          if (event.pointerType === 'mouse' && !mobile && event.currentTarget.contains(event.target as Node)) {
+            clearTimeout(hoverTimer.current);
+            setSidebarHovered(true);
+          }
+        }}
+        onPointerLeave={() => {
+          clearTimeout(hoverTimer.current);
+          hoverTimer.current = setTimeout(() => setSidebarHovered(false), 600);
+        }}
+      >
         <section>
           {props.workspace && !props.browser && (
             <button
@@ -364,7 +451,9 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
               onClick={() => props.send({ command: 'chooseWorkspace' })}
             >
               <Icon name="folder" />
-              <span>{props.workspace.split(/[\\/]/).filter(Boolean).pop()}</span>
+              <span className="wb-nav-label" aria-hidden="true">
+                {props.workspace.split(/[\\/]/).filter(Boolean).pop()}
+              </span>
               <Icon name="chevron" />
             </button>
           )}
@@ -387,8 +476,13 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
             )}
           </div>
           <nav className="menu wb-main-menu">
-            {navButton('current', 'focus', t('wbCurrent'), snapshot ? `${counts.percent}%` : undefined)}
-            {navButton('tasks', 'table', t('wbTasks'), snapshot ? <ItemCount count={counts.total} /> : undefined)}
+            {navButton(
+              'current',
+              'focus',
+              t('wbCurrent'),
+              snapshot ? { count: counts.percent, percentage: true } : undefined
+            )}
+            {navButton('tasks', 'table', t('wbTasks'), snapshot ? { count: counts.total } : undefined)}
           </nav>
         </section>
         <section>
@@ -403,6 +497,7 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
             update={navigation.changePage}
             openItem={openItem}
             navigationKey={routeIdentity(state.route)}
+            onActiveChange={setExploreActive}
           />
         </section>
         <div className="wb-sidebar-bottom">
@@ -416,7 +511,7 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
           <section className="wb-management">
             <div className="wb-section-heading">
               <h2 className="wb-nav-caption">{t('wbManagement')}</h2>
-              <div>
+              <div className="wb-management-actions">
                 {(['refresh', 'debug'] as const).map((command) => (
                   <button
                     type="button"
@@ -434,15 +529,21 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
             {props.renderManagement ? (
               props.renderManagement(selectedRun, snapshot)
             ) : (
-              <button type="button" className="wb-nav-button wb-discard-button" disabled>
+              <button type="button" className="wb-nav-button wb-discard-button" aria-label={t('wbDiscard')} disabled>
                 <Icon name="trash" />
-                <span>{t('wbDiscard')}</span>
+                <span className="wb-nav-label" aria-hidden="true">
+                  {t('wbDiscard')}
+                </span>
               </button>
             )}
           </section>
         </div>
       </aside>
-      <main ref={pageRef} className="wb-page-scroll">
+      <main
+        ref={pageRef}
+        className="wb-page-scroll"
+        data-current-mindmap={page === 'current' && !!snapshot && !props.loading}
+      >
         <div
           id="wb-page-content"
           className="wb-page-content"

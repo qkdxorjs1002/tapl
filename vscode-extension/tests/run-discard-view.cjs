@@ -7,6 +7,7 @@ const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
 const filename = path.join(__dirname, 'run-discard-render.cjs');
 const output = buildSync({
+  loader: { '.css': 'empty' },
   stdin: { contents: "export { RunTabs } from './src/webview/App';", resolveDir: path.resolve(__dirname, '..') },
   bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react-dom']
 }).outputFiles[0].text;

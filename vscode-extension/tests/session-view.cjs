@@ -8,6 +8,7 @@ const { renderToStaticMarkup } = require('react-dom/server');
 
 const filename = path.join(__dirname, 'session-view-render.cjs');
 const output = buildSync({
+  loader: { '.css': 'empty' },
   stdin: { contents: "export { App } from './src/webview/App';", resolveDir: path.resolve(__dirname, '..') },
   bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react-dom']
 }).outputFiles[0].text;
