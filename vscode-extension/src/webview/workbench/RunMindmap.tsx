@@ -32,12 +32,16 @@ export function RunMindmap({
   const { t, status } = useI18n();
   const graph = useMemo(() => buildRunMindmap(snapshot), [snapshot]);
   const runKey = JSON.stringify([snapshot.run.source_db ?? '', snapshot.run.id]);
+  const follow = useMemo(() => snapshot.run.status === 'active'
+    ? graph.nodes.filter(node => node.kind === 'task' && node.status === 'In Progress').map(node => node.key)
+    : undefined, [graph, snapshot.run.status]);
   const [active, setActive] = useState<string>();
   const relations = useMemo(() => buildMindmapRelationIndex(graph, 'node-parent'), [graph]);
   const related = useMemo(() => relatedMindmapNodes(relations, active), [active, relations]);
-  const { hostRef, worldRef, controlsRef, edges, suppressClickCapture } = useMindmapViewport({
+  const { hostRef, worldRef, controlsRef, edges, suppressClickCapture, following } = useMindmapViewport({
     graph,
     cameraKey: runKey,
+    follow,
     setActive
   });
 
@@ -78,6 +82,23 @@ export function RunMindmap({
         ))}
       </div>
       <div className="wb-mm-top-controls" data-mm-controls>
+        {follow !== undefined && (
+          <button
+            className="wb-mm-icon-button wb-mm-follow"
+            type="button"
+            data-wb-focus="mindmap-follow"
+            aria-label={t('wbMindmapFollow')}
+            aria-pressed={following}
+            title={t(following ? 'wbMindmapFollowOff' : 'wbMindmapFollowOn')}
+            onClick={() => controlsRef.current?.toggleFollow()}
+          >
+            <svg className="wb-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="6" />
+              <circle cx="12" cy="12" r="2" />
+              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+            </svg>
+          </button>
+        )}
         {back && (
           <button
             className="wb-mm-icon-button wb-back"

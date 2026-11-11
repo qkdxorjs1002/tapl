@@ -9,7 +9,7 @@ const output = buildSync({
 }).outputFiles[0].text;
 const compiled = { exports: {} };
 new Function('module', 'exports', output)(compiled, compiled.exports);
-const { buildRunMindmap, constrainMindmapCamera, mindmapMinimumZoom } = compiled.exports;
+const { buildRunMindmap, constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapFollowDrag, MINDMAP_FOLLOW_DRAG_THRESHOLD, MINDMAP_FOLLOW_DRAG_RESISTANCE } = compiled.exports;
 const run = { id: 'run-1', source_db: 'main.sqlite3', request_summary: 'The actual user request', status: 'active' };
 const snapshot = (plans = [], tasks = [], selected = run) => ({
   run: selected, plans, tasks, findings: [], task_counts: { Completed: 900 },
@@ -197,4 +197,36 @@ test('camera stays near the graph at extreme pan and re-clamps after zoom or vie
   const camera = constrainMindmapCamera({ x: 10000, y: -10000, zoom: .001 }, onlyRun.bounds, { width: 1368, height: 928 });
   assert.equal(camera.zoom, .72, 'empty RUN cannot be zoomed into an unreadable dot');
   assert.ok(Math.abs(camera.x) <= 96 && Math.abs(camera.y) <= 96);
+});
+
+
+test('follow camera centers TASK boundaries including outer leaves and fits concurrent TASKs on resize', () => {
+  const graph = buildRunMindmap(snapshot([plan(1)], Array.from({ length: 800 }, (_, i) => task(i, { spec_id: 'PLAN-1' }))));
+  const tasks = graph.nodes.filter(node => node.kind === 'task');
+  for (const viewport of [{ width: 390, height: 780 }, { width: 1368, height: 928 }]) {
+    const first = tasks[0], last = tasks.at(-1);
+    const single = mindmapFollowCamera([last], viewport);
+    assert.ok(Math.abs(last.x * single.zoom + single.x) < 1e-8);
+    assert.ok(Math.abs(last.y * single.zoom + single.y) < 1e-8, 'edge TASK can occupy viewport center');
+    const group = mindmapFollowCamera([first, last], viewport);
+    assert.ok(group.zoom < single.zoom);
+    for (const node of [first, last]) {
+      assert.ok(Math.abs(node.x * group.zoom + group.x) + node.width * group.zoom / 2 <= viewport.width / 2);
+      assert.ok(Math.abs(node.y * group.zoom + group.y) + node.height * group.zoom / 2 <= viewport.height / 2);
+    }
+    const fallback = mindmapFollowCamera([], viewport);
+    assert.equal(fallback.x, 0); assert.equal(fallback.y, 0);
+    assert.ok(fallback.zoom >= .72 && fallback.zoom <= 1);
+  }
+});
+
+test('follow magnet uses a screen-space threshold and a continuous release into free pan', () => {
+  assert.equal(MINDMAP_FOLLOW_DRAG_THRESHOLD, 24);
+  assert.equal(MINDMAP_FOLLOW_DRAG_RESISTANCE, .18);
+  assert.deepEqual(mindmapFollowDrag(0, 0), { x: 0, y: 0, released: false });
+  assert.deepEqual(mindmapFollowDrag(12, -16), { x: 12 * .18, y: -16 * .18, released: false });
+  const boundary = mindmapFollowDrag(24, 0), released = mindmapFollowDrag(24.001, 0);
+  assert.equal(boundary.released, false); assert.equal(released.released, true);
+  assert.ok(Math.abs(boundary.x - released.x) < .002, 'release has no camera jump');
+  assert.ok(Math.abs(mindmapFollowDrag(100, 0).x - (100 - 24 * .82)) < 1e-8);
 });

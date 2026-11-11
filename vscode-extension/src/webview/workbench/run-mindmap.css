@@ -484,3 +484,14 @@ html:not([data-tapl-theme]) > body:is(.vscode-high-contrast, .vscode-high-contra
     gap: 12px;
   }
 }
+
+.wb-mm-follow {
+  width: 40px;
+  height: 40px;
+  border-color: var(--mm-line);
+  background: var(--mm-surface);
+  box-shadow: var(--mm-shadow);
+}
+.wb-mm-follow[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--mm-accent) 40%, var(--mm-line));
+}

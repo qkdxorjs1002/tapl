@@ -117,6 +117,7 @@ test('shared viewport accepts structural DAGs and calculates every valid edge wi
   const react = {
     ...React,
     useRef: (current) => ({ current }),
+    useState: (initial) => [initial, () => {}],
     useEffect() {},
     useMemo: (factory) => factory()
   };
@@ -154,7 +155,7 @@ test('shared viewport accepts structural DAGs and calculates every valid edge wi
 });
 
 test('shared viewport routes radial DAGs through rectangle boundaries in every direction', () => {
-  const react = { ...React, useRef: (current) => ({ current }), useEffect() {}, useMemo: (factory) => factory() };
+  const react = { ...React, useRef: (current) => ({ current }), useState: (initial) => [initial, () => {}], useEffect() {}, useMemo: (factory) => factory() };
   const { useMindmapViewport } = load(react);
   const graph = {
     routing: 'radial',
@@ -234,4 +235,18 @@ test('standalone TASK status retains every status, filtering, search and exact r
   assert.deepEqual(changes, [{ taskFilter: 'Completed' }, { taskQuery: 'Actual task 3' }]);
   assert.strictEqual(calls[0][0], tasks[2]);
   assert.strictEqual(calls[0][1], run);
+});
+
+
+test('active RUNs expose an accessible localized follow toggle; ended RUNs do not', () => {
+  for (const locale of ['en', 'ko']) {
+    const html = render(snapshot({ tasks: [task(1)] }), locale);
+    const label = locale === 'ko' ? '진행 중 TASK 추적' : 'Follow active tasks';
+    const tooltip = locale === 'ko' ? 'TASK 자동 추적 끄기' : 'Turn off automatic task following';
+    assert.ok(html.includes(`aria-label="${label}" aria-pressed="true" title="${tooltip}"`));
+    assert.ok(render(snapshot(), locale).includes('data-wb-focus="mindmap-follow"'), 'no executing TASK still allows following the RUN');
+    for (const status of ['completed', 'archived', 'queued']) {
+      assert.ok(!render(snapshot({ run: { ...run, status } }), locale).includes('data-wb-focus="mindmap-follow"'));
+    }
+  }
 });

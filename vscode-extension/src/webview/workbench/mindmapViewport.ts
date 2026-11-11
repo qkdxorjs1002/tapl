@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { constrainMindmapCamera, mindmapMinimumZoom } from './mindmapCamera';
+import { constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapFollowDrag } from './mindmapCamera';
 import type { MindmapBounds, MindmapCamera } from './mindmapCamera';
 import { mindmapConnectionGeometry } from './mindmapGeometry';
 import type { MindmapRouting } from './mindmapGeometry';
@@ -21,26 +21,33 @@ export type MindmapViewportGraph = {
   bounds: MindmapBounds;
   routing?: MindmapRouting;
 };
-export type MindmapViewportControls = { fit: () => void; zoom: (factor: number) => void };
+export type MindmapViewportControls = { fit: () => void; zoom: (factor: number) => void; toggleFollow: () => void };
 type Camera = MindmapCamera;
 type Point = { x: number; y: number };
 const cameras = new Map<string, Camera>();
+// Preferences survive record navigation, but a webview reload starts active RUNs following again.
+const followPreferences = new Map<string, boolean>();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
 /** Shared camera, gestures, focus visibility, and synchronized 2D edge motion. */
 export function useMindmapViewport({
   graph,
   cameraKey,
+  follow,
   setActive
 }: {
   graph: MindmapViewportGraph;
   cameraKey: string;
+  /** Present only for active RUNs; an empty list follows the default RUN view. */
+  follow?: string[];
   setActive: (key?: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<MindmapViewportControls>();
   const suppressClickRef = useRef(0);
+  const [, updateFollow] = useState(0);
+  const following = follow !== undefined && (followPreferences.get(cameraKey) ?? true);
   const byKey = useMemo(() => new Map(graph.nodes.map((node) => [node.key, node])), [graph]);
   const edges = useMemo(
     () =>
@@ -64,8 +71,9 @@ export function useMindmapViewport({
       canvas = worldRef.current;
     if (!host || !canvas) return;
     let bounds = host.getBoundingClientRect();
+    let tracking = follow !== undefined && (followPreferences.get(cameraKey) ?? true);
     let target: Camera = cameras.get(cameraKey) ? { ...cameras.get(cameraKey)! } : { x: 0, y: 0, zoom: 1 };
-    target = constrainMindmapCamera(target, graph.bounds, bounds);
+    if (!tracking) target = constrainMindmapCamera(target, graph.bounds, bounds);
     let camera = { ...target };
     let raf = 0,
       ambientTimer = 0,
@@ -80,6 +88,7 @@ export function useMindmapViewport({
       lastNativeGesture = 0;
     const touchPointers = new Set<number>();
     const pointers = new Map<number, Point>();
+    let elastic: { origin: Point; base: Camera } | undefined;
     let anchor: Point | undefined, pinch: { distance: number; center: Point } | undefined;
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let reduced = motion.matches;
@@ -231,11 +240,38 @@ export function useMindmapViewport({
       ambientTimer = 0;
       if (!raf && visible()) raf = requestAnimationFrame(tick);
     };
-    const setTarget = (next: Camera) => {
-      target = constrainMindmapCamera(next, graph.bounds, bounds);
+    const setTarget = (next: Camera, panning = false) => {
+      const constrained = constrainMindmapCamera(next, graph.bounds, bounds,
+        panning ? Math.min(target.zoom, mindmapMinimumZoom(graph.bounds, bounds)) : undefined);
+      // An outer followed TASK can start beyond the normal pan limits. Move back toward
+      // those limits continuously, retaining the current zoom and avoiding a release jump.
+      target = panning ? {
+        ...constrained,
+        x: clamp(next.x, Math.min(target.x, constrained.x), Math.max(target.x, constrained.x)),
+        y: clamp(next.y, Math.min(target.y, constrained.y), Math.max(target.y, constrained.y))
+      } : constrained;
       remember();
       wake();
     };
+    const followKeys = new Set(follow);
+    const followedNodes = graph.nodes.filter(node => followKeys.has(node.key));
+    const followTarget = () => mindmapFollowCamera(followedNodes, bounds);
+    const track = () => {
+      target = followTarget(); // Following may center an outer leaf beyond normal pan constraints.
+      remember();
+      wake();
+    };
+    const setFollowing = (enabled: boolean) => {
+      if (follow === undefined || tracking === enabled) return;
+      tracking = enabled;
+      followPreferences.delete(cameraKey);
+      followPreferences.set(cameraKey, enabled);
+      if (followPreferences.size > 24) followPreferences.delete(followPreferences.keys().next().value!);
+      host.dataset.following = String(enabled);
+      updateFollow(value => value + 1);
+      if (enabled) { elastic = undefined; track(); }
+    };
+    const manual = () => setFollowing(false);
     const fit = () => {
       const zoom = clamp(Math.min((bounds.width - 72) / 1440, (bounds.height - 160) / 600), 0.72, 1);
       setTarget({ x: 0, y: 0, zoom });
@@ -250,8 +286,15 @@ export function useMindmapViewport({
       y: y - bounds.top - bounds.height / 2
     });
     const center = () => ({ x: 0, y: 0 });
-    controlsRef.current = { fit, zoom: (factor) => zoomAt(factor, center()) };
-    if (!cameras.has(cameraKey)) {
+    controlsRef.current = {
+      fit: () => { manual(); fit(); },
+      zoom: (factor) => { manual(); zoomAt(factor, center()); },
+      toggleFollow: () => setFollowing(!tracking)
+    };
+    if (follow !== undefined) host.dataset.following = String(tracking);
+    else delete host.dataset.following;
+    if (tracking) track();
+    else if (!cameras.has(cameraKey)) {
       fit();
       camera = { ...target };
     }
@@ -260,6 +303,7 @@ export function useMindmapViewport({
       if ((event.target as Element).closest('[data-mm-controls]')) return;
       event.preventDefault();
       if (gestureActive || Date.now() - lastNativeGesture < 140) return;
+      manual();
       const unit = event.deltaMode === 1 ? 18 : event.deltaMode === 2 ? bounds.height : 1;
       if (event.ctrlKey || event.metaKey)
         zoomAt(Math.exp(-event.deltaY * unit * 0.008), local(event.clientX, event.clientY));
@@ -269,10 +313,12 @@ export function useMindmapViewport({
           ...target,
           x: target.x - (horizontalFallback ? event.deltaY : event.deltaX) * unit,
           y: target.y - (horizontalFallback ? 0 : event.deltaY) * unit
-        });
+        }, true);
       }
     };
     const resetGesture = () => {
+      if (elastic && tracking) track();
+      elastic = undefined;
       pointers.clear();
       touchPointers.clear();
       pinch = undefined;
@@ -304,6 +350,8 @@ export function useMindmapViewport({
       wake();
       if (event.pointerType === 'touch') touchPointers.add(event.pointerId);
       rebase();
+      if (pointers.size >= 2) { manual(); elastic = undefined; }
+      else if (tracking) elastic = { origin: { x: event.clientX, y: event.clientY }, base: { ...target } };
       // Capture on the original button so a stationary tap keeps normal record navigation.
       const element = event.target instanceof Element ? event.target : host;
       try {
@@ -342,9 +390,15 @@ export function useMindmapViewport({
           y: target.y + current.center.y - pinch.center.y
         });
         pinch = current;
+      } else if (elastic && tracking) {
+        const offset = mindmapFollowDrag(next.x - elastic.origin.x, next.y - elastic.origin.y);
+        target = { ...elastic.base, x: elastic.base.x + offset.x, y: elastic.base.y + offset.y };
+        if (offset.released) { manual(); elastic = undefined; }
+        remember();
+        wake();
       } else {
         const origin = !dragged && anchor ? anchor : previous;
-        setTarget({ ...target, x: target.x + next.x - origin.x, y: target.y + next.y - origin.y });
+        setTarget({ ...target, x: target.x + next.x - origin.x, y: target.y + next.y - origin.y }, true);
       }
       dragged = true;
       suppressClickRef.current = Date.now() + 450;
@@ -353,6 +407,8 @@ export function useMindmapViewport({
     };
     const up = (event: PointerEvent) => {
       if (!pointers.has(event.pointerId)) return;
+      if (elastic && tracking) track();
+      elastic = undefined;
       pointers.delete(event.pointerId);
       decorationDirty = true;
       wake();
@@ -372,6 +428,9 @@ export function useMindmapViewport({
       const node = element && byKey.get(element.dataset.mindmapNode!);
       if (!node) return;
       setActive(node.key);
+      // Pointer clicks and hover never move or release the following camera.
+      if (tracking && host.dataset.inputMode !== 'keyboard') return;
+      if (tracking) manual();
       const x = node.x * target.zoom + target.x,
         y = node.y * target.zoom + target.y;
       const padX = Math.min(bounds.width / 2, (node.width * target.zoom) / 2 + 40);
@@ -386,6 +445,8 @@ export function useMindmapViewport({
     };
     const key = (event: KeyboardEvent) => {
       if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!['Escape', '+', '=', '-', '−', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      manual();
       const delta = event.shiftKey ? 120 : 64;
       if (event.key === 'Escape') {
         resetGesture();
@@ -393,10 +454,10 @@ export function useMindmapViewport({
         fit();
       } else if (event.key === '+' || event.key === '=') zoomAt(1.2, center());
       else if (event.key === '-' || event.key === '−') zoomAt(1 / 1.2, center());
-      else if (event.key === 'ArrowLeft') setTarget({ ...target, x: target.x + delta });
-      else if (event.key === 'ArrowRight') setTarget({ ...target, x: target.x - delta });
-      else if (event.key === 'ArrowUp') setTarget({ ...target, y: target.y + delta });
-      else if (event.key === 'ArrowDown') setTarget({ ...target, y: target.y - delta });
+      else if (event.key === 'ArrowLeft') setTarget({ ...target, x: target.x + delta }, true);
+      else if (event.key === 'ArrowRight') setTarget({ ...target, x: target.x - delta }, true);
+      else if (event.key === 'ArrowUp') setTarget({ ...target, y: target.y + delta }, true);
+      else if (event.key === 'ArrowDown') setTarget({ ...target, y: target.y - delta }, true);
       else return;
       event.preventDefault();
     };
@@ -404,6 +465,8 @@ export function useMindmapViewport({
     const gestureStart = (event: Event) => {
       event.preventDefault();
       if (touchPointers.size >= 2) return;
+      manual();
+      elastic = undefined;
       gestureActive = true;
       lastNativeGesture = Date.now();
       gestureScale = (event as Gesture).scale || 1;
@@ -450,7 +513,8 @@ export function useMindmapViewport({
       bounds = host.getBoundingClientRect();
       viewDirty = true;
       decorationDirty = true;
-      setTarget(target);
+      if (tracking) { elastic = undefined; track(); }
+      else setTarget(target);
     });
     resize.observe(host);
     const intersection =
@@ -507,7 +571,7 @@ export function useMindmapViewport({
       window.removeEventListener('blur', suspend);
       motion.removeEventListener('change', motionChange);
     };
-  }, [cameraKey, graph, byKey, edges, setActive]);
+  }, [cameraKey, graph, byKey, edges, follow, setActive]);
 
   const suppressClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (Date.now() < suppressClickRef.current && !(event.target as Element).closest('[data-mm-controls]')) {
@@ -515,5 +579,5 @@ export function useMindmapViewport({
       event.stopPropagation();
     }
   };
-  return { hostRef, worldRef, controlsRef, edges, suppressClickCapture };
+  return { hostRef, worldRef, controlsRef, edges, suppressClickCapture, following };
 }

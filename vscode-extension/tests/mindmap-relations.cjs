@@ -138,7 +138,8 @@ test('memoized RUN cards keep all records, edge order, titles, focus targets and
   for (const locale of ['en', 'ko']) {
     const html = render(locale, RunMindmap, { snapshot, open() {} });
     assertDomOrder(html, graph);
-    assert.deepEqual(attributeValues(html, 'data-wb-focus'), ['plan:1', 'task:2']);
+    assert.deepEqual(attributeValues(html, 'data-wb-focus'), ['plan:1', 'task:2', 'mindmap-follow']);
+    assert.match(html, locale === 'en' ? /aria-label="Follow active tasks"/ : /aria-label="진행 중 TASK 추적"/);
     assert.match(html, /Run title/);
     assert.match(html, /tabindex="0"/);
     assert.match(html, locale === 'en' ? /Completed/ : /완료/);

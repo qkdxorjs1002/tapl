@@ -213,7 +213,9 @@ test('glass flow follows only executing paths, stays independent of hover, and s
         }));
         s.task_counts = { 'In Progress': 2, Completed: 1, Blocked: 1, Pending: 1 };
         overview = structuredClone(payload);
-      } else payload.view.status = structuredClone(overview.view.status);
+      } else if (payload.view.status.active_run?.id === overview.view.status.active_run.id) {
+        payload.view.status = structuredClone(overview.view.status);
+      }
     }
     await route.fulfill({ response, json: payload });
   });
@@ -369,7 +371,7 @@ test('icon navigation hides collapsed counts, expands over the map and preserves
     const pinBox = await pin.boundingBox();
     const theme = await page.locator('[data-wb-focus="theme-toggle"]').boundingBox();
     assert.ok(theme.x + theme.width <= pinBox.x, 'pin is the rightmost control after theme');
-    assert.equal(await page.locator('.wb-mm-top-controls button[aria-pressed]').count(),0,'map motion has no toggle');
+    assert.equal(await page.locator('.wb-mm-top-controls button[aria-pressed]').count(),1,'active RUN exposes its follow toggle');
     const tasks = page.locator('[data-wb-focus="nav:tasks"]');
     assert.equal(await page.locator('.wb-count-compact').count(),0);
     assert.equal(await tasks.locator('.wb-rail-count').isVisible(),false);
@@ -1179,4 +1181,128 @@ test('initial loading retains the fixed shell', { timeout: 30000 }, async () => 
     release();
     await page.locator('.wb-run-mindmap').waitFor();
   } finally { release(); await page.close(); }
+});
+
+test('RUN follows executing TASKs with elastic drag release, refresh, resize and source-safe session preferences', { timeout: 60000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  let overview;
+  await page.route('**/api/message', async route => {
+    const response = await route.fetch(), payload = await response.json();
+    if (payload.view?.type === 'overview') {
+      if (!overview) {
+        payload.view.status.tasks.forEach((task, index) => { task.status = index === 0 ? 'In Progress' : 'Pending'; });
+        overview = structuredClone(payload);
+      } else if (payload.view.status.active_run?.id === overview.view.status.active_run.id) {
+        payload.view.status = structuredClone(overview.view.status);
+      }
+    }
+    await route.fulfill({ response, json: payload });
+  });
+  const map = page.locator('.wb-run-mindmap'), toggle = page.locator('[data-wb-focus="mindmap-follow"]');
+  const camera = () => map.locator('.wb-mm-world').evaluate(el => { const m = new DOMMatrix(getComputedStyle(el).transform); return { x: m.e, y: m.f, z: m.a }; });
+  const publish = async () => {
+    await page.evaluate(payload => window.postMessage({ ...payload, type: 'view:update' }, '*'), overview);
+    const expected = overview.view.status.tasks.filter(task => task.status === 'In Progress').map(task => `task:${task.id}`).sort();
+    await page.waitForFunction(expected => {
+      const actual = [...document.querySelectorAll('.wb-run-mindmap [data-kind=task] button[data-status="In Progress"]')]
+        .map(node => node.dataset.wbFocus).sort();
+      return JSON.stringify(actual) === JSON.stringify(expected);
+    }, expected);
+  };
+  const centered = () => page.waitForFunction(() => {
+    const map = document.querySelector('.wb-run-mindmap'), bounds = map.getBoundingClientRect();
+    const tasks = [...map.querySelectorAll('[data-kind=task] button[data-status="In Progress"]')].map(el => el.closest('[data-kind]').getBoundingClientRect());
+    if (!tasks.length) return false;
+    const left = Math.min(...tasks.map(r => r.left)), right = Math.max(...tasks.map(r => r.right));
+    const top = Math.min(...tasks.map(r => r.top)), bottom = Math.max(...tasks.map(r => r.bottom));
+    return Math.abs((left + right - bounds.left - bounds.right) / 2) < 1
+      && Math.abs((top + bottom - bounds.top - bounds.bottom) / 2) < 1
+      && left >= bounds.left && right <= bounds.right && top >= bounds.top && bottom <= bounds.bottom;
+  });
+  const enable = async () => { if (await toggle.getAttribute('aria-pressed') !== 'true') await toggle.click(); await centered(); };
+  try {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(origin); await map.waitFor(); await centered();
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+    assert.equal(await toggle.getAttribute('aria-label'), '진행 중 TASK 추적');
+    assert.equal(await toggle.getAttribute('title'), 'TASK 자동 추적 끄기');
+    const first = map.locator('[data-kind=task] button[data-status="In Progress"]');
+    await first.hover(); assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'hover keeps following');
+    await first.click(); await page.locator('.wb-record-page').waitFor();
+    await page.locator('.wb-back').click(); await map.waitFor(); await centered();
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'ordinary node navigation retains following');
+    const box = await map.boundingBox(), x = box.x + box.width / 2, y = box.y + 40;
+    const originCamera = await camera(), direction = originCamera.x > 0 ? -1 : 1;
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + direction * 12, y + 8); await page.waitForTimeout(50);
+    const resisted = await camera();
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+    assert.ok(Math.abs(resisted.x - originCamera.x - direction * 12 * .18) < .2, 'small drag shows elastic resistance');
+    await page.mouse.up(); await centered();
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + direction * 23, y); await page.waitForTimeout(40);
+    const held = await camera(); assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+    await page.mouse.move(x + direction * 25, y); await page.waitForTimeout(40);
+    const released = await camera(); assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+    assert.ok(Math.abs(released.x - held.x) < 3, 'crossing the magnet threshold has no jump');
+    await page.mouse.move(x + direction * 55, y); await page.waitForTimeout(40);
+    assert.ok(((await camera()).x - released.x) * direction > 20, 'same pointer gesture continues free pan');
+    await page.mouse.up();
+    await page.getByRole('tab', { name: /Second active RUN/ }).click();
+    await map.waitFor();
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'another RUN starts following');
+    await page.getByRole('tab', { name: /Viewer redesign/ }).click(); await map.waitFor();
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'return retains the selected RUN preference');
+    await enable();
+    await map.evaluate(el => {
+      const rect = el.getBoundingClientRect(), init = { bubbles: true, pointerId: 71, pointerType: 'touch', button: 0, clientX: rect.x + rect.width / 2, clientY: rect.y + 40 };
+      el.dispatchEvent(new PointerEvent('pointerdown', init));
+      window.dispatchEvent(new PointerEvent('pointermove', { ...init, clientX: init.clientX + 14 }));
+      window.dispatchEvent(new PointerEvent('pointerup', { ...init, clientX: init.clientX + 14 }));
+    });
+    await centered(); assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'single touch drag has the same resistance');
+    for (const action of [
+      () => map.locator('.wb-mm-camera-controls button').last().click(),
+      async () => { await page.mouse.move(x, y); await page.mouse.wheel(10, 20); },
+      async () => { await map.focus(); await page.keyboard.press('ArrowRight'); },
+      () => map.locator('.wb-mm-camera-controls button').nth(1).click(),
+      () => map.evaluate(el => el.dispatchEvent(new Event('gesturestart', { bubbles: true, cancelable: true })))
+    ]) {
+      await action(); assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'manual camera action releases tracking');
+      await map.evaluate(el => el.dispatchEvent(new Event('gestureend', { bubbles: true, cancelable: true })));
+      await enable();
+    }
+    overview.view.status.tasks.forEach((task, index, tasks) => { task.status = index === tasks.length - 1 ? 'In Progress' : 'Pending'; });
+    await publish(); await centered();
+    const moved = await camera(); assert.ok(Math.abs(moved.y - originCamera.y) > 100, 'snapshot follows the new executing TASK');
+    overview.view.status.tasks[0].status = 'In Progress'; await publish(); await centered();
+    const multiple = await camera(); assert.ok(multiple.z < moved.z, 'concurrent TASKs fit together');
+    await page.setViewportSize({ width: 390, height: 740 }); await centered();
+    assert.ok((await camera()).z <= multiple.z, 'resize recomputes the executing boundaries');
+    await page.setViewportSize({ width: 1440, height: 1000 }); await centered();
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    overview.view.status.tasks[0].status = 'Pending'; await publish(); await centered();
+    overview.view.status.tasks.forEach(task => { task.status = 'Completed'; }); await publish();
+    await page.waitForFunction(() => { const m = new DOMMatrix(getComputedStyle(document.querySelector('.wb-mm-world')).transform); return Math.abs(m.e) < .1 && Math.abs(m.f) < .1; });
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'no executing TASK returns to RUN view without disabling');
+    await toggle.click();
+    const status = overview.view.status;
+    const originalSnapshot = { run: { ...status.active_run, source_db: status.active_run.source_db ?? status.source_db }, plans: status.plans, tasks: status.tasks, findings: [], task_counts: status.task_counts, active_batches: [], active_executions: [], readonly: false };
+    const peerSnapshot = structuredClone(originalSnapshot); peerSnapshot.run.source_db += '.peer';
+    for (const item of [...peerSnapshot.tasks, ...peerSnapshot.plans]) item.source_db = peerSnapshot.run.source_db;
+    const postSnapshot = snapshot => page.evaluate(snapshot => window.postMessage({ type: 'view:update', view: { type: 'run', snapshot } }, '*'), snapshot);
+    await postSnapshot(peerSnapshot);
+    await page.waitForFunction(source => JSON.parse(document.querySelector('.wb-run-mindmap').dataset.runKey)[0] === source, peerSnapshot.run.source_db);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'same RUN ID in another DB has a separate preference');
+    await postSnapshot(originalSnapshot);
+    await page.waitForFunction(source => JSON.parse(document.querySelector('.wb-run-mindmap').dataset.runKey)[0] === source, originalSnapshot.run.source_db);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'source preference restores independently');
+    originalSnapshot.run.status = 'completed'; await postSnapshot(originalSnapshot);
+    await toggle.waitFor({ state: 'detached' });
+    assert.equal(await map.getAttribute('data-following'), null, 'ended RUN no longer tracks');
+    await page.reload(); await map.waitFor();
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'reload resets to following');
+    await page.locator('[data-wb-focus="nav:memories"]').click(); await page.locator('.wb-memory-mindmap').waitFor();
+    assert.equal(await toggle.count(), 0); assert.equal(await page.locator('.wb-memory-mindmap').getAttribute('data-following'), null);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
 });
