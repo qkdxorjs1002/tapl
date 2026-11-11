@@ -524,7 +524,7 @@ export function RunTabs({
           <p id="tapl-discard-effects">{t('discardRunEffects')}</p>
           <p id="tapl-discard-process">{t('discardRunProcess')}</p>
           <dl className="tapl-discard-identity">
-            <dt>{t('run')}</dt>
+            <dt>{t('runId')}</dt>
             <dd>
               <code className="tapl-discard-run-id">{target.runId}</code>
             </dd>
