@@ -1,17 +1,11 @@
-:root {
-  --wb-status-pending: #5b697d;
-  --wb-status-progress: #3568c5;
-  --wb-status-blocked: #b24a36;
-  --wb-status-completed: #247454;
-  --wb-status-skipped: #785ba5;
-}
-:root[data-tapl-theme='dark'],
-:root:not([data-tapl-theme]):has(body.vscode-dark, body.vscode-high-contrast) {
-  --wb-status-pending: #a6b4c8;
-  --wb-status-progress: #8fb4ff;
-  --wb-status-blocked: #f1a182;
-  --wb-status-completed: #7ed4ad;
-  --wb-status-skipped: #baa2e4;
+/* Component-local aliases follow body-scoped native palettes and live updates. */
+:root,
+body {
+  --wb-status-pending: var(--tapl-muted);
+  --wb-status-progress: var(--tapl-info);
+  --wb-status-blocked: var(--tapl-error);
+  --wb-status-completed: var(--tapl-success);
+  --wb-status-skipped: var(--tapl-skipped);
 }
 .wb-status-label[data-status] {
   --wb-state: var(--wb-status-pending);
@@ -66,7 +60,7 @@
   max-height: calc(100dvh - 32px);
   margin: auto;
   padding: 26px 28px;
-  border: 1px solid var(--tapl-border-base);
+  border: 1px solid var(--tapl-border-control);
   border-radius: 18px;
   color: var(--tapl-foreground);
   background: var(--tapl-surface);
@@ -76,7 +70,7 @@
   animation: wb-dialog-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .wb-dialog::backdrop {
-  background: rgb(8 15 25 / 0.48);
+  background: var(--tapl-overlay);
   backdrop-filter: blur(4px);
 }
 .wb-dialog-heading {
@@ -108,16 +102,16 @@
   width: 100%;
   height: 42px;
   padding: 10px 12px;
-  border: 1px solid var(--tapl-border-base);
-  background: var(--tapl-page-bg);
-  color: var(--tapl-foreground);
+  border: 1px solid var(--tapl-border-control);
+  background: var(--tapl-surface-muted);
+  color: var(--tapl-input-content);
   border-radius: 8px;
   font:
     13px/1.5 ui-monospace,
     monospace;
 }
 .wb-dialog-input:focus-visible {
-  outline: 2px solid var(--tapl-highlight);
+  outline: 2px solid var(--tapl-focus);
   outline-offset: 2px;
 }
 .wb-dialog-actions {
@@ -149,7 +143,7 @@
   font-size: 14px;
   font-weight: 600;
   padding-bottom: 14px;
-  border-bottom: 1px solid var(--tapl-border-base);
+  border-bottom: 1px solid var(--tapl-border-subtle);
 }
 .tapl-discard-dialog.wb-dialog .tapl-discard-confirmation {
   margin-top: 20px;
@@ -161,8 +155,9 @@
   padding: 6px 9px;
   max-width: min(240px, calc(100vw - 16px));
   border-radius: 6px;
-  background: var(--tapl-foreground);
-  color: var(--tapl-page-bg);
+  border: 1px solid var(--tapl-tooltip-border);
+  background: var(--tapl-tooltip-bg);
+  color: var(--tapl-tooltip-content);
   box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
   font: 11px/1.5 var(--tapl-font);
   overflow-wrap: anywhere;

@@ -16,6 +16,17 @@
   --border: 1px;
   --depth: 0;
   --noise: 0;
+  --tapl-shadow: 0 22px 54px rgb(0 0 0 / 0.2);
+  --tapl-shadow-soft: 0 10px 28px rgb(0 0 0 / 0.14);
+  --tapl-shadow-raised: 0 14px 34px rgb(0 0 0 / 0.16), 0 1px 0 color-mix(in srgb, currentColor 7%, transparent) inset;
+  --tapl-shadow-item: 0 6px 18px rgb(0 0 0 / 0.11);
+  --tapl-shadow-inset: 0 1px 0 rgb(255 255 255 / 0.035) inset;
+}
+
+/* VS Code injects variables on body in some hosts. Resolve aliases there as well,
+   while explicit browser themes keep their root palette and inherit it unchanged. */
+:root,
+html:not([data-tapl-theme]) > body {
   --tapl-tech-blue: var(--vscode-button-background, #0e639c);
   --tapl-tech-cyan: var(--vscode-textLink-foreground, #3794ff);
   --tapl-page-bg: var(--vscode-sideBar-background, var(--vscode-panel-background, var(--vscode-editor-background, #252526)));
@@ -33,13 +44,16 @@
   --tapl-error: var(--vscode-errorForeground, #f48771);
   --tapl-accent: var(--vscode-focusBorder, #007fd4);
   --tapl-highlight: var(--vscode-textLink-foreground, #3794ff);
-  --tapl-info: var(--vscode-symbolIcon-eventForeground, var(--tapl-highlight));
-  --tapl-border-base: var(--vscode-panel-border, #454545);
+  --tapl-info: var(--vscode-editorInfo-foreground, var(--tapl-highlight));
+  --tapl-skipped: var(--vscode-testing-iconSkipped, var(--vscode-symbolIcon-enumeratorForeground, #b180d7));
+  --tapl-focus: var(--vscode-focusBorder, var(--tapl-accent));
+  --tapl-border-base: var(--vscode-panel-border, color-mix(in srgb, var(--tapl-foreground) 24%, var(--tapl-panel)));
   --tapl-border-subtle: color-mix(in srgb, var(--tapl-border-base) 24%, transparent);
   --tapl-border: color-mix(in srgb, var(--tapl-border-base) 46%, transparent);
   --tapl-border-panel: color-mix(in srgb, var(--tapl-border-base) 70%, transparent);
   --tapl-border-item: color-mix(in srgb, var(--tapl-border-base) 46%, transparent);
   --tapl-border-control: var(--vscode-input-border, var(--tapl-border-base));
+  --tapl-border-chrome: var(--tapl-border-subtle);
   --tapl-border-strong: var(--vscode-focusBorder, var(--tapl-accent));
   --tapl-primary: var(--vscode-button-background, var(--tapl-accent));
   --tapl-primary-content: var(--vscode-button-foreground, #ffffff);
@@ -49,6 +63,16 @@
   --tapl-secondary-hover: var(--vscode-button-secondaryHoverBackground, var(--tapl-surface));
   --tapl-input-content: var(--vscode-input-foreground, var(--tapl-foreground));
   --tapl-code-bg: var(--vscode-textCodeBlock-background, var(--tapl-surface-muted));
+  --tapl-link-hover: var(--vscode-textLink-activeForeground, var(--tapl-highlight));
+  --tapl-tooltip-bg: var(--vscode-editorHoverWidget-background, var(--tapl-surface-raised));
+  --tapl-tooltip-content: var(--vscode-editorHoverWidget-foreground, var(--tapl-foreground));
+  --tapl-tooltip-border: var(--vscode-editorHoverWidget-border, var(--tapl-border-control));
+  --tapl-overlay: color-mix(in srgb, var(--tapl-page-bg) 45%, rgb(0 0 0 / 0.6));
+}
+
+/* Rebind derived component tokens at the same scope as the host palette. */
+:root,
+body {
   --color-base-100: var(--tapl-panel);
   --color-base-200: var(--tapl-surface);
   --color-base-300: var(--tapl-surface-muted);
@@ -69,11 +93,6 @@
   --color-warning-content: var(--tapl-panel);
   --color-error: var(--tapl-error);
   --color-error-content: var(--tapl-panel);
-  --tapl-shadow: 0 22px 54px rgb(0 0 0 / 0.2);
-  --tapl-shadow-soft: 0 10px 28px rgb(0 0 0 / 0.14);
-  --tapl-shadow-raised: 0 14px 34px rgb(0 0 0 / 0.16), 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent) inset;
-  --tapl-shadow-item: 0 6px 18px rgb(0 0 0 / 0.11);
-  --tapl-shadow-inset: 0 1px 0 rgb(255 255 255 / 0.035) inset;
 }
 
 :root:not([data-tapl-theme]):has(> body.vscode-light),
@@ -84,6 +103,15 @@
 :root:not([data-tapl-theme]):has(> body.vscode-dark),
 :root:not([data-tapl-theme]):has(> body.vscode-high-contrast) {
   color-scheme: dark;
+}
+
+html:not([data-tapl-theme]) > body:is(.vscode-high-contrast, .vscode-high-contrast-light) {
+  --tapl-border-chrome: var(--vscode-contrastBorder, var(--tapl-border-base));
+  --tapl-border-subtle: var(--vscode-contrastBorder, var(--tapl-border-base));
+  --tapl-border: var(--vscode-contrastBorder, var(--tapl-border-base));
+  --tapl-border-panel: var(--vscode-contrastBorder, var(--tapl-border-base));
+  --tapl-border-item: var(--vscode-contrastBorder, var(--tapl-border-base));
+  --tapl-border-control: var(--vscode-contrastBorder, var(--tapl-border-base));
 }
 
 html {
@@ -146,20 +174,27 @@ input {
   color: var(--tapl-foreground);
 }
 
-.input {
+.input,
+.select,
+.textarea {
   background: var(--tapl-surface-muted);
   color: var(--tapl-input-content);
-  border-color: color-mix(in srgb, var(--tapl-border-control) 70%, transparent);
+  border-color: var(--tapl-border-control);
   box-shadow: var(--tapl-shadow-inset);
 }
 
-.input::placeholder {
+.input::placeholder,
+.textarea::placeholder {
   color: var(--tapl-muted);
 }
 
 button:focus-visible,
-input:focus-visible {
-  outline: 2px solid var(--tapl-accent);
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--tapl-focus);
   outline-offset: 2px;
 }
 
@@ -256,7 +291,7 @@ pre {
 }
 
 .tapl-run-tab-close:focus-visible {
-  outline: 2px solid var(--tapl-accent);
+  outline: 2px solid var(--tapl-focus);
   outline-offset: -2px;
 }
 
@@ -275,7 +310,7 @@ pre {
   box-shadow: var(--tapl-shadow-raised);
 }
 
-.tapl-discard-dialog::backdrop { background: rgb(0 0 0 / .6); }
+.tapl-discard-dialog::backdrop { background: var(--tapl-overlay); }
 .tapl-discard-dialog h2 { margin: 0 0 12px; font-size: 20px; font-weight: 600; }
 .tapl-discard-dialog p { margin: 12px 0; }
 .tapl-discard-run-title { font-weight: 600; overflow-wrap: anywhere; }
@@ -300,7 +335,7 @@ pre {
 }
 
 .tapl-run-tab:focus-visible {
-  outline: 2px solid var(--tapl-accent);
+  outline: 2px solid var(--tapl-focus);
   outline-offset: -2px;
 }
 
@@ -427,7 +462,7 @@ pre {
 
 .tapl-workspace-mark {
   @apply grid h-12 w-12 place-items-center rounded-2xl text-xl font-black;
-  color: #ffffff;
+  color: var(--tapl-primary-content);
   background: linear-gradient(135deg, var(--tapl-tech-blue), color-mix(in srgb, var(--tapl-tech-blue) 70%, var(--tapl-tech-cyan) 30%));
   box-shadow: 0 12px 30px color-mix(in srgb, var(--tapl-accent) 34%, transparent);
 }
@@ -708,7 +743,7 @@ pre {
 }
 
 .tapl-custom-popover:focus-visible {
-  outline: 2px solid var(--tapl-accent);
+  outline: 2px solid var(--tapl-focus);
   outline-offset: -2px;
 }
 
@@ -853,7 +888,7 @@ pre {
 }
 
 .tapl-clickable:focus-visible {
-  outline: 2px solid var(--tapl-accent);
+  outline: 2px solid var(--tapl-focus);
   outline-offset: 2px;
 }
 
@@ -1003,6 +1038,10 @@ pre {
 
 .tapl-readable.markdown-body a {
   color: var(--tapl-highlight);
+}
+
+.tapl-readable.markdown-body a:hover {
+  color: var(--tapl-link-hover);
 }
 
 .tapl-readable.markdown-body blockquote {

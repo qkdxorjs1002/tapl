@@ -12,14 +12,20 @@ import './memory-mindmap.css';
 export function MemoryMindmap({
   memories,
   send,
-  cameraKey
+  cameraKey,
+  workspaceKey
 }: {
   memories: AssociativeMemory[];
   send: (message: WebviewCommand) => void;
   cameraKey: string;
+  workspaceKey?: string;
 }): JSX.Element {
   const { t } = useI18n();
-  const graph = useMemo(() => buildMemoryMindmap(memories), [memories]);
+  const workspaceTitle = workspaceKey?.split(/[\\/]/).filter(Boolean).pop() || t('wbWorkspace');
+  const graph = useMemo(
+    () => buildMemoryMindmap(memories, { workspaceKey, workspaceTitle }),
+    [memories, workspaceKey, workspaceTitle]
+  );
   const [active, setActive] = useState<string>();
   const related = useMemo(() => {
     if (!active || !graph.nodes.some((node) => node.key === active)) return undefined;
@@ -48,9 +54,19 @@ export function MemoryMindmap({
     setActive
   });
   const label = (node: MemoryMindmapNode) =>
-    t(node.kind === 'source' ? 'wbMemoryMapSource' : node.kind === 'memory' ? 'wbMemoryMapMemory' : 'wbMemoryMapCue');
+    t(
+      node.kind === 'workspace'
+        ? 'wbWorkspace'
+        : node.kind === 'source'
+          ? 'wbMemoryMapSource'
+          : node.kind === 'memory'
+            ? 'wbMemoryMapMemory'
+            : 'wbMemoryMapCue'
+    );
   const open = (node: MemoryMindmapNode) => {
-    if (node.kind === 'cue' && node.cue !== undefined) {
+    if (node.kind === 'workspace') {
+      controlsRef.current?.fit();
+    } else if (node.kind === 'cue' && node.cue !== undefined) {
       send({ command: 'memories', query: node.cue, offset: 0 });
     } else if (node.memory && node.kind === 'memory') {
       send({ command: 'openMemory', memoryId: node.memory.id, source_db: node.memory.source_db });
@@ -60,6 +76,19 @@ export function MemoryMindmap({
   };
   const content = (node: MemoryMindmapNode) => {
     const memory = node.memory;
+    if (node.kind === 'workspace')
+      return (
+        <>
+          <span className="wb-mm-meta wb-mm-workspace-label">
+            <Icon name="folder" />
+            {label(node)}
+          </span>
+          <span className="wb-mm-title" title={workspaceKey || node.title}>
+            {node.title}
+          </span>
+          <span className="wb-mm-workspace-count">{t('wbMemoryMapCount', { count: graph.memoryCount })}</span>
+        </>
+      );
     if (node.kind === 'cue')
       return (
         <>
@@ -180,9 +209,11 @@ export function MemoryMindmap({
               type="button"
               disabled={node.kind === 'source' && !node.memory?.source_available}
               aria-label={
-                node.kind === 'cue'
-                  ? `${t('wbMemoryMapSearchCue', { cue: node.cue ?? node.title })} · ${t('wbMemoryMapCount', { count: node.count })}`
-                  : `${node.kind === 'source' ? t('openOriginalSource') : t('memoryDetail')}: ${node.title}`
+                node.kind === 'workspace'
+                  ? t('wbMemoryMapCenter', { workspace: node.title })
+                  : node.kind === 'cue'
+                    ? `${t('wbMemoryMapSearchCue', { cue: node.cue ?? node.title })} · ${t('wbMemoryMapCount', { count: node.count })}`
+                    : `${node.kind === 'source' ? t('openOriginalSource') : t('memoryDetail')}: ${node.title}`
               }
               title={node.kind === 'source' && !node.memory?.source_available ? t('sourceUnavailable') : node.title}
               data-wb-focus={
@@ -201,11 +232,11 @@ export function MemoryMindmap({
         <span>
           {t('wbMemoryMapSource')} <b>{graph.sourceCount}</b>
         </span>
-        <span aria-hidden="true">→</span>
+        <span aria-hidden="true">·</span>
         <span>
           {t('wbMemoryMapMemory')} <b>{graph.memoryCount}</b>
         </span>
-        <span aria-hidden="true">→</span>
+        <span aria-hidden="true">·</span>
         <span>
           {t('wbMemoryMapCue')} <b>{graph.cueCount}</b>
         </span>

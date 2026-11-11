@@ -142,6 +142,7 @@ test('shared viewport accepts structural DAGs and calculates every valid edge wi
   assert.deepEqual(viewport.edges[0], {
     from: 'source', to: 'memory-a', index: 0,
     start: { x: -150, y: 0 }, end: { x: -50, y: -80 }, middle: -100,
+    control1: { x: -100, y: 0 }, control2: { x: -100, y: -80 },
     path: 'M -150 0 C -100 0, -100 -80, -50 -80'
   });
   assert.equal(viewport.edges.filter((edge) => edge.to === 'cue').length, 2);
@@ -149,6 +150,39 @@ test('shared viewport accepts structural DAGs and calculates every valid edge wi
     preventDefault() { assert.fail('stationary click must remain available'); },
     stopPropagation() { assert.fail('stationary click must propagate'); }
   });
+});
+
+test('shared viewport routes radial DAGs through rectangle boundaries in every direction', () => {
+  const react = { ...React, useRef: (current) => ({ current }), useEffect() {}, useMemo: (factory) => factory() };
+  const { useMindmapViewport } = load(react);
+  const graph = {
+    routing: 'radial',
+    nodes: [
+      { key: 'workspace', x: 0, y: 0, width: 120, height: 80 },
+      { key: 'up', x: 0, y: -240, width: 100, height: 60 },
+      { key: 'down', x: 0, y: 240, width: 100, height: 60 },
+      { key: 'left', x: -300, y: 0, width: 100, height: 60 },
+      { key: 'right', x: 300, y: 0, width: 100, height: 60 }
+    ],
+    edges: [
+      ...['up', 'down', 'left', 'right'].map((to) => ({ from: 'workspace', to })),
+      { from: 'up', to: 'right' }, { from: 'down', to: 'right' }, { from: 'missing', to: 'workspace' }
+    ],
+    bounds: { minX: -350, minY: -270, maxX: 350, maxY: 270 }
+  };
+  const { edges } = useMindmapViewport({ graph, cameraKey: 'memory:radial', setActive() {} });
+  assert.equal(edges.length, 6);
+  assert.deepEqual(edges.slice(0, 4).map(({ start, end }) => ({ start, end })), [
+    { start: { x: 0, y: -40 }, end: { x: 0, y: -210 } },
+    { start: { x: 0, y: 40 }, end: { x: 0, y: 210 } },
+    { start: { x: -60, y: 0 }, end: { x: -250, y: 0 } },
+    { start: { x: 60, y: 0 }, end: { x: 250, y: 0 } }
+  ]);
+  assert.ok(edges[0].control1.y < edges[0].start.y);
+  assert.ok(edges[1].control1.y > edges[1].start.y);
+  assert.ok(edges[2].control1.x < edges[2].start.x);
+  assert.ok(edges[3].control1.x > edges[3].start.x);
+  assert.equal(edges.filter((edge) => edge.to === 'right').length, 3, 'associative incoming edges remain distinct');
 });
 
 test('single-click nodes pass the original item and exact source RUN; invalid record IDs are guarded', () => {

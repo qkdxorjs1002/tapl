@@ -1,19 +1,19 @@
 .wb-mindmap {
-  --mm-bg: #141b24;
-  --mm-surface: #1c2632;
-  --mm-raised: #24313e;
-  --mm-fg: #e5edf5;
-  --mm-muted: #a1afc0;
-  --mm-line: #38495b;
-  --mm-quiet: #263442;
-  --mm-accent: #a7cccd;
-  --mm-accent-rgb: 167, 204, 205;
-  --mm-progress: #91b8ff;
-  --mm-completed: #80d3ae;
-  --mm-blocked: #efa58b;
-  --mm-pending: #a5afbf;
-  --mm-shadow: 0 12px 36px #080e1726;
-  --mm-grid: #879aaa15;
+  --mm-bg: var(--tapl-page-bg);
+  --mm-surface: var(--tapl-surface);
+  --mm-raised: var(--tapl-hover);
+  --mm-fg: var(--tapl-foreground);
+  --mm-muted: var(--tapl-muted);
+  --mm-line: var(--tapl-border-control);
+  --mm-quiet: var(--tapl-surface-muted);
+  --mm-accent: var(--tapl-highlight);
+  --mm-focus: var(--tapl-focus);
+  --mm-progress: var(--tapl-info);
+  --mm-completed: var(--tapl-success);
+  --mm-blocked: var(--tapl-error);
+  --mm-pending: var(--tapl-muted);
+  --mm-shadow: var(--tapl-shadow-item);
+  --mm-grid: color-mix(in srgb, var(--tapl-muted) 12%, transparent);
   position: relative;
   isolation: isolate;
   width: 100%;
@@ -35,37 +35,18 @@
   outline: none;
 }
 .wb-mindmap:focus-visible:not([data-input-mode='pointer']) {
-  outline: 2px solid var(--mm-accent);
+  outline: 2px solid var(--mm-focus);
   outline-offset: -5px;
 }
 .wb-mindmap[data-input-mode='pointer'] .wb-mm-node-button:focus {
   outline: none;
-}
-html[data-tapl-theme='light'] .wb-mindmap,
-html:not([data-tapl-theme]) body.vscode-light .wb-mindmap,
-html:not([data-tapl-theme]) body.vscode-high-contrast-light .wb-mindmap {
-  --mm-bg: #f5f7fa;
-  --mm-surface: #fff;
-  --mm-raised: #edf2f5;
-  --mm-fg: #243243;
-  --mm-muted: #607185;
-  --mm-line: #d0dbe5;
-  --mm-quiet: #e7edf2;
-  --mm-accent: #376e73;
-  --mm-accent-rgb: 55, 110, 115;
-  --mm-progress: #3567ba;
-  --mm-completed: #247354;
-  --mm-blocked: #a34e36;
-  --mm-pending: #6c788a;
-  --mm-shadow: 0 10px 30px #26384f0b;
-  --mm-grid: #617d9b18;
 }
 .wb-mindmap::before {
   content: '';
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(ellipse at 50% 50%, rgba(var(--mm-accent-rgb), 0.045), transparent 61%);
+  background: radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--mm-accent) 4.5%, transparent), transparent 61%);
 }
 .wb-mm-pointer-light {
   position: absolute;
@@ -73,7 +54,7 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .wb-mindmap {
   pointer-events: none;
   background: radial-gradient(
     360px circle at var(--mm-px, 50%) var(--mm-py, 50%),
-    rgba(var(--mm-accent-rgb), 0.045),
+    color-mix(in srgb, var(--mm-accent) 4.5%, transparent),
     transparent
   );
   opacity: 0;
@@ -122,7 +103,7 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .wb-mindmap {
 .wb-mm-pulse {
   fill: var(--mm-accent);
   opacity: 0;
-  filter: drop-shadow(0 0 4px rgba(var(--mm-accent-rgb), 0.6));
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--mm-accent) 60%, transparent));
 }
 .wb-mm-node {
   position: absolute;
@@ -169,8 +150,8 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .wb-mindmap {
 .wb-mm-emphasis .wb-mm-node-button {
   border-color: color-mix(in srgb, var(--mm-accent) 68%, var(--mm-line));
   box-shadow:
-    0 0 0 4px rgba(var(--mm-accent-rgb), 0.035),
-    0 12px 38px rgba(var(--mm-accent-rgb), 0.045);
+    0 0 0 4px color-mix(in srgb, var(--mm-accent) 3.5%, transparent),
+    0 12px 38px color-mix(in srgb, var(--mm-accent) 4.5%, transparent);
   background: color-mix(in srgb, var(--mm-accent) 3%, var(--mm-surface));
 }
 .wb-mm-node-button:disabled {
@@ -178,7 +159,7 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .wb-mindmap {
 }
 .wb-mm-node-button:focus-visible,
 .wb-mm-icon-button:focus-visible {
-  outline: 2px solid var(--mm-accent);
+  outline: 2px solid var(--mm-focus);
   outline-offset: 5px;
 }
 .wb-mm-dim .wb-mm-node-button {
@@ -190,15 +171,15 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .wb-mindmap {
   border-radius: 22px;
   background: linear-gradient(145deg, color-mix(in srgb, var(--mm-accent) 6%, var(--mm-surface)), var(--mm-surface));
   box-shadow:
-    0 0 0 8px rgba(var(--mm-accent-rgb), 0.025),
-    0 22px 80px rgba(var(--mm-accent-rgb), 0.055);
+    0 0 0 8px color-mix(in srgb, var(--mm-accent) 2.5%, transparent),
+    0 22px 80px color-mix(in srgb, var(--mm-accent) 5.5%, transparent);
   cursor: default;
 }
 .wb-mm-node[data-kind='run']::before {
   content: '';
   position: absolute;
   inset: -22px;
-  border: 1px solid rgba(var(--mm-accent-rgb), 0.075);
+  border: 1px solid color-mix(in srgb, var(--mm-accent) 7.5%, transparent);
   border-radius: 42px;
   pointer-events: none;
 }
@@ -441,7 +422,7 @@ html:not([data-tapl-theme]) body.vscode-high-contrast-light .wb-mindmap {
 }
 .wb-mm-icon-button[aria-pressed='true'] {
   color: var(--mm-accent);
-  background: rgba(var(--mm-accent-rgb), 0.06);
+  background: color-mix(in srgb, var(--mm-accent) 6%, transparent);
 }
 @media (max-width: 600px) {
   .wb-mm-legend {

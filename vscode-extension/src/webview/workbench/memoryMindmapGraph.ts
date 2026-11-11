@@ -2,7 +2,7 @@ import type { AssociativeMemory } from '../types';
 
 export interface MemoryMindmapNode {
   key: string;
-  kind: 'source' | 'memory' | 'cue';
+  kind: 'workspace' | 'source' | 'memory' | 'cue';
   x: number;
   y: number;
   width: number;
@@ -16,11 +16,17 @@ export interface MemoryMindmapNode {
 
 export interface MemoryMindmapGraph {
   nodes: MemoryMindmapNode[];
-  edges: { from: string; to: string; relation: 'source' | 'cue' }[];
+  edges: { from: string; to: string; relation: 'workspace' | 'source' | 'cue' }[];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   memoryCount: number;
   sourceCount: number;
   cueCount: number;
+  routing?: 'radial';
+}
+
+export interface MemoryMindmapOptions {
+  workspaceKey?: string;
+  workspaceTitle?: string;
 }
 
 // This is deliberately JavaScript lowercase, not Python's broader casefold.
@@ -49,15 +55,97 @@ function sourceIdentity(memory: AssociativeMemory, memoryKey: string): string | 
     : key('source', 'incomplete', memoryKey);
 }
 
-/** Build only provenance and cue relationships present on the current results page. */
-export function buildMemoryMindmap(memories: AssociativeMemory[]): MemoryMindmapGraph {
+const NODE_GAP = 24;
+const RADIAL_STEP = 88;
+const ANGULAR_STEP = 76;
+
+/** A spatial index keeps collision checks local even for hundreds of shared cues. */
+class NodePlacement {
+  private readonly cells = new Map<string, MemoryMindmapNode[]>();
+  private readonly cellSize = 256;
+
+  private visit(node: MemoryMindmapNode, padding: number, callback: (cell: string) => boolean): boolean {
+    const firstX = Math.floor((node.x - node.width / 2 - padding) / this.cellSize);
+    const lastX = Math.floor((node.x + node.width / 2 + padding) / this.cellSize);
+    const firstY = Math.floor((node.y - node.height / 2 - padding) / this.cellSize);
+    const lastY = Math.floor((node.y + node.height / 2 + padding) / this.cellSize);
+    for (let x = firstX; x <= lastX; x += 1) {
+      for (let y = firstY; y <= lastY; y += 1) {
+        if (!callback(`${x},${y}`)) return false;
+      }
+    }
+    return true;
+  }
+
+  add(node: MemoryMindmapNode): void {
+    this.visit(node, NODE_GAP, (cell) => {
+      const nodes = this.cells.get(cell);
+      if (nodes) nodes.push(node);
+      else this.cells.set(cell, [node]);
+      return true;
+    });
+  }
+
+  private fits(node: MemoryMindmapNode): boolean {
+    return this.visit(node, 0, (cell) => {
+      for (const other of this.cells.get(cell) ?? []) {
+        if (
+          Math.abs(node.x - other.x) < (node.width + other.width) / 2 + NODE_GAP &&
+          Math.abs(node.y - other.y) < (node.height + other.height) / 2 + NODE_GAP
+        )
+          return false;
+      }
+      return true;
+    });
+  }
+
+  /** Search expanding radial rows, preferring the parent direction in each sector. */
+  place(node: MemoryMindmapNode, angle: number, radius: number, halfSector: number, preferred = angle): void {
+    const preferredOffset = Math.max(-halfSector, Math.min(halfSector, angleDelta(preferred, angle)));
+    for (let row = 0; ; row += 1) {
+      const distance = radius + row * RADIAL_STEP;
+      const angleStep = ANGULAR_STEP / distance;
+      const steps = Math.ceil((halfSector + Math.abs(preferredOffset)) / angleStep);
+      for (let step = 0; step <= steps; step += 1) {
+        const offsets =
+          step === 0 ? [preferredOffset] : [preferredOffset + step * angleStep, preferredOffset - step * angleStep];
+        for (const offset of offsets) {
+          if (Math.abs(offset) > halfSector + 1e-9) continue;
+          const direction = angle + offset;
+          node.x = Math.cos(direction) * distance;
+          node.y = Math.sin(direction) * distance;
+          if (Math.abs(node.x) < 1e-9) node.x = 0;
+          if (Math.abs(node.y) < 1e-9) node.y = 0;
+          if (this.fits(node)) {
+            this.add(node);
+            return;
+          }
+        }
+      }
+    }
+  }
+}
+
+function angleDelta(angle: number, center: number): number {
+  return Math.atan2(Math.sin(angle - center), Math.cos(angle - center));
+}
+
+/**
+ * The workspace is a result-collection anchor, including connected databases.
+ * Only the source and cue edges describe relationships in the returned memories.
+ */
+export function buildMemoryMindmap(
+  memories: AssociativeMemory[],
+  options: MemoryMindmapOptions = {}
+): MemoryMindmapGraph {
   const graph: MemoryMindmapGraph = {
     nodes: [],
     edges: [],
     bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
     memoryCount: 0,
     sourceCount: 0,
-    cueCount: 0
+    cueCount: 0,
+    routing: 'radial'
   };
   const memoryNodes = new Map<string, MemoryMindmapNode>();
   const sources = new Map<string, MemoryMindmapNode>();
@@ -72,7 +160,7 @@ export function buildMemoryMindmap(memories: AssociativeMemory[]): MemoryMindmap
     const node: MemoryMindmapNode = {
       key: memoryKey,
       kind: 'memory',
-      x: 470,
+      x: 0,
       y: 0,
       width: 300,
       height: 132,
@@ -89,7 +177,7 @@ export function buildMemoryMindmap(memories: AssociativeMemory[]): MemoryMindmap
         sourceNode = {
           key: sourceKey,
           kind: 'source',
-          x: 110,
+          x: 0,
           y: 0,
           width: 220,
           height: 90,
@@ -123,7 +211,7 @@ export function buildMemoryMindmap(memories: AssociativeMemory[]): MemoryMindmap
       let entry = cues.get(cueKey);
       if (!entry) {
         entry = {
-          node: { key: cueKey, kind: 'cue', x: 820, y: 0, width: 200, height: 54, title: cue, cue, count: 0 },
+          node: { key: cueKey, kind: 'cue', x: 0, y: 0, width: 200, height: 54, title: cue, cue, count: 0 },
           memories: []
         };
         cues.set(cueKey, entry);
@@ -140,41 +228,63 @@ export function buildMemoryMindmap(memories: AssociativeMemory[]): MemoryMindmap
   graph.cueCount = cues.size;
   if (!graph.memoryCount) return graph;
 
-  // Give dense cue columns room without ever reducing the memory card gap.
-  const step = Math.max(164, (cues.size * 78) / memoryNodes.size);
-  let nextY = 0;
-  for (const group of groups.values()) {
-    const firstY = nextY;
-    for (const node of group.memories) {
-      node.y = nextY;
-      nextY += step;
+  const workspace: MemoryMindmapNode = {
+    key: key('workspace', options.workspaceKey ?? null),
+    kind: 'workspace',
+    x: 0,
+    y: 0,
+    width: 240,
+    height: 96,
+    title: options.workspaceTitle ?? 'Workspace',
+    count: graph.memoryCount
+  };
+  const placement = new NodePlacement();
+  placement.add(workspace);
+  const sectors = [...groups.values()].map((group, index) => ({
+    ...group,
+    angle: (index * Math.PI * 2) / groups.size,
+    // One branch still fans outward; two branches use opposite half-planes.
+    halfSector: Math.min(Math.PI / 2, Math.PI / groups.size) * 0.92
+  }));
+  const memorySectors = new Map<string, (typeof sectors)[number]>();
+
+  // Keep source anchors close to the workspace regardless of descendant count.
+  // Extra sources use outward slots along their own ray when labels would clash.
+  for (const sector of sectors) {
+    if (sector.source) placement.place(sector.source, sector.angle, 340, 0);
+    graph.edges.push({ from: workspace.key, to: sector.source?.key ?? sector.memories[0].key, relation: 'workspace' });
+  }
+  for (const sector of sectors) {
+    const radius = sector.source ? Math.hypot(sector.source.x, sector.source.y) + 350 : 360;
+    for (const node of sector.memories) {
+      placement.place(node, sector.angle, radius, sector.halfSector);
+      memorySectors.set(node.key, sector);
     }
-    if (group.source) {
-      const last = group.memories[group.memories.length - 1];
-      group.source.y = (firstY + last.y) / 2;
-    }
-    nextY += 40;
+  }
+  for (const entry of cues.values()) {
+    const parentSectors = new Set(entry.memories.map((node) => memorySectors.get(node.key)!));
+    const firstSector = memorySectors.get(entry.memories[0].key)!;
+    const sumX = entry.memories.reduce((sum, node) => sum + node.x, 0);
+    const sumY = entry.memories.reduce((sum, node) => sum + node.y, 0);
+    const preferred = Math.hypot(sumX, sumY) > 1e-8 ? Math.atan2(sumY, sumX) : firstSector.angle;
+    const radius = Math.max(...entry.memories.map((node) => Math.hypot(node.x, node.y))) + 320;
+    // A cue shared across sectors is still one node with every true parent.
+    // Its placement may use the full circle; it does not invent an owning source.
+    placement.place(
+      entry.node,
+      parentSectors.size === 1 ? firstSector.angle : preferred,
+      radius,
+      parentSectors.size === 1 ? firstSector.halfSector : Math.PI,
+      preferred
+    );
   }
 
-  const orderedCues = [...cues.values()]
-    .map((entry, index) => ({
-      ...entry,
-      index,
-      target: entry.memories.reduce((sum, node) => sum + node.y, 0) / entry.memories.length
-    }))
-    .sort((a, b) => a.target - b.target || a.index - b.index);
-  let previousBottom = -Infinity;
-  let displacement = 0;
-  for (const entry of orderedCues) {
-    entry.node.y = Math.max(entry.target, previousBottom + 24 + entry.node.height / 2);
-    displacement += entry.node.y - entry.target;
-    previousBottom = entry.node.y + entry.node.height / 2;
-  }
-  // Center the collision-free packing around its desired barycenters.
-  const cueShift = orderedCues.length ? displacement / orderedCues.length : 0;
-  for (const entry of orderedCues) entry.node.y -= cueShift;
-
-  graph.nodes = [...sources.values(), ...memoryNodes.values(), ...Array.from(cues.values(), (entry) => entry.node)];
+  graph.nodes = [
+    workspace,
+    ...sources.values(),
+    ...memoryNodes.values(),
+    ...Array.from(cues.values(), (entry) => entry.node)
+  ];
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,
@@ -185,12 +295,6 @@ export function buildMemoryMindmap(memories: AssociativeMemory[]): MemoryMindmap
     maxX = Math.max(maxX, node.x + node.width / 2);
     maxY = Math.max(maxY, node.y + node.height / 2);
   }
-  const centerX = (minX + maxX) / 2,
-    centerY = (minY + maxY) / 2;
-  for (const node of graph.nodes) {
-    node.x -= centerX;
-    node.y -= centerY;
-  }
-  graph.bounds = { minX: minX - centerX, minY: minY - centerY, maxX: maxX - centerX, maxY: maxY - centerY };
+  graph.bounds = { minX, minY, maxX, maxY };
   return graph;
 }

@@ -22,6 +22,33 @@
   border: 1px solid var(--mm-line);
   border-radius: 16px;
 }
+.wb-memory-mindmap .wb-mm-node[data-kind='workspace'] .wb-mm-node-button {
+  gap: 5px;
+  padding: 14px 18px;
+  border-radius: 20px;
+  border-color: color-mix(in srgb, var(--mm-accent) 62%, var(--mm-line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--mm-accent) 9%, var(--mm-surface)), var(--mm-surface));
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--mm-accent) 4%, transparent),
+    var(--mm-shadow);
+}
+.wb-memory-mindmap .wb-mm-workspace-label {
+  justify-content: flex-start;
+  gap: 6px;
+}
+.wb-memory-mindmap .wb-mm-workspace-label .wb-icon {
+  width: 12px;
+  height: 12px;
+}
+.wb-memory-mindmap .wb-mm-node[data-kind='workspace'] .wb-mm-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.wb-memory-mindmap .wb-mm-workspace-count {
+  color: var(--mm-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 .wb-memory-mindmap .wb-mm-node[data-kind='memory'] .wb-mm-node-button {
   justify-content: space-between;
   border-radius: 15px;

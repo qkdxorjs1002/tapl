@@ -16,6 +16,8 @@ html[data-tapl-theme='light'] {
   --tapl-accent: #355e62;
   --tapl-highlight: #355e62;
   --tapl-info: #3c6797;
+  --tapl-skipped: #785ba5;
+  --tapl-focus: #355e62;
   --tapl-primary: #355e62;
   --tapl-primary-content: #fff;
   --tapl-primary-hover: #294d51;
@@ -57,6 +59,8 @@ html[data-tapl-theme='dark'] {
   --tapl-accent: #a7c9cb;
   --tapl-highlight: #a7c9cb;
   --tapl-info: #adccf0;
+  --tapl-skipped: #baa2e4;
+  --tapl-focus: #a7c9cb;
   --tapl-primary: #a7c9cb;
   --tapl-primary-content: #152e32;
   --tapl-primary-hover: #bfdbdc;
@@ -81,7 +85,19 @@ html[data-tapl-theme='dark'] {
   --tapl-tech-blue: #a7c9cb;
   --tapl-tech-cyan: #a7c9cb;
 }
-html[data-tapl-theme] {
+/* Explicit browser themes stay independent of any native palette on body. */
+html[data-tapl-theme],
+html[data-tapl-theme] > body {
+  --tapl-border-chrome: var(--tapl-border-subtle);
+  --tapl-link-hover: var(--tapl-highlight);
+  --tapl-tooltip-bg: var(--tapl-surface-raised);
+  --tapl-tooltip-content: var(--tapl-foreground);
+  --tapl-tooltip-border: var(--tapl-border-control);
+  --tapl-overlay: color-mix(in srgb, var(--tapl-page-bg) 45%, rgb(0 0 0 / 0.6));
+}
+/* Rebind Daisy UI colors where body-scoped native variables are resolved. */
+:root,
+body {
   --color-base-100: var(--tapl-page-bg);
   --color-base-200: var(--tapl-hover);
   --color-base-300: var(--tapl-border-base);
@@ -116,7 +132,10 @@ body:has(.tapl-workbench) {
   --wb-raised: var(--tapl-surface-raised, #fff);
   --wb-soft: var(--tapl-surface-muted, #f0f3f7);
   --wb-muted: var(--tapl-muted, #606d7e);
-  --wb-border: var(--tapl-border-base, #dce2e9);
+  --wb-border: var(--tapl-border-item, #dce2e9);
+  --wb-border-chrome: var(--tapl-border-chrome, var(--wb-border));
+  --wb-border-control: var(--tapl-border-control, var(--wb-border));
+  --wb-focus: var(--tapl-focus, var(--tapl-accent));
   --wb-primary: var(--tapl-highlight, #355e62);
   --wb-shadow: 0 18px 60px -22px rgb(15 29 47 / 0.25), 0 2px 8px rgb(15 29 47 / 0.06);
   color: var(--wb-fg);
@@ -164,7 +183,7 @@ body:has(.tapl-workbench) {
 }
 .tapl-workbench :is(button, a, input, select, summary):focus-visible,
 .wb-explore-panel button:focus-visible {
-  outline: 2px solid var(--wb-primary);
+  outline: 2px solid var(--wb-focus);
   outline-offset: 3px;
 }
 .wb-icon {
@@ -191,8 +210,8 @@ body:has(.tapl-workbench) {
   left: 12px;
   padding: 10px 16px;
   border-radius: 8px;
-  background: var(--wb-primary);
-  color: var(--color-primary-content);
+  background: var(--tapl-primary);
+  color: var(--tapl-primary-content);
   z-index: 100;
 }
 .wb-skip-link:focus {
@@ -218,7 +237,7 @@ body:has(.tapl-workbench) {
   display: flex;
   min-width: 0;
   background: var(--wb-surface);
-  border-bottom: 1px solid var(--wb-border);
+  border-bottom: 1px solid var(--wb-border-chrome);
   z-index: 30;
 }
 .wb-brand-area {
@@ -382,7 +401,7 @@ body:has(.tapl-workbench) {
   flex-direction: column;
   gap: 23px;
   padding: 24px 16px 0;
-  border-right: 1px solid var(--wb-border);
+  border-right: 1px solid var(--wb-border-chrome);
   background: var(--wb-soft);
   overflow-x: hidden;
   overflow-y: auto;
@@ -681,7 +700,7 @@ body:has(.tapl-workbench) {
   height: 32px;
   padding-inline: 11px;
   gap: 6px;
-  border: 1px solid var(--wb-border);
+  border: 1px solid var(--wb-border-control);
   background: var(--wb-surface);
   color: var(--wb-muted);
   font-size: 12px;
@@ -787,7 +806,7 @@ body:has(.tapl-workbench) {
   outline: none;
 }
 .wb-scroll-viewport:has(> .wb-horizontal-track:focus-visible) {
-  outline: 2px solid var(--wb-primary);
+  outline: 2px solid var(--wb-focus);
   outline-offset: 3px;
   border-radius: 14px;
 }
@@ -1006,8 +1025,8 @@ body:has(.tapl-workbench) {
   font-size: 12px;
 }
 .wb-pill-tabs .btn-primary {
-  background: var(--wb-primary);
-  color: var(--color-primary-content);
+  background: var(--tapl-primary);
+  color: var(--tapl-primary-content);
 }
 .wb-task-search {
   display: flex;
@@ -1090,7 +1109,7 @@ body:has(.tapl-workbench) {
   max-width: 640px;
   gap: 8px;
   padding-inline: 11px;
-  background: var(--wb-surface);
+  background: var(--tapl-surface-muted);
 }
 .wb-search-box input {
   min-width: 0;
@@ -1489,7 +1508,7 @@ body:has(.tapl-workbench) {
   display: block;
   position: fixed;
   inset: var(--wb-bar) 0 0;
-  background: rgb(13 22 35 / 0.35);
+  background: var(--tapl-overlay);
   border: 0;
   z-index: 40;
 }
@@ -1659,11 +1678,6 @@ body:has(.tapl-workbench) {
     scroll-behavior: auto !important;
   }
 }
-html:not([data-tapl-theme]) body.vscode-high-contrast .tapl-workbench,
-html:not([data-tapl-theme]) body.vscode-high-contrast-light .tapl-workbench {
-  --wb-border: var(--vscode-contrastBorder, var(--tapl-border-base));
-}
-
 .wb-legacy-view [data-legacy-back] {
   display: none;
 }

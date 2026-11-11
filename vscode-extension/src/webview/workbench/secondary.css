@@ -252,7 +252,7 @@
 }
 .wb-secondary-disclosure > summary:focus-visible,
 .wb-secondary-inspect > summary:focus-visible {
-  outline: 2px solid var(--wb-primary);
+  outline: 2px solid var(--wb-focus);
   outline-offset: -3px;
   border-radius: 5px;
 }
@@ -278,7 +278,7 @@
 .wb-secondary-inspect > pre {
   margin-top: 8px;
   padding: 12px;
-  background: var(--wb-soft);
+  background: var(--tapl-code-bg);
   border: 1px solid var(--wb-border);
   border-radius: 6px;
   color: var(--wb-fg);

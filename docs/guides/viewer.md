@@ -34,7 +34,7 @@ The RUN bar stays fixed. Desktop navigation starts as an icon rail: hover or key
 - **TASK status** filters the full TASK list. Selecting a TASK opens its detailed page; **Back** returns to the preceding filter, query, scroll and focus.
 - **Explore** opens one PLAN, TASK or FINDING list to the right on hover or click. Its list scrolls independently. Keyboard users can open it with Enter or Right Arrow and close it with Escape.
 - **Record search** starts with all records and collapsed RUN groups. Switch between all records and the selected RUN, or grouped and flat results. See [Search](search.md#browse-records-in-the-viewer).
-- **Associative memory** connects source → memory → cue from left to right for the current results page. Shared sources and identical normalized cues join branches. Select a memory for details, a source for its original record/RUN, or a cue to search. It shares the RUN map's pan, pinch, keyboard and reduced-motion behavior; returning restores the workspace/query/page camera. Search, pagination and diagnostics stay available. See [Memory](memory.md#read-memories-in-the-viewer). The Debug control sits beside Management.
+- **Associative memory** places the workspace at the center and branches through sources, memories and cues in all directions for the current results page. The center groups results from connected databases without changing their actual provenance. Shared sources and identical normalized cues join branches. Select a memory for details, a source for its original record/RUN, or a cue to search. It shares the RUN map's pan, pinch, keyboard and reduced-motion behavior; returning restores the workspace/query/page camera. Search, pagination and diagnostics stay available. See [Memory](memory.md#read-memories-in-the-viewer). The Debug control sits beside Management.
 
 The top bar lists unarchived RUNs. Opening an archived source from records or memory adds one temporary tab at the right; selecting another RUN removes it. Source database and RUN ID remain paired during navigation. Internal links provide Back. Clicking the already selected RUN tab preserves its page and return trail; switching RUNs, direct sidebar navigation and reload clear the trail. Per-RUN filters and theme/language choices persist separately from that trail.
 
@@ -44,7 +44,9 @@ PLAN, TASK and FINDING details use a reading column with a separate properties r
 
 Ownership, timestamps, status, source database and parent PLAN belong in properties. Additional/custom/execution fields use vertical nested entries with expandable objects and arrays, rather than serialized JSON blocks. Zero, false, null and empty containers remain distinguishable. The same field presentation is used in memory and diagnostics.
 
-Icon-only controls have short localized hover/focus tooltips. Status labels retain text and distinct indicators: slate for pending, blue for in progress, terracotta for blocked, green for completed and violet for skipped. Diagnostics show hook events chronologically with expandable payloads. Loading, errors and unsupported capabilities remain inside the fixed shell.
+In VS Code automatic theme mode, the shell, both maps, status indicators, controls, dialogs, tooltips and reading surfaces follow the host's current colors, including live theme changes. Header/sidebar boundaries stay subtle; keyboard focus and high-contrast boundaries remain visible. A manually selected light/dark palette takes precedence.
+
+Icon-only controls have short localized hover/focus tooltips. Status labels retain text and distinct indicators and follow the host semantic colors. The built-in palettes use slate for pending, blue for in progress, terracotta for blocked, green for completed and violet for skipped. Diagnostics show hook events chronologically with expandable payloads. Loading, errors and unsupported capabilities remain inside the fixed shell.
 
 ## Database access and protected services
 

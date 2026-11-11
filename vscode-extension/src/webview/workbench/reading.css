@@ -145,7 +145,7 @@
 }
 .wb-readable :not(pre) > code {
   border-radius: 4px;
-  background: var(--wb-soft);
+  background: var(--tapl-code-bg);
   color: var(--wb-fg);
   padding: 2px 4px;
 }
@@ -156,7 +156,7 @@
   padding: 12px;
   border: 1px solid var(--wb-border);
   border-radius: 7px;
-  background: var(--wb-soft);
+  background: var(--tapl-code-bg);
   color: var(--wb-fg);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -170,7 +170,7 @@
   border: 1px solid var(--wb-border);
   border-radius: 11px;
   background: var(--wb-surface);
-  box-shadow: 0 6px 20px -14px rgb(15 29 47 / 0.25);
+  box-shadow: var(--tapl-shadow-item);
 }
 .wb-record-properties > h2 {
   margin: 0 0 18px;
@@ -226,7 +226,7 @@
   overflow-wrap: anywhere;
 }
 .wb-reading-link:hover {
-  color: var(--wb-fg);
+  color: var(--tapl-link-hover);
 }
 .wb-reading-archive {
   display: flex;

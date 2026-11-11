@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { constrainMindmapCamera, mindmapMinimumZoom } from './mindmapCamera';
 import type { MindmapBounds, MindmapCamera } from './mindmapCamera';
+import { mindmapConnectionGeometry, mindmapConnectionPoint } from './mindmapGeometry';
+import type { MindmapRouting } from './mindmapGeometry';
 
 /** Layout-only graph contract shared by RUN trees and associative memory DAGs. */
 export type MindmapViewportGraph = {
   nodes: { key: string; x: number; y: number; width: number; height: number }[];
   edges: { from: string; to: string }[];
   bounds: MindmapBounds;
+  routing?: MindmapRouting;
 };
 export type MindmapViewportControls = { fit: () => void; zoom: (factor: number) => void };
 type Camera = MindmapCamera;
@@ -36,18 +39,11 @@ export function useMindmapViewport({
         const from = byKey.get(edge.from),
           to = byKey.get(edge.to);
         if (!from || !to) return [];
-        const direction = to.x >= from.x ? 1 : -1;
-        const start = { x: from.x + (from.width / 2) * direction, y: from.y };
-        const end = { x: to.x - (to.width / 2) * direction, y: to.y };
-        const middle = (start.x + end.x) / 2;
         return [
           {
             ...edge,
             index,
-            start,
-            end,
-            middle,
-            path: `M ${start.x} ${start.y} C ${middle} ${start.y}, ${middle} ${end.y}, ${end.x} ${end.y}`
+            ...mindmapConnectionGeometry(from, to, graph.routing)
           }
         ];
       }),
@@ -118,21 +114,18 @@ export function useMindmapViewport({
         element.style.transform = `translate(${node.x - node.width / 2 + offset.x}px, ${node.y - node.height / 2 + offset.y}px)`;
       });
       edges.forEach((edge, index) => {
-        const from = offsets.get(edge.from) ?? { x: 0, y: 0 },
-          to = offsets.get(edge.to) ?? { x: 0, y: 0 };
-        const start = { x: edge.start.x + from.x, y: edge.start.y + from.y };
-        const end = { x: edge.end.x + to.x, y: edge.end.y + to.y };
-        const middle = (start.x + end.x) / 2;
-        paths[index]?.setAttribute(
-          'd',
-          `M ${start.x} ${start.y} C ${middle} ${start.y}, ${middle} ${end.y}, ${end.x} ${end.y}`
+        const connection = mindmapConnectionGeometry(
+          byKey.get(edge.from)!,
+          byKey.get(edge.to)!,
+          graph.routing,
+          offsets.get(edge.from),
+          offsets.get(edge.to)
         );
+        paths[index]?.setAttribute('d', connection.path);
         const pulse = pulses[index];
         if (reduced || !pulse) return;
-        const p = (time / 5200 + index * 0.173) % 1,
-          q = 1 - p;
-        const x = q * q * q * start.x + 3 * q * q * p * middle + 3 * q * p * p * middle + p * p * p * end.x;
-        const y = q * q * q * start.y + 3 * q * q * p * start.y + 3 * q * p * p * end.y + p * p * p * end.y;
+        const p = (time / 5200 + index * 0.173) % 1;
+        const { x, y } = mindmapConnectionPoint(connection, p);
         pulse.setAttribute('cx', String(x));
         pulse.setAttribute('cy', String(y));
         pulse.style.opacity = String(Math.sin(p * Math.PI) * 0.65);

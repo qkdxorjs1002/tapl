@@ -409,7 +409,7 @@ test('Current RUN is a source-safe interactive mindmap with bounded camera and p
   } finally { await page.close(); }
 });
 
-test('associative memories branch left to right with shared cues, exact sources and a persistent gesture camera', { timeout: 60000 }, async () => {
+test('associative memories branch around the workspace with shared cues, exact sources and a persistent gesture camera', { timeout: 60000 }, async () => {
   const { page, errors } = await openPage();
   try {
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -422,15 +422,20 @@ test('associative memories branch left to right with shared cues, exact sources 
     assert.equal(await map.locator('[data-kind=source]').count(),2);
     assert.equal(await map.locator('[data-kind=memory]').count(),2);
     assert.equal(await map.locator('[data-kind=cue]').count(),5);
-    assert.equal(await map.locator('g[data-relation]').count(),8);
+    assert.equal(await map.locator('[data-kind=workspace]').count(),1);
+    assert.equal(await map.locator('g[data-relation]').count(),10);
+    assert.equal(await map.locator('g[data-relation=workspace]').count(),2);
     assert.equal(await page.locator('.wb-memory-card').count(),0);
-    const edges = await map.evaluate(el => [...el.querySelectorAll('g[data-from]')].map(edge => {
-      const from = [...el.querySelectorAll('[data-mindmap-node]')].find(n => n.dataset.mindmapNode===edge.dataset.from);
-      const to = [...el.querySelectorAll('[data-mindmap-node]')].find(n => n.dataset.mindmapNode===edge.dataset.to);
-      return {from:from.getBoundingClientRect().right,to:to.getBoundingClientRect().left};
+    const positions = await map.locator('[data-mindmap-node]').evaluateAll(nodes=>nodes.map(node=>{
+      const matrix=new DOMMatrix(getComputedStyle(node).transform);
+      return {kind:node.dataset.kind,x:matrix.e+node.offsetWidth/2,y:matrix.f+node.offsetHeight/2};
     }));
-    assert.ok(edges.every(edge=>edge.to>edge.from),'every recorded relationship flows left to right');
+    const hub=positions.find(node=>node.kind==='workspace');
+    assert.ok(Math.abs(hub.x)<1 && Math.abs(hub.y)<1,'workspace stays at the camera origin');
+    const sources=positions.filter(node=>node.kind==='source');
+    assert.ok(sources.some(node=>node.x>0) && sources.some(node=>node.x<0),'sparse sources spread on both sides of the hub');
     const cue = map.locator('[data-kind=cue] button').filter({hasText:'interface evidence'});
+    await cue.focus(); await page.waitForTimeout(40);
     await cue.hover();
     assert.equal(await map.locator('[data-kind=memory].wb-mm-emphasis').count(),2,'shared cue highlights both related memories');
     assert.equal(await map.locator('[data-kind=source].wb-mm-emphasis').count(),2);
@@ -500,7 +505,8 @@ test('memory graph search and pagination retain the query and return to first-pa
     assert.equal(requests.at(-1).query,'interface evidence'); assert.equal(requests.at(-1).offset,1);
     assert.equal(await map.locator('[data-kind=memory]').count(),1);
     assert.equal(await map.locator('[data-kind=source]').count(),1,'only this page creates relationships');
-    await map.locator('[data-kind=cue] button').filter({hasText:'interface evidence'}).click();
+    const sharedCue=map.locator('[data-kind=cue] button').filter({hasText:'interface evidence'});
+    await sharedCue.focus(); await page.waitForTimeout(40); await sharedCue.click();
     await page.waitForFunction(()=>document.querySelector('.wb-search-context')?.textContent.includes('1–1'));
     assert.equal(requests.at(-1).offset,0);
     assert.equal(requests.at(-1).query,'interface evidence');
@@ -508,6 +514,133 @@ test('memory graph search and pagination retain the query and return to first-pa
     await page.locator('[data-wb-focus="memory-submit"]').click();
     await page.getByRole('button',{name:'검색 초기화',exact:true}).waitFor();
     assert.equal(await map.count(),0);
+    assert.deepEqual(errors,[]);
+  } finally {await page.close();}
+});
+
+test('workspace memory hub distributes four source branches and keeps every rendered card separate', { timeout: 30000 }, async () => {
+  const {page,errors}=await openPage();
+  await page.route('**/api/message',async route=>{
+    const request=route.request().postDataJSON();
+    if(request.command!=='memories') return route.continue();
+    const response=await route.fetch();const payload=await response.json();
+    const originals=payload.view.memories;
+    payload.view.memories=[...originals,...originals.map((memory,index)=>({...memory,id:`radial-preview-${index}`,source_available:false,source:{...memory.source,run_id:`radial-preview-run-${index}`,title:`Source branch ${index+3}`}}))];
+    payload.view.total=payload.view.memories.length;
+    return route.fulfill({response,json:payload});
+  });
+  try {
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await page.locator('[data-wb-focus="nav:memories"]').click();
+    const map=page.locator('.wb-memory-mindmap');await map.waitFor();
+    await page.mouse.move(1400,30);await page.waitForTimeout(650);
+    const nodes=await map.locator('[data-mindmap-node]').evaluateAll(elements=>elements.map(element=>{
+      const matrix=new DOMMatrix(getComputedStyle(element).transform),r=element.getBoundingClientRect();
+      return {kind:element.dataset.kind,x:matrix.e+element.offsetWidth/2,y:matrix.f+element.offsetHeight/2,b:matrix.b,c:matrix.c,left:r.left,right:r.right,top:r.top,bottom:r.bottom};
+    }));
+    assert.equal(nodes.filter(node=>node.kind==='workspace').length,1);
+    const sources=nodes.filter(node=>node.kind==='source');assert.equal(sources.length,4);
+    assert.equal(new Set(sources.map(node=>Math.abs(node.x)>=Math.abs(node.y)?node.x>=0?'right':'left':node.y>=0?'bottom':'top')).size,4);
+    for(let a=0;a<nodes.length;a++) {
+      assert.equal(nodes[a].b,0);assert.equal(nodes[a].c,0,'card text never rotates');
+      for(let b=a+1;b<nodes.length;b++) assert.ok(nodes[a].right<=nodes[b].left||nodes[b].right<=nodes[a].left||nodes[a].bottom<=nodes[b].top||nodes[b].bottom<=nodes[a].top,'rendered cards never overlap');
+    }
+    const hub=map.locator('[data-kind=workspace] button');
+    const centerLabel=await hub.getAttribute('aria-label');assert.ok(centerLabel.includes('워크스페이스'));
+    await hub.click();assert.equal(await map.count(),1,'the hub centers the view without opening a record');
+    await shot(page,'memory-radial-four-way');
+    assert.deepEqual(errors,[]);
+  } finally {await page.close();}
+});
+
+test('native VS Code palettes update maps, chrome, controls and dialogs without overriding explicit themes', { timeout: 60000 }, async () => {
+  const {page,errors}=await openPage();
+  const palettes=[
+    {mode:'vscode-dark',bg:'#101b2b',surface:'#1d2f43',fg:'#e8eff7',muted:'#a4b3c5',border:'#8d9bad',input:'#152337',inputFg:'#eaf2ff',button:'#27618c',buttonFg:'#ffffff',focus:'#f3bd66',link:'#7bbfff',code:'#0b1421',tip:'#283f58',tipFg:'#edf7ff',info:'#74bfff',passed:'#8ad8ac',error:'#f5a28a',warning:'#ffd075',skipped:'#ceafea',secondary:'#304359',secondaryFg:'#eef2f7'},
+    {mode:'vscode-light',bg:'#f4f0e8',surface:'#fffcf6',fg:'#2d2434',muted:'#6d606e',border:'#8f798c',input:'#ede5df',inputFg:'#3b2a42',button:'#684386',buttonFg:'#ffffff',focus:'#ae4a2f',link:'#704398',code:'#e6dcd4',tip:'#f9e8d8',tipFg:'#3e2434',info:'#285ead',passed:'#247447',error:'#a63c36',warning:'#9b6b16',skipped:'#7d4892',secondary:'#e5d7e5',secondaryFg:'#4c3152'}
+  ];
+  const rgba=(selector,property)=>page.locator(selector).first().evaluate((element,property)=>{
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d');
+    context.fillStyle=getComputedStyle(element)[property];context.fillRect(0,0,1,1);return [...context.getImageData(0,0,1,1).data];
+  },property);
+  const hex=value=>[...value.slice(1).match(/../g).map(part=>parseInt(part,16)),255];
+  const native=async p=>{
+    await page.evaluate(p=>{
+      delete document.documentElement.dataset.taplTheme;
+      document.body.className=p.mode;
+      const values={
+        'sideBar-background':p.bg,'panel-background':p.bg,'editor-background':p.bg,'editorWidget-background':p.surface,
+        'editor-foreground':p.fg,'descriptionForeground':p.muted,'panel-border':p.border,'input-border':p.border,
+        'input-background':p.input,'input-foreground':p.inputFg,'button-background':p.button,'button-foreground':p.buttonFg,
+        'button-hoverBackground':p.button,'button-secondaryBackground':p.secondary,'button-secondaryForeground':p.secondaryFg,
+        'focusBorder':p.focus,'textLink-foreground':p.link,'textLink-activeForeground':p.link,'textCodeBlock-background':p.code,
+        'editorHoverWidget-background':p.tip,'editorHoverWidget-foreground':p.tipFg,'editorHoverWidget-border':p.border,
+        'editorInfo-foreground':p.info,'testing-iconPassed':p.passed,'errorForeground':p.error,'editorWarning-foreground':p.warning,
+        'testing-iconSkipped':p.skipped,'list-hoverBackground':p.secondary,'contrastBorder':'#ffe066'
+      };
+      for(const [key,value] of Object.entries(values)) document.body.style.setProperty(`--vscode-${key}`,value);
+    },p);
+    await page.waitForTimeout(350);
+  };
+  try {
+    await page.emulateMedia({reducedMotion:'reduce'});
+    for(const [index,p] of palettes.entries()) {
+      await page.locator('[data-wb-focus="nav:current"]').click();
+      await page.locator('.wb-run-mindmap').waitFor();await page.mouse.move(1400,30);
+      await native(p);
+      assert.deepEqual(await rgba('.wb-run-mindmap','backgroundColor'),hex(p.bg));
+      assert.deepEqual(await rgba('.wb-run-mindmap','color'),hex(p.fg));
+      assert.deepEqual(await rgba('.wb-run-mindmap [data-kind=task] button','backgroundColor'),hex(p.surface));
+      assert.deepEqual(await rgba('.wb-run-mindmap .wb-mm-state[data-status=progress]','color'),hex(p.info));
+      assert.ok((await rgba('.wb-topbar','borderBottomColor'))[3]<100,'chrome border remains subtle');
+      assert.ok((await rgba('.wb-sidebar','borderRightColor'))[3]<100);
+      await page.keyboard.press('Tab');await page.locator('.wb-run-mindmap').focus();
+      assert.deepEqual(await rgba('.wb-run-mindmap','outlineColor'),hex(p.focus));
+      await shot(page,`native-${index}-run`);
+      await page.locator('[data-wb-focus="nav:tasks"]').click();await page.locator('.wb-tasks-table').waitFor();
+      assert.deepEqual(await rgba('[data-wb-focus="filter:all"]','backgroundColor'),hex(p.button));
+      assert.deepEqual(await rgba('[data-wb-focus="filter:all"]','color'),hex(p.buttonFg));
+      assert.equal(new Set(await page.locator('.wb-tasks-table .wb-status-label').evaluateAll(nodes=>nodes.map(node=>getComputedStyle(node).color))).size,4);
+      await page.locator('[data-wb-focus="nav:current"]').click();await page.locator('.wb-run-mindmap').waitFor();
+      await page.mouse.move(1400,30);await page.waitForTimeout(650);
+      const detailTask=page.locator('.wb-run-mindmap [data-kind=task] button').filter({hasText:'TASK-013'});
+      await detailTask.focus();await page.waitForTimeout(60);await detailTask.click();
+      await page.locator('.wb-record-page').waitFor();
+      assert.deepEqual(await rgba('.wb-record-page h1','color'),hex(p.fg));
+      await shot(page,`native-${index}-detail`);
+      await page.locator('[data-wb-focus="nav:memories"]').click();await page.locator('.wb-memory-mindmap').waitFor();
+      assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex(p.bg));
+      assert.deepEqual(await rgba('.wb-memory-mindmap','color'),hex(p.fg));
+      assert.deepEqual(await rgba('.wb-search-box .input','backgroundColor'),hex(p.input));
+      assert.deepEqual(await rgba('.wb-search-box input','color'),hex(p.inputFg));
+      await page.mouse.move(1400,30);await page.waitForTimeout(650);await shot(page,`native-${index}-memory`);
+      await page.locator('.wb-language-menu summary').hover();await page.getByRole('tooltip').waitFor();
+      assert.deepEqual(await rgba('[role=tooltip]','backgroundColor'),hex(p.tip));
+      assert.deepEqual(await rgba('[role=tooltip]','color'),hex(p.tipFg));
+      await page.keyboard.press('Escape');
+      await page.locator('[data-wb-focus="workspace-picker"]').click();await page.getByRole('dialog').waitFor();
+      assert.deepEqual(await rgba('.wb-dialog','backgroundColor'),hex(p.surface));
+      assert.deepEqual(await rgba('.wb-dialog-input','backgroundColor'),hex(p.input));
+      assert.deepEqual(await rgba('.wb-dialog .btn-primary','backgroundColor'),hex(p.button));
+      assert.deepEqual(await rgba('.wb-dialog .btn-primary','color'),hex(p.buttonFg));
+      await shot(page,`native-${index}-dialog`);
+      await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
+    }
+    // Body-scoped host variables change live without remounting either map.
+    await native(palettes[0]);assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex(palettes[0].bg));
+    await page.evaluate(()=>document.body.className='vscode-high-contrast');
+    assert.deepEqual(await rgba('.wb-topbar','borderBottomColor'),hex('#ffe066'));
+    assert.deepEqual(await rgba('.wb-sidebar','borderRightColor'),hex('#ffe066'));
+    await page.evaluate(()=>document.documentElement.dataset.taplTheme='light');
+    await page.waitForTimeout(350);
+    assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex('#f7f8fa'));
+    assert.deepEqual(await rgba('.wb-memory-mindmap','color'),hex('#222d3b'));
+    await page.evaluate(()=>document.body.style.setProperty('--vscode-sideBar-background','#ff00ff'));
+    assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex('#f7f8fa'),'manual light palette wins over native body values');
+    await page.evaluate(()=>document.documentElement.dataset.taplTheme='dark');
+    await page.waitForTimeout(350);
+    assert.deepEqual(await rgba('.wb-memory-mindmap','backgroundColor'),hex('#151b24'));
+    assert.deepEqual(await rgba('.wb-memory-mindmap','color'),hex('#e6edf5'));
     assert.deepEqual(errors,[]);
   } finally {await page.close();}
 });
@@ -536,8 +669,10 @@ test('PLAN, FINDING, memories and diagnostics use reading pages and nested verti
     await page.locator('.wb-memory-mindmap [data-kind=memory]').first().waitFor();
     assert.equal(await page.locator('.wb-memory-mindmap [data-kind=memory]').count(), 2);
     assert.equal(await page.locator('.tapl-memory-list,.tapl-card').count(), 0);
+    await page.mouse.move(1400,100);await page.waitForTimeout(650);
     await shot(page, 'memories-ko-light');
-    await page.locator('.wb-memory-mindmap [data-kind=memory]').filter({ hasText: 'original contrast finding' }).locator('button').click();
+    const findingMemory=page.locator('.wb-memory-mindmap [data-kind=memory]').filter({ hasText: 'original contrast finding' }).locator('button');
+    await findingMemory.focus();await page.waitForTimeout(60);await findingMemory.click();
     await page.locator('.wb-memory-source-preview').waitFor();
     await shot(page, 'memory-detail-ko-light');
     await page.locator('.wb-memory-origin button').click();

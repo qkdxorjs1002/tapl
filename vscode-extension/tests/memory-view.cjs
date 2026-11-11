@@ -144,10 +144,12 @@ test('memory mindmap replaces cards with recorded source → memory → cue rela
       'Keep the real canonical note.\n&lt;script&gt;source()&lt;/script&gt;',
       'Source title', memory.source_db, sourceLabel, memoryLabel, cueLabel, scope,
       'data-kind="source"', 'data-kind="memory"', 'data-kind="cue"',
+      'data-kind="workspace"', 'data-relation="workspace"',
       'data-relation="source"', 'data-relation="cue"',
       `data-wb-focus="memory:${memory.source_db}:${memory.id}"`
     ]) assert.ok(html.includes(value), value);
     assert.equal((html.match(/data-kind="source"/g) || []).length, 1);
+    assert.equal((html.match(/data-kind="workspace"/g) || []).length, 1);
     assert.equal((html.match(/data-kind="memory"/g) || []).length, 1);
     assert.equal((html.match(/data-kind="cue"/g) || []).length, 2);
     assert.equal((html.match(/<h1 /g) || []).length, 1);
@@ -202,7 +204,11 @@ test('graph clicks preserve exact source-qualified navigation and raw cue search
   cues[0].props.onClick();
   assert.deepEqual(calls, [{ command: 'memories', query: '  ＲＥＬＥＡＳＥ  ', offset: 0 }]);
   const camera = nodes.find((node) => node.props?.['data-memory-camera-key']);
-  assert.equal(camera.props['data-memory-camera-key'], JSON.stringify(['memories', '/workspace-a', 'old search', 20]));
+  assert.equal(camera.props['data-memory-camera-key'], JSON.stringify(['memories', 'radial', '/workspace-a', 'old search', 20]));
+  const workspace = graphNodes.find((node) => node.props['data-kind'] === 'workspace');
+  calls.length = 0;
+  button(workspace).props.onClick();
+  assert.deepEqual(calls, [], 'centering the workspace never navigates to a record or changes the editor workspace');
 });
 
 test('unavailable graph source is disabled, and paging and search keep their original commands', () => {

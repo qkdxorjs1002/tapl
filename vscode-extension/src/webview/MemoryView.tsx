@@ -116,7 +116,8 @@ function MemoryList({
         <MemoryMindmap
           memories={view.memories}
           send={send}
-          cameraKey={JSON.stringify(['memories', workspaceKey ?? '', view.query, view.offset])}
+          workspaceKey={workspaceKey}
+          cameraKey={JSON.stringify(['memories', 'radial', workspaceKey ?? '', view.query, view.offset])}
         />
       ) : (
         <EmptyState
