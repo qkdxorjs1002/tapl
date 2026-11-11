@@ -50,13 +50,18 @@
 }
 .wb-mm-pointer-light {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
+  width: 720px;
+  height: 720px;
   pointer-events: none;
   background: radial-gradient(
-    360px circle at var(--mm-px, 50%) var(--mm-py, 50%),
+    360px circle at 50% 50%,
     color-mix(in srgb, var(--mm-accent) 4.5%, transparent),
     transparent
   );
+  transform: translate(calc(var(--mm-px, 0px) - 50%), calc(var(--mm-py, 0px) - 50%));
+  will-change: transform;
   opacity: 0;
   transition: opacity 0.6s;
 }
@@ -103,7 +108,6 @@
 .wb-mm-pulse {
   fill: var(--mm-accent);
   opacity: 0;
-  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--mm-accent) 60%, transparent));
 }
 .wb-mm-node {
   position: absolute;

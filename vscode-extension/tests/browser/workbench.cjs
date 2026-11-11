@@ -44,6 +44,77 @@ async function openPage() {
   return { page, errors };
 }
 
+test('large maps bound idle work, retain keyboard targets and refresh current graph geometry', { timeout: 60000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  let overview;
+  await page.route('**/api/message', async route => {
+    const response = await route.fetch(), payload = await response.json();
+    if (payload.view?.type === 'overview') {
+      const s = payload.view.status, plan = s.plans[0], task = s.tasks[0];
+      s.plans = Array.from({ length: 40 }, (_, i) => ({ ...plan, id: 100000+i, stable_id: `PLAN-${i+1}`, title: `Large plan ${i+1}` }));
+      s.tasks = Array.from({ length: 1000 }, (_, i) => ({ ...task, id: 200000+i, stable_id: `TASK-${i+1}`, title: `Large task ${i+1}`, spec_id: s.plans[i%40].stable_id, status: 'Pending' }));
+      s.task_counts = { Pending: 1000 }; overview = structuredClone(payload);
+    }
+    if (payload.view?.type === 'memories' && payload.view.memories.length) {
+      const sample = payload.view.memories[0];
+      payload.view.memories = Array.from({ length: 50 }, (_, i) => ({ ...sample, id: `large-memory-${i}`, source: { ...sample.source, run_id: `large-source-${i}`, title: `Large source ${i}` }, source_available: false, cue: Array.from({ length: 16 }, (_, j) => `cue ${i}-${j}`) }));
+      payload.view.total = 50; payload.view.limit = 50;
+    }
+    await route.fulfill({ response, json: payload });
+  });
+  const idleWrites = () => page.locator('.wb-mindmap').evaluate(async host => {
+    const counts = { node: 0, path: 0, pulse: 0, world: 0, light: 0 };
+    const selectors = { node: '.wb-mm-node', path: '.wb-mm-edge', pulse: '.wb-mm-pulse', world: '.wb-mm-world', light: '.wb-mm-pointer-light' };
+    const observer = new MutationObserver(records => {
+      for (const { target } of records) for (const [key, selector] of Object.entries(selectors)) {
+        if (target.matches(selector)) { counts[key]++; break; }
+      }
+    });
+    observer.observe(host, { attributes: true, subtree: true, attributeFilter: ['style', 'd', 'cx', 'cy'] });
+    await new Promise(resolve => setTimeout(resolve, 450)); observer.disconnect(); return counts;
+  });
+  try {
+    await page.goto(origin); await page.waitForLoadState('networkidle'); await page.locator('.wb-run-mindmap').waitFor();
+    for (const [kind, count] of [['run', 1041], ['memory', 901]]) {
+      if (kind === 'memory') { await page.locator('[data-wb-focus="nav:memories"]').click(); await page.locator('.wb-memory-mindmap').waitFor(); }
+      await page.mouse.move(1400, 40); await page.waitForTimeout(1000);
+      const map = page.locator('.wb-mindmap');
+      assert.equal(await map.locator('[data-mindmap-node]').count(), count, 'every keyboard target stays mounted');
+      const writes = await idleWrites();
+      assert.equal(writes.node+writes.path+writes.world+writes.light, 0, `${kind}: settled geometry sleeps`);
+      assert.ok(writes.pulse > 0 && writes.pulse < 3000, `${kind}: ambient work is bounded`);
+      const pulses = await map.locator('.wb-mm-pulse').evaluateAll(nodes => nodes.filter(node => +getComputedStyle(node).opacity > 0).length);
+      assert.ok(pulses > 0 && pulses <= 24, 'default motion keeps a bounded visible budget');
+      await page.emulateMedia({ reducedMotion: 'reduce' }); await page.waitForTimeout(100);
+      assert.deepEqual(await idleWrites(), { node: 0, path: 0, pulse: 0, world: 0, light: 0 });
+      const last = map.locator('[data-kind=task] button, [data-kind=cue] button').last();
+      await last.focus(); await page.waitForTimeout(60);
+      const target = await last.boundingBox(), viewport = await map.boundingBox();
+      assert.ok(target.x >= viewport.x && target.x+target.width <= viewport.x+viewport.width+1);
+      assert.ok(target.y >= viewport.y && target.y+target.height <= viewport.y+viewport.height+1);
+      if (kind === 'run') {
+        // A polling snapshot moves retained keys; old cleanup must not restore their old coordinates.
+        const next = structuredClone(overview), s = next.view.status;
+        s.tasks = s.tasks.slice(0, 200); s.task_counts = { Pending: 200 };
+        const source = require('esbuild').buildSync({ entryPoints: [path.resolve(__dirname, '../../src/webview/workbench/mindmap.ts')], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles[0].text;
+        const compiled = { exports: {} }; new Function('module', 'exports', source)(compiled, compiled.exports);
+        const graph = compiled.exports.buildRunMindmap({ ...s, run: { ...s.active_run, source_db: s.active_run.source_db ?? s.source_db }, readonly: false });
+        await page.evaluate(payload => window.postMessage({ ...payload, type: 'view:update' }, '*'), next);
+        await page.waitForFunction(() => document.querySelectorAll('.wb-run-mindmap [data-mindmap-node]').length === 241); await page.waitForTimeout(60);
+        const actual = await map.locator('[data-mindmap-node]').evaluateAll(nodes => nodes.map(node => {
+          const m = new DOMMatrix(getComputedStyle(node).transform);
+          return { key: node.dataset.mindmapNode, x: m.e+node.offsetWidth/2, y: m.f+node.offsetHeight/2 };
+        }));
+        const expected = new Map(graph.nodes.map(node => [node.key, node]));
+        for (const node of actual) assert.ok(Math.abs(node.x-expected.get(node.key).x)<.01 && Math.abs(node.y-expected.get(node.key).y)<.01, 'current graph positions survive effect replacement');
+      }
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+    }
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test('icon navigation hides collapsed counts, expands over the map and preserves pinning and Explore focus', { timeout: 60000 }, async () => {
   const { page, errors } = await openPage();
   const shell = page.locator('.tapl-workbench'), sidebar = page.locator('.wb-sidebar');

@@ -4,6 +4,15 @@ import { constrainMindmapCamera, mindmapMinimumZoom } from './mindmapCamera';
 import type { MindmapBounds, MindmapCamera } from './mindmapCamera';
 import { mindmapConnectionGeometry, mindmapConnectionPoint } from './mindmapGeometry';
 import type { MindmapRouting } from './mindmapGeometry';
+import {
+  MINDMAP_DECORATION_INTERVAL,
+  mindmapConnectionBounds,
+  mindmapIntersects,
+  mindmapMagneticOffset,
+  mindmapNearbyNodes,
+  mindmapVisiblePulses,
+  mindmapWorldView
+} from './mindmapMotion';
 
 /** Layout-only graph contract shared by RUN trees and associative memory DAGs. */
 export type MindmapViewportGraph = {
@@ -59,6 +68,7 @@ export function useMindmapViewport({
     target = constrainMindmapCamera(target, graph.bounds, bounds);
     let camera = { ...target };
     let raf = 0,
+      ambientTimer = 0,
       disposed = false,
       onScreen = true,
       pointerInside = false;
@@ -76,6 +86,35 @@ export function useMindmapViewport({
     const nodeElements = Array.from(canvas.querySelectorAll<HTMLElement>('[data-mindmap-node]'));
     const pulses = Array.from(canvas.querySelectorAll<SVGCircleElement>('.wb-mm-pulse'));
     const paths = Array.from(canvas.querySelectorAll<SVGPathElement>('.wb-mm-edge'));
+    // React can retain imperative styles across an effect restart; restore the current graph once.
+    nodeElements.forEach((element, index) => {
+      const node = graph.nodes[index];
+      if (!node) return;
+      const value = `translate(${node.x - node.width / 2}px, ${node.y - node.height / 2}px)`;
+      if (element.style.transform !== value) element.style.transform = value;
+    });
+    paths.forEach((path, index) => {
+      if (edges[index] && path.getAttribute('d') !== edges[index].path) path.setAttribute('d', edges[index].path);
+    });
+    const pointerLight = host.querySelector<HTMLElement>('.wb-mm-pointer-light');
+    pointerLight?.style.setProperty('--mm-px', `${lastPointer.x}px`);
+    pointerLight?.style.setProperty('--mm-py', `${lastPointer.y}px`);
+    const nodeIndices = new Map(graph.nodes.map((node, index) => [node.key, index]));
+    const nearbyNodes = mindmapNearbyNodes(graph.nodes);
+    const connections = edges.map((edge) => ({ ...edge }));
+    const edgeBounds = edges.map(mindmapConnectionBounds);
+    const incident = new Map<string, number[]>();
+    edges.forEach((edge, index) => {
+      for (const key of [edge.from, edge.to]) {
+        const list = incident.get(key);
+        if (list) list.push(index);
+        else incident.set(key, [index]);
+      }
+    });
+    const offsets = new Map<number, Point>();
+    let pulseIndices: number[] = [], decorationDirty = true, viewDirty = true;
+    let lastDecoration = -Infinity;
+    let renderedCamera: Camera | undefined;
     const remember = () => {
       cameras.delete(cameraKey);
       cameras.set(cameraKey, { ...target });
@@ -83,9 +122,14 @@ export function useMindmapViewport({
     };
     const visible = () => !disposed && onScreen && !document.hidden;
     const transform = () => {
+      if (renderedCamera && renderedCamera.x === camera.x && renderedCamera.y === camera.y && renderedCamera.zoom === camera.zoom) return false;
       canvas.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})`;
-      host.style.backgroundPosition = `${camera.x}px ${camera.y}px`;
-      host.style.backgroundSize = `${26 * camera.zoom}px ${26 * camera.zoom}px`;
+      if (!renderedCamera || renderedCamera.x !== camera.x || renderedCamera.y !== camera.y)
+        host.style.backgroundPosition = `${camera.x}px ${camera.y}px`;
+      if (!renderedCamera || renderedCamera.zoom !== camera.zoom)
+        host.style.backgroundSize = `${26 * camera.zoom}px ${26 * camera.zoom}px`;
+      renderedCamera = { ...camera };
+      return true;
     };
     const tick = (time: number) => {
       raf = 0;
@@ -97,43 +141,88 @@ export function useMindmapViewport({
       if (Math.abs(target.x - camera.x) < 0.05) camera.x = target.x;
       if (Math.abs(target.y - camera.y) < 0.05) camera.y = target.y;
       if (Math.abs(target.zoom - camera.zoom) < 0.0001) camera.zoom = target.zoom;
-      transform();
-      lastPointer.x += (pointer.x - lastPointer.x) * 0.16;
-      lastPointer.y += (pointer.y - lastPointer.y) * 0.16;
-      host.style.setProperty('--mm-px', `${lastPointer.x}px`);
-      host.style.setProperty('--mm-py', `${lastPointer.y}px`);
-      const offsets = new Map<string, Point>();
-      nodeElements.forEach((element, index) => {
-        const node = graph.nodes[index];
-        if (!node) return;
-        const dx = (lastPointer.x - bounds.width / 2 - camera.x) / camera.zoom - node.x;
-        const dy = (lastPointer.y - bounds.height / 2 - camera.y) / camera.zoom - node.y;
-        const influence = !reduced && pointerInside && !pointers.size ? Math.max(0, 1 - Math.hypot(dx, dy) / 280) : 0;
-        const offset = { x: clamp(dx / 35, -3, 3) * influence, y: clamp(dy / 35, -3, 3) * influence };
-        offsets.set(node.key, offset);
-        element.style.transform = `translate(${node.x - node.width / 2 + offset.x}px, ${node.y - node.height / 2 + offset.y}px)`;
-      });
-      edges.forEach((edge, index) => {
-        const connection = mindmapConnectionGeometry(
-          byKey.get(edge.from)!,
-          byKey.get(edge.to)!,
-          graph.routing,
-          offsets.get(edge.from),
-          offsets.get(edge.to)
-        );
-        paths[index]?.setAttribute('d', connection.path);
-        const pulse = pulses[index];
-        if (reduced || !pulse) return;
-        const p = (time / 5200 + index * 0.173) % 1;
-        const { x, y } = mindmapConnectionPoint(connection, p);
-        pulse.setAttribute('cx', String(x));
-        pulse.setAttribute('cy', String(y));
-        pulse.style.opacity = String(Math.sin(p * Math.PI) * 0.65);
-      });
-      if (!reduced || camera.x !== target.x || camera.y !== target.y || camera.zoom !== target.zoom)
+      const cameraChanged = transform();
+      let pointerChanged = false;
+      for (const axis of ['x', 'y'] as const) {
+        const previous = lastPointer[axis];
+        lastPointer[axis] += (pointer[axis] - lastPointer[axis]) * (reduced ? 1 : 0.16);
+        if (Math.abs(pointer[axis] - lastPointer[axis]) < 0.05) lastPointer[axis] = pointer[axis];
+        if (previous !== lastPointer[axis]) {
+          pointerLight?.style.setProperty(axis === 'x' ? '--mm-px' : '--mm-py', `${lastPointer[axis]}px`);
+          pointerChanged = true;
+        }
+      }
+      decorationDirty ||= cameraChanged || pointerChanged;
+      viewDirty ||= cameraChanged;
+      const cameraMoving = camera.x !== target.x || camera.y !== target.y || camera.zoom !== target.zoom;
+      const pointerMoving = lastPointer.x !== pointer.x || lastPointer.y !== pointer.y;
+      // Camera and pointer light keep their native frame rate; graph decorations have a separate budget.
+      if (time - lastDecoration >= MINDMAP_DECORATION_INTERVAL || reduced) {
+        const view = mindmapWorldView(camera, bounds, 12);
+        if (viewDirty) {
+          const nextPulses = reduced ? [] : mindmapVisiblePulses(edgeBounds, view);
+          const selected = new Set(nextPulses);
+          for (const index of pulseIndices) if (!selected.has(index) && pulses[index]) pulses[index].style.opacity = '0';
+          pulseIndices = nextPulses;
+          viewDirty = false;
+        }
+        if (decorationDirty) {
+          const worldPointer = {
+            x: (lastPointer.x - bounds.width / 2 - camera.x) / camera.zoom,
+            y: (lastPointer.y - bounds.height / 2 - camera.y) / camera.zoom
+          };
+          const magnetic = !reduced && pointerInside && !pointers.size;
+          const candidates = new Set(magnetic ? nearbyNodes(worldPointer) : []);
+          for (const index of offsets.keys()) candidates.add(index);
+          const dirtyEdges = new Set<number>();
+          for (const index of candidates) {
+            const node = graph.nodes[index];
+            const onscreen = mindmapIntersects(view, {
+              left: node.x - node.width / 2, right: node.x + node.width / 2,
+              top: node.y - node.height / 2, bottom: node.y + node.height / 2
+            });
+            const next = mindmapMagneticOffset(node, worldPointer, magnetic && onscreen);
+            const previous = offsets.get(index);
+            if ((previous?.x || 0) === next.x && (previous?.y || 0) === next.y) continue;
+            if (next.x || next.y) offsets.set(index, next);
+            else offsets.delete(index);
+            const element = nodeElements[index];
+            if (element) element.style.transform = `translate(${node.x - node.width / 2 + next.x}px, ${node.y - node.height / 2 + next.y}px)`;
+            for (const edgeIndex of incident.get(node.key) || []) dirtyEdges.add(edgeIndex);
+          }
+          for (const index of dirtyEdges) {
+            const edge = edges[index];
+            const connection = mindmapConnectionGeometry(
+              byKey.get(edge.from)!, byKey.get(edge.to)!, graph.routing,
+              offsets.get(nodeIndices.get(edge.from)!), offsets.get(nodeIndices.get(edge.to)!)
+            );
+            connections[index] = { ...edge, ...connection };
+            paths[index]?.setAttribute('d', connection.path);
+          }
+          decorationDirty = false;
+        }
+        for (const index of pulseIndices) {
+          const pulse = pulses[index];
+          if (!pulse || reduced) continue;
+          const p = (time / 5200 + index * 0.173) % 1;
+          const { x, y } = mindmapConnectionPoint(connections[index], p);
+          pulse.setAttribute('cx', String(x));
+          pulse.setAttribute('cy', String(y));
+          pulse.style.opacity = String(Math.sin(p * Math.PI) * 0.65);
+        }
+        lastDecoration = time;
+      }
+      if (cameraMoving || pointerMoving)
         raf = requestAnimationFrame(tick);
+      else if (decorationDirty || viewDirty || (!reduced && pulseIndices.length))
+        ambientTimer = window.setTimeout(() => {
+          ambientTimer = 0;
+          tick(performance.now());
+        }, Math.max(1, MINDMAP_DECORATION_INTERVAL - (performance.now() - lastDecoration)));
     };
     const wake = () => {
+      if (ambientTimer) window.clearTimeout(ambientTimer);
+      ambientTimer = 0;
       if (!raf && visible()) raf = requestAnimationFrame(tick);
     };
     const setTarget = (next: Camera) => {
@@ -184,6 +273,7 @@ export function useMindmapViewport({
       anchor = undefined;
       gestureActive = false;
       host.classList.remove('wb-mm-dragging');
+      decorationDirty = true;
     };
     const rebase = () => {
       const values = [...pointers.values()];
@@ -204,6 +294,8 @@ export function useMindmapViewport({
         camera = { ...target };
       }
       pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      decorationDirty = true;
+      wake();
       if (event.pointerType === 'touch') touchPointers.add(event.pointerId);
       rebase();
       // Capture on the original button so a stationary tap keeps normal record navigation.
@@ -217,8 +309,11 @@ export function useMindmapViewport({
     };
     const move = (event: PointerEvent) => {
       if (event.target instanceof Node && host.contains(event.target)) {
+        if (!pointerInside) {
+          decorationDirty = true;
+          host.classList.add('wb-mm-pointer-inside');
+        }
         pointerInside = true;
-        host.classList.add('wb-mm-pointer-inside');
         pointer = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
         wake();
       }
@@ -253,6 +348,8 @@ export function useMindmapViewport({
     const up = (event: PointerEvent) => {
       if (!pointers.has(event.pointerId)) return;
       pointers.delete(event.pointerId);
+      decorationDirty = true;
+      wake();
       touchPointers.delete(event.pointerId);
       if (dragged) suppressClickRef.current = Date.now() + 450;
       rebase(); // Pinch → one-finger drag starts at the remaining finger, with no jump.
@@ -260,6 +357,7 @@ export function useMindmapViewport({
     };
     const leave = () => {
       pointerInside = false;
+      decorationDirty = true;
       host.classList.remove('wb-mm-pointer-inside');
       wake();
     };
@@ -327,6 +425,8 @@ export function useMindmapViewport({
       leave();
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
+      if (ambientTimer) window.clearTimeout(ambientTimer);
+      ambientTimer = 0;
     };
     const visibility = () => {
       if (document.hidden) suspend();
@@ -334,12 +434,16 @@ export function useMindmapViewport({
     };
     const motionChange = () => {
       reduced = motion.matches;
+      decorationDirty = true;
+      viewDirty = true;
       host.dataset.reducedMotion = String(reduced);
       wake();
     };
     host.dataset.reducedMotion = String(reduced);
     const resize = new ResizeObserver(() => {
       bounds = host.getBoundingClientRect();
+      viewDirty = true;
+      decorationDirty = true;
       setTarget(target);
     });
     resize.observe(host);
@@ -376,6 +480,7 @@ export function useMindmapViewport({
       remember();
       disposed = true;
       suspend();
+      for (const index of pulseIndices) if (pulses[index]) pulses[index].style.opacity = '0';
       controlsRef.current = undefined;
       resize.disconnect();
       intersection?.disconnect();

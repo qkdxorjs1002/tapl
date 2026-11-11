@@ -162,7 +162,8 @@ function interactionTree(view, send) {
     ...React,
     useContext: (context) => context._currentValue,
     useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
-    useRef: (current) => ({ current }), useEffect() {}, useLayoutEffect() {}, useMemo: (factory) => factory()
+    useRef: (current) => ({ current }), useEffect() {}, useLayoutEffect() {}, useMemo: (factory) => factory(),
+    useCallback: (callback) => callback, memo: (component) => component
   };
   function nodes(node) {
     if (!node || typeof node !== 'object') return [];
