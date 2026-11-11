@@ -693,19 +693,22 @@ body:has(.tapl-workbench) {
   overflow-wrap: anywhere;
 }
 .wb-active-task.card {
+  flex: 0 0 min(420px, calc(100% - 28px));
+  min-width: min(300px, calc(100% - 28px));
+  max-width: calc(100% - 28px);
+  padding: 18px 20px;
+  gap: 12px;
   border-top: 2px solid color-mix(in srgb, var(--wb-status-progress, var(--wb-primary)) 48%, var(--wb-border));
 }
 .wb-active-tasks,
 .wb-plan-board {
   align-items: stretch;
 }
-.wb-active-task.card,
 .wb-plan-summary.card {
   flex: 0 0 min(720px, calc(100% - 64px));
   min-width: min(420px, calc(100% - 28px));
   max-width: calc(100% - 28px);
 }
-.wb-single-task .wb-active-task,
 .wb-single-plan .wb-plan-summary {
   flex-basis: 100%;
   min-width: 0;
@@ -746,6 +749,9 @@ body:has(.tapl-workbench) {
   height: 16px;
   margin-top: 5px;
   color: var(--wb-primary);
+}
+.wb-active-task .wb-overview-heading strong {
+  font-size: 16px;
 }
 .wb-overview-fields {
   display: grid;
@@ -796,6 +802,10 @@ body:has(.tapl-workbench) {
 }
 .wb-overview-fact .wb-overview-label {
   white-space: nowrap;
+}
+.wb-active-task .wb-overview-facts {
+  gap: 6px 16px;
+  padding-top: 10px;
 }
 .wb-active-empty,
 .wb-plan-placeholder {
@@ -1396,10 +1406,13 @@ body:has(.tapl-workbench) {
     padding-inline: 13px;
   }
   .wb-active-task.card,
-  .wb-active-task.card,
   .wb-plan-summary.card {
     padding: 18px;
     gap: 16px;
+  }
+  .wb-active-task.card {
+    padding: 16px 18px;
+    gap: 12px;
   }
   .wb-plan-summary.card {
     flex-basis: calc(100% - 28px);
@@ -1407,6 +1420,8 @@ body:has(.tapl-workbench) {
   .wb-single-task .wb-active-task.card,
   .wb-single-plan .wb-plan-summary.card {
     flex-basis: 100%;
+    min-width: 0;
+    max-width: none;
   }
   .wb-overview-heading strong {
     font-size: 16px;

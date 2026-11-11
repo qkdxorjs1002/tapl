@@ -68,7 +68,7 @@ RUNs, tasks, owners, records and timestamps are synthetic. The 2/6 completion co
 
 The [Viewer guide](../guides/viewer.md) is the behavior reference; gallery fixtures are not runtime data.
 
-Current RUN shows expanded PLAN cards first, followed by In Progress TASK cards. PLAN previews objective, approach and validation; TASK previews goal, action, verification and compact recorded execution facts. Both use horizontal rows with fading edges, independent scroll positions and matching single-card/responsive sizing. Missing fields are omitted and long previews are limited; full content opens in Explore. All task states remain available in TASK status.
+Current RUN shows expanded PLAN cards first, followed by In Progress TASK cards. PLAN previews objective, approach and validation; TASK shows a compact ID, title, status and recorded execution facts; narrative fields remain on its detail page. Both use horizontal rows with fading edges, independent scroll positions and responsive sizing, with narrower TASK cards. Missing fields are omitted and long previews are limited; full content opens in Explore. All task states remain available in TASK status.
 
 Shipping details follow the prototype hero, reading column, property rail and real related-record rows. Meaningful typed fields are promoted into the body; additional values form a vertical object/array tree. Memory uses note cards and source previews. Workspace selection is a modal, and diagnostics/errors/loading use the same visual system. Icon tooltips and status tokens are shared across pages. Synthetic prototype checks, relationships and metadata are never copied as runtime facts.
 

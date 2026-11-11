@@ -81,7 +81,7 @@ test('no-active state stays explicit for empty tasks and RUNs with only other st
   assert.doesNotMatch(missingMetadata, /wb-run-information/);
 });
 
-test('typed task narratives and actual metadata are readable, localized, escaped and not replaced by body summaries', () => {
+test('compact TASK cards omit narratives and retain actual localized execution metadata', () => {
   const item = task(3, 'In Progress', {
     goal: 'Recorded goal <script>unsafe()</script>', action: 'First action\nSecond action', verification: 'Recorded verification',
     body: 'Duplicate body should not appear', spec_id: 'PLAN-007', depends_on: ['TASK-001', 'TASK-002'],
@@ -92,20 +92,20 @@ test('typed task narratives and actual metadata are readable, localized, escaped
   });
   for (const locale of ['en', 'ko']) {
     const html = render(snapshot({ tasks: [item] }), locale);
-    for (const text of ['Recorded goal &lt;script&gt;unsafe()&lt;/script&gt;', 'First action\nSecond action', 'Recorded verification', 'Actual owner', 'Actual executor', 'PLAN-007']) {
+    for (const text of ['Actual task 3', 'Actual owner', 'Actual executor', 'PLAN-007']) {
       assert.ok(html.includes(text), text);
     }
-    for (const key of ['goal', 'action', 'verification', 'wbOwner', 'wbExecutionRef', 'executor', 'executionMode', 'wbParentPlan', 'dependencies', 'elapsedTime', 'wbSubagent', 'wbParallel']) {
+    for (const key of ['wbOwner', 'wbExecutionRef', 'executor', 'executionMode', 'wbParentPlan', 'dependencies', 'elapsedTime', 'wbSubagent', 'wbParallel']) {
       assert.ok(html.includes(translate(locale, key)), key);
     }
     assert.ok(html.includes(translate(locale, 'wbItems', { count: 2 })));
     assert.ok(html.includes(locale === 'ko' ? '0초' : '0s'), 'zero is measured');
-    assert.doesNotMatch(html, /<script>|Duplicate body should|Legacy goal should|TASK-001|TASK-002|>main<|>sequential</);
+    assert.doesNotMatch(html, /wb-overview-fields|Recorded goal|First action|Recorded verification|<script>|Duplicate body should|Legacy goal should|TASK-001|TASK-002|>main<|>sequential</);
     assert.ok(!html.includes(translate(locale, 'notMeasured')));
   }
 });
 
-test('sparse tasks omit invented properties, and old body or custom goal values remain useful fallbacks', () => {
+test('sparse TASK cards omit properties and narrative fallbacks', () => {
   const sparse = render(snapshot({ tasks: [task(1)] }));
   assert.doesNotMatch(sparse, /wb-overview-fields|wb-overview-facts/);
   for (const key of ['wbOwner', 'wbParentPlan', 'dependencies', 'notMeasured']) assert.ok(!sparse.includes(translate('en', key)));
@@ -113,8 +113,7 @@ test('sparse tasks omit invented properties, and old body or custom goal values 
     task(1, 'In Progress', { body: '## Original heading\n\nActual **body** summary', execution_mode: 'sequential', executor_kind: 'main' }),
     task(2, 'In Progress', { custom_fields: { goal: 'Actual legacy goal', owner: false, assignee: 'Actual assignee' } })
   ] }));
-  assert.match(fallback, /Actual body summary/);
-  assert.match(fallback, /Actual legacy goal/);
+  assert.doesNotMatch(fallback, /Actual body summary|Actual legacy goal|wb-overview-fields/);
   assert.match(fallback, /Actual assignee/);
   assert.doesNotMatch(fallback, /Original heading|>main<|>sequential<|Not measured/);
 });

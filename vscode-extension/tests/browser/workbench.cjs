@@ -222,9 +222,9 @@ test('Current RUN shows only active TASKs and useful PLAN previews with responsi
     assert.equal(await tasks.count(), 6);
     assert.deepEqual(await tasks.locator('.wb-overview-meta > .wb-mono').allTextContents(), ['TASK-001', 'TASK-005', 'TASK-009', 'TASK-013', 'TASK-017', 'TASK-021']);
     assert.equal(await tasks.locator('.wb-status-label:not([data-status="In Progress"])').count(), 0);
-    assert.equal(await tasks.first().locator('.wb-overview-field').count(), 3);
-    assert.ok((await tasks.first().innerText()).includes('Make interface task 1 readable.'));
-    assert.ok((await tasks.first().innerText()).includes('Check both locales and responsive layouts.'));
+    assert.equal(await tasks.locator('.wb-overview-field').count(), 0);
+    assert.ok(!(await tasks.first().innerText()).includes('Make interface task 1 readable.'));
+    assert.ok(!(await tasks.first().innerText()).includes('Check both locales and responsive layouts.'));
     assert.ok((await tasks.first().locator('.wb-overview-facts').innerText()).includes('PLAN-001'));
     const section = await page.locator('.wb-active-section').boundingBox(), plans = await page.locator('.wb-plan-section').boundingBox();
     assert.ok(plans.y < section.y);
@@ -241,6 +241,7 @@ test('Current RUN shows only active TASKs and useful PLAN previews with responsi
     const cards = await tasks.evaluateAll(elements => elements.slice(0, 2).map(el => el.getBoundingClientRect().toJSON()));
     assert.equal(cards[0].y, cards[1].y, 'TASKs share one horizontal row');
     assert.ok(cards[1].x > cards[0].x + cards[0].width);
+    assert.ok(cards[0].width <= 420 && cards[0].height < 240, 'compact desktop TASK card');
     const footers = await tasks.locator('.wb-overview-facts').evaluateAll(elements => elements.slice(0, 2).map(el => el.getBoundingClientRect().bottom));
     assert.ok(Math.abs(footers[0] - footers[1]) < 1, 'TASK metadata aligns at the bottom of each card');
     await taskTrack.focus();
@@ -257,12 +258,12 @@ test('Current RUN shows only active TASKs and useful PLAN previews with responsi
     await page.locator('.wb-back').click();
     await page.locator('.wb-active-task').first().waitFor();
     assert.equal(await track.evaluate(el => el.scrollLeft), horizontal);
-    await tasks.nth(1).scrollIntoViewIfNeeded();
+    await tasks.nth(3).scrollIntoViewIfNeeded();
     const taskHorizontal = await taskTrack.evaluate(el => el.scrollLeft);
     assert.ok(taskHorizontal > 0);
-    await tasks.nth(1).click();
+    await tasks.nth(3).click();
     await page.locator('.wb-record-page').waitFor();
-    assert.equal(await page.locator('.wb-record-page h1').innerText(), 'Interface task 5');
+    assert.equal(await page.locator('.wb-record-page h1').innerText(), 'Interface task 13');
     await page.locator('.wb-back').click();
     await page.locator('.wb-active-task').first().waitFor();
     assert.equal(await taskTrack.evaluate(el => el.scrollLeft), taskHorizontal, 'TASK horizontal position returns from detail');
@@ -283,10 +284,9 @@ test('Current RUN shows only active TASKs and useful PLAN previews with responsi
           await shot(page, `overview-${locale}-${theme}-${width}`);
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true,
             JSON.stringify(await page.evaluate(() => ({ inner: innerWidth, root: document.documentElement.scrollWidth, body: document.body.scrollWidth, overflow: [...document.querySelectorAll('body *')].map(el => ({ name: el.className, right: el.getBoundingClientRect().right, width: el.getBoundingClientRect().width })).filter(el => el.right > innerWidth + 1).slice(-10) }))));
-          const action = page.locator('.wb-active-task').first().locator('.wb-overview-text').nth(1);
-          const geometry = await action.evaluate(el => ({ height: el.clientHeight, scroll: el.scrollHeight, line: parseFloat(getComputedStyle(el).lineHeight) }));
-          assert.ok(geometry.height <= geometry.line * 4 + 1, 'bounded action preview');
-          assert.ok(geometry.scroll > geometry.height, 'long action is available in full detail');
+          assert.equal(await tasks.locator('.wb-overview-text').count(), 0);
+          const geometry = await tasks.first().boundingBox();
+          assert.ok(geometry.height < 260, 'compact TASK height in both locales and themes');
           await shot(page, `overview-${locale}-${theme}-${width}`);
           await plan.scrollIntoViewIfNeeded();
           await shot(page, `plans-${locale}-${theme}-${width}`);

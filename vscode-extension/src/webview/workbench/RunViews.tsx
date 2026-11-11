@@ -134,11 +134,6 @@ function ActiveTasks({ snapshot, open }: { snapshot: TaplRunSnapshot; open: Open
               ['dependencies', dependencies ? <ItemCount count={dependencies} /> : undefined]
             ];
             const present = facts.filter(([, value]) => value);
-            const fields = overviewFields(item, [
-              ['goal', 'goal'],
-              ['action', 'action'],
-              ['verification', 'verification']
-            ]);
             return (
               <button
                 type="button"
@@ -160,7 +155,6 @@ function ActiveTasks({ snapshot, open }: { snapshot: TaplRunSnapshot; open: Open
                   <strong>{item.title}</strong>
                   <Icon name="arrow" />
                 </span>
-                <OverviewFields fields={fields} />
                 {(present.length > 0 || item.execution_timing) && (
                   <span className="wb-overview-facts">
                     {present.map(([label, value]) => (
