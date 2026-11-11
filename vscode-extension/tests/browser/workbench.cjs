@@ -1361,7 +1361,8 @@ test('page motion waits for route content, ignores polling/filter/locale updates
     await page.locator('[data-wb-focus="nav:settings"]').click();
     const input = page.locator('[id="setting-search.max_results"]'); await input.waitFor();
     await input.fill('37'); await input.evaluate(el => { el.__retainedDraft = true; });
-    await page.locator('[data-wb-focus="nav:tasks"]').click(); await page.locator('.wb-tasks-table').waitFor();
+    await page.locator('[data-wb-focus="nav:tasks"]').click();
+    await page.locator('[data-wb-focus="task-query"]').waitFor();
     await page.locator('[data-wb-focus="nav:settings"]').click();
     assert.equal(await input.inputValue(), '37');
     assert.equal(await input.evaluate(el => el.__retainedDraft), true);
