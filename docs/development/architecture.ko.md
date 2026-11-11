@@ -2,7 +2,7 @@
 
 [문서 홈](../README.ko.md) · [English](architecture.md)
 
-TAPL은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 워크플로 상태를 보관합니다. CLI 관리 명령, MCP 워크플로 도구, 호스트 수명주기 hook, Viewer는 Python 애플리케이션·DB 경계를 통해 로컬 상태를 사용합니다. 에이전트가 저장소 작업을 수행하고 TAPL은 그 전후의 워크플로를 기록·검증합니다.
+TAPL은 선택한 작업 영역의 `.tapl/tapl-{UUID}.db`에 워크플로 상태를 보관합니다. CLI 관리 명령, MCP 워크플로 도구, 호스트 수명주기 hook, Viewer는 Python 애플리케이션·DB 경계를 통해 로컬 상태를 사용합니다. 에이전트가 저장소 작업을 수행하고 TAPL은 그 전후의 워크플로를 기록·검증합니다.
 
 `clients.py`는 컨텍스트별 호스트 식별과 소유자 검증을 담당합니다. `claude_install.py`는 Claude JSON 연결과 독립 갱신 표식을 관리하며 기존 Codex의 TOML·hook 경로는 유지합니다. Hook·MCP 진입부는 설정과 정책을 클라이언트별로 한정합니다. 공통 DB schema는 변경하지 않고 새 Claude 소유자에 예약 접두사를 사용합니다. [Claude 연결 경계](../getting-started/claude-code.ko.md)를 참고하세요.
 
@@ -19,7 +19,7 @@ TAPL은 정확한 작업 폴더의 `.tapl/tapl-{UUID}.db`에 워크플로 상태
 | `validation.py`, `recommendations.py` | 워크플로 계약 검증과 다음 행동 선택. |
 | `clients.py` | 컨텍스트별 클라이언트 선택과 클라이언트 간 소유자 검증. |
 | `prompt.py`, `context.py`, `.codex/`, `.claude/` | 클라이언트별 정책·bootstrap 문구, 이벤트 지침, 설치용 hook 템플릿. |
-| `hook_cli.py`, `hooks.py`, `sessions.py` | Codex·Claude Code 수명주기 어댑터, 이벤트 검사, 대화 식별자 범위. |
+| `hook_cli.py`, `hooks.py`, `sessions.py`, `session_workspace.py` | 클라이언트 수명주기 어댑터, 이벤트 검사, 대화 식별자 범위, Codex 작업 영역 메타데이터 해석. |
 | `config.py`, `config_editor.py` | 적용 설정과 검증된 설정 수정. |
 | `embeddings.py`, `searchd.py` | 선택적 의미 검색과 Unix 소켓 임베딩 데몬. |
 | `recall.py`, `memory_search.py` | 연상 메모리·원본 연결·revision·검토·캡처·검색. |
@@ -54,7 +54,7 @@ Schema는 RUN, 공통 항목, 계획·작업·발견 필드, 승인, 아카이�
 
 ## 세션과 실행 소유권
 
-DB는 부모에서 추론한 Git 루트가 아닌 작업 폴더에 속합니다. `find_repo_root`는 전달된 폴더나 현재 폴더만 해석하므로 초기화한 하위 디렉터리는 독립된 이력을 가질 수 있습니다.
+DB는 선택한 작업 영역에 속하며 `find_repo_root`는 Git 상위를 탐색하지 않고 전달된 폴더나 현재 폴더만 해석합니다. Codex hook에서는 `session_workspace.py`가 대화 기록의 첫 세션 메타데이터 레코드를 검증해 선택한 작업 영역을 복원한 뒤 DB·설정·설치 갱신을 선택합니다. 메타데이터가 잘못됐거나 없으면 이벤트 `cwd`로 돌아갑니다. Claude hook·CLI·MCP 시작 폴더 선택은 기존 계약을 유지합니다. 명시적으로 선택한 하위 디렉터리 작업 영역은 독립된 이력을 가집니다. 검증과 fallback 범위는 [작업 영역 해석과 저장](../guides/storage.ko.md)을 참고하세요.
 
 `sessions.py`는 hook `session_id`를 정규화하고 문맥 범위를 제공합니다. `clients.py`는 클라이언트 경계를 검증하고 `WorkflowConnection`은 연결별 소유자를 유지하며 unique index로 세션마다 활성 RUN 하나를 보장합니다. Codex는 기존 소유자와 식별자 생략 시 legacy `""` 범위를 유지합니다. Claude Code는 읽기를 포함한 모든 MCP 호출에 정확한 `claude-code:<native-session-id>` hook 소유자가 필요합니다. 두 클라이언트 모두 다른 세션의 RUN을 채택하지 않습니다. Viewer는 활성 소유자 목록을 보여 줄 수 있지만 변경은 올바른 소유자를 명시적으로 선택해야 합니다.
 

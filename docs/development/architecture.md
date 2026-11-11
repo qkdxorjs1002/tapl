@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [한국어](architecture.ko.md)
 
-TAPL keeps workflow state in the exact working folder's `.tapl/tapl-{UUID}.db`. CLI management, MCP workflow tools, host lifecycle hooks, and Viewers use that local state through Python application/database boundaries. The agent performs repository work; TAPL records and validates the workflow around it.
+TAPL keeps workflow state in the selected workspace's `.tapl/tapl-{UUID}.db`. CLI management, MCP workflow tools, host lifecycle hooks, and Viewers use that local state through Python application/database boundaries. The agent performs repository work; TAPL records and validates the workflow around it.
 
 `clients.py` provides context-local host identity and owner validation. `claude_install.py` manages Claude JSON integration and independent refresh markers; existing Codex management retains its TOML/hooks paths. Hook/MCP entry scopes configuration and policy per client. The shared database schema is unchanged; new Claude owners use a reserved prefix. See [Claude integration boundaries](../getting-started/claude-code.md).
 
@@ -19,7 +19,7 @@ Environment identity persists independently in the user-global `~/.tapl/installa
 | `validation.py`, `recommendations.py` | Workflow contract checks and next-action selection. |
 | `clients.py` | Context-local client selection and cross-client owner validation. |
 | `prompt.py`, `context.py`, `.codex/`, `.claude/` | Client-specific policy/bootstrap text, event guidance, and installable hook templates. |
-| `hook_cli.py`, `hooks.py`, `sessions.py` | Codex and Claude Code lifecycle adapters, event checks, and scoped conversation identity. |
+| `hook_cli.py`, `hooks.py`, `sessions.py`, `session_workspace.py` | Client lifecycle adapters, event checks, scoped conversation identity, and Codex workspace metadata resolution. |
 | `config.py`, `config_editor.py` | Effective settings and validated configuration edits. |
 | `embeddings.py`, `searchd.py` | Optional semantic retrieval and Unix-socket embedding daemon. |
 | `recall.py`, `memory_search.py` | Associative memories, source links, revisions, review/capture, and retrieval. |
@@ -54,7 +54,7 @@ The schema stores RUNs, common items, plan/task/finding fields, approvals, archi
 
 ## Session and execution ownership
 
-The database belongs to a working folder, not a Git root inferred from parents. `find_repo_root` resolves only the supplied/current folder. Each initialized subdirectory can therefore own independent history.
+The database belongs to a selected workspace; `find_repo_root` resolves only the supplied/current folder without searching Git parents. For Codex hooks, `session_workspace.py` validates the transcript's first session metadata record to recover the selected workspace before resolving the database, configuration, and installation refresh. Invalid or unavailable metadata falls back to the event `cwd`. Claude hook, CLI, and MCP startup folder selection retain their existing contracts. Explicitly selected subdirectory workspaces keep independent history. See [workspace resolution and storage](../guides/storage.md) for validation and fallback boundaries.
 
 `sessions.py` normalizes a hook `session_id` and provides context-local scope; `clients.py` validates the client boundary, and `WorkflowConnection` retains the owner on each connection. A unique index permits one active RUN per session. Codex retains its native owner and omitted-identity legacy `""` scope. Claude Code requires the exact `claude-code:<native-session-id>` hook owner on every MCP call, including reads. Neither client adopts another session's RUN. Viewers can list active owners but must explicitly select the correct owner for mutation.
 

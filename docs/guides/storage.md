@@ -2,9 +2,15 @@
 
 [Documentation](../README.md) · [한국어](storage.ko.md)
 
-TAPL writes each local environment's records to `.tapl/tapl-{UUID}.db` in the exact working folder. History search, archives, memory recall, and the Viewer also read the other `tapl-*.db` files in that folder. Workflow changes stay in the local database.
+TAPL writes each local environment's records to `.tapl/tapl-{UUID}.db` in the selected workspace. History search, archives, memory recall, and the Viewer also read the other `tapl-*.db` files in that folder. Workflow changes stay in the local database.
 
 Client integration does not create a second workflow database: Codex and Claude Code share the folder’s installation UUID/database and history reader. Claude owner IDs occupy a separate namespace; [client removal safeguards](../getting-started/claude-code.md#connect-and-remove) protect shared settings and history.
+
+For Codex hooks, the workspace is the folder selected in Codex, even when a tool runs in a subdirectory. Hook events still require an existing absolute `cwd`. TAPL parses only the first JSONL record, limited to 1 MiB, from an absolute `transcript_path` pointing to a regular file; a symlink at that path is rejected. It uses the record's `payload.cwd` only when its type is `session_meta`, its `payload.id` exactly matches the hook session, and the workspace is an existing absolute directory. It does not parse or retain later conversation records to resolve the workspace.
+
+The resolved folder selects the hook's database, configuration, and automatic installation refresh. A hook `--db` override must point to that folder's database. If the metadata is missing, unreadable, oversized, malformed, or fails validation, the hook falls back to the event's existing absolute `cwd`. Hosts without usable metadata therefore retain per-event folder selection. Claude Code hooks continue to use their event `cwd`; administrative CLI commands use their selected/current folder, and MCP servers remain bound to their startup folder.
+
+Selecting `repo/packages/app` as a workspace gives it independent history. Running a tool there from a Codex session whose selected workspace is `repo` keeps that hook in `repo`. Workspace resolution does not search Git parents or move, delete, or merge existing databases.
 
 ## Persistent installation identity
 

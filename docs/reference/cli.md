@@ -22,7 +22,7 @@ Put global options before the command. Use `taplctl --help`, `taplctl COMMAND --
 | `--version` | Print the installed version and exit |
 | `-h`, `--help` | Show help and exit |
 
-Without an explicit database, database-using commands select the working folder's `.tapl/tapl-{UUID}.db`, never a parent database. Config selection prefers the exact working folder's `.tapl/config.toml`, then `~/.tapl/config.toml`. See [configuration](../guides/configuration.md).
+Without an explicit database, database-using commands select the working folder's `.tapl/tapl-{UUID}.db`, never a parent database. Config selection prefers the exact working folder's `.tapl/config.toml`, then `~/.tapl/config.toml`. See [configuration](../guides/configuration.md). Codex hooks separately resolve the workspace selected in Codex from validated session metadata; this leaves management command folder selection unchanged. Hook `--db` must identify the resolved workspace's database. See [workspace resolution and storage](../guides/storage.md).
 
 `init`, `doctor`, `update`, both `install`/`uninstall` scopes, all `config` subcommands, `reindex`, and public `searchd` subcommands accept **one** of `--json` (structured JSON) or `--agent` (compact XML-like agent output). `viewer` has neither output flag. `--dry-run` is available only on `install`, `uninstall`, and `reindex`; it previews the command's managed changes rather than creating a general read-only mode for all startup/database activity.
 

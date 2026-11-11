@@ -22,7 +22,7 @@ taplctl [--session-id ID] [--db PATH] [--config PATH] COMMAND ...
 | `--version` | 설치 버전을 출력하고 종료 |
 | `-h`, `--help` | 도움말을 출력하고 종료 |
 
-DB를 명시하지 않으면 DB 사용 명령은 현재 작업 폴더의 `.tapl/tapl-{UUID}.db`를 선택하며 상위 DB를 찾지 않습니다. 설정은 정확한 작업 폴더의 `.tapl/config.toml`, 다음으로 `~/.tapl/config.toml`을 선택합니다. [설정](../guides/configuration.ko.md)을 참고하세요.
+DB를 명시하지 않으면 DB 사용 명령은 현재 작업 폴더의 `.tapl/tapl-{UUID}.db`를 선택하며 상위 DB를 찾지 않습니다. 설정은 정확한 작업 폴더의 `.tapl/config.toml`, 다음으로 `~/.tapl/config.toml`을 선택합니다. [설정](../guides/configuration.ko.md)을 참고하세요. Codex hook은 별도로 검증한 세션 메타데이터에서 Codex가 선택한 작업 영역을 정하며 관리 명령의 폴더 선택은 바뀌지 않습니다. Hook의 `--db`는 해석한 작업 영역의 DB를 가리켜야 합니다. [작업 영역 해석과 저장](../guides/storage.ko.md)을 참고하세요.
 
 `init`, `doctor`, `update`, 두 `install`·`uninstall` 범위, 모든 `config` 하위 명령, `reindex`, 공개 `searchd` 하위 명령은 `--json`(구조화 JSON)과 `--agent`(간결한 XML 유사 Agent 출력) 중 **하나**를 받습니다. `viewer`에는 두 출력 옵션이 없습니다. `--dry-run`은 `install`, `uninstall`, `reindex`에만 있으며 해당 명령의 관리 변경을 미리 보여 줍니다. 모든 시작·DB 활동을 읽기 전용으로 바꾸는 공통 모드는 아닙니다.
 

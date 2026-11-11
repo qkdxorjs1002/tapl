@@ -15,6 +15,7 @@ from . import db, hooks
 from . import install as tapl_install
 from .command_runtime import configure_stdio
 from .clients import CLIENTS, client_scope, current_client, session_key, validate_session_key
+from .session_workspace import resolve_hook_workspace
 
 
 JSON_HELP = "Print JSON output."
@@ -77,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tool", default=None, help="Tool name for tool hook events.")
     parser.add_argument(
         "--db", type=Path, default=None,
-        help="Optional DB path; must match this installation's local DB in the session cwd.",
+        help="Optional DB path; must match this installation's local DB in the selected workspace.",
     )
     parser.add_argument("--config", type=Path, default=None, help="Path to tapl TOML config.")
     output = parser.add_mutually_exclusive_group()
@@ -106,10 +107,10 @@ def _handle_hook(args: argparse.Namespace) -> int:
     if current_client() == "claude-code":
         hooks.validate_claude_payload(payload, event=args.event, tool=args.tool)
     owner = validate_session_key(session_key(payload.get("session_id", "")))
-    start = _payload_cwd(payload)
+    start = resolve_hook_workspace(payload, client=current_client(), fallback=_payload_cwd(payload))
     db_path = db.local_db_path(start, create_identity=True)
     if args.db is not None and args.db.expanduser().resolve() != db_path.resolve():
-        raise ValueError(f"Hook --db must match the working directory database: {db_path}")
+        raise ValueError(f"Hook --db must match the selected workspace database: {db_path}")
     db_path = db.default_db_path(start)
     workspace: dict[str, Any] | None = None
     if args.db is None and args.config is None:

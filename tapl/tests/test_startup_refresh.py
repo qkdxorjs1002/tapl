@@ -146,3 +146,57 @@ def test_hook_refresh_failure_reports_error_before_config_load(
         assert hook_cli.main(["--event", "UserPromptSubmit", "--json"]) == 1
     load.assert_not_called()
     assert json.loads(capsys.readouterr().out) == {"ok": False, "error": "refresh failed"}
+
+
+def test_codex_child_hooks_share_selected_workspace_database_config_and_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = tmp_path / "repo"
+    selected = repo / "selected"
+    child = selected / "child"
+    child.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text(json.dumps({
+        "type": "session_meta", "payload": {"id": "selected-session", "cwd": str(selected)},
+    }) + "\n", encoding="utf-8")
+    original_load = hook_cli.tapl_config.load
+    original_handle = hook_cli.hooks.handle_event
+
+    def refresh(*, start: Path, mode: str) -> list[dict[str, object]]:
+        assert start == selected
+        assert any((selected / ".tapl").glob("tapl-*.db"))
+        (selected / ".tapl/config.toml").write_text("[search]\nmax_results = 9\n", encoding="utf-8")
+        return []
+
+    def load(*args: object, **kwargs: object) -> config.TaplConfig:
+        assert kwargs["start"] == selected
+        settings = original_load(*args, **kwargs)
+        assert settings.search.max_results == 9
+        return settings
+
+    with mock.patch.object(hook_cli.tapl_install, "auto_install_if_needed", side_effect=refresh) as install, \
+            mock.patch.object(hook_cli.tapl_config, "load", side_effect=load), \
+            mock.patch.object(hook_cli.hooks, "handle_event", wraps=original_handle) as handle:
+        for cwd, event in [
+            (selected, "SessionStart"), (child, "PreToolUse"),
+            (child, "PermissionRequest"), (child, "PostToolUse"), (selected, "Stop"),
+        ]:
+            payload = {
+                "cwd": str(cwd), "session_id": "selected-session", "transcript_path": str(transcript),
+                "tool_name": "Bash", "tool_input": {"command": "pwd"},
+            }
+            monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+            assert hook_cli.main(["--client", "codex", "--event", event, "--json"]) == 0
+            assert json.loads(capsys.readouterr().out)["workspace"]["workspace_root"] == str(selected)
+            assert handle.call_args.kwargs["payload"] == payload
+            assert handle.call_args.kwargs["tapl_settings"].search.max_results == 9
+    assert install.call_count == 5
+    conn = db.connect(db.local_db_path(selected), session_id="selected-session")
+    try:
+        assert conn.execute("SELECT count(*) FROM events WHERE session_id = ?", ("selected-session",)).fetchone()[0] == 5
+    finally:
+        conn.close()
+    assert len(list((selected / ".tapl").glob("tapl-*.db"))) == 1
+    assert not (child / ".tapl").exists()
+    assert not (repo / ".tapl").exists()
