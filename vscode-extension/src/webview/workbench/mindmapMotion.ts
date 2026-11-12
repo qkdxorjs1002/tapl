@@ -42,6 +42,16 @@ export function mindmapVisiblePulses(edgeBounds: readonly MindmapView[], view: M
   return Array.from({ length: count }, (_, index) => visible[Math.floor(index * visible.length / count)]);
 }
 
+/** Index execution once. Camera movement visits only flowing edges, preserving their original order. */
+export function mindmapPulseLookup(edgeBounds: readonly MindmapView[], eligible: readonly boolean[]) {
+  const indices: number[] = [], bounds: MindmapView[] = [];
+  edgeBounds.forEach((bound, index) => {
+    if (eligible[index]) { indices.push(index); bounds.push(bound); }
+  });
+  return (view: MindmapView, limit = MINDMAP_PULSE_LIMIT): number[] =>
+    mindmapVisiblePulses(bounds, view, limit).map((index) => indices[index]);
+}
+
 /** Build once per graph; pointer movement only visits nearby cells, regardless of the graph extent. */
 export function mindmapNearbyNodes(nodes: readonly MindmapPoint[]) {
   const cells = new Map<string, number[]>();

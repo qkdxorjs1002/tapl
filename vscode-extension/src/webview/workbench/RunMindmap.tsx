@@ -5,9 +5,10 @@ import type { TaplItem, TaplRunSnapshot, TaplWorkflowRun } from '../types';
 import { Icon } from './Icon';
 import { buildRunMindmap, type MindmapNode } from './mindmap';
 import { useMindmapViewport } from './mindmapViewport';
-import { mindmapRunFollowKeys } from './mindmapCamera';
+import { mindmapRunActiveKeys, mindmapRunFollowKeys } from './mindmapCamera';
 import { MindmapEdge } from './MindmapEdges';
 import { buildMindmapRelationIndex, relatedMindmapNodes } from './mindmapRelations';
+import { useMindmapAction, useMindmapValue } from './useMindmapCache';
 import './run-mindmap.css';
 
 const openable = (item?: TaplItem) => typeof item?.id === 'number' && Number.isFinite(item.id);
@@ -22,8 +23,8 @@ const stateKind = (value?: string) =>
 
 /** A RUN-owned camera survives record details and source-safe RUN navigation. */
 export function RunMindmap({
-  snapshot,
-  open,
+  snapshot: incomingSnapshot,
+  open: incomingOpen,
   back
 }: {
   snapshot: TaplRunSnapshot;
@@ -31,18 +32,24 @@ export function RunMindmap({
   back?: () => void;
 }): JSX.Element {
   const { t, status } = useI18n();
+  const snapshot = useMindmapValue(incomingSnapshot);
+  const open = useMindmapAction(incomingOpen);
   const graph = useMemo(() => buildRunMindmap(snapshot), [snapshot]);
   const runKey = JSON.stringify([snapshot.run.source_db ?? '', snapshot.run.id]);
   const follow = useMemo(() => mindmapRunFollowKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
   const [active, setActive] = useState<string>();
   const relations = useMemo(() => buildMindmapRelationIndex(graph, 'node-parent'), [graph]);
-  const related = useMemo(() => relatedMindmapNodes(relations, active), [active, relations]);
   const { hostRef, worldRef, controlsRef, edges, suppressClickCapture, following } = useMindmapViewport({
     graph,
     cameraKey: runKey,
     follow,
     setActive
   });
+  const executing = useMemo(() => mindmapRunActiveKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
+  const related = useMemo(() => {
+    if (active && relations.keys.has(active)) return relatedMindmapNodes(relations, active);
+    return following ? relatedMindmapNodes(relations, executing, { ancestorsOnly: true }) : undefined;
+  }, [active, relations, following, executing]);
 
   return (
     <div

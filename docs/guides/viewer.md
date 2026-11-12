@@ -38,7 +38,7 @@ The RUN bar stays fixed. Desktop navigation starts as an icon rail: hover or key
 
   Return motion has a small elastic rebound before settling. Live updates in the same RUN preserve ongoing gestures and return motion; after a gesture ends, the view follows the latest TASK and PLAN positions.
 
-  Hovering or focusing a related item highlights both its executing glass tube and travelling light without restarting the flow. Idle paths remain still.
+  While following is ON, executing TASKs and their ancestor paths stay highlighted as on hover; with no executing TASK, executing PLANs take their place. Idle siblings remain dim. Direct hover or keyboard focus takes priority, and leaving restores the automatic highlight. With following OFF or an ended RUN, only direct hover/focus highlights items. Highlighting includes both the executing glass tube and travelling light without restarting the flow. Idle paths remain still.
 
   Drag or two-finger scroll pans both axes; pinch or Ctrl+wheel zooms around the gesture position, and Shift+wheel pans horizontally. Arrow keys and +/− work; Escape or Center view turns following OFF and returns to a readable RUN-centered view. Pan limits and minimum zoom follow actual node bounds and viewport size to prevent distant empty-space travel. Clicking or dragging does not draw a canvas focus outline; keyboard focus remains visible. Nodes and connectors respond together to the pointer; motion is enabled by default and follows the system reduced-motion setting.
 - **Settings**, beneath Management, edits all CLI-supported preferences and the Viewer language. Save changes or confirm a reset to defaults; the selected workspace controls the target file. See [Viewer settings](configuration.md#viewer-settings).
@@ -52,6 +52,8 @@ The top bar lists unarchived RUNs. Opening an archived source from records or me
 Page, RUN, source and detail changes use brief transitions without replaying them on polling or filter edits; menus and dialogs also ease in and out, while system reduced motion removes animations and transition waits.
 
 Both maps keep every node available for keyboard navigation. Pointer motion updates nearby nodes and their connectors. In an active RUN, layered glow surrounds light traveling inside glass-like connection channels only toward **In Progress** records and along their ancestor paths; hovering another record does not start its flow. Other states, ended RUNs and associative memory links do not carry moving light. Moving light is limited to 24 visible executing connections at 30 frames per second. Stationary node/connector geometry is reused, and decorative work stops when the map is hidden or system reduced motion is enabled. Camera movement retains its separate frame rate.
+
+Repeated snapshots reuse unchanged map data and viewport geometry. Record content still updates immediately; changes to layout, connections or execution rebuild the affected viewport caches. Camera movement checks only executing connections for moving light.
 
 ## Read details and structured fields
 

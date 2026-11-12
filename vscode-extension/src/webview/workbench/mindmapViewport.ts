@@ -15,9 +15,10 @@ import {
   mindmapIntersects,
   mindmapMagneticOffset,
   mindmapNearbyNodes,
-  mindmapVisiblePulses,
+  mindmapPulseLookup,
   mindmapWorldView
 } from './mindmapMotion';
+import { useMindmapValue } from './useMindmapCache';
 
 /** Layout and optional execution flags shared by RUN trees and associative memory DAGs. */
 export type MindmapViewportGraph = {
@@ -48,9 +49,9 @@ const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(ma
 
 /** Shared camera, gestures, focus visibility, and synchronized 2D edge motion. */
 export function useMindmapViewport({
-  graph,
+  graph: incomingGraph,
   cameraKey,
-  follow,
+  follow: incomingFollow,
   setActive
 }: {
   graph: MindmapViewportGraph;
@@ -59,6 +60,14 @@ export function useMindmapViewport({
   follow?: string[];
   setActive: (key?: string) => void;
 }) {
+  // Labels, bodies and navigation payloads can change without invalidating geometry or gestures.
+  const graph = useMindmapValue(useMemo<MindmapViewportGraph>(() => ({
+    nodes: incomingGraph.nodes.map(({ key, x, y, width, height }) => ({ key, x, y, width, height })),
+    edges: incomingGraph.edges.map(({ from, to, flowing }) => ({ from, to, ...(flowing === undefined ? {} : { flowing }) })),
+    bounds: incomingGraph.bounds,
+    routing: incomingGraph.routing
+  }), [incomingGraph]));
+  const follow = useMindmapValue(incomingFollow);
   const hostRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<MindmapViewportControls>();
@@ -149,6 +158,7 @@ export function useMindmapViewport({
     const nodeIndices = new Map(graph.nodes.map((node, index) => [node.key, index]));
     const nearbyNodes = mindmapNearbyNodes(graph.nodes);
     const edgeBounds = edges.map(mindmapConnectionBounds);
+    const visiblePulses = mindmapPulseLookup(edgeBounds, eligiblePulses);
     const incident = new Map<string, number[]>();
     edges.forEach((edge, index) => {
       for (const key of [edge.from, edge.to]) {
@@ -225,7 +235,7 @@ export function useMindmapViewport({
       if (time - lastDecoration >= MINDMAP_DECORATION_INTERVAL || reduced) {
         const view = mindmapWorldView(camera, bounds, 12);
         if (viewDirty) {
-          const nextPulses = reduced ? [] : mindmapVisiblePulses(edgeBounds, view, undefined, eligiblePulses);
+          const nextPulses = reduced ? [] : visiblePulses(view);
           const selected = new Set(nextPulses);
           for (const index of pulseIndices) if (!selected.has(index)) hidePulse(index);
           pulseIndices = nextPulses;

@@ -11,6 +11,7 @@ const output = buildSync({
   stdin: {
     contents: `
       export * from './mindmapRelations';
+      export { mindmapRunActiveKeys } from './mindmapCamera';
       export * from './mindmap';
       export * from './memoryMindmapGraph';
       export { RunMindmap } from './RunMindmap';
@@ -28,7 +29,7 @@ compiled.filename = filename;
 compiled.paths = module.paths;
 compiled._compile(output, filename);
 const {
-  buildMindmapRelationIndex, relatedMindmapNodes,
+  buildMindmapRelationIndex, relatedMindmapNodes, mindmapRunActiveKeys,
   buildRunMindmap, buildMemoryMindmap, RunMindmap, MemoryMindmap, I18nProvider
 } = compiled.exports;
 
@@ -65,6 +66,35 @@ test('RUN ancestors use node parents while descendants use actual outgoing edges
   assert.deepEqual(sorted(relatedMindmapNodes(index, 'task')), ['plan', 'run', 'task']);
   assert.deepEqual(sorted(relatedMindmapNodes(index, 'plan')), ['plan', 'run', 'sibling', 'task']);
   assert.deepEqual(sorted(relatedMindmapNodes(index, 'dangling')), ['dangling', 'missing']);
+});
+
+test('automatic execution seeds exclude fitted parents and traverse shared ancestry only once', () => {
+  const nodes = [
+    { key: 'run', kind: 'run' },
+    { key: 'plan-a', kind: 'plan', parent: 'run', status: 'In Progress' },
+    { key: 'plan-b', kind: 'plan', parent: 'run', status: 'In Progress' },
+    ...Array.from({ length: 1000 }, (_, i) => ({ key: `task-${i}`, kind: 'task', parent: 'plan-a', status: 'In Progress' })),
+    { key: 'idle', kind: 'task', parent: 'plan-a', status: 'Pending' }
+  ];
+  const graph = { nodes, edges: nodes.filter(node => node.parent).map(node => ({ from: node.parent, to: node.key })) };
+  const index = buildMindmapRelationIndex(graph, 'node-parent');
+  const active = mindmapRunActiveKeys(nodes, 'active');
+  assert.equal(active.length, 1000);
+  assert.ok(active.every(key => key.startsWith('task-')));
+  let visits = 0;
+  const parents = { get(key) { visits++; return index.parents.get(key); } };
+  const related = relatedMindmapNodes({ ...index, parents }, [...active, active[0], 'stale'], { ancestorsOnly: true });
+  assert.equal(related.size, 1002);
+  assert.equal(visits, 1002, 'shared parent paths are visited once across all executing seeds');
+  assert.equal(related.has('idle'), false);
+  assert.equal(related.has('plan-b'), false, 'executing PLAN is not a seed when TASKs are executing');
+  nodes.filter(node => node.kind === 'task').forEach(node => { node.status = 'Pending'; });
+  assert.deepEqual(mindmapRunActiveKeys(nodes, 'active'), ['plan-a', 'plan-b']);
+  assert.deepEqual(sorted(relatedMindmapNodes(index, ['plan-a', 'plan-b'], { ancestorsOnly: true })), ['plan-a', 'plan-b', 'run']);
+  assert.equal(mindmapRunActiveKeys(nodes, 'archived'), undefined);
+  nodes.filter(node => node.kind === 'plan').forEach(node => { node.status = 'Finalized'; });
+  assert.deepEqual(mindmapRunActiveKeys(nodes, 'active'), []);
+  assert.equal(relatedMindmapNodes(index, [], { ancestorsOnly: true }), undefined);
 });
 
 test('duplicate edges, self edges and cycles terminate with the reachable nodes once', () => {

@@ -7,13 +7,14 @@ import { buildMemoryMindmap, type MemoryMindmapNode } from './memoryMindmapGraph
 import { useMindmapViewport } from './mindmapViewport';
 import { MindmapEdge } from './MindmapEdges';
 import { buildMindmapRelationIndex, relatedMindmapNodes } from './mindmapRelations';
+import { useMindmapAction, useMindmapValue } from './useMindmapCache';
 import './run-mindmap.css';
 import './memory-mindmap.css';
 
 /** The current results page, connected only by recorded provenance and saved cues. */
 export function MemoryMindmap({
-  memories,
-  send,
+  memories: incomingMemories,
+  send: incomingSend,
   cameraKey,
   workspaceKey
 }: {
@@ -23,6 +24,8 @@ export function MemoryMindmap({
   workspaceKey?: string;
 }): JSX.Element {
   const { t } = useI18n();
+  const memories = useMindmapValue(incomingMemories);
+  const send = useMindmapAction(incomingSend);
   const workspaceTitle = workspaceKey?.split(/[\\/]/).filter(Boolean).pop() || t('wbWorkspace');
   const graph = useMemo(
     () => buildMemoryMindmap(memories, { workspaceKey, workspaceTitle }),

@@ -35,12 +35,17 @@ export function buildMindmapRelationIndex(
 }
 
 /** Trace ancestors and descendants separately: shared parents must not pull in siblings. */
-export function relatedMindmapNodes(index: MindmapRelationIndex, active?: string): Set<string> | undefined {
-  if (!active || !index.keys.has(active)) return undefined;
-  const related = new Set([active]);
-  for (const direction of [index.parents, index.children]) {
-    const visited = new Set([active]);
-    const pending = [active];
+export function relatedMindmapNodes(
+  index: MindmapRelationIndex,
+  active?: string | readonly string[],
+  { ancestorsOnly = false }: { ancestorsOnly?: boolean } = {}
+): Set<string> | undefined {
+  const seeds = (typeof active === 'string' ? [active] : active ?? []).filter(key => index.keys.has(key));
+  if (!seeds.length) return undefined;
+  const related = new Set(seeds);
+  for (const direction of ancestorsOnly ? [index.parents] : [index.parents, index.children]) {
+    const visited = new Set(seeds);
+    const pending = [...visited];
     while (pending.length) {
       const key = pending.pop()!;
       for (const next of direction.get(key) ?? []) {

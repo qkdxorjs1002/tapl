@@ -12,6 +12,7 @@ new Function('module', 'exports', output)(compiled, compiled.exports);
 const {
   mindmapWorldView: viewAt, mindmapConnectionBounds: boundsOf, mindmapIntersects: intersects,
   mindmapVisiblePulses: pulsesFor, mindmapNearbyNodes: nearbyNodes, mindmapMagneticOffset: offsetFor,
+  mindmapPulseLookup: pulseLookup,
   MINDMAP_PULSE_LIMIT: pulseLimit, MINDMAP_DECORATION_INTERVAL: decorationInterval
 } = compiled.exports;
 
@@ -63,6 +64,22 @@ test('only executing edges consume the visible pulse budget', () => {
   assert.deepEqual(pulsesFor(edgeBounds, view, 24, eligible), [997, 999]);
   assert.deepEqual(pulsesFor(edgeBounds, view, 24, edgeBounds.map(() => false)), []);
   assert.deepEqual(pulsesFor(edgeBounds, { left: 50, right: 60, top: 50, bottom: 60 }, 24, eligible), []);
+});
+
+test('pulse lookup reads eligibility once and preserves culling and budget across camera changes', () => {
+  const view = { left: -10, right: 10, top: -10, bottom: 10 };
+  const bounds = Array.from({ length: 10000 }, (_, i) => i % 3 ? view : { left: 50, right: 60, top: 50, bottom: 60 });
+  const eligible = bounds.map((_, i) => i % 29 === 0);
+  let reads = 0;
+  const tracked = new Proxy(eligible, { get(target, key) { if (/^\d+$/.test(String(key))) reads++; return target[key]; } });
+  const find = pulseLookup(bounds, tracked);
+  assert.equal(reads, bounds.length);
+  for (const camera of [view, { left: 45, right: 65, top: 45, bottom: 65 }]) {
+    for (const limit of [0, 1, 24, 1000]) assert.deepEqual(find(camera, limit), pulsesFor(bounds, camera, limit, eligible));
+  }
+  for (let i = 0; i < 150; i++) find(view);
+  assert.equal(reads, bounds.length, 'camera frames never rescan eligibility');
+  assert.deepEqual(pulseLookup(bounds, bounds.map(() => false))(view), []);
 });
 
 test('magnetic offsets keep modest motion, settle exactly, and reset outside influence/reduced motion', () => {

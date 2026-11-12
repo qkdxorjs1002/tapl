@@ -228,6 +228,11 @@ test('glass flow follows executing paths, highlights related tubes without resta
     const activeKeys = await map.locator('g[data-flow=running]').evaluateAll(groups => groups.map(group =>
       JSON.parse(group.dataset.to).find(value => typeof value === 'string' && /^(PLAN|TASK)-/.test(value))).sort());
     assert.deepEqual(activeKeys, ['PLAN-901', 'TASK-901', 'TASK-905']);
+    const follow = map.locator('.wb-mm-follow');
+    assert.equal(await follow.getAttribute('aria-pressed'), 'true');
+    assert.equal(await map.locator('g[data-flow=running].wb-mm-edge-active').count(), 3, 'following highlights every executing ancestor path');
+    assert.equal(await map.locator('[data-kind=task].wb-mm-emphasis').count(), 2);
+    assert.equal(await map.locator('[data-kind=task].wb-mm-dim').count(), 3, 'fitted PLAN does not highlight idle siblings');
     const idlePulses = () => map.locator('g[data-to]:not([data-flow]) > .wb-mm-pulse').evaluateAll(nodes => nodes.every(node => +getComputedStyle(node).opacity === 0));
     assert.ok(await idlePulses());
     const flow = map.locator('.wb-mm-flow').first();
@@ -239,12 +244,20 @@ test('glass flow follows executing paths, highlights related tubes without resta
     await map.locator('[data-kind=task] button').filter({ hasText: 'Flow task 2' }).hover();
     await page.waitForTimeout(300);
     assert.equal(await map.locator('g[data-flow=running]').count(), 3, 'hovering a completed task does not start its flow');
+    assert.ok((await map.locator('g[data-flow=running][data-to*="TASK-901"]').getAttribute('class')).includes('wb-mm-edge-dim'), 'direct hover takes priority over automatic highlight');
     assert.ok(await idlePulses());
     assert.ok(await map.locator('g[data-flow=running]').evaluateAll(groups => groups.every(group => {
       const d = group.querySelector('.wb-mm-edge').getAttribute('d');
       return [...group.querySelectorAll('.wb-mm-glass-path')].every(path => path.getAttribute('d') === d);
     })), 'tube and light follow the displaced curve together');
     await page.mouse.move(1400, 30); await page.waitForTimeout(700);
+    assert.equal(await map.locator('g[data-flow=running].wb-mm-edge-active').count(), 3, 'leaving restores automatic highlight');
+    await map.locator('[data-kind=task] button').filter({ hasText: 'Flow task 2' }).focus();
+    assert.equal(await map.locator('[data-kind=task].wb-mm-emphasis').count(), 1, 'direct focus takes priority');
+    await map.focus();
+    assert.equal(await map.locator('g[data-flow=running].wb-mm-edge-active').count(), 3, 'leaving focus restores automatic highlight');
+    await follow.click();
+    assert.equal(await map.locator('.wb-mm-emphasis, .wb-mm-edge-active, .wb-mm-dim, .wb-mm-edge-dim').count(), 0, 'OFF clears automatic highlight');
     const runningTask = map.locator('g[data-flow=running][data-to*="TASK-901"]');
     const taskButton = map.locator('[data-kind=task] button').filter({ hasText: 'Flow task 1' });
     const tubeStyle = () => runningTask.evaluate(group => {
@@ -295,10 +308,17 @@ test('glass flow follows executing paths, highlights related tubes without resta
     overview.view.status.task_counts = { Completed: 5 }; await publish();
     await page.waitForFunction(() => document.querySelectorAll('.wb-mm-flow').length === 0);
     assert.ok(await map.locator('.wb-mm-pulse').evaluateAll(nodes => nodes.every(node => +getComputedStyle(node).opacity === 0)), 'completed paths leave no stale light');
+    await follow.click();
+    assert.equal(await map.locator('.wb-mm-emphasis').count(), 0, 'no executing targets means no automatic highlight');
+    overview.view.status.plans[0].status = 'In Progress'; await publish();
+    await page.waitForFunction(() => document.querySelectorAll('.wb-run-mindmap [data-kind=plan].wb-mm-emphasis').length === 1);
+    assert.equal(await map.locator('[data-kind=task].wb-mm-emphasis').count(), 0, 'PLAN fallback highlights ancestors without its idle descendants');
     overview.view.status.tasks[0].status = 'In Progress'; await publish();
     await page.waitForFunction(() => document.querySelectorAll('.wb-mm-flow').length === 2);
+    assert.equal(await map.locator('[data-kind=task].wb-mm-emphasis').count(), 1, 'new executing TASK refreshes automatic highlight');
     overview.view.status.active_run.status = 'archived'; await publish();
     await page.waitForFunction(() => document.querySelectorAll('.wb-mm-flow').length === 0);
+    assert.equal(await map.locator('.wb-mm-emphasis, .wb-mm-edge-active').count(), 0, 'ended RUN has no automatic highlight');
     await page.locator('[data-wb-focus="nav:memories"]').click(); await page.locator('.wb-memory-mindmap').waitFor();
     assert.equal(await page.locator('.wb-memory-mindmap .wb-mm-flow').count(), 0);
     assert.ok(await page.locator('.wb-memory-mindmap .wb-mm-pulse').evaluateAll(nodes => nodes.every(node => +getComputedStyle(node).opacity === 0)), 'active memories are not executing work');
@@ -309,7 +329,14 @@ test('glass flow follows executing paths, highlights related tubes without resta
 test('large maps bound idle work, retain keyboard targets and refresh current graph geometry', { timeout: 60000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
-  let overview;
+  let overview, memoryOverview;
+  await page.addInitScript(() => {
+    window.__mapSetups = 0;
+    const Observer = window.ResizeObserver;
+    window.ResizeObserver = class extends Observer {
+      observe(target, options) { if (target.matches('.wb-mindmap')) window.__mapSetups++; return super.observe(target, options); }
+    };
+  });
   await page.route('**/api/message', async route => {
     const response = await route.fetch(), payload = await response.json();
     if (payload.view?.type === 'overview') {
@@ -322,6 +349,7 @@ test('large maps bound idle work, retain keyboard targets and refresh current gr
       const sample = payload.view.memories[0];
       payload.view.memories = Array.from({ length: 50 }, (_, i) => ({ ...sample, id: `large-memory-${i}`, source: { ...sample.source, run_id: `large-source-${i}`, title: `Large source ${i}` }, source_available: false, cue: Array.from({ length: 16 }, (_, j) => `cue ${i}-${j}`) }));
       payload.view.total = 50; payload.view.limit = 50;
+      memoryOverview = structuredClone(payload);
     }
     await route.fulfill({ response, json: payload });
   });
@@ -348,6 +376,23 @@ test('large maps bound idle work, retain keyboard targets and refresh current gr
       assert.equal(writes.pulse, 0, `${kind}: no executing work means no ambient flow writes`);
       const pulses = await map.locator('.wb-mm-pulse').evaluateAll(nodes => nodes.filter(node => +getComputedStyle(node).opacity > 0).length);
       assert.equal(pulses, 0, 'pending work and memories remain static');
+      const setups = await page.evaluate(() => window.__mapSetups);
+      assert.ok(setups > 0, 'viewport setup instrumentation is active');
+      await page.evaluate(async ({ payload, kind }) => {
+        for (let i = 0; i < 3; i++) {
+          window.postMessage({ ...structuredClone(payload), type: 'view:update' }, '*');
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
+        if (kind === 'run') {
+          payload.view.status.tasks[0].body = 'Fresh record body';
+          payload.view.status.tasks[0].title = 'Fresh task title';
+        }
+        else payload.view.memories[0].note = 'Fresh memory note';
+        window.postMessage({ ...payload, type: 'view:update' }, '*');
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }, { payload: structuredClone(kind === 'run' ? overview : memoryOverview), kind });
+      assert.equal(await page.evaluate(() => window.__mapSetups), setups, `${kind}: identical and detail-only updates reuse viewport geometry`);
+      assert.ok((await map.textContent()).includes(kind === 'run' ? 'Fresh task title' : 'Fresh memory note'), 'record content stays fresh while geometry is reused');
       await page.emulateMedia({ reducedMotion: 'reduce' }); await page.waitForTimeout(100);
       assert.deepEqual(await idleWrites(), { node: 0, path: 0, pulse: 0, world: 0, light: 0 });
       const last = map.locator('[data-kind=task] button, [data-kind=cue] button').last();
@@ -934,6 +979,7 @@ test('native VS Code palettes update maps, chrome, controls and dialogs without 
   };
   try {
     await page.emulateMedia({reducedMotion:'reduce'});
+    await page.locator('.wb-mm-follow').click(); // Compare unhighlighted native palette tokens.
     for(const [index,p] of palettes.entries()) {
       await page.locator('[data-wb-focus="nav:current"]').click();
       await page.locator('.wb-run-mindmap').waitFor();await page.mouse.move(1400,30);

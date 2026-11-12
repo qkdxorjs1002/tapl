@@ -83,15 +83,21 @@ export function mindmapFollowCamera(nodes: FollowNode[], viewport: Viewport): Mi
 }
 
 type FollowRecord = { key: string; kind: string; status?: string; parent?: string };
-/** Use resolved graph parents: stable IDs alone cannot identify a source-safe PLAN. */
-export function mindmapRunFollowKeys(nodes: FollowRecord[], status?: string): string[] | undefined {
+/** Highlight executing records, without treating fitted parent PLANs as executing seeds. */
+export function mindmapRunActiveKeys(nodes: FollowRecord[], status?: string): string[] | undefined {
   if (status !== 'active') return undefined;
   const tasks = nodes.filter(node => node.kind === 'task' && node.status === 'In Progress');
-  if (!tasks.length) return nodes.filter(node => node.kind === 'plan' && node.status === 'In Progress').map(node => node.key);
+  return (tasks.length ? tasks : nodes.filter(node => node.kind === 'plan' && node.status === 'In Progress')).map(node => node.key);
+}
+/** Use resolved graph parents: stable IDs alone cannot identify a source-safe PLAN. */
+export function mindmapRunFollowKeys(nodes: FollowRecord[], status?: string): string[] | undefined {
+  const active = mindmapRunActiveKeys(nodes, status);
+  if (!active) return undefined;
   const byKey = new Map(nodes.map(node => [node.key, node]));
-  const keys = new Set(tasks.map(node => node.key));
-  for (const task of tasks) {
-    const parent = task.parent && byKey.get(task.parent);
+  const keys = new Set(active);
+  for (const key of active) {
+    const node = byKey.get(key)!;
+    const parent = node.kind === 'task' && node.parent && byKey.get(node.parent);
     if (parent && parent.kind === 'plan') keys.add(parent.key);
   }
   return [...keys];
