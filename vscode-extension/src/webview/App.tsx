@@ -10,7 +10,8 @@ import type {
   TaplWorkflowRun,
   WebviewCommand,
   WebviewView,
-  WorkspaceSelectionResult
+  WorkspaceSelectionResult,
+  WorkspaceDirectoryResult
 } from './types';
 import { vscodeApi } from './vscodeApi';
 import { I18nProvider, useI18n } from './i18n';
@@ -68,6 +69,7 @@ export function App(): JSX.Element {
   const [discardResult, setDiscardResult] = useState<RunDiscardResult>();
   const [settingsResult, setSettingsResult] = useState<SettingsResult>();
   const [workspaceResult, setWorkspaceResult] = useState<WorkspaceSelectionResult>();
+  const [directoryResult, setDirectoryResult] = useState<WorkspaceDirectoryResult>();
   const [view, setView] = useState<WebviewView | undefined>(restored?.view);
   const [locale, setLocale] = useState<SupportedLocale>(() =>
     resolveLocale(restored?.preferences?.language === 'auto'
@@ -96,6 +98,10 @@ export function App(): JSX.Element {
     const listener = (event: MessageEvent<HostMessage>) => {
       const message = event.data;
       if (!message || typeof message.type !== 'string') return;
+      if (message.type === 'workspace:directory') {
+        setDirectoryResult(message);
+        return;
+      }
       if (message.type === 'settings:result') {
         if (message.workspace === workspaceRef.current) {
           if (message.ok) {
@@ -188,6 +194,7 @@ export function App(): JSX.Element {
           view={view ?? BOOTSTRAP_VIEW}
           loading={!view}
           workspaceResult={workspaceResult}
+          directoryResult={directoryResult}
           settingsResult={settingsResult}
           layout={layout}
           workspace={workspace}

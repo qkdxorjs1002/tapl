@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useBrowserLayoutEffect } from './effects';
 import { useDialogMotion } from './workbenchMotion';
 import { useI18n } from '../i18n';
-import type { WorkspaceSelectionResult } from '../types';
+import type { WorkspaceDirectoryResult, WorkspaceSelectionResult } from '../types';
 import { Icon } from './Icon';
 
 /** One tooltip layer also covers icon controls in flyouts and native dialogs. */
@@ -139,6 +139,8 @@ export function WorkspaceDialog({
   workspace,
   message,
   result,
+  directoryResult,
+  browse,
   submit,
   close,
   fallbackFocus
@@ -147,26 +149,63 @@ export function WorkspaceDialog({
   workspace?: string;
   message?: string;
   result?: WorkspaceSelectionResult;
+  directoryResult?: WorkspaceDirectoryResult;
+  browse: (requestId: string, path?: string) => void;
   submit: (workspace: string) => void;
   close: () => void;
   fallbackFocus: () => HTMLElement | null;
 }): JSX.Element | null {
   const { t } = useI18n();
-  const dialog = useRef<HTMLDialogElement>(null),
-    input = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
   const [path, setPath] = useState(workspace ?? '');
   const [pending, setPending] = useState(false),
     [error, setError] = useState('');
   const pendingRef = useRef(false);
-  const present = useDialogMotion(open, dialog, input, fallbackFocus);
-  useEffect(() => {
+  const request = useRef('');
+  const requestPrefix = useId();
+  const requestSequence = useRef(0);
+  const edits = useRef(0);
+  const requestedEdit = useRef(0);
+  const [listing, setListing] = useState<WorkspaceDirectoryResult>();
+  const [browsing, setBrowsing] = useState(false);
+  const [browseError, setBrowseError] = useState('');
+  const folderList = useRef<HTMLDivElement>(null);
+  const initialFocus = useRef<HTMLButtonElement>(null);
+  const loadDirectory = (candidate?: string) => {
+    const requestId = `${requestPrefix}:${++requestSequence.current}`;
+    request.current = requestId;
+    requestedEdit.current = edits.current;
+    setBrowsing(true);
+    setBrowseError('');
+    setError('');
+    browse(requestId, candidate);
+  };
+  const present = useDialogMotion(open, dialog, initialFocus, fallbackFocus);
+  useBrowserLayoutEffect(() => {
     if (!open) return;
     setPath(workspace ?? '');
     setError(message ?? '');
     setPending(false);
     pendingRef.current = false;
-    input.current?.select();
+    setListing(undefined);
+    loadDirectory(workspace || undefined);
+    return () => { request.current = ''; };
   }, [open]);
+  useEffect(() => {
+    if (!open || !directoryResult || directoryResult.requestId !== request.current) return;
+    setBrowsing(false);
+    if (directoryResult.ok) {
+      setListing(directoryResult);
+      if (edits.current === requestedEdit.current) setPath(directoryResult.path ?? '');
+      folderList.current?.scrollTo(0, 0);
+    } else setBrowseError(directoryResult.message ?? t('taplUnavailable'));
+  }, [directoryResult, open]);
+  useEffect(() => {
+    if (!listing?.path || !folderList.current) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const animation = folderList.current.animate([{ opacity: 0.5 }, { opacity: 1 }], { duration: 140 });
+    return () => animation.cancel();
+  }, [listing]);
   useEffect(() => {
     if (!result || !open || !pendingRef.current) return;
     setPending(false);
@@ -217,31 +256,55 @@ export function WorkspaceDialog({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!path.trim() || pendingRef.current) return;
+          if (!path.trim() || pendingRef.current || browsing) return;
           pendingRef.current = true;
           setPending(true);
           setError('');
           submit(path.trim());
         }}
       >
+        <p className="wb-workspace-hint">{t('workspaceBrowseHelp')}</p>
+        <div className="wb-folder-toolbar">
+          <button ref={initialFocus} type="button" className="btn btn-sm btn-ghost" disabled={pending}
+            onClick={() => loadDirectory('~')}><Icon name="folder" />{t('workspaceHome')}</button>
+        </div>
+        <div className="wb-folder-location" title={listing?.path}>{listing?.path ?? t('workspaceFolders')}</div>
+        <div ref={folderList} className="wb-folder-list" role="region" aria-label={t('workspaceFolders')} aria-busy={browsing}>
+          <ul>
+              {listing?.parent && <li><button type="button" className="wb-folder-row" disabled={pending || browsing}
+                aria-label={t('workspaceParent')} title={t('workspaceParent')} onClick={() => loadDirectory(listing.parent ?? undefined)}>
+                <Icon name="folder" /><span>../</span><Icon name="chevron" /></button></li>}
+              {browsing ? <li className="wb-folder-empty" role="status"><span className="loading loading-spinner loading-sm" /> {t('workspaceLoading')}</li>
+                : browseError ? <li className="wb-folder-empty wb-dialog-error" role="alert">{browseError}</li>
+                : !listing?.directories?.length && <li className="wb-folder-empty">{t('workspaceEmpty')}</li>}
+              {!browsing && !browseError && listing?.directories?.map((folder) => (
+              <li key={folder.path}><button type="button" className="wb-folder-row" disabled={pending}
+                onClick={() => loadDirectory(folder.path)}><Icon name="folder" /><span>{folder.name}</span><Icon name="chevron" /></button></li>
+            ))}</ul>
+        </div>
         <label className="wb-dialog-label" htmlFor="tapl-workspace-path">
           {t('workspacePath')}
         </label>
-        <input
-          ref={input}
-          id="tapl-workspace-path"
-          className="input wb-dialog-input"
-          value={path}
-          placeholder={t('workspacePlaceholder')}
-          autoComplete="off"
-          disabled={pending}
-          aria-invalid={!!error}
-          aria-describedby={error ? 'wb-workspace-error' : undefined}
-          onChange={(event) => {
-            setPath(event.target.value);
-            setError('');
-          }}
-        />
+        <div className="wb-folder-path">
+          <input
+            id="tapl-workspace-path"
+            className="input wb-dialog-input"
+            value={path}
+            placeholder={t('workspacePlaceholder')}
+            autoComplete="off"
+            disabled={pending || browsing}
+            aria-invalid={!!error}
+            aria-describedby={error ? 'wb-workspace-error' : undefined}
+            onChange={(event) => {
+              edits.current += 1;
+              setPath(event.target.value);
+              setError('');
+            }}
+          />
+          <button type="button" className="btn btn-sm btn-ghost" disabled={pending || browsing || !path.trim()}
+            onClick={() => loadDirectory(path.trim())}>{t('workspaceGo')}</button>
+        </div>
+        <p className="wb-workspace-hint">{t('workspaceSetupHint')}</p>
         {error && (
           <p id="wb-workspace-error" className="wb-dialog-error" role="alert">
             {error}
@@ -251,7 +314,7 @@ export function WorkspaceDialog({
           <button type="button" className="btn btn-sm btn-ghost" disabled={pending} onClick={cancel}>
             {t('cancel')}
           </button>
-          <button type="submit" className="btn btn-sm btn-primary" disabled={pending || !path.trim()}>
+          <button type="submit" className="btn btn-sm btn-primary" disabled={pending || browsing || !path.trim()}>
             {pending && <span className="loading loading-spinner loading-xs" />}
             {t('openWorkspace')}
           </button>

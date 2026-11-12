@@ -14,14 +14,15 @@ import type {
   TaplWorkflowRun,
   WebviewCommand,
   WebviewView,
-  WorkspaceSelectionResult
+  WorkspaceSelectionResult,
+  WorkspaceDirectoryResult
 } from '../types';
 import { Icon } from './Icon';
 import { SettingsView } from './SettingsView';
 import { IconTooltips, WorkspaceDialog } from './InteractionLayers';
 import { PageLoading } from './SecondaryViews';
 import { Explore } from './Explore';
-import { EmptyState, NavCount, PageHeading } from './components';
+import { BackLayerContext, EmptyState, NavCount, PageHeading } from './components';
 import { CurrentRun, TaskStatus } from './RunViews';
 import { RecordsView } from './RecordsView';
 import { commandForRun, useWorkbench } from './useWorkbench';
@@ -38,6 +39,7 @@ export interface WorkbenchProps {
   renderPage: (view: WebviewView, send: (command: WebviewCommand) => void, back?: () => void) => ReactNode;
   loading?: boolean;
   workspaceResult?: WorkspaceSelectionResult;
+  directoryResult?: WorkspaceDirectoryResult;
   renderManagement?: (run: TaplWorkflowRun | undefined, context?: TaplRunSnapshot) => ReactNode;
   locale: SupportedLocale;
   initialState?: unknown;
@@ -46,13 +48,16 @@ export interface WorkbenchProps {
   workspace?: string;
 }
 export function Workbench(props: WorkbenchProps): JSX.Element {
+  const [backLayer, setBackLayer] = useState<HTMLDivElement | null>(null);
   return (
     <I18nProvider locale={props.locale}>
-      <WorkbenchShell {...props} />
+      <BackLayerContext.Provider value={backLayer}>
+        <WorkbenchShell {...props} setBackLayer={setBackLayer} />
+      </BackLayerContext.Provider>
     </I18nProvider>
   );
 }
-function WorkbenchShell(props: WorkbenchProps): JSX.Element {
+function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDivElement | null) => void }): JSX.Element {
   const { t } = useI18n();
   const pageRef = useRef<HTMLElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -604,12 +609,15 @@ function WorkbenchShell(props: WorkbenchProps): JSX.Element {
           )}
         </div>
       </main>
+      <div className="wb-back-layer" ref={props.setBackLayer} />
       {props.browser && (
         <WorkspaceDialog
           open={workspaceOpen}
           workspace={props.view.type === 'workspace' ? props.view.workspace || props.workspace : props.workspace}
           message={props.view.type === 'workspace' ? props.view.message : undefined}
           result={props.workspaceResult}
+          directoryResult={props.directoryResult}
+          browse={(requestId, path) => props.send({ command: 'browseWorkspace', requestId, path })}
           submit={(workspace) => props.send({ command: 'selectWorkspace', workspace })}
           close={() => setWorkspaceOpen(false)}
           fallbackFocus={() =>

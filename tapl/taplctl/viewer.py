@@ -439,6 +439,8 @@ class ViewerApplication:
         raise WorkspaceRequired("Choose a workspace that contains a TAPL database in .tapl/.")
 
     def handle_message(self, payload: object) -> dict[str, Any]:
+        if isinstance(payload, dict) and payload.get("command") == "browseWorkspace":
+            return self._browse_workspace(payload)
         if isinstance(payload, dict) and payload.get("command") in {"getSettings", "saveSettings", "resetSettings"}:
             return self._settings_message(payload)
         identity = payload.get("sessionId") if isinstance(payload, dict) else None
@@ -541,6 +543,31 @@ class ViewerApplication:
             message = str(exc)
             return {**self._error_message(message, locale=locale, layout=layout),
                     "discardResult": {**result, "message": message}}
+
+    def _browse_workspace(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response: dict[str, Any] = {"type": "workspace:directory", "requestId": payload.get("requestId"), "ok": False}
+        raw = payload.get("path")
+        try:
+            if raw is not None and (not isinstance(raw, str) or len(raw) > 4096 or "\x00" in raw):
+                raise ValueError("Invalid directory path.")
+            start = self.default_workspace
+            if start is None and self.default_db is not None:
+                start = NativeJsonRunner._workspace_for_database(self.default_db) or self.default_db.parent
+            start = start or Path.cwd()
+            directory = Path(raw).expanduser().resolve() if raw else start.resolve()
+            children = []
+            for child in directory.iterdir():
+                try:
+                    if child.is_dir():
+                        children.append({"name": child.name, "path": str(child)})
+                except OSError:
+                    continue  # An unreadable or disappearing child must not hide its siblings.
+            children.sort(key=lambda child: (child["name"].casefold(), child["name"]))
+            return {**response, "ok": True, "path": str(directory),
+                    "parent": str(directory.parent) if directory.parent != directory else None,
+                    "directories": children}
+        except (OSError, ValueError, RuntimeError) as exc:
+            return {**response, "message": str(exc)}
 
     def _handle_message(self, payload: object) -> dict[str, Any]:
         locale = "en"
@@ -934,6 +961,10 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "Invalid JSON."})
+            return
+        if isinstance(payload, dict) and payload.get("command") == "browseWorkspace" and not self.headers.get("Origin"):
+            self._send_json(HTTPStatus.FORBIDDEN, {"type": "workspace:directory", "requestId": payload.get("requestId"),
+                "ok": False, "message": "An allowed Origin is required to browse directories."})
             return
         if isinstance(payload, dict) and payload.get("command") == "discardRun" and not self.headers.get("Origin"):
             self._send_json(HTTPStatus.FORBIDDEN, {"type": "error", "message": "An allowed Origin is required to discard a RUN.",

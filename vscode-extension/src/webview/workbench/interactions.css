@@ -92,6 +92,22 @@ body {
   flex: none;
   border: 0;
 }
+.wb-workspace-dialog { width: min(620px, calc(100vw - 32px)); }
+.wb-workspace-hint { color: var(--tapl-muted); font-size: 12px; line-height: 1.6; margin: 8px 0 12px; }
+.wb-folder-toolbar { display: flex; gap: 8px; }
+.wb-folder-location { overflow-wrap: anywhere; font-size: 12px; margin: 12px 0 8px; }
+.wb-folder-list { height: clamp(120px, 30vh, 260px); overflow: auto; border: 1px solid var(--tapl-border-control); border-radius: 10px; margin-bottom: 16px; }
+.wb-folder-list ul { list-style: none; margin: 0; padding: 4px; }
+.wb-folder-list > p { display: flex; align-items: center; gap: 8px; margin: 16px; font-size: 12px; }
+.wb-folder-empty { color: var(--tapl-muted); padding: 12px; font-size: 12px; }
+.wb-folder-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; text-align: left; border-radius: 6px; transition: background-color 120ms ease; }
+.wb-folder-row > span { flex: 1; overflow-wrap: anywhere; min-width: 0; }
+.wb-folder-row .wb-icon { flex-shrink: 0; }
+.wb-folder-row:hover, .wb-folder-row:focus-visible { background: var(--tapl-hover); }
+.wb-folder-row:focus-visible { outline: 2px solid var(--tapl-focus); outline-offset: -2px; }
+.wb-folder-path { display: flex; align-items: center; gap: 8px; }
+.wb-folder-path .wb-dialog-input { min-width: 0; flex: 1; }
+@media (prefers-reduced-motion: reduce) { .wb-folder-row { transition: none; } }
 .wb-dialog-label {
   display: block;
   margin-bottom: 9px;

@@ -4,7 +4,7 @@ import { useI18n } from '../i18n';
 import { formatExecutionTiming, isRunningExecutionTiming } from '../executionTiming';
 import type { TaplItem, TaplItemDetail, TaplJsonValue, TaplRunSnapshot, WebviewCommand, WebviewView } from '../types';
 import { Icon } from './Icon';
-import { StatusMark } from './components';
+import { BackButton, StatusMark } from './components';
 import {
   formatTimestamp,
   isRecorded,
@@ -307,7 +307,7 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
   return (
     <article className="wb-record-page">
       <header className="wb-record-hero">
-        <div className="wb-record-heading-row">
+        <div className="wb-record-heading-row" data-has-back={!!back}>
           <div className="wb-record-heading-copy">
             <div className="wb-record-context">
               <span className="wb-reading-kind">{kind(kindValue)}</span>
@@ -332,18 +332,7 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
               </div>
             )}
           </div>
-          {back && (
-            <button
-              className="btn btn-sm wb-back"
-              type="button"
-              data-wb-focus="back"
-              onClick={back}
-              title={t('wbBack')}
-            >
-              <Icon name="back" />
-              {t('wbBack')}
-            </button>
-          )}
+          {back && <BackButton back={back} />}
         </div>
       </header>
       <div className="wb-reading-grid">

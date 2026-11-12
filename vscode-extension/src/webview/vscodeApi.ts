@@ -80,6 +80,7 @@ class BrowserApi implements VsCodeApi {
   };
 
   postMessage(message: WebviewCommand): void {
+    if (message.command === 'browseWorkspace') { void this.browseWorkspace(message); return; }
     if (message.command === 'getSettings' || message.command === 'saveSettings' || message.command === 'resetSettings') {
       void this.settingsRequest(message); return;
     }
@@ -177,6 +178,21 @@ class BrowserApi implements VsCodeApi {
       this.settingsPending -= 1;
       if (action !== 'get') this.settingsWritePending = false;
       this.scheduleRevisionCheck();
+    }
+  }
+
+  /** Directory reads never navigate, persist a workspace, or interrupt RUN polling. */
+  private async browseWorkspace(message: Extract<WebviewCommand, { command: 'browseWorkspace' }>): Promise<void> {
+    try {
+      const response = await fetch('/api/message', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(message) });
+      const payload = await response.json() as HostMessage;
+      if (!response.ok || payload.type !== 'workspace:directory' || payload.requestId !== message.requestId)
+        throw new Error(`Directory request failed (${response.status}).`);
+      dispatchHostMessage(payload);
+    } catch (error) {
+      dispatchHostMessage({ type: 'workspace:directory', requestId: message.requestId, ok: false,
+        message: error instanceof Error ? error.message : 'Directory request failed.' });
     }
   }
 

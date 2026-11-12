@@ -716,6 +716,34 @@ body:has(.tapl-workbench) {
   width: 14px;
   height: 14px;
 }
+.wb-back-layer {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  justify-self: end;
+  margin: 34px 44px 0 0;
+  z-index: 15;
+  pointer-events: none;
+}
+.wb-back-layer > .wb-back {
+  pointer-events: auto;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 0.12);
+  animation: wb-floating-back-in 160ms ease-out;
+}
+.tapl-workbench:has(.wb-back-layer > .wb-back) [data-has-back='true'] {
+  padding-inline-end: 110px;
+}
+.tapl-workbench[data-mobile='true'] .wb-back-layer {
+  grid-column: 1;
+  margin: 28px 24px 0 0;
+}
+@keyframes wb-floating-back-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-back-layer > .wb-back { animation: none; }
+}
 .wb-current-overview {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

@@ -53,6 +53,52 @@ class ViewerTests(unittest.TestCase):
             }
         raise AssertionError(f"unexpected args: {args}")
 
+    def test_workspace_browse_lists_only_sorted_directories_without_initializing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for name in ("zebra", "Alpha", ".hidden", "한글 폴더"):
+                (root / name).mkdir()
+            (root / "private.txt").write_text("not exposed", encoding="utf-8")
+            (root / "linked folder").symlink_to(root / "Alpha", target_is_directory=True)
+            app = viewer.ViewerApplication(default_workspace=root, json_runner=self.fake_runner)
+            result = app.handle_message({"command": "browseWorkspace", "requestId": "first"})
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["requestId"], "first")
+            self.assertEqual(result["path"], str(root))
+            self.assertEqual(result["parent"], str(root.parent))
+            self.assertEqual([entry["name"] for entry in result["directories"]],
+                             [".hidden", "Alpha", "linked folder", "zebra", "한글 폴더"])
+            self.assertFalse((root / ".tapl").exists())
+            linked = app.handle_message({"command": "browseWorkspace", "path": str(root / "linked folder")})
+            self.assertEqual(linked["path"], str(root / "Alpha"))
+            self.assertEqual(linked["directories"], [])
+            home = app.handle_message({"command": "browseWorkspace", "path": "~"})
+            self.assertEqual(home["path"], str(Path.home().resolve()))
+            filesystem_root = app.handle_message({"command": "browseWorkspace", "path": root.anchor})
+            self.assertIsNone(filesystem_root["parent"])
+            workspace = self.initialized_workspace(root)
+            app = viewer.ViewerApplication(default_db=tapl_db.local_db_path(workspace, create_identity=False))
+            self.assertEqual(app.handle_message({"command": "browseWorkspace"})["path"], str(workspace))
+
+    def test_workspace_browse_handles_invalid_paths_permissions_and_default_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            app = viewer.ViewerApplication(json_runner=self.fake_runner)
+            with mock.patch.object(viewer.Path, "cwd", return_value=root):
+                self.assertEqual(app.handle_message({"command": "browseWorkspace"})["path"], str(root))
+            (root / "file").touch()
+            for path in (str(root / "missing"), str(root / "file"), "\x00", 123, "x" * 4097):
+                with self.subTest(path=str(path)[:40]):
+                    result = app.handle_message({"command": "browseWorkspace", "requestId": "bad", "path": path})
+                    self.assertFalse(result["ok"])
+                    self.assertEqual(result["type"], "workspace:directory")
+                    self.assertNotIn("directories", result)
+                    self.assertTrue(result["message"])
+            with mock.patch.object(viewer.Path, "iterdir", side_effect=PermissionError("access denied")):
+                result = app.handle_message({"command": "browseWorkspace", "path": str(root)})
+                self.assertFalse(result["ok"])
+                self.assertIn("access denied", result["message"])
+
     def test_port_validation(self) -> None:
         self.assertEqual(viewer.parse_port("8000"), 8000)
         for value in ("0", "65536", "abc"):
@@ -426,6 +472,22 @@ allowed_origins = [
                     opener.open(forbidden, timeout=5)
                 self.assertEqual(caught.exception.code, 403)
                 caught.exception.close()
+
+                for browse_origin in (None, "https://example.com", origin):
+                    headers = {"Content-Type": "application/json"}
+                    if browse_origin:
+                        headers["Origin"] = browse_origin
+                    request = urllib.request.Request(f"{origin}/api/message",
+                        data=json.dumps({"command": "browseWorkspace", "requestId": "http"}).encode(),
+                        headers=headers, method="POST")
+                    if browse_origin == origin:
+                        with opener.open(request, timeout=5) as response:
+                            self.assertEqual(json.loads(response.read())["path"], str(workspace.resolve()))
+                    else:
+                        with self.assertRaises(urllib.error.HTTPError) as denied:
+                            opener.open(request, timeout=5)
+                        self.assertEqual(denied.exception.code, 403)
+                        denied.exception.close()
 
                 with self.assertRaises(urllib.error.HTTPError) as caught:
                     opener.open(f"{origin}/api/message", timeout=5)

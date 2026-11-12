@@ -286,8 +286,18 @@ export interface SettingsResult {
 }
 
 export type WorkspaceSelectionResult = { type: 'workspace:result'; ok: boolean; message?: string; workspace?: string };
+export interface WorkspaceDirectoryResult {
+  type: 'workspace:directory';
+  requestId: string;
+  ok: boolean;
+  path?: string;
+  parent?: string | null;
+  directories?: { name: string; path: string }[];
+  message?: string;
+}
 
 export type HostMessage =
+  | WorkspaceDirectoryResult
   | WorkspaceSelectionResult
   | SettingsResult
   | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; preferences?: ViewerPreferences; discardResult?: RunDiscardResult }
@@ -315,6 +325,7 @@ export type WebviewCommand = (
   | { command: 'ready' }
   | { command: 'chooseWorkspace' }
   | { command: 'selectWorkspace'; workspace: string }
+  | { command: 'browseWorkspace'; requestId: string; path?: string }
   | { command: 'selectRun'; sessionId: string }
   | { command: 'discardRun'; runId: string; targetSessionId: string; workspace: string; confirmed: true; confirmationRunId: string }
   | { command: 'refresh' }

@@ -11,7 +11,7 @@ const fixture = path.resolve(__dirname, '../fixtures/workbench.py');
 const workspace = mkdtempSync(path.join(tmpdir(), 'tapl-workbench-'));
 const secondWorkspace = path.join(workspace, 'second');
 async function startServer(extra = []) {
-  const process = spawn(python, [fixture, '--workspace', workspace, '--port', '0', ...extra], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const process = spawn(python, [fixture, '--workspace', workspace, '--port', '0', ...extra], { cwd: workspace, stdio: ['ignore', 'pipe', 'pipe'] });
   const url = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Viewer startup timed out')), 15000);
     process.once('error', error => { clearTimeout(timer); reject(error); });
@@ -59,7 +59,7 @@ async function setLanguage(page, locale) {
     await page.locator('.wb-settings-savebar button[type=submit]').click();
     await page.waitForFunction(expected => document.documentElement.lang === expected, locale);
   }
-  await page.locator('.wb-settings .wb-back').click();
+  await page.locator('.wb-back-layer .wb-back').click();
 }
 
 test('settings edits all CLI sections, saves model/profile changes together, and confirms reset', { timeout: 60000 }, async () => {
@@ -127,6 +127,44 @@ test('settings edits all CLI sections, saves model/profile changes together, and
     assert.equal(await page.locator('html').getAttribute('lang'), 'ko');
     await page.locator('[data-wb-focus="nav:settings"]').click(); await field('search.max_results').waitFor();
     assert.equal(await field('search.max_results').inputValue(), '12');
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('floating Back stays outside page scrolling on settings and contained reading pages', { timeout: 30000 }, async () => {
+  const { page, errors } = await openPage();
+  try {
+    const back = page.locator('.wb-back-layer > .wb-back');
+    const scroll = page.locator('.wb-page-scroll');
+    const assertAnchored = async () => {
+      await back.waitFor();
+      await page.waitForFunction(() => !document.querySelector('.wb-back-layer > .wb-back')?.getAnimations().some(animation => animation.playState === 'running'));
+      const start = await back.boundingBox();
+      await scroll.evaluate(el => el.scrollTop = el.scrollHeight);
+      assert.ok(await scroll.evaluate(el => el.scrollTop > 0), 'the page actually scrolls');
+      const end = await back.boundingBox();
+      assert.ok(Math.abs(start.x - end.x) < 1 && Math.abs(start.y - end.y) < 1, 'Back stays at its floating anchor');
+      assert.ok(end.x >= 0 && end.x + end.width <= (await page.viewportSize()).width, 'Back stays inside the viewport');
+      assert.equal(await scroll.locator('.wb-back').count(), 0, 'scroll containment never captures Back');
+      assert.equal(await back.count(), 1, 'hidden settings do not duplicate Back');
+    };
+    await page.locator('[data-wb-focus="nav:settings"]').click();
+    await page.locator('.wb-settings-savebar').waitFor();
+    await page.mouse.move(1200, 900);
+    await assertAnchored();
+    await shot(page, 'settings-floating-back-light');
+    await back.click();
+    await page.locator('.wb-run-mindmap').waitFor();
+    await page.locator('.wb-mm-node[data-kind=task] button').first().press('Enter');
+    await page.locator('.wb-record-page').waitFor();
+    await page.setViewportSize({ width: 390, height: 700 });
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.mobile === 'true');
+    await assertAnchored();
+    await shot(page, 'record-floating-back-mobile');
+    await back.focus();
+    await page.keyboard.press('Enter');
+    await page.locator('.wb-run-mindmap').waitFor();
+    assert.equal(await back.count(), 0);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
@@ -682,6 +720,41 @@ test('theme control reflects automatic dark mode and follows system changes unti
   } finally { await page.close(); }
 });
 
+test('workspace browsing recovers from errors and ignores stale replies after cancel and reopen', { timeout: 30000 }, async () => {
+  const { page, errors } = await openPage();
+  try {
+    await setLanguage(page, 'en');
+    let delayed;
+    await page.route('**/api/message', async route => {
+      const request = route.request().postDataJSON();
+      if (request.command !== 'browseWorkspace') return route.continue();
+      if (!delayed) { delayed = route; return; }
+      return route.continue();
+    });
+    const picker = page.locator('[data-wb-focus="workspace-picker"]');
+    await picker.click();
+    const modal = page.locator('.wb-workspace-dialog');
+    await modal.getByRole('status').waitFor();
+    await page.keyboard.press('Escape');
+    await modal.waitFor({ state: 'detached' });
+    await picker.click();
+    await modal.getByRole('region').getByRole('button', { name: 'second', exact: true }).waitFor();
+    await delayed.fulfill({ json: { type: 'workspace:directory', requestId: delayed.request().postDataJSON().requestId,
+      ok: true, path: '/stale', parent: '/', directories: [] } });
+    assert.equal(await modal.locator('input').inputValue(), workspace);
+    await modal.locator('input').fill(path.join(workspace, 'missing'));
+    await modal.getByRole('button', { name: 'Go to folder', exact: true }).click();
+    await modal.getByRole('alert').waitFor();
+    await modal.getByRole('button', { name: 'Parent folder', exact: true }).click();
+    await modal.getByRole('region').getByRole('button', { name: path.basename(workspace), exact: true }).click();
+    await modal.getByRole('region').getByRole('button', { name: 'second', exact: true }).waitFor();
+    await page.keyboard.press('Escape');
+    await modal.waitFor({ state: 'detached' });
+    assert.equal(await picker.evaluate(el => el === document.activeElement), true);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test('workspace modal preserves RUN, filters, scroll and focus on cancel, invalid and same-folder selections', { timeout: 45000 }, async () => {
   const { page, errors } = await openPage();
   try {
@@ -1188,7 +1261,7 @@ test('icon tooltips work on hover/focus and actual status colors stay distinct i
   } finally { await page.close(); }
 });
 
-test('an unselected initial workspace opens the same modal over the fixed shell', { timeout: 30000 }, async () => {
+test('an unselected initial workspace browses folders and opens a selection without typing a path', { timeout: 30000 }, async () => {
   const extra = await startServer(['--without-default']);
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 }, locale: 'en-US' });
   try {
@@ -1196,10 +1269,18 @@ test('an unselected initial workspace opens the same modal over the fixed shell'
     await page.locator('dialog.wb-workspace-dialog').waitFor();
     assert.equal(await page.locator('.tapl-workbench').count(), 1);
     assert.equal(await page.locator('.tapl-workspace-orbit,.tapl-workspace-card').count(), 0);
-    await page.locator('#tapl-workspace-path').fill(workspace);
+    const modal = page.locator('.wb-workspace-dialog');
+    await modal.getByRole('region', { name: 'Folders', exact: true }).getByRole('button', { name: 'second', exact: true }).click();
+    await page.waitForFunction(expected => document.querySelector('#tapl-workspace-path')?.value === expected, secondWorkspace);
+    assert.equal(await modal.locator('.wb-folder-list li').first().innerText(), '../');
+    assert.equal(await modal.locator('.wb-folder-toolbar').getByRole('button', { name: 'Parent folder', exact: true }).count(), 0);
+    await modal.getByRole('button', { name: 'Parent folder', exact: true }).click();
+    await page.waitForFunction(expected => document.querySelector('#tapl-workspace-path')?.value === expected, workspace);
+    await modal.getByRole('region', { name: 'Folders', exact: true }).getByRole('button', { name: 'second', exact: true }).click();
     await page.locator('.wb-workspace-dialog button[type=submit]').click();
     await page.locator('dialog.wb-workspace-dialog').waitFor({ state: 'detached' });
     await page.locator('.wb-run-mindmap').waitFor();
+    assert.ok((await page.locator('[data-wb-focus="workspace-picker"]').getAttribute('title')).includes(secondWorkspace));
     await shot(page, 'workspace-initial-en');
   } finally { await page.close(); extra.process.kill(); }
 });

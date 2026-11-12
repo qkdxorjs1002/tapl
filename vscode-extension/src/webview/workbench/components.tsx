@@ -1,10 +1,26 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useBrowserLayoutEffect } from './effects';
 import { useI18n } from '../i18n';
 import type { TaplItem } from '../types';
 import { formatExecutionTiming, isRunningExecutionTiming } from '../executionTiming';
 import { useState } from 'react';
 import { Icon } from './Icon';
+
+export const BackLayerContext = createContext<HTMLElement | null>(null);
+
+/** Keep navigation above page scrolling, including reading surfaces with CSS containment. */
+export function BackButton({ back }: { back: () => void }): JSX.Element {
+  const { t } = useI18n();
+  const layer = useContext(BackLayerContext);
+  const button = (
+    <button className="btn btn-sm wb-back" type="button" onClick={back} data-wb-focus="back" title={t('wbBack')}>
+      <Icon name="back" />
+      {t('wbBack')}
+    </button>
+  );
+  return layer ? createPortal(button, layer) : button;
+}
 
 export function StatusMark({ value, dotOnly = false }: { value?: string; dotOnly?: boolean }): JSX.Element | null {
   const { status } = useI18n();
@@ -65,21 +81,15 @@ export function PageHeading({
   back?: () => void;
   children?: ReactNode;
 }): JSX.Element {
-  const { t } = useI18n();
   return (
-    <div className="wb-page-heading">
+    <div className="wb-page-heading" data-has-back={!!back}>
       <div>
         <h1 tabIndex={-1} data-wb-page-heading>
           {title}
         </h1>
         {children}
       </div>
-      {back && (
-        <button className="btn btn-sm wb-back" type="button" onClick={back} data-wb-focus="back">
-          <Icon name="back" />
-          {t('wbBack')}
-        </button>
-      )}
+      {back && <BackButton back={back} />}
     </div>
   );
 }
