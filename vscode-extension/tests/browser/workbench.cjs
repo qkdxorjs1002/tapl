@@ -1390,15 +1390,15 @@ test('RUN follows executing TASK and PLAN context with resistant gestures, refre
       const read = () => new DOMMatrix(getComputedStyle(el.querySelector('.wb-mm-world')).transform).e;
       const following = () => el.querySelector('.wb-mm-follow').getAttribute('aria-pressed') === 'true';
       let held = read(), steps = 0;
-      while (following() && steps < 200) {
+      while (following() && steps < 40) {
         held = read(); steps++;
         el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 20 }));
         await new Promise(resolve => requestAnimationFrame(resolve));
       }
       return { held, released: read(), steps };
     });
-    assert.ok(wheelStroke.steps > 60 && wheelStroke.steps < 200, 'corrected input still requires a deliberately long continuous stroke');
-    assert.ok(Math.abs(wheelStroke.held-originCamera.x) > 145, 'view keeps bending across a long corrected stroke');
+    assert.ok(wheelStroke.steps > 10 && wheelStroke.steps < 40, 'one moderate continuous stroke reaches the corrected release distance');
+    assert.ok(Math.abs(wheelStroke.held-originCamera.x) > 30, 'view visibly bends before release');
     assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'continuous net wheel motion releases');
     assert.ok(Math.abs(wheelStroke.released-wheelStroke.held) < 8, `wheel release is continuous: ${JSON.stringify(wheelStroke)}`);
     await enable();
@@ -1514,9 +1514,9 @@ test('trackpad acceleration stays attached, direct input has no extra easing, an
         wheel(120, direct); await frame(); const immediate = read();
         await frames(4); const later = read();
         await reset();
-        for (const delta of [12, 40, 100, 200, 260, 180]) { wheel(delta, direct); await frame(); }
+        for (const delta of [12, 40, 100]) { wheel(delta, direct); await frame(); }
         const peak = Math.abs(read()-origin), attached = following(), tail = [];
-        for (const delta of [140, 110, 80, 55, 34, 21, 13, 8, 5, 3, 2, 1, .5, .25, .1, .05]) {
+        for (const delta of [60, 40, 25, 16, 10, 6, 4, 2, 1, .5, .25, .1, .05]) {
           wheel(delta, momentum); await frame(); tail.push(Math.abs(read()-origin));
         }
         const before = read(); wheel(-120, direct); await frame(); const after = read();

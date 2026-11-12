@@ -463,7 +463,10 @@ export function useMindmapViewport({
           applyElasticZoom(elasticZoom, response);
         } else if (wheelBase) {
           target = { ...wheelBase, x: wheelBase.x + response.x, y: wheelBase.y + response.y };
-          if (response.released) manual();
+          if (response.released) {
+            if (event.deltaMode === 0) camera = { ...target };
+            manual();
+          }
           remember();
           wake();
         }

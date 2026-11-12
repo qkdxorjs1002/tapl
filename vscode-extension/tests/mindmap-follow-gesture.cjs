@@ -9,7 +9,8 @@ const output = buildSync({
 const compiled = { exports: {} };
 new Function('module', 'exports', output)(compiled, compiled.exports);
 const { mindmapFollowPan, mindmapFollowZoom, mindmapFollowWheel, mindmapFollowTrackpad, mindmapFollowWheelResponse, mindmapWheelDelta,
-  MINDMAP_FOLLOW_WHEEL_THRESHOLD, MINDMAP_FOLLOW_WHEEL_IDLE, MINDMAP_FOLLOW_ZOOM_THRESHOLD } = compiled.exports;
+  MINDMAP_FOLLOW_WHEEL_THRESHOLD, MINDMAP_FOLLOW_TRACKPAD_THRESHOLD, MINDMAP_FOLLOW_DRAG_THRESHOLD,
+  MINDMAP_FOLLOW_WHEEL_IDLE, MINDMAP_FOLLOW_ZOOM_THRESHOLD } = compiled.exports;
 
 test('wheel intent uses net normalized displacement within one burst, including long-lived viewers', () => {
   for (const start of [0, 2e6, 1e10]) {
@@ -101,12 +102,12 @@ test('native momentum freezes intent, while unsupported browsers detect sustaine
   for (const native of [true, false]) {
     let state, time = 0;
     const direct = native ? false : undefined;
-    for (const delta of [12, 40, 100, 200, 260, 180]) {
+    for (const delta of [12, 40, 100]) {
       state = mindmapFollowTrackpad(state, delta, 0, time, direct); time += 16;
       assert.equal(state.pan.momentum, false);
     }
     let frozen;
-    for (const delta of [140, 110, 80, 55, 34, 21, 13, 8, 5, 3, 2, 1, .5, .25]) {
+    for (const delta of [60, 40, 25, 16, 10, 6, 4, 2, 1, .5, .25, .1]) {
       state = mindmapFollowTrackpad(state, delta, 0, time, native ? true : undefined); time += 16;
       if (frozen !== undefined) assert.equal(state.x, frozen, 'tail never adds release intent');
       if (state.pan.momentum) frozen = state.x;
@@ -126,10 +127,12 @@ test('steady long input never becomes momentum and explicit platform phases over
   const turn = mindmapFollowTrackpad(tail, 0, 4, 32);
   assert.equal(turn.pan.momentum, false, 'perpendicular renewed input resumes even below the previous tail speed');
   assert.equal(turn.x, 0); assert.ok(turn.y > 3.9 && turn.y < 4);
-  let state;
-  for (let i = 0; i < 150; i++) {
-    state = mindmapFollowTrackpad(state, 6, 8, i*16);
-    assert.equal(state.pan.momentum, false, 'holding a steady long gesture never starts a replay');
+  for (const interval of [8, 16, 32]) {
+    let state;
+    for (let i = 0; i < 150; i++) {
+      state = mindmapFollowTrackpad(state, 6, 8, i*interval);
+      assert.equal(state.pan.momentum, false, 'steady contact never becomes inferred momentum at any cadence');
+    }
   }
   let slowing = mindmapFollowTrackpad(undefined, 200, 0, 0, false);
   for (let i = 1; i <= 12; i++) {
@@ -139,5 +142,24 @@ test('steady long input never becomes momentum and explicit platform phases over
   for (const value of [NaN, Infinity, -Number.MAX_VALUE]) {
     const invalid = mindmapFollowTrackpad(undefined, value, value, value);
     assert.ok(Number.isFinite(invalid.x) && Number.isFinite(invalid.y) && Number.isFinite(invalid.time));
+  }
+});
+
+test('a moderate trackpad stroke releases continuously at the corrected pointer threshold and idle resets small strokes', () => {
+  assert.equal(MINDMAP_FOLLOW_TRACKPAD_THRESHOLD, MINDMAP_FOLLOW_DRAG_THRESHOLD);
+  const contact = mindmapFollowTrackpad(undefined, 1, 0, 0, false);
+  const held = mindmapFollowWheelResponse({ ...contact, x: MINDMAP_FOLLOW_TRACKPAD_THRESHOLD });
+  const released = mindmapFollowWheelResponse({ ...contact, x: MINDMAP_FOLLOW_TRACKPAD_THRESHOLD+.001 });
+  assert.equal(held.released, false); assert.equal(released.released, true);
+  assert.ok(Math.abs(released.x-held.x) < .001, 'the new release boundary has no positional jump');
+  let state;
+  for (let i = 0; i < 5; i++) state = mindmapFollowTrackpad(state, 20, 0, i*16, false);
+  assert.equal(mindmapFollowWheelResponse(state).released, false, 'a small burst stays attached');
+  for (let i = 0; i < 8; i++) state = mindmapFollowTrackpad(state, 20, 0, state.time+16, false);
+  assert.equal(mindmapFollowWheelResponse(state).released, true, 'one moderate continuous push releases');
+  for (let i = 0; i < 40; i++) {
+    state = mindmapFollowTrackpad(state, 20, 0, state.time+MINDMAP_FOLLOW_WHEEL_IDLE, false);
+    assert.ok(state.x > 18 && state.x < 20);
+    assert.equal(mindmapFollowWheelResponse(state).released, false, 'separate small strokes never accumulate');
   }
 });

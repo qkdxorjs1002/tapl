@@ -1,5 +1,6 @@
 /** Intent thresholds are screen-space values, independent of graph zoom. */
 export const MINDMAP_FOLLOW_DRAG_THRESHOLD = 220;
+export const MINDMAP_FOLLOW_TRACKPAD_THRESHOLD = MINDMAP_FOLLOW_DRAG_THRESHOLD;
 export const MINDMAP_FOLLOW_WHEEL_THRESHOLD = 1200;
 export const MINDMAP_FOLLOW_RESISTANCE = 0.6;
 export const MINDMAP_FOLLOW_ZOOM_THRESHOLD = Math.log(1.65);
@@ -47,12 +48,16 @@ export function mindmapFollowTrackpad(previous: MindmapFollowWheel | undefined, 
   const redirected = !!pan && x * pan.dx + y * pan.dy < .5 * distance * Math.hypot(pan.dx, pan.dy);
   const resumed = !!pan?.momentum && (momentum === false || (momentum === undefined
     && ((redirected && distance > 2) || (speed > pan.speed * 1.8 && speed > .12 && distance > 2))));
-  const filtered = pan && !redirected && !resumed ? pan.speed + (speed - pan.speed) * -Math.expm1(-elapsed / 24) : speed;
-  const peak = pan && !redirected && !resumed ? Math.max(pan.peak, filtered) : filtered;
-  const slowing = pan && !redirected && !resumed && filtered < pan.speed * .98 ? pan.slowing + elapsed : 0;
+  const motionContinues = pan !== undefined && !redirected && !resumed;
+  const history = motionContinues && pan.peak > 0;
+  const filtered = history ? pan.speed + (speed - pan.speed) * -Math.expm1(-elapsed / 24) : speed;
+  // The first packet has no measured cadence, so it must not seed deceleration detection.
+  const peak = motionContinues ? Math.max(pan.peak, filtered) : 0;
+  const slowing = history && filtered < pan.speed * .98 ? pan.slowing + elapsed : 0;
   // Prefer the platform phase. Older browsers need a conservative, sustained deceleration fallback.
   const tail = momentum ?? (!!pan?.momentum && !resumed || peak > .4 && filtered < peak * .6 && slowing >= 40);
-  const gain = 1 / Math.sqrt(1 + (speed / 3) ** 2);
+  const inputSpeed = resumed ? distance / (1000 / 60) : speed;
+  const gain = 1 / Math.sqrt(1 + (inputSpeed / 3) ** 2);
   const base = resumed ? undefined : before;
   return {
     x: finite((base?.x ?? 0) + (tail ? 0 : x * gain)),
@@ -67,7 +72,10 @@ export function mindmapFollowWheelResponse(state: MindmapFollowWheel, zoom = fal
     return { x: 0, y: 0, ...mindmapFollowZoom(state.y * 0.008) };
   }
   const offset = mindmapFollowPan(state.x, state.y, MINDMAP_FOLLOW_WHEEL_THRESHOLD);
-  return { x: offset.x * .35, y: offset.y * .35, factor: 1, released: offset.released };
+  const released = state.pan
+    ? !state.pan.momentum && Math.hypot(state.x, state.y) > MINDMAP_FOLLOW_TRACKPAD_THRESHOLD
+    : offset.released;
+  return { x: offset.x * .35, y: offset.y * .35, factor: 1, released };
 }
 
 /** Wheel delta modes use the same CSS-pixel units for intent and manual movement. */
