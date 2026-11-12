@@ -8,7 +8,7 @@ const output = buildSync({
 }).outputFiles[0].text;
 const compiled = { exports: {} };
 new Function('module', 'exports', output)(compiled, compiled.exports);
-const { mindmapFollowPan, mindmapFollowZoom, mindmapFollowWheel, mindmapFollowWheelResponse, mindmapWheelDelta,
+const { mindmapFollowPan, mindmapFollowZoom, mindmapFollowWheel, mindmapFollowTrackpad, mindmapFollowWheelResponse, mindmapWheelDelta,
   MINDMAP_FOLLOW_WHEEL_THRESHOLD, MINDMAP_FOLLOW_WHEEL_IDLE, MINDMAP_FOLLOW_ZOOM_THRESHOLD } = compiled.exports;
 
 test('wheel intent uses net normalized displacement within one burst, including long-lived viewers', () => {
@@ -75,5 +75,69 @@ test('zero and malformed deltas never release follow or poison the camera', () =
     const pan = mindmapFollowPan(state.x, state.y);
     assert.ok(Number.isFinite(pan.x) && Number.isFinite(pan.y));
     assert.ok(Number.isFinite(mindmapFollowZoom(value).factor));
+  }
+});
+
+test('trackpad acceleration is compressed radially and consistently across event cadences', () => {
+  const spike = mindmapFollowTrackpad(undefined, 700, 0, 0, false);
+  assert.ok(spike.x > 40 && spike.x < 51, 'one accelerated packet cannot become a long gesture');
+  assert.equal(mindmapFollowWheelResponse(spike).released, false);
+  const diagonal = mindmapFollowTrackpad(undefined, 300, -400, 0, false);
+  assert.ok(Math.abs(diagonal.x / diagonal.y + .75) < 1e-9, 'both axes share a gain');
+  const travels = [8, 16, 32].map(interval => {
+    let state;
+    for (let time = 0; time < 960; time += interval) state = mindmapFollowTrackpad(state, interval, 0, time, false);
+    return state.x;
+  });
+  assert.ok(Math.max(...travels)-Math.min(...travels) < 4, JSON.stringify(travels));
+  let state;
+  for (let i = 0; i < 40; i++) state = mindmapFollowTrackpad(state, 100, 0, 1e10+i*16, false);
+  assert.equal(mindmapFollowWheelResponse(state).released, true, 'a continuous deliberate long stroke still releases');
+  const reset = mindmapFollowTrackpad(state, 10, 0, state.time+MINDMAP_FOLLOW_WHEEL_IDLE, false);
+  assert.ok(reset.x > 9 && reset.x < 10, 'separate gestures start fresh');
+});
+
+test('native momentum freezes intent, while unsupported browsers detect sustained deceleration', () => {
+  for (const native of [true, false]) {
+    let state, time = 0;
+    const direct = native ? false : undefined;
+    for (const delta of [12, 40, 100, 200, 260, 180]) {
+      state = mindmapFollowTrackpad(state, delta, 0, time, direct); time += 16;
+      assert.equal(state.pan.momentum, false);
+    }
+    let frozen;
+    for (const delta of [140, 110, 80, 55, 34, 21, 13, 8, 5, 3, 2, 1, .5, .25]) {
+      state = mindmapFollowTrackpad(state, delta, 0, time, native ? true : undefined); time += 16;
+      if (frozen !== undefined) assert.equal(state.x, frozen, 'tail never adds release intent');
+      if (state.pan.momentum) frozen = state.x;
+      assert.equal(mindmapFollowWheelResponse(state).released, false);
+    }
+    assert.ok(frozen !== undefined, 'tail detected');
+    const continued = mindmapFollowTrackpad(state, -120, 0, time, direct);
+    assert.equal(continued.pan.momentum, false);
+    assert.ok(continued.x < -40 && continued.x > -51, 'new stroke resets old intent for a visible-position rebase');
+    const faster = mindmapFollowTrackpad(state, 120, 0, time, direct);
+    assert.equal(faster.pan.momentum, false, 'same-direction renewed input also resumes');
+  }
+});
+
+test('steady long input never becomes momentum and explicit platform phases override heuristics', () => {
+  const tail = mindmapFollowTrackpad(mindmapFollowTrackpad(undefined, 200, 0, 0), 100, 0, 16, true);
+  const turn = mindmapFollowTrackpad(tail, 0, 4, 32);
+  assert.equal(turn.pan.momentum, false, 'perpendicular renewed input resumes even below the previous tail speed');
+  assert.equal(turn.x, 0); assert.ok(turn.y > 3.9 && turn.y < 4);
+  let state;
+  for (let i = 0; i < 150; i++) {
+    state = mindmapFollowTrackpad(state, 6, 8, i*16);
+    assert.equal(state.pan.momentum, false, 'holding a steady long gesture never starts a replay');
+  }
+  let slowing = mindmapFollowTrackpad(undefined, 200, 0, 0, false);
+  for (let i = 1; i <= 12; i++) {
+    slowing = mindmapFollowTrackpad(slowing, 200*.6**i, 0, i*16, false);
+    assert.equal(slowing.pan.momentum, false, 'explicit direct contact takes priority over fallback');
+  }
+  for (const value of [NaN, Infinity, -Number.MAX_VALUE]) {
+    const invalid = mindmapFollowTrackpad(undefined, value, value, value);
+    assert.ok(Number.isFinite(invalid.x) && Number.isFinite(invalid.y) && Number.isFinite(invalid.time));
   }
 });

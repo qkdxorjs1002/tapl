@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import { constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapFollowDrag, mindmapSpringCamera } from './mindmapCamera';
 import type { MindmapBounds, MindmapCamera } from './mindmapCamera';
 import {
-  mindmapFollowPan, mindmapFollowZoom, mindmapFollowWheel, mindmapFollowWheelResponse, mindmapWheelDelta,
+  mindmapFollowPan, mindmapFollowZoom, mindmapFollowWheel, mindmapFollowTrackpad, mindmapFollowWheelResponse, mindmapWheelDelta,
   MINDMAP_FOLLOW_WHEEL_IDLE
 } from './mindmapFollowGesture';
 import type { MindmapFollowWheel } from './mindmapFollowGesture';
@@ -207,7 +207,8 @@ export function useMindmapViewport({
         }
       } else {
         returnMotion = undefined;
-        const easing = reduced || pointers.size ? 1 : 0.18;
+        const directPan = tracking && wheelKind === 'pan' && wheelIntent && !wheelIntent.pan?.momentum;
+        const easing = reduced || pointers.size || directPan ? 1 : 0.18;
         camera.x += (target.x - camera.x) * easing;
         camera.y += (target.y - camera.y) * easing;
         camera.zoom += (target.zoom - camera.zoom) * easing;
@@ -348,8 +349,12 @@ export function useMindmapViewport({
       if (wheelTimer) window.clearTimeout(wheelTimer);
       if (!wheelIntent || !tracking) return;
       wheelTimer = window.setTimeout(() => {
+        const returning = wheelIntent?.pan?.momentum;
         clearElastic();
-        if (tracking) track(true);
+        if (tracking) {
+          if (returning) { target = followTarget(); remember(); wake(); }
+          else track(true);
+        }
       }, Math.max(0, MINDMAP_FOLLOW_WHEEL_IDLE - (performance.now() - wheelIntent.time)));
     };
     const setFollowing = (enabled: boolean) => {
@@ -405,7 +410,7 @@ export function useMindmapViewport({
     };
     if (follow !== undefined) host.dataset.following = String(tracking);
     else delete host.dataset.following;
-    const interacting = () => pointers.size > 0 || gestureActive || !!wheelIntent
+    const interacting = () => pointers.size > 0 || gestureActive || (!!wheelIntent && !wheelIntent.pan?.momentum)
       || (!tracking && performance.now() - lastWheelTime < MINDMAP_FOLLOW_WHEEL_IDLE);
     if (tracking) {
       if (!interacting()) {
@@ -426,6 +431,8 @@ export function useMindmapViewport({
       const delta = mindmapWheelDelta(event.deltaX, event.deltaY, event.deltaMode, bounds.height, event.shiftKey);
       const kind = event.ctrlKey || event.metaKey ? 'zoom' : 'pan';
       if (kind === 'zoom' ? !delta.y : !delta.x && !delta.y) return;
+      const momentum = (event as WheelEvent & { momentum?: boolean }).momentum;
+      if (tracking && kind === 'pan' && event.deltaMode === 0 && momentum === true && (wheelKind !== 'pan' || !wheelIntent)) return;
       const now = performance.now();
       lastWheelTime = now;
       if (tracking) {
@@ -438,7 +445,19 @@ export function useMindmapViewport({
           elastic = undefined;
           elasticZoom = kind === 'zoom' ? beginElasticZoom(local(event.clientX, event.clientY)) : undefined;
         }
-        wheelIntent = mindmapFollowWheel(wheelIntent, -delta.x, -delta.y, now);
+        const previous = wheelIntent;
+        wheelIntent = kind === 'pan' && event.deltaMode === 0
+          ? mindmapFollowTrackpad(previous, -delta.x, -delta.y, now, momentum)
+          : mindmapFollowWheel(previous, -delta.x, -delta.y, now);
+        if (wheelIntent.pan?.momentum) {
+          if (!previous?.pan?.momentum) track(true);
+          scheduleWheelReturn();
+          return;
+        }
+        if (previous?.pan?.momentum) {
+          wheelBase = { ...camera };
+          returnMotion = undefined;
+        }
         const response = mindmapFollowWheelResponse(wheelIntent, kind === 'zoom');
         if (kind === 'zoom' && elasticZoom) {
           applyElasticZoom(elasticZoom, response);

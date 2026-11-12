@@ -1386,14 +1386,21 @@ test('RUN follows executing TASK and PLAN context with resistant gestures, refre
       await centered();
     }
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'separated gestures never accumulate intent');
-    await wheel(1199, 0); await page.waitForTimeout(25);
-    const wheelHeld = await camera();
-    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'long elastic stroke stays attached until its distance boundary');
-    assert.ok(Math.abs(wheelHeld.x - originCamera.x) > 150, 'view keeps bending across a long stroke');
-    await wheel(2, 0);
-    await page.waitForTimeout(25);
+    const wheelStroke = await map.evaluate(async el => {
+      const read = () => new DOMMatrix(getComputedStyle(el.querySelector('.wb-mm-world')).transform).e;
+      const following = () => el.querySelector('.wb-mm-follow').getAttribute('aria-pressed') === 'true';
+      let held = read(), steps = 0;
+      while (following() && steps < 200) {
+        held = read(); steps++;
+        el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 20 }));
+        await new Promise(resolve => requestAnimationFrame(resolve));
+      }
+      return { held, released: read(), steps };
+    });
+    assert.ok(wheelStroke.steps > 60 && wheelStroke.steps < 200, 'corrected input still requires a deliberately long continuous stroke');
+    assert.ok(Math.abs(wheelStroke.held-originCamera.x) > 145, 'view keeps bending across a long corrected stroke');
     assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'continuous net wheel motion releases');
-    assert.ok(Math.abs((await camera()).x - wheelHeld.x) < 3, 'wheel release is continuous');
+    assert.ok(Math.abs(wheelStroke.released-wheelStroke.held) < 8, `wheel release is continuous: ${JSON.stringify(wheelStroke)}`);
     await enable();
     const softPinch = await wheel(0, -20, { ctrlKey: true });
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'small ctrl-wheel pinch stays magnetic');
@@ -1483,6 +1490,54 @@ test('RUN follows executing TASK and PLAN context with resistant gestures, refre
   } finally { await page.close(); }
 });
 
+test('trackpad acceleration stays attached, direct input has no extra easing, and momentum cannot stretch or replay the return', { timeout: 30000 }, async () => {
+  const { page, errors } = await openPage();
+  try {
+    await page.mouse.move(1400, 30);
+    const traces = await page.locator('.wb-run-mindmap').evaluate(async el => {
+      const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+      const frames = async count => { for (let i = 0; i < count; i++) await frame(); };
+      const read = () => { const m = new DOMMatrix(getComputedStyle(el.querySelector('.wb-mm-world')).transform); return m.e; };
+      const toggle = el.querySelector('.wb-mm-follow');
+      const following = () => toggle.getAttribute('aria-pressed') === 'true';
+      const wheel = (deltaX, momentum) => {
+        const r = el.getBoundingClientRect();
+        const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX, clientX: r.x+r.width/2, clientY: r.y+40 });
+        Object.defineProperty(event, 'momentum', { value: momentum });
+        el.dispatchEvent(event);
+      };
+      const reset = async () => { if (following()) toggle.click(); toggle.click(); await frames(35); };
+      const result = [];
+      for (const native of [true, false]) {
+        await reset(); const origin = read();
+        const direct = native ? false : undefined, momentum = native ? true : undefined;
+        wheel(120, direct); await frame(); const immediate = read();
+        await frames(4); const later = read();
+        await reset();
+        for (const delta of [12, 40, 100, 200, 260, 180]) { wheel(delta, direct); await frame(); }
+        const peak = Math.abs(read()-origin), attached = following(), tail = [];
+        for (const delta of [140, 110, 80, 55, 34, 21, 13, 8, 5, 3, 2, 1, .5, .25, .1, .05]) {
+          wheel(delta, momentum); await frame(); tail.push(Math.abs(read()-origin));
+        }
+        const before = read(); wheel(-120, direct); await frame(); const after = read();
+        result.push({ native, immediate: immediate-origin, later: later-origin, peak, attached, tail, regrab: after-before, following: following() });
+      }
+      return result;
+    });
+    for (const trace of traces) {
+      const detail = JSON.stringify(trace);
+      assert.ok(Math.abs(trace.immediate) > 2, `direct input moves on the next frame: ${detail}`);
+      assert.ok(Math.abs(trace.later-trace.immediate) < .2, `no second easing stretches direct input: ${detail}`);
+      assert.ok(trace.peak > 12 && trace.peak < 55, `accelerated spike is compressed: ${detail}`);
+      assert.equal(trace.attached, true, detail);
+      assert.ok(trace.tail.at(-1) < trace.peak*.4, `return progresses while momentum is still arriving: ${detail}`);
+      assert.ok(trace.regrab > 2 && trace.regrab < 18, `new input starts at the visible return position across frame cadences: ${detail}`);
+      assert.equal(trace.following, true, `momentum cannot release following: ${detail}`);
+    }
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test('same RUN refresh preserves sustained pointer, trackpad and native pinch gestures', { timeout: 30000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' });
   let overview;
@@ -1518,7 +1573,9 @@ test('same RUN refresh preserves sustained pointer, trackpad and native pinch ge
       pointer('pointerup', x + 250); await enable();
       wheel(700); await frame(); const wheelHeld = read();
       await refresh(); const wheelAfterRefresh = read();
-      wheel(600); await frame(); const wheelReleased = !following();
+      wheel(600); await frame();
+      for (let i = 0; i < 80 && following(); i++) { wheel(100); await frame(); }
+      const wheelReleased = !following();
       await enable();
       native('gesturestart', 1); native('gesturechange', 1.2); await frame();
       await refresh(); native('gesturechange', 1.7); await frame(); const nativeReleased = !following();
@@ -1584,7 +1641,7 @@ test('follow return settles smoothly and regrabbing or lifting one pinch finger 
       pointer('pointerdown', 92, x); await frame(); const restart = read();
       pointer('pointermove', 92, x + 15); await frame(); const continued = read();
       pointer('pointerup', 92, x + 15); const settled = await steady();
-      wheel(600);
+      wheel(600); await frame(); wheel(600);
       let wheelReturning = read();
       for (let index = 0; index < 120; index++) {
         await frame(); const next = read();
@@ -1594,6 +1651,7 @@ test('follow return settles smoothly and regrabbing or lifting one pinch finger 
         if (index === 119) throw new Error('Wheel did not begin returning');
       }
       wheel(15); await frame(); const wheelRestart = read();
+      await new Promise(resolve => setTimeout(resolve, 220)); // The direct packet has no physical end event; wait for idle return.
       const wheelSettled = await steady();
       pointer('pointerdown', 93, x - 50); pointer('pointerdown', 94, x + 50);
       pointer('pointermove', 94, x + 60); await frames(2); const pinchHeld = read();

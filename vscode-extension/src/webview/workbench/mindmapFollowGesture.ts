@@ -24,13 +24,41 @@ export function mindmapFollowZoom(logScale: number) {
   return { factor: Math.exp(Math.max(-20, Math.min(20, offset.x))), released: offset.released };
 }
 
-export type MindmapFollowWheel = { x: number; y: number; time: number };
+export type MindmapFollowWheel = {
+  x: number; y: number; time: number;
+  pan?: { dx: number; dy: number; speed: number; peak: number; slowing: number; momentum: boolean };
+};
 /** Net movement within one continuous burst; idle gaps never accumulate intent. */
 export function mindmapFollowWheel(previous: MindmapFollowWheel | undefined, x: number, y: number, time: number) {
   const continuous = previous && time >= previous.time && time - previous.time < MINDMAP_FOLLOW_WHEEL_IDLE;
   const timestamp = Number.isFinite(time) ? time : 0;
   return { x: finite((continuous ? previous.x : 0) + finite(x)), y: finite((continuous ? previous.y : 0) + finite(y)),
     time: timestamp };
+}
+
+/** Pixel wheel deltas already contain OS acceleration. Compress speed without adding input latency. */
+export function mindmapFollowTrackpad(previous: MindmapFollowWheel | undefined, x: number, y: number, time: number, momentum?: boolean): MindmapFollowWheel {
+  x = finite(x); y = finite(y);
+  const timestamp = Number.isFinite(time) ? time : 0;
+  const continuous = previous && timestamp >= previous.time && timestamp - previous.time < MINDMAP_FOLLOW_WHEEL_IDLE;
+  const before = continuous ? previous : undefined, pan = before?.pan;
+  const elapsed = pan ? Math.max(4, Math.min(40, timestamp - before!.time)) : 1000 / 60;
+  const distance = Math.hypot(x, y), speed = distance / elapsed;
+  const redirected = !!pan && x * pan.dx + y * pan.dy < .5 * distance * Math.hypot(pan.dx, pan.dy);
+  const resumed = !!pan?.momentum && (momentum === false || (momentum === undefined
+    && ((redirected && distance > 2) || (speed > pan.speed * 1.8 && speed > .12 && distance > 2))));
+  const filtered = pan && !redirected && !resumed ? pan.speed + (speed - pan.speed) * -Math.expm1(-elapsed / 24) : speed;
+  const peak = pan && !redirected && !resumed ? Math.max(pan.peak, filtered) : filtered;
+  const slowing = pan && !redirected && !resumed && filtered < pan.speed * .98 ? pan.slowing + elapsed : 0;
+  // Prefer the platform phase. Older browsers need a conservative, sustained deceleration fallback.
+  const tail = momentum ?? (!!pan?.momentum && !resumed || peak > .4 && filtered < peak * .6 && slowing >= 40);
+  const gain = 1 / Math.sqrt(1 + (speed / 3) ** 2);
+  const base = resumed ? undefined : before;
+  return {
+    x: finite((base?.x ?? 0) + (tail ? 0 : x * gain)),
+    y: finite((base?.y ?? 0) + (tail ? 0 : y * gain)), time: timestamp,
+    pan: { dx: x, dy: y, speed: filtered, peak, slowing, momentum: tail }
+  };
 }
 
 /** Translate trackpad travel into a long, soft elastic stroke in screen space. */
