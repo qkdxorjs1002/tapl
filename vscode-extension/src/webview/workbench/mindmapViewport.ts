@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapFollowDrag } from './mindmapCamera';
+import { constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapFollowDrag, mindmapSpringCamera } from './mindmapCamera';
 import type { MindmapBounds, MindmapCamera } from './mindmapCamera';
+import {
+  mindmapFollowPan, mindmapFollowZoom, mindmapFollowWheel, mindmapFollowWheelResponse, mindmapWheelDelta,
+  MINDMAP_FOLLOW_WHEEL_IDLE
+} from './mindmapFollowGesture';
+import type { MindmapFollowWheel } from './mindmapFollowGesture';
 import { mindmapConnectionGeometry } from './mindmapGeometry';
 import type { MindmapRouting } from './mindmapGeometry';
 import {
@@ -24,6 +29,18 @@ export type MindmapViewportGraph = {
 export type MindmapViewportControls = { fit: () => void; zoom: (factor: number) => void; toggleFollow: () => void };
 type Camera = MindmapCamera;
 type Point = { x: number; y: number };
+type ElasticDrag = { origin: Point; base: Camera };
+type ElasticZoom = { base: Camera; point: Point; logScale: number; x: number; y: number };
+type ReturnMotion = { velocity: Camera; time: number };
+type ViewportInteraction = {
+  key: string; tracking: boolean; target: Camera; camera: Camera; velocity: Camera; frameTime?: number;
+  returnMotion?: ReturnMotion; pointerInside: boolean; pointer: Point; lastPointer: Point;
+  gestureScale: number; gestureActive: boolean; dragged: boolean; lastNativeGesture: number;
+  touches: Set<number>; pointers: Map<number, Point>; elastic?: ElasticDrag; elasticZoom?: ElasticZoom;
+  wheelIntent?: MindmapFollowWheel; wheelBase?: Camera; wheelKind?: 'pan' | 'zoom';
+  lastWheelTime: number;
+  anchor?: Point; pinch?: { distance: number; center: Point };
+};
 const cameras = new Map<string, Camera>();
 // Preferences survive record navigation, but a webview reload starts active RUNs following again.
 const followPreferences = new Map<string, boolean>();
@@ -45,6 +62,7 @@ export function useMindmapViewport({
   const hostRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<MindmapViewportControls>();
+  const interactionRef = useRef<ViewportInteraction>();
   const suppressClickRef = useRef(0);
   const [, updateFollow] = useState(0);
   const following = follow !== undefined && (followPreferences.get(cameraKey) ?? true);
@@ -72,24 +90,36 @@ export function useMindmapViewport({
     if (!host || !canvas) return;
     let bounds = host.getBoundingClientRect();
     let tracking = follow !== undefined && (followPreferences.get(cameraKey) ?? true);
-    let target: Camera = cameras.get(cameraKey) ? { ...cameras.get(cameraKey)! } : { x: 0, y: 0, zoom: 1 };
-    if (!tracking) target = constrainMindmapCamera(target, graph.bounds, bounds);
-    let camera = { ...target };
+    const saved = interactionRef.current;
+    // Data refreshes rebuild graph caches, not the user's ongoing interaction.
+    const resume = follow !== undefined && saved?.key === cameraKey && saved.tracking === tracking ? saved : undefined;
+    let target: Camera = { ...(resume?.target ?? cameras.get(cameraKey) ?? { x: 0, y: 0, zoom: 1 }) };
+    if (!tracking && !(resume?.pointers.size || resume?.gestureActive || (resume && performance.now() - resume.lastWheelTime < MINDMAP_FOLLOW_WHEEL_IDLE)))
+      target = constrainMindmapCamera(target, graph.bounds, bounds);
+    let camera = { ...(resume?.camera ?? target) };
+    let cameraVelocity: Camera = { ...(resume?.velocity ?? { x: 0, y: 0, zoom: 0 }) }, previousFrameTime = resume?.frameTime;
+    let returnMotion: ReturnMotion | undefined = resume?.returnMotion;
     let raf = 0,
       ambientTimer = 0,
       disposed = false,
       onScreen = true,
-      pointerInside = false;
-    let pointer: Point = { x: bounds.width / 2, y: bounds.height / 2 };
-    let lastPointer = { ...pointer };
-    let gestureScale = 1,
-      gestureActive = false,
-      dragged = false,
-      lastNativeGesture = 0;
-    const touchPointers = new Set<number>();
-    const pointers = new Map<number, Point>();
-    let elastic: { origin: Point; base: Camera } | undefined;
-    let anchor: Point | undefined, pinch: { distance: number; center: Point } | undefined;
+      pointerInside = resume?.pointerInside ?? false;
+    let pointer: Point = resume?.pointer ?? { x: bounds.width / 2, y: bounds.height / 2 };
+    let lastPointer = { ...(resume?.lastPointer ?? pointer) };
+    let gestureScale = resume?.gestureScale ?? 1,
+      gestureActive = resume?.gestureActive ?? false,
+      dragged = resume?.dragged ?? false,
+      lastNativeGesture = resume?.lastNativeGesture ?? 0;
+    const touchPointers = new Set(resume?.touches);
+    const pointers = new Map(resume?.pointers);
+    let elastic: ElasticDrag | undefined = resume?.elastic;
+    let elasticZoom: ElasticZoom | undefined = resume?.elasticZoom;
+    let wheelIntent = resume?.wheelIntent, wheelBase = resume?.wheelBase;
+    let wheelKind = resume?.wheelKind, wheelTimer = 0;
+    let lastWheelTime = resume?.lastWheelTime ?? -Infinity;
+    let anchor = resume?.anchor, pinch = resume?.pinch;
+    host.classList.toggle('wb-mm-dragging', pointers.size > 0 && dragged);
+    host.classList.toggle('wb-mm-pointer-inside', pointerInside);
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let reduced = motion.matches;
     const nodeElements = Array.from(canvas.querySelectorAll<HTMLElement>('[data-mindmap-node]'));
@@ -150,13 +180,32 @@ export function useMindmapViewport({
     const tick = (time: number) => {
       raf = 0;
       if (!visible()) return;
-      const easing = reduced || pointers.size ? 1 : 0.18;
-      camera.x += (target.x - camera.x) * easing;
-      camera.y += (target.y - camera.y) * easing;
-      camera.zoom += (target.zoom - camera.zoom) * easing;
-      if (Math.abs(target.x - camera.x) < 0.05) camera.x = target.x;
-      if (Math.abs(target.y - camera.y) < 0.05) camera.y = target.y;
-      if (Math.abs(target.zoom - camera.zoom) < 0.0001) camera.zoom = target.zoom;
+      const previous = { ...camera };
+      const elapsed = previousFrameTime === undefined ? 1 / 60 : Math.max(.001, Math.min(.05, (time - previousFrameTime) / 1000));
+      previousFrameTime = time;
+      if (returnMotion && !reduced) {
+        const next = mindmapSpringCamera(camera, target, returnMotion.velocity, (time - returnMotion.time) / 1000);
+        camera = next.camera;
+        returnMotion = { velocity: next.velocity, time };
+        cameraVelocity = next.velocity;
+        if (Math.abs(camera.x - target.x) < .02 && Math.abs(camera.y - target.y) < .02
+          && Math.abs(camera.zoom - target.zoom) < .00001 && Math.abs(next.velocity.x) < .3
+          && Math.abs(next.velocity.y) < .3 && Math.abs(next.velocity.zoom) < .0001) {
+          camera = { ...target };
+          cameraVelocity = { x: 0, y: 0, zoom: 0 };
+          returnMotion = undefined;
+        }
+      } else {
+        returnMotion = undefined;
+        const easing = reduced || pointers.size ? 1 : 0.18;
+        camera.x += (target.x - camera.x) * easing;
+        camera.y += (target.y - camera.y) * easing;
+        camera.zoom += (target.zoom - camera.zoom) * easing;
+        if (Math.abs(target.x - camera.x) < 0.05) camera.x = target.x;
+        if (Math.abs(target.y - camera.y) < 0.05) camera.y = target.y;
+        if (Math.abs(target.zoom - camera.zoom) < 0.0001) camera.zoom = target.zoom;
+        for (const axis of ['x', 'y', 'zoom'] as const) cameraVelocity[axis] = (camera[axis] - previous[axis]) / elapsed;
+      }
       const cameraChanged = transform();
       let pointerChanged = false;
       for (const axis of ['x', 'y'] as const) {
@@ -170,7 +219,7 @@ export function useMindmapViewport({
       }
       decorationDirty ||= cameraChanged || pointerChanged;
       viewDirty ||= cameraChanged;
-      const cameraMoving = camera.x !== target.x || camera.y !== target.y || camera.zoom !== target.zoom;
+      const cameraMoving = !!returnMotion || camera.x !== target.x || camera.y !== target.y || camera.zoom !== target.zoom;
       const pointerMoving = lastPointer.x !== pointer.x || lastPointer.y !== pointer.y;
       // Camera and pointer light keep their native frame rate; graph decorations have a separate budget.
       if (time - lastDecoration >= MINDMAP_DECORATION_INTERVAL || reduced) {
@@ -241,6 +290,7 @@ export function useMindmapViewport({
       if (!raf && visible()) raf = requestAnimationFrame(tick);
     };
     const setTarget = (next: Camera, panning = false) => {
+      returnMotion = undefined;
       const constrained = constrainMindmapCamera(next, graph.bounds, bounds,
         panning ? Math.min(target.zoom, mindmapMinimumZoom(graph.bounds, bounds)) : undefined);
       // An outer followed TASK can start beyond the normal pan limits. Move back toward
@@ -256,10 +306,41 @@ export function useMindmapViewport({
     const followKeys = new Set(follow);
     const followedNodes = graph.nodes.filter(node => followKeys.has(node.key));
     const followTarget = () => mindmapFollowCamera(followedNodes, bounds);
-    const track = () => {
+    const track = (settle = false) => {
       target = followTarget(); // Following may center an outer leaf beyond normal pan constraints.
+      returnMotion = undefined;
+      if (settle && !reduced) {
+        const velocity: Camera = { x: 0, y: 0, zoom: 0 };
+        if (previousFrameTime !== undefined && performance.now() - previousFrameTime < 70) {
+          for (const axis of ['x', 'y', 'zoom'] as const) {
+            const limit = Math.abs(target[axis] - camera[axis]) * 4;
+            velocity[axis] = clamp(cameraVelocity[axis], -limit, limit);
+          }
+        }
+        returnMotion = { velocity, time: performance.now() };
+      }
       remember();
       wake();
+    };
+    const clearWheel = () => {
+      if (wheelTimer) window.clearTimeout(wheelTimer);
+      wheelTimer = 0;
+      wheelIntent = undefined;
+      wheelBase = undefined;
+      wheelKind = undefined;
+    };
+    const clearElastic = () => {
+      clearWheel();
+      elastic = undefined;
+      elasticZoom = undefined;
+    };
+    const scheduleWheelReturn = () => {
+      if (wheelTimer) window.clearTimeout(wheelTimer);
+      if (!wheelIntent || !tracking) return;
+      wheelTimer = window.setTimeout(() => {
+        clearElastic();
+        if (tracking) track(true);
+      }, Math.max(0, MINDMAP_FOLLOW_WHEEL_IDLE - (performance.now() - wheelIntent.time)));
     };
     const setFollowing = (enabled: boolean) => {
       if (follow === undefined || tracking === enabled) return;
@@ -269,7 +350,9 @@ export function useMindmapViewport({
       if (followPreferences.size > 24) followPreferences.delete(followPreferences.keys().next().value!);
       host.dataset.following = String(enabled);
       updateFollow(value => value + 1);
-      if (enabled) { elastic = undefined; track(); }
+      clearElastic();
+      returnMotion = undefined;
+      if (enabled) track();
     };
     const manual = () => setFollowing(false);
     const fit = () => {
@@ -277,15 +360,34 @@ export function useMindmapViewport({
       setTarget({ x: 0, y: 0, zoom });
     };
     const zoomAt = (factor: number, point: Point) => {
-      const zoom = clamp(target.zoom * factor, mindmapMinimumZoom(graph.bounds, bounds), 2.8),
+      const minimum = mindmapMinimumZoom(graph.bounds, bounds);
+      const zoom = clamp(target.zoom * factor, follow === undefined ? minimum : Math.min(target.zoom, minimum), 2.8),
         ratio = zoom / target.zoom;
-      setTarget({ x: point.x - (point.x - target.x) * ratio, y: point.y - (point.y - target.y) * ratio, zoom });
+      setTarget({ x: point.x - (point.x - target.x) * ratio, y: point.y - (point.y - target.y) * ratio, zoom },
+        follow !== undefined);
     };
     const local = (x: number, y: number) => ({
-      x: x - bounds.left - bounds.width / 2,
-      y: y - bounds.top - bounds.height / 2
+      x: Number.isFinite(x) ? x - bounds.left - bounds.width / 2 : 0,
+      y: Number.isFinite(y) ? y - bounds.top - bounds.height / 2 : 0
     });
     const center = () => ({ x: 0, y: 0 });
+    const beginElasticZoom = (point: Point): ElasticZoom => ({ base: { ...target }, point, logScale: 0, x: 0, y: 0 });
+    const applyElasticZoom = (state: ElasticZoom, wheelResponse?: { factor: number; released: boolean }) => {
+      const zoom = wheelResponse ?? mindmapFollowZoom(state.logScale), pan = mindmapFollowPan(state.x, state.y);
+      // A deliberate extreme pinch still obeys the manual zoom ceiling. Preserve
+      // the anchor after clamping, including followed groups below the normal floor.
+      const scale = clamp(state.base.zoom * zoom.factor,
+        Math.min(state.base.zoom, mindmapMinimumZoom(graph.bounds, bounds)), 2.8);
+      const ratio = scale / state.base.zoom;
+      target = {
+        x: state.point.x - (state.point.x - state.base.x) * ratio + pan.x,
+        y: state.point.y - (state.point.y - state.base.y) * ratio + pan.y,
+        zoom: scale
+      };
+      if (zoom.released || pan.released) manual();
+      remember();
+      wake();
+    };
     controlsRef.current = {
       fit: () => { manual(); fit(); },
       zoom: (factor) => { manual(); zoomAt(factor, center()); },
@@ -293,7 +395,15 @@ export function useMindmapViewport({
     };
     if (follow !== undefined) host.dataset.following = String(tracking);
     else delete host.dataset.following;
-    if (tracking) track();
+    const interacting = () => pointers.size > 0 || gestureActive || !!wheelIntent
+      || (!tracking && performance.now() - lastWheelTime < MINDMAP_FOLLOW_WHEEL_IDLE);
+    if (tracking) {
+      if (!interacting()) {
+        if (returnMotion) target = followTarget();
+        else track();
+      }
+      if (wheelIntent) scheduleWheelReturn();
+    }
     else if (!cameras.has(cameraKey)) {
       fit();
       camera = { ...target };
@@ -303,22 +413,49 @@ export function useMindmapViewport({
       if ((event.target as Element).closest('[data-mm-controls]')) return;
       event.preventDefault();
       if (gestureActive || Date.now() - lastNativeGesture < 140) return;
-      manual();
-      const unit = event.deltaMode === 1 ? 18 : event.deltaMode === 2 ? bounds.height : 1;
-      if (event.ctrlKey || event.metaKey)
-        zoomAt(Math.exp(-event.deltaY * unit * 0.008), local(event.clientX, event.clientY));
+      const delta = mindmapWheelDelta(event.deltaX, event.deltaY, event.deltaMode, bounds.height, event.shiftKey);
+      const kind = event.ctrlKey || event.metaKey ? 'zoom' : 'pan';
+      if (kind === 'zoom' ? !delta.y : !delta.x && !delta.y) return;
+      const now = performance.now();
+      lastWheelTime = now;
+      if (tracking) {
+        if (wheelKind !== kind || !wheelIntent || now - wheelIntent.time >= MINDMAP_FOLLOW_WHEEL_IDLE) {
+          clearWheel();
+          returnMotion = undefined;
+          target = { ...camera };
+          wheelBase = { ...target };
+          wheelKind = kind;
+          elastic = undefined;
+          elasticZoom = kind === 'zoom' ? beginElasticZoom(local(event.clientX, event.clientY)) : undefined;
+        }
+        wheelIntent = mindmapFollowWheel(wheelIntent, -delta.x, -delta.y, now);
+        const response = mindmapFollowWheelResponse(wheelIntent, kind === 'zoom');
+        if (kind === 'zoom' && elasticZoom) {
+          applyElasticZoom(elasticZoom, response);
+        } else if (wheelBase) {
+          target = { ...wheelBase, x: wheelBase.x + response.x, y: wheelBase.y + response.y };
+          if (response.released) manual();
+          remember();
+          wake();
+        }
+        if (tracking) scheduleWheelReturn();
+        return;
+      }
+      if (kind === 'zoom')
+        zoomAt(Math.exp(clamp(-delta.y * 0.008, -20, 20)), local(event.clientX, event.clientY));
       else {
-        const horizontalFallback = event.shiftKey && event.deltaX === 0;
         setTarget({
           ...target,
-          x: target.x - (horizontalFallback ? event.deltaY : event.deltaX) * unit,
-          y: target.y - (horizontalFallback ? 0 : event.deltaY) * unit
+          x: target.x - delta.x,
+          y: target.y - delta.y
         }, true);
       }
     };
     const resetGesture = () => {
-      if (elastic && tracking) track();
-      elastic = undefined;
+      const spring = elastic || elasticZoom || wheelIntent;
+      clearElastic();
+      lastWheelTime = -Infinity;
+      if (spring && tracking) track(true);
       pointers.clear();
       touchPointers.clear();
       pinch = undefined;
@@ -340,8 +477,14 @@ export function useMindmapViewport({
     };
     const down = (event: PointerEvent) => {
       host.dataset.inputMode = 'pointer';
-      if (event.button !== 0 || (event.target as Element).closest('[data-mm-controls]')) return;
+      if (event.button !== 0 || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)
+        || (event.target as Element).closest('[data-mm-controls]')) return;
       if (!pointers.size) {
+        if (tracking) {
+          clearElastic();
+          returnMotion = undefined;
+          target = { ...camera };
+        }
         dragged = false;
         camera = { ...target };
       }
@@ -350,7 +493,10 @@ export function useMindmapViewport({
       wake();
       if (event.pointerType === 'touch') touchPointers.add(event.pointerId);
       rebase();
-      if (pointers.size >= 2) { manual(); elastic = undefined; }
+      if (pointers.size >= 2) {
+        elastic = undefined;
+        if (tracking && pinch) elasticZoom = beginElasticZoom(local(pinch.center.x, pinch.center.y));
+      }
       else if (tracking) elastic = { origin: { x: event.clientX, y: event.clientY }, base: { ...target } };
       // Capture on the original button so a stationary tap keeps normal record navigation.
       const element = event.target instanceof Element ? event.target : host;
@@ -362,6 +508,7 @@ export function useMindmapViewport({
       if (!(event.target as Element).closest('button,[data-mindmap-node]')) host.focus({ preventScroll: true });
     };
     const move = (event: PointerEvent) => {
+      if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
       if (event.target instanceof Node && host.contains(event.target)) {
         if (!pointerInside) {
           decorationDirty = true;
@@ -383,12 +530,19 @@ export function useMindmapViewport({
           distance: Math.max(1, Math.hypot(values[1].x - values[0].x, values[1].y - values[0].y)),
           center: { x: (values[0].x + values[1].x) / 2, y: (values[0].y + values[1].y) / 2 }
         };
-        zoomAt(current.distance / pinch.distance, local(pinch.center.x, pinch.center.y));
-        setTarget({
-          ...target,
-          x: target.x + current.center.x - pinch.center.x,
-          y: target.y + current.center.y - pinch.center.y
-        });
+        if (tracking && elasticZoom) {
+          elasticZoom.logScale += Math.log(current.distance / pinch.distance);
+          elasticZoom.x += current.center.x - pinch.center.x;
+          elasticZoom.y += current.center.y - pinch.center.y;
+          applyElasticZoom(elasticZoom);
+        } else {
+          zoomAt(current.distance / pinch.distance, local(pinch.center.x, pinch.center.y));
+          setTarget({
+            ...target,
+            x: target.x + current.center.x - pinch.center.x,
+            y: target.y + current.center.y - pinch.center.y
+          }, follow !== undefined);
+        }
         pinch = current;
       } else if (elastic && tracking) {
         const offset = mindmapFollowDrag(next.x - elastic.origin.x, next.y - elastic.origin.y);
@@ -407,14 +561,17 @@ export function useMindmapViewport({
     };
     const up = (event: PointerEvent) => {
       if (!pointers.has(event.pointerId)) return;
-      if (elastic && tracking) track();
-      elastic = undefined;
+      const spring = elastic || elasticZoom;
       pointers.delete(event.pointerId);
+      if (spring && tracking && !pointers.size) track(true);
+      clearElastic();
       decorationDirty = true;
       wake();
       touchPointers.delete(event.pointerId);
       if (dragged) suppressClickRef.current = Date.now() + 450;
       rebase(); // Pinch → one-finger drag starts at the remaining finger, with no jump.
+      if (tracking && anchor) elastic = { origin: { ...anchor }, base: { ...target } };
+      else if (tracking && pinch) elasticZoom = beginElasticZoom(local(pinch.center.x, pinch.center.y));
       if (!pointers.size) host.classList.remove('wb-mm-dragging');
     };
     const leave = () => {
@@ -465,11 +622,14 @@ export function useMindmapViewport({
     const gestureStart = (event: Event) => {
       event.preventDefault();
       if (touchPointers.size >= 2) return;
-      manual();
-      elastic = undefined;
+      if (tracking) {
+        clearElastic(); returnMotion = undefined; target = { ...camera };
+        elasticZoom = beginElasticZoom(center());
+      }
       gestureActive = true;
       lastNativeGesture = Date.now();
-      gestureScale = (event as Gesture).scale || 1;
+      const scale = (event as Gesture).scale;
+      gestureScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
     };
     const gestureChange = (event: Event) => {
       event.preventDefault();
@@ -480,16 +640,24 @@ export function useMindmapViewport({
         Number.isFinite(value.clientX) && Number.isFinite(value.clientY)
           ? local(value.clientX, value.clientY)
           : center();
-      const scale = value.scale || 1;
-      zoomAt(scale / gestureScale, point);
+      const scale = value.scale;
+      if (!Number.isFinite(scale) || scale <= 0) return;
+      if (tracking && elasticZoom) {
+        if (!elasticZoom.logScale) elasticZoom.point = point;
+        elasticZoom.logScale += Math.log(scale / gestureScale);
+        applyElasticZoom(elasticZoom);
+      } else zoomAt(scale / gestureScale, point);
       gestureScale = scale;
     };
     const gestureEnd = (event: Event) => {
       event.preventDefault();
+      if (!gestureActive) return;
       if (gestureActive) lastNativeGesture = Date.now();
       gestureActive = false;
+      if (elasticZoom && tracking) { clearElastic(); track(true); }
     };
     const suspend = () => {
+      if (disposed) return;
       resetGesture();
       leave();
       if (raf) cancelAnimationFrame(raf);
@@ -510,11 +678,18 @@ export function useMindmapViewport({
     };
     host.dataset.reducedMotion = String(reduced);
     const resize = new ResizeObserver(() => {
-      bounds = host.getBoundingClientRect();
+      if (disposed) return;
+      const next = host.getBoundingClientRect();
+      const changed = Math.abs(next.width - bounds.width) > .1 || Math.abs(next.height - bounds.height) > .1;
+      bounds = next;
+      if (!changed) return;
       viewDirty = true;
       decorationDirty = true;
-      if (tracking) { elastic = undefined; track(); }
-      else setTarget(target);
+      if (tracking && !interacting()) {
+        if (returnMotion) { target = followTarget(); remember(); wake(); }
+        else track();
+      } else if (!interacting()) setTarget(target);
+      else wake();
     });
     resize.observe(host);
     const intersection =
@@ -542,14 +717,24 @@ export function useMindmapViewport({
     host.addEventListener('gesturestart', gestureStart, { passive: false });
     host.addEventListener('gesturechange', gestureChange, { passive: false });
     host.addEventListener('gestureend', gestureEnd, { passive: false });
+    host.addEventListener('gesturecancel', gestureEnd, { passive: false });
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('blur', suspend);
     motion.addEventListener('change', motionChange);
     wake();
     return () => {
       remember();
+      interactionRef.current = {
+        key: cameraKey, tracking, target: { ...target }, camera: { ...camera }, velocity: { ...cameraVelocity }, frameTime: previousFrameTime,
+        returnMotion, pointerInside, pointer: { ...pointer }, lastPointer: { ...lastPointer },
+        gestureScale, gestureActive, dragged, lastNativeGesture,
+        touches: new Set(touchPointers), pointers: new Map(pointers), elastic, elasticZoom,
+        wheelIntent, wheelBase, wheelKind, lastWheelTime, anchor, pinch
+      };
       disposed = true;
-      suspend();
+      if (raf) cancelAnimationFrame(raf);
+      if (ambientTimer) window.clearTimeout(ambientTimer);
+      if (wheelTimer) window.clearTimeout(wheelTimer);
       for (const index of pulseIndices) hidePulse(index);
       controlsRef.current = undefined;
       resize.disconnect();
@@ -567,6 +752,7 @@ export function useMindmapViewport({
       host.removeEventListener('gesturestart', gestureStart);
       host.removeEventListener('gesturechange', gestureChange);
       host.removeEventListener('gestureend', gestureEnd);
+      host.removeEventListener('gesturecancel', gestureEnd);
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('blur', suspend);
       motion.removeEventListener('change', motionChange);

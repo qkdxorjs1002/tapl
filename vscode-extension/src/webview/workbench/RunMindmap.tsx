@@ -5,6 +5,7 @@ import type { TaplItem, TaplRunSnapshot, TaplWorkflowRun } from '../types';
 import { Icon } from './Icon';
 import { buildRunMindmap, type MindmapNode } from './mindmap';
 import { useMindmapViewport } from './mindmapViewport';
+import { mindmapRunFollowKeys } from './mindmapCamera';
 import { MindmapEdge } from './MindmapEdges';
 import { buildMindmapRelationIndex, relatedMindmapNodes } from './mindmapRelations';
 import './run-mindmap.css';
@@ -32,9 +33,7 @@ export function RunMindmap({
   const { t, status } = useI18n();
   const graph = useMemo(() => buildRunMindmap(snapshot), [snapshot]);
   const runKey = JSON.stringify([snapshot.run.source_db ?? '', snapshot.run.id]);
-  const follow = useMemo(() => snapshot.run.status === 'active'
-    ? graph.nodes.filter(node => node.kind === 'task' && node.status === 'In Progress').map(node => node.key)
-    : undefined, [graph, snapshot.run.status]);
+  const follow = useMemo(() => mindmapRunFollowKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
   const [active, setActive] = useState<string>();
   const relations = useMemo(() => buildMindmapRelationIndex(graph, 'node-parent'), [graph]);
   const related = useMemo(() => relatedMindmapNodes(relations, active), [active, relations]);

@@ -9,7 +9,7 @@ const output = buildSync({
 }).outputFiles[0].text;
 const compiled = { exports: {} };
 new Function('module', 'exports', output)(compiled, compiled.exports);
-const { buildRunMindmap, constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapFollowDrag, MINDMAP_FOLLOW_DRAG_THRESHOLD, MINDMAP_FOLLOW_DRAG_RESISTANCE } = compiled.exports;
+const { buildRunMindmap, constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapRunFollowKeys, mindmapFollowDrag, mindmapSpringCamera, MINDMAP_FOLLOW_DRAG_THRESHOLD, MINDMAP_FOLLOW_DRAG_RESISTANCE } = compiled.exports;
 const run = { id: 'run-1', source_db: 'main.sqlite3', request_summary: 'The actual user request', status: 'active' };
 const snapshot = (plans = [], tasks = [], selected = run) => ({
   run: selected, plans, tasks, findings: [], task_counts: { Completed: 900 },
@@ -221,12 +221,74 @@ test('follow camera centers TASK boundaries including outer leaves and fits conc
 });
 
 test('follow magnet uses a screen-space threshold and a continuous release into free pan', () => {
-  assert.equal(MINDMAP_FOLLOW_DRAG_THRESHOLD, 24);
-  assert.equal(MINDMAP_FOLLOW_DRAG_RESISTANCE, .18);
+  assert.equal(MINDMAP_FOLLOW_DRAG_THRESHOLD, 220);
+  assert.equal(MINDMAP_FOLLOW_DRAG_RESISTANCE, .6);
   assert.deepEqual(mindmapFollowDrag(0, 0), { x: 0, y: 0, released: false });
-  assert.deepEqual(mindmapFollowDrag(12, -16), { x: 12 * .18, y: -16 * .18, released: false });
-  const boundary = mindmapFollowDrag(24, 0), released = mindmapFollowDrag(24.001, 0);
+  const small = mindmapFollowDrag(12, -16);
+  assert.equal(small.released, false);
+  assert.ok(Math.hypot(small.x, small.y) > 8 && Math.hypot(small.x, small.y) < 12, 'small drag bends softly');
+  assert.ok(Math.abs(small.x / 12 - small.y / -16) < 1e-8, 'radial resistance preserves direction');
+  const boundary = mindmapFollowDrag(220, 0), released = mindmapFollowDrag(220.001, 0);
   assert.equal(boundary.released, false); assert.equal(released.released, true);
   assert.ok(Math.abs(boundary.x - released.x) < .002, 'release has no camera jump');
-  assert.ok(Math.abs(mindmapFollowDrag(100, 0).x - (100 - 24 * .82)) < 1e-8);
+  assert.ok(Math.abs(mindmapFollowDrag(300, 0).x - boundary.x - 80) < 1e-8);
+});
+
+
+test('follow targets pair executing TASKs only with resolved source-safe parent PLANs', () => {
+  const local = plan(1), idle = plan(2, { status: 'In Progress' });
+  const active = task(1, { status: 'In Progress', spec_id: local.stable_id });
+  const orphan = task(2, { status: 'In Progress', spec_id: 'missing' });
+  const graph = buildRunMindmap(snapshot([local, idle, plan(3, { source_db: 'peer.sqlite3' })], [active, orphan]));
+  assert.deepEqual(new Set(mindmapRunFollowKeys(graph.nodes, 'active')),
+    new Set([nodeFor(graph, active).key, nodeFor(graph, orphan).key, nodeFor(graph, local).key]));
+  const ambiguous = buildRunMindmap(snapshot([local, plan(8, { stable_id: local.stable_id })], [active]));
+  assert.deepEqual(mindmapRunFollowKeys(ambiguous.nodes, 'active'), [nodeFor(ambiguous, active).key]);
+  const foreign = buildRunMindmap(snapshot([plan(1, { source_db: 'peer.sqlite3' })], [active]));
+  assert.deepEqual(mindmapRunFollowKeys(foreign.nodes, 'active'), [nodeFor(foreign, active).key]);
+  const onlyPlan = buildRunMindmap(snapshot([idle], [task(3)]));
+  assert.deepEqual(mindmapRunFollowKeys(onlyPlan.nodes, 'active'), [nodeFor(onlyPlan, idle).key]);
+  assert.deepEqual(mindmapRunFollowKeys(buildRunMindmap(snapshot([local])).nodes, 'active'), []);
+  for (const status of ['completed', 'archived', 'queued']) assert.equal(mindmapRunFollowKeys(graph.nodes, status), undefined);
+});
+
+test('automatic framing enlarges readable PLAN/TASK context and fits short or narrow views', () => {
+  const graph = buildRunMindmap(snapshot([plan(1)], [task(1, { status: 'In Progress', spec_id: 'PLAN-1' })]));
+  const keys = new Set(mindmapRunFollowKeys(graph.nodes, 'active'));
+  const nodes = graph.nodes.filter(node => keys.has(node.key));
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 740 }, { width: 390, height: 260 }, { width: 240, height: 180 }]) {
+    const camera = mindmapFollowCamera(nodes, viewport);
+    assert.ok(camera.zoom > 0 && camera.zoom <= 1.6);
+    if (viewport.width === 1440) assert.equal(camera.zoom, 1.6, 'combined pair can zoom in beyond the former normal zoom');
+    for (const node of nodes) {
+      const x = node.x * camera.zoom + camera.x, y = node.y * camera.zoom + camera.y;
+      assert.ok(Math.abs(x) + node.width * camera.zoom / 2 <= viewport.width / 2 - 15);
+      assert.ok(Math.abs(y) + node.height * camera.zoom / 2 <= viewport.height / 2 - 23);
+    }
+  }
+});
+
+test('return spring starts gently, rebounds slightly, settles continuously and agrees across refresh rates', () => {
+  const initial = { x: 100, y: -60, zoom: 1.8 }, target = { x: 0, y: 0, zoom: 1.6 };
+  const first = mindmapSpringCamera(initial, target, { x: 0, y: 0, zoom: 0 }, 1 / 60);
+  assert.ok(first.camera.x > 90 && first.camera.x < 100, 'quick release starts continuously instead of jumping to its target');
+  const results = [];
+  for (const hz of [30, 60, 120]) {
+    let camera = initial, velocity = { x: 0, y: 0, zoom: 0 }, minimum = camera.x;
+    for (let frame = 0; frame < hz; frame++) {
+      ({ camera, velocity } = mindmapSpringCamera(camera, target, velocity, 1 / hz));
+      minimum = Math.min(minimum, camera.x);
+    }
+    assert.ok(minimum < -7 && minimum > -12, 'a brief rebound feels springy without a large bounce');
+    assert.ok(Math.abs(camera.x) < .01 && Math.abs(camera.zoom - target.zoom) < .0001);
+    assert.ok(Math.abs(velocity.x) < .1, 'motion is already imperceptible before the final snap threshold');
+    results.push(camera);
+  }
+  for (const result of results) assert.ok(Math.abs(result.x - results[0].x) < 1e-10);
+  assert.deepEqual(mindmapSpringCamera(initial, target, first.velocity, 0).camera, initial);
+  let camera = initial, velocity = { x: 0, y: 0, zoom: 0 };
+  for (let frame = 0; frame < 120; frame++) {
+    ({ camera, velocity } = mindmapSpringCamera(camera, { ...target, zoom: .001 }, velocity, 1 / 60));
+    assert.ok(Number.isFinite(camera.zoom) && camera.zoom > 0, 'large live zoom retargets stay positive through the rebound');
+  }
 });

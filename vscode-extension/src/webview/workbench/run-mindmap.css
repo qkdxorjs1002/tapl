@@ -119,6 +119,7 @@
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
+  transition: stroke 0.2s, stroke-width 0.2s, stroke-opacity 0.2s;
 }
 .wb-mm-tube-channel {
   stroke: color-mix(in srgb, var(--mm-bg) 80%, var(--mm-progress));
@@ -160,9 +161,35 @@
   stroke-dasharray: 4 196;
   stroke-dashoffset: calc(4 - var(--mm-flow-progress, 0));
 }
+.wb-mm-edge-running.wb-mm-edge-active {
+  --mm-progress: var(--mm-accent);
+  --mm-flow-core: color-mix(in srgb, var(--mm-accent) 12%, #fff);
+}
+.wb-mm-edge-running.wb-mm-edge-active .wb-mm-edge {
+  stroke: var(--mm-accent);
+  stroke-width: 5.2;
+  stroke-opacity: 0.95;
+}
+.wb-mm-edge-running.wb-mm-edge-active .wb-mm-tube-reflection {
+  stroke-opacity: 0.55;
+}
+.wb-mm-edge-running.wb-mm-edge-active .wb-mm-flow-glow {
+  stroke-width: 10;
+  stroke-opacity: 0.26;
+}
+.wb-mm-edge-running.wb-mm-edge-active .wb-mm-flow-halo {
+  stroke-width: 6;
+  stroke-opacity: 0.62;
+}
+.wb-mm-edge-running.wb-mm-edge-active .wb-mm-flow-core {
+  stroke-width: 1.4;
+}
 html:not([data-tapl-theme]) > body:is(.vscode-high-contrast, .vscode-high-contrast-light) .wb-mm-edge-running .wb-mm-edge {
   stroke: var(--mm-line);
   stroke-opacity: 1;
+}
+html:not([data-tapl-theme]) > body:is(.vscode-high-contrast, .vscode-high-contrast-light) .wb-mm-edge-running.wb-mm-edge-active .wb-mm-edge {
+  stroke: var(--mm-accent);
 }
 html:not([data-tapl-theme]) > body:is(.vscode-high-contrast, .vscode-high-contrast-light) :is(.wb-mm-flow-glow, .wb-mm-flow-halo) {
   display: none;

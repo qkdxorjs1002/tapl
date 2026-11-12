@@ -196,7 +196,7 @@ test('settings works without an active RUN and keeps unsaved inputs through back
   } finally { await page.close(); }
 });
 
-test('glass flow follows only executing paths, stays independent of hover, and stops on status refresh', { timeout: 45000 }, async () => {
+test('glass flow follows executing paths, highlights related tubes without restarting, and stops on status refresh', { timeout: 45000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   let overview;
@@ -245,10 +245,46 @@ test('glass flow follows only executing paths, stays independent of hover, and s
       return [...group.querySelectorAll('.wb-mm-glass-path')].every(path => path.getAttribute('d') === d);
     })), 'tube and light follow the displaced curve together');
     await page.mouse.move(1400, 30); await page.waitForTimeout(700);
+    const runningTask = map.locator('g[data-flow=running][data-to*="TASK-901"]');
+    const taskButton = map.locator('[data-kind=task] button').filter({ hasText: 'Flow task 1' });
+    const tubeStyle = () => runningTask.evaluate(group => {
+      const style = selector => getComputedStyle(group.querySelector(selector));
+      return { stroke: style('.wb-mm-edge').stroke, width: parseFloat(style('.wb-mm-edge').strokeWidth),
+        glow: style('.wb-mm-flow-glow').stroke, glowWidth: parseFloat(style('.wb-mm-flow-glow').strokeWidth),
+        reflection: +style('.wb-mm-tube-reflection').strokeOpacity };
+    });
     for (const theme of ['dark', 'light']) {
       await page.evaluate(theme => document.documentElement.dataset.taplTheme = theme, theme);
       await page.waitForTimeout(300); await shot(page, `glass-flow-${theme}`);
+      const baseline = await tubeStyle();
+      const pulse = runningTask.locator('.wb-mm-flow');
+      const progress = await pulse.evaluate(node => { node.__retainedFlow = true; return node.style.getPropertyValue('--mm-flow-progress'); });
+      await taskButton.hover(); await page.waitForTimeout(300);
+      const highlighted = await tubeStyle();
+      assert.notEqual(highlighted.stroke, baseline.stroke, `${theme} running tube uses related emphasis`);
+      assert.ok(highlighted.width > baseline.width && highlighted.glowWidth > baseline.glowWidth);
+      assert.notEqual(highlighted.glow, baseline.glow, 'travelling light inherits the same emphasis');
+      assert.ok(highlighted.reflection > baseline.reflection);
+      assert.ok(await pulse.evaluate(node => node.__retainedFlow), 'emphasis retains the flowing element');
+      assert.notEqual(await pulse.evaluate(node => node.style.getPropertyValue('--mm-flow-progress')), progress, 'flow continues while highlighted');
+      assert.equal(await map.locator('g[data-flow=running]').count(), 3); assert.ok(await idlePulses());
+      assert.ok((await map.locator('g[data-flow=running][data-to*="TASK-905"]').getAttribute('class')).includes('wb-mm-edge-dim'));
+      await shot(page, `glass-flow-highlight-${theme}`);
+      await page.mouse.move(1400, 30); await page.waitForTimeout(300);
+      assert.equal((await tubeStyle()).stroke, baseline.stroke, 'leaving restores the ordinary running tube');
     }
+    for (const mode of ['vscode-high-contrast', 'vscode-high-contrast-light']) {
+      await page.evaluate(mode => {
+        delete document.documentElement.dataset.taplTheme; document.body.className = mode;
+        document.body.style.setProperty('--vscode-textLink-foreground', '#ffff00');
+      }, mode);
+      await map.focus(); await page.waitForTimeout(300); const baseline = await tubeStyle();
+      await taskButton.focus(); await page.waitForTimeout(300);
+      assert.notEqual((await tubeStyle()).stroke, baseline.stroke, `${mode} keyboard focus highlights the tube`);
+      assert.equal(await runningTask.locator('.wb-mm-flow-glow').evaluate(node => getComputedStyle(node).display), 'none');
+      await map.focus();
+    }
+    await page.evaluate(() => { document.body.className = ''; document.body.style.removeProperty('--vscode-textLink-foreground'); document.documentElement.dataset.taplTheme = 'light'; });
     await page.emulateMedia({ reducedMotion: 'reduce' }); await page.waitForTimeout(100);
     assert.ok(await map.locator('.wb-mm-flow, .wb-mm-pulse').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display === 'none')));
     const stopped = await flow.evaluate(node => node.style.getPropertyValue('--mm-flow-progress'));
@@ -1185,7 +1221,7 @@ test('initial loading retains the fixed shell', { timeout: 30000 }, async () => 
   } finally { release(); await page.close(); }
 });
 
-test('RUN follows executing TASKs with elastic drag release, refresh, resize and source-safe session preferences', { timeout: 60000 }, async () => {
+test('RUN follows executing TASK and PLAN context with resistant gestures, refresh and source-safe preferences', { timeout: 60000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   let overview;
@@ -1193,7 +1229,7 @@ test('RUN follows executing TASKs with elastic drag release, refresh, resize and
     const response = await route.fetch(), payload = await response.json();
     if (payload.view?.type === 'overview') {
       if (!overview) {
-        payload.view.status.tasks.forEach((task, index) => { task.status = index === 0 ? 'In Progress' : 'Pending'; });
+        payload.view.status.tasks.forEach((task, index, tasks) => { task.status = index === Math.floor(tasks.length / 2) ? 'In Progress' : 'Pending'; });
         overview = structuredClone(payload);
       } else if (payload.view.status.active_run?.id === overview.view.status.active_run.id) {
         payload.view.status = structuredClone(overview.view.status);
@@ -1214,10 +1250,22 @@ test('RUN follows executing TASKs with elastic drag release, refresh, resize and
   };
   const centered = () => page.waitForFunction(() => {
     const map = document.querySelector('.wb-run-mindmap'), bounds = map.getBoundingClientRect();
-    const tasks = [...map.querySelectorAll('[data-kind=task] button[data-status="In Progress"]')].map(el => el.closest('[data-kind]').getBoundingClientRect());
-    if (!tasks.length) return false;
-    const left = Math.min(...tasks.map(r => r.left)), right = Math.max(...tasks.map(r => r.right));
-    const top = Math.min(...tasks.map(r => r.top)), bottom = Math.max(...tasks.map(r => r.bottom));
+    const tasks = [...map.querySelectorAll('[data-kind=task] button[data-status="In Progress"]')].map(el => el.closest('[data-kind]'));
+    const targets = new Set(tasks);
+    if (tasks.length) {
+      const nodes = [...map.querySelectorAll('[data-mindmap-node]')];
+      for (const task of tasks) {
+        const edge = [...map.querySelectorAll('[data-from][data-to]')].find(edge => edge.dataset.to === task.dataset.mindmapNode);
+        const parent = edge && nodes.find(node => node.dataset.mindmapNode === edge.dataset.from);
+        if (parent?.dataset.kind === 'plan') targets.add(parent);
+      }
+    } else {
+      for (const plan of map.querySelectorAll('[data-kind=plan] button[data-status="In Progress"]')) targets.add(plan.closest('[data-kind]'));
+    }
+    if (!targets.size) return false;
+    const rectangles = [...targets].map(node => node.getBoundingClientRect());
+    const left = Math.min(...rectangles.map(r => r.left)), right = Math.max(...rectangles.map(r => r.right));
+    const top = Math.min(...rectangles.map(r => r.top)), bottom = Math.max(...rectangles.map(r => r.bottom));
     return Math.abs((left + right - bounds.left - bounds.right) / 2) < 1
       && Math.abs((top + bottom - bounds.top - bounds.bottom) / 2) < 1
       && left >= bounds.left && right <= bounds.right && top >= bounds.top && bottom <= bounds.bottom;
@@ -1226,6 +1274,8 @@ test('RUN follows executing TASKs with elastic drag release, refresh, resize and
   try {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(origin); await map.waitFor(); await centered();
+    await shot(page, 'run-follow-task-plan');
+    assert.ok((await camera()).z > 1, 'focused TASK and parent PLAN enlarge for readability');
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
     assert.equal(await toggle.getAttribute('aria-label'), '진행 중 TASK 추적');
     assert.equal(await toggle.getAttribute('title'), 'TASK 자동 추적 끄기');
@@ -1239,14 +1289,15 @@ test('RUN follows executing TASKs with elastic drag release, refresh, resize and
     await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + direction * 12, y + 8); await page.waitForTimeout(50);
     const resisted = await camera();
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
-    assert.ok(Math.abs(resisted.x - originCamera.x - direction * 12 * .18) < .2, 'small drag shows elastic resistance');
+    assert.ok((resisted.x - originCamera.x) * direction > 4 && (resisted.x - originCamera.x) * direction < 8,
+      'small drag visibly bends with soft resistance');
     await page.mouse.up(); await centered();
-    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + direction * 23, y); await page.waitForTimeout(40);
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + direction * 219, y); await page.waitForTimeout(40);
     const held = await camera(); assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
-    await page.mouse.move(x + direction * 25, y); await page.waitForTimeout(40);
+    await page.mouse.move(x + direction * 221, y); await page.waitForTimeout(40);
     const released = await camera(); assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
     assert.ok(Math.abs(released.x - held.x) < 3, 'crossing the magnet threshold has no jump');
-    await page.mouse.move(x + direction * 55, y); await page.waitForTimeout(40);
+    await page.mouse.move(x + direction * 251, y); await page.waitForTimeout(40);
     assert.ok(((await camera()).x - released.x) * direction > 20, 'same pointer gesture continues free pan');
     await page.mouse.up();
     await page.getByRole('tab', { name: /Second active RUN/ }).click();
@@ -1264,26 +1315,103 @@ test('RUN follows executing TASKs with elastic drag release, refresh, resize and
     await centered(); assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'single touch drag has the same resistance');
     for (const action of [
       () => map.locator('.wb-mm-camera-controls button').last().click(),
-      async () => { await page.mouse.move(x, y); await page.mouse.wheel(10, 20); },
       async () => { await map.focus(); await page.keyboard.press('ArrowRight'); },
-      () => map.locator('.wb-mm-camera-controls button').nth(1).click(),
-      () => map.evaluate(el => el.dispatchEvent(new Event('gesturestart', { bubbles: true, cancelable: true })))
+      () => map.locator('.wb-mm-camera-controls button').nth(1).click()
     ]) {
       await action(); assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'manual camera action releases tracking');
       await map.evaluate(el => el.dispatchEvent(new Event('gestureend', { bubbles: true, cancelable: true })));
       await enable();
     }
+    const wheel = (deltaX, deltaY, extra = {}) => map.evaluate((el, input) => {
+      const rect = el.getBoundingClientRect();
+      el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: rect.x + rect.width / 2,
+        clientY: rect.y + 40, ...input }));
+      return new Promise(resolve => requestAnimationFrame(() => {
+        const matrix = new DOMMatrix(getComputedStyle(el.querySelector('.wb-mm-world')).transform);
+        resolve({ x: matrix.e, y: matrix.f, z: matrix.a });
+      }));
+    }, { deltaX, deltaY, ...extra });
+    await wheel(0, 0); assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'zero wheel input is inert');
+    for (let burst = 0; burst < 3; burst++) {
+      const bent = await wheel(0, 70);
+      assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'small trackpad pan resists');
+      const travel = originCamera.y - bent.y;
+      assert.ok(travel > 8 && travel < 20, `small trackpad movement bends softly: ${JSON.stringify({ originCamera, bent })}`);
+      await centered();
+    }
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'separated gestures never accumulate intent');
+    await wheel(1199, 0); await page.waitForTimeout(25);
+    const wheelHeld = await camera();
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'long elastic stroke stays attached until its distance boundary');
+    assert.ok(Math.abs(wheelHeld.x - originCamera.x) > 150, 'view keeps bending across a long stroke');
+    await wheel(2, 0);
+    await page.waitForTimeout(25);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'continuous net wheel motion releases');
+    assert.ok(Math.abs((await camera()).x - wheelHeld.x) < 3, 'wheel release is continuous');
+    await enable();
+    const softPinch = await wheel(0, -20, { ctrlKey: true });
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'small ctrl-wheel pinch stays magnetic');
+    assert.ok(softPinch.z > originCamera.z * 1.05 && softPinch.z < originCamera.z * 1.15,
+      `small pinch bends softly: ${JSON.stringify({ originCamera, softPinch })}`);
+    await centered();
+    await wheel(0, -60, { ctrlKey: true });
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'pinch has a long elastic scale range');
+    await wheel(0, -5, { ctrlKey: true });
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'sustained ctrl-wheel pinch releases');
+    await enable();
+    const native = (type, scale) => map.evaluate((el, { type, scale }) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'scale', { value: scale }); el.dispatchEvent(event);
+    }, { type, scale });
+    await native('gesturestart', 1);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'native pinch start alone keeps follow');
+    await native('gesturechange', 1.12); await page.waitForTimeout(25);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'small native pinch resists');
+    await native('gesturechange', NaN);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'invalid native scale is ignored');
+    await native('gesturecancel', 1.12); await centered();
+    await native('gesturestart', 1); await native('gesturechange', 1e100); await page.waitForTimeout(25);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+    assert.ok((await camera()).z <= 2.8, 'huge pinch respects the zoom ceiling at release');
+    await native('gestureend', 1e100); await enable();
+    await native('gesturestart', 1); await native('gesturechange', 1e-100); await page.waitForTimeout(25);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+    assert.ok((await camera()).z >= .08, 'huge contraction respects the manual zoom floor');
+    await native('gestureend', 1e-100); await enable();
+    const touch = (type, id, offset) => map.evaluate((el, { type, id, offset }) => {
+      const rect = el.getBoundingClientRect();
+      const event = new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: id, pointerType: 'touch',
+        button: 0, clientX: rect.x + rect.width / 2 + offset, clientY: rect.y + 40 });
+      (type === 'pointerdown' ? el : window).dispatchEvent(event);
+    }, { type, id, offset });
+    await touch('pointerdown', 81, -50); await touch('pointerdown', 82, 50);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'second finger alone keeps follow');
+    await touch('pointermove', 82, 60); await page.waitForTimeout(25);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'small touch pinch resists');
+    await touch('pointercancel', 82, 60); await touch('pointermove', 81, -40);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'cancel rebases remaining finger without release');
+    await touch('pointerup', 81, -40); await centered();
+    await touch('pointerdown', 81, -50); await touch('pointerdown', 82, 50); await touch('pointermove', 82, 130);
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'deliberate touch pinch releases');
+    await touch('pointerup', 82, 130); await touch('pointerup', 81, -50); await enable();
+    // Snapshot replacement and resize must cancel pending wheel springback timers.
+    await page.waitForTimeout(150); await wheel(0, 50);
     overview.view.status.tasks.forEach((task, index, tasks) => { task.status = index === tasks.length - 1 ? 'In Progress' : 'Pending'; });
     await publish(); await centered();
     const moved = await camera(); assert.ok(Math.abs(moved.y - originCamera.y) > 100, 'snapshot follows the new executing TASK');
     overview.view.status.tasks[0].status = 'In Progress'; await publish(); await centered();
     const multiple = await camera(); assert.ok(multiple.z < moved.z, 'concurrent TASKs fit together');
-    await page.setViewportSize({ width: 390, height: 740 }); await centered();
+    await page.setViewportSize({ width: 390, height: 360 }); await centered();
+    await shot(page, 'run-follow-task-plan-short');
     assert.ok((await camera()).z <= multiple.z, 'resize recomputes the executing boundaries');
     await page.setViewportSize({ width: 1440, height: 1000 }); await centered();
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     overview.view.status.tasks[0].status = 'Pending'; await publish(); await centered();
-    overview.view.status.tasks.forEach(task => { task.status = 'Completed'; }); await publish();
+    overview.view.status.tasks.forEach(task => { task.status = 'Completed'; });
+    overview.view.status.plans.forEach((plan, index) => { plan.status = index === 0 ? 'In Progress' : 'Finalized'; });
+    await publish(); await centered();
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'PLAN-only execution remains framed');
+    overview.view.status.plans.forEach(plan => { plan.status = 'Finalized'; }); await publish();
     await page.waitForFunction(() => { const m = new DOMMatrix(getComputedStyle(document.querySelector('.wb-mm-world')).transform); return Math.abs(m.e) < .1 && Math.abs(m.f) < .1; });
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'no executing TASK returns to RUN view without disabling');
     await toggle.click();
@@ -1305,6 +1433,141 @@ test('RUN follows executing TASKs with elastic drag release, refresh, resize and
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'reload resets to following');
     await page.locator('[data-wb-focus="nav:memories"]').click(); await page.locator('.wb-memory-mindmap').waitFor();
     assert.equal(await toggle.count(), 0); assert.equal(await page.locator('.wb-memory-mindmap').getAttribute('data-following'), null);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('same RUN refresh preserves sustained pointer, trackpad and native pinch gestures', { timeout: 30000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' });
+  let overview;
+  await page.route('**/api/message', async route => {
+    const response = await route.fetch(), payload = await response.json();
+    if (payload.view?.type === 'overview') overview = structuredClone(payload);
+    await route.fulfill({ response, json: payload });
+  });
+  try {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(origin); await page.locator('.wb-run-mindmap').waitFor();
+    const trace = await page.locator('.wb-run-mindmap').evaluate(async (el, payload) => {
+      const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+      const frames = async count => { for (let index = 0; index < count; index++) await frame(); };
+      const read = () => { const m = new DOMMatrix(getComputedStyle(el.querySelector('.wb-mm-world')).transform); return { x: m.e, y: m.f, z: m.a }; };
+      const toggle = () => el.querySelector('[data-wb-focus="mindmap-follow"]');
+      const following = () => toggle().getAttribute('aria-pressed') === 'true';
+      const enable = async () => { if (!following()) toggle().click(); await frames(3); };
+      const refresh = async () => {
+        payload.view.status.tasks[0].title += ' updated';
+        window.postMessage({ ...payload, type: 'view:update' }, '*'); await frames(3);
+      };
+      const rect = el.getBoundingClientRect(), x = rect.x + rect.width / 2, y = rect.y + 100;
+      const pointer = (type, clientX) => (type === 'pointerdown' ? el : window).dispatchEvent(new PointerEvent(type,
+        { bubbles: true, cancelable: true, pointerId: 111, pointerType: 'touch', button: 0, clientX, clientY: y }));
+      const wheel = deltaX => el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX, clientX: x, clientY: y }));
+      const native = (type, scale) => { const event = new Event(type, { bubbles: true, cancelable: true }); Object.defineProperty(event, 'scale', { value: scale }); el.dispatchEvent(event); };
+      await frames(3);
+      pointer('pointerdown', x); pointer('pointermove', x + 120); await frame(); const held = read();
+      await refresh(); const afterRefresh = read();
+      pointer('pointermove', x + 180); await frame(); const continued = read();
+      pointer('pointermove', x + 250); await frame(); const pointerReleased = !following();
+      pointer('pointerup', x + 250); await enable();
+      wheel(700); await frame(); const wheelHeld = read();
+      await refresh(); const wheelAfterRefresh = read();
+      wheel(600); await frame(); const wheelReleased = !following();
+      await enable();
+      native('gesturestart', 1); native('gesturechange', 1.2); await frame();
+      await refresh(); native('gesturechange', 1.7); await frame(); const nativeReleased = !following();
+      native('gestureend', 1.7);
+      await enable(); await frames(10);
+      wheel(50); window.dispatchEvent(new Event('blur'));
+      payload.view.status.tasks.forEach((task, index, tasks) => { task.status = index === tasks.length - 1 ? 'In Progress' : 'Pending'; });
+      await refresh(); await frames(3);
+      const nodes = [...el.querySelectorAll('[data-mindmap-node]')], active = nodes.filter(node => node.dataset.kind === 'task'
+        && node.querySelector('button[data-status="In Progress"]'));
+      const targets = new Set(active);
+      for (const task of active) {
+        const edge = [...el.querySelectorAll('[data-from][data-to]')].find(edge => edge.dataset.to === task.dataset.mindmapNode);
+        const parent = edge && nodes.find(node => node.dataset.mindmapNode === edge.dataset.from);
+        if (parent?.dataset.kind === 'plan') targets.add(parent);
+      }
+      const rectangles = [...targets].map(node => node.getBoundingClientRect()), viewport = el.getBoundingClientRect();
+      const blurCenterError = Math.abs((Math.min(...rectangles.map(r => r.left)) + Math.max(...rectangles.map(r => r.right)) - viewport.left - viewport.right) / 2)
+        + Math.abs((Math.min(...rectangles.map(r => r.top)) + Math.max(...rectangles.map(r => r.bottom)) - viewport.top - viewport.bottom) / 2);
+      return { held, afterRefresh, continued, pointerReleased, wheelHeld, wheelAfterRefresh, wheelReleased, nativeReleased, blurCenterError };
+    }, overview);
+    const detail = JSON.stringify(trace);
+    assert.ok(Math.abs(trace.afterRefresh.x - trace.held.x) < .05, `refresh retains the held position: ${detail}`);
+    assert.ok(trace.continued.x - trace.held.x > 10, `same pointer continues after refresh: ${detail}`);
+    assert.equal(trace.pointerReleased, true, detail);
+    assert.ok(Math.abs(trace.wheelAfterRefresh.x - trace.wheelHeld.x) < .05, `refresh retains wheel travel: ${detail}`);
+    assert.equal(trace.wheelReleased, true, `wheel distance accumulates across refresh: ${detail}`);
+    assert.equal(trace.nativeReleased, true, `native pinch keeps its gesture baseline: ${detail}`);
+    assert.ok(trace.blurCenterError < 1, `blur clears input activity and refresh follows the latest target: ${detail}`);
+  } finally { await page.close(); }
+});
+
+test('follow return settles smoothly and regrabbing or lifting one pinch finger never snaps', { timeout: 30000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  try {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto(origin); await page.locator('.wb-run-mindmap').waitFor();
+    const trace = await page.locator('.wb-run-mindmap').evaluate(async el => {
+      const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+      const frames = async count => { for (let index = 0; index < count; index++) await frame(); };
+      const read = () => { const m = new DOMMatrix(getComputedStyle(el.querySelector('.wb-mm-world')).transform); return { x: m.e, y: m.f, z: m.a }; };
+      const steady = async () => {
+        let previous = read(), stable = 0;
+        for (let index = 0; index < 150; index++) {
+          await frame(); const next = read();
+          stable = Math.abs(next.x - previous.x) < .001 && Math.abs(next.y - previous.y) < .001 && Math.abs(next.z - previous.z) < .00001 ? stable + 1 : 0;
+          if (stable >= 3) return next;
+          previous = next;
+        }
+        throw new Error('Return camera never settled');
+      };
+      const rect = el.getBoundingClientRect(), x = rect.x + rect.width / 2, y = rect.y + 100;
+      const pointer = (type, id, clientX) => {
+        const event = new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: id, pointerType: 'touch', button: 0, clientX, clientY: y });
+        (type === 'pointerdown' ? el : window).dispatchEvent(event);
+      };
+      const wheel = deltaX => el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX, clientX: x, clientY: y }));
+      const baseline = await steady();
+      pointer('pointerdown', 91, x); pointer('pointermove', 91, x + 160); await frames(2);
+      const held = read(); pointer('pointerup', 91, x + 160); await frame(); const first = read();
+      await frames(5); const interrupted = read();
+      pointer('pointerdown', 92, x); await frame(); const restart = read();
+      pointer('pointermove', 92, x + 15); await frame(); const continued = read();
+      pointer('pointerup', 92, x + 15); const settled = await steady();
+      wheel(600);
+      let wheelReturning = read();
+      for (let index = 0; index < 120; index++) {
+        await frame(); const next = read();
+        const returning = Math.abs(next.x - baseline.x) < Math.abs(wheelReturning.x - baseline.x) - .05;
+        wheelReturning = next;
+        if (returning && Math.abs(next.x - baseline.x) > 10) break;
+        if (index === 119) throw new Error('Wheel did not begin returning');
+      }
+      wheel(15); await frame(); const wheelRestart = read();
+      const wheelSettled = await steady();
+      pointer('pointerdown', 93, x - 50); pointer('pointerdown', 94, x + 50);
+      pointer('pointermove', 94, x + 60); await frames(2); const pinchHeld = read();
+      pointer('pointerup', 94, x + 60); await frame(); const oneFinger = read();
+      pointer('pointerup', 93, x - 50); await frame(); const pinchFirst = read();
+      const pinchSettled = await steady();
+      return { baseline, held, first, interrupted, restart, continued, settled, wheelReturning, wheelRestart, wheelSettled, pinchHeld, oneFinger, pinchFirst, pinchSettled };
+    });
+    const detail = JSON.stringify(trace), distance = trace.held.x - trace.baseline.x;
+    assert.ok(distance > 40 && distance < 100, detail);
+    assert.ok(Math.abs(trace.first.x - trace.held.x) < distance * .12, `return starts gently: ${detail}`);
+    assert.ok(Math.abs(trace.restart.x - trace.interrupted.x) < .05, `regrab stays at the visible position: ${detail}`);
+    assert.ok(trace.continued.x - trace.restart.x > 3, `regrab continues bending: ${detail}`);
+    assert.ok(Math.abs(trace.settled.x - trace.baseline.x) < .1, detail);
+    assert.ok(Math.abs(trace.wheelReturning.x - trace.baseline.x) > 10, detail);
+    assert.ok(Math.abs(trace.wheelRestart.x - trace.wheelReturning.x) < 5, `wheel reentry never resets to the follow center: ${detail}`);
+    assert.ok(Math.abs(trace.wheelSettled.x - trace.baseline.x) < .1, detail);
+    assert.ok(Math.abs(trace.oneFinger.x - trace.pinchHeld.x) < .05 && Math.abs(trace.oneFinger.z - trace.pinchHeld.z) < .0001, `remaining finger keeps the view: ${detail}`);
+    assert.ok(Math.abs(trace.pinchFirst.z - trace.pinchHeld.z) < Math.abs(trace.pinchHeld.z - trace.baseline.z) * .12, `pinch return starts gently: ${detail}`);
+    assert.ok(Math.abs(trace.pinchSettled.z - trace.baseline.z) < .0001, detail);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
@@ -1355,6 +1618,8 @@ test('page motion waits for route content, ignores polling/filter/locale updates
     assert.equal(await count(), afterFilter, 'pending placeholder does not consume destination entry');
     releaseRecords(); await page.locator('.wb-search-group').first().waitFor();
     assert.equal(await count(), afterFilter + 1, 'actual response enters once');
+    await page.mouse.move(1400, 30);
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench')?.dataset.sidebarExpanded === 'false');
     await page.locator('.wb-search-group-header').first().click();
     await page.locator('.wb-search-result').first().click(); await page.locator('.wb-record-page').waitFor();
     assert.equal(await count(), afterFilter + 2, 'a record detail has its own route entry');
