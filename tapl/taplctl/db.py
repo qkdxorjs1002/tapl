@@ -3242,12 +3242,14 @@ def _status_payload(conn: sqlite3.Connection, *, run_id: str | None = None) -> d
     for task in tasks:
         task["active_execution"] = executions_by_task.get(str(task.get("stable_id") or ""))
 
-    from . import recall
+    from . import recall, run_references
     return {
         "session_id": connection_session_id(conn),
         "memory_review": recall.review_state(conn, run_id),
         "schema": get_meta(conn),
         "active_run": workflow_run_to_dict(run),
+        "references": run_references.read(conn, run_id),
+        "reference_limits": run_references.limits(),
         "active_runs": active_runs(conn),
         "queued_runs": queued,
         "approvals": {
@@ -3276,6 +3278,7 @@ def run_snapshot(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None
         state = _status_payload(conn, run_id=run_id)
         return {"run": state["active_run"], **{key: state[key] for key in (
             "plans", "tasks", "findings", "task_counts", "active_batches", "active_executions", "active_runs",
+            "references", "reference_limits",
         )}}
     finally:
         if owns_transaction:

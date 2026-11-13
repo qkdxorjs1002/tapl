@@ -235,31 +235,38 @@ test('follow magnet uses a screen-space threshold and a continuous release into 
 });
 
 
-test('follow targets pair executing TASKs only with resolved source-safe parent PLANs', () => {
+test('follow targets include RUN and pair executing TASKs only with resolved source-safe parent PLANs', () => {
   const local = plan(1), idle = plan(2, { status: 'In Progress' });
   const active = task(1, { status: 'In Progress', spec_id: local.stable_id });
   const orphan = task(2, { status: 'In Progress', spec_id: 'missing' });
   const graph = buildRunMindmap(snapshot([local, idle, plan(3, { source_db: 'peer.sqlite3' })], [active, orphan]));
   assert.deepEqual(new Set(mindmapRunFollowKeys(graph.nodes, 'active')),
-    new Set([nodeFor(graph, active).key, nodeFor(graph, orphan).key, nodeFor(graph, local).key]));
+    new Set([nodeFor(graph, active).key, nodeFor(graph, orphan).key, nodeFor(graph, local).key, rootFor(graph).key]));
   const ambiguous = buildRunMindmap(snapshot([local, plan(8, { stable_id: local.stable_id })], [active]));
-  assert.deepEqual(mindmapRunFollowKeys(ambiguous.nodes, 'active'), [nodeFor(ambiguous, active).key]);
+  assert.deepEqual(mindmapRunFollowKeys(ambiguous.nodes, 'active'), [nodeFor(ambiguous, active).key, rootFor(ambiguous).key]);
   const foreign = buildRunMindmap(snapshot([plan(1, { source_db: 'peer.sqlite3' })], [active]));
-  assert.deepEqual(mindmapRunFollowKeys(foreign.nodes, 'active'), [nodeFor(foreign, active).key]);
+  assert.deepEqual(mindmapRunFollowKeys(foreign.nodes, 'active'), [nodeFor(foreign, active).key, rootFor(foreign).key]);
   const onlyPlan = buildRunMindmap(snapshot([idle], [task(3)]));
-  assert.deepEqual(mindmapRunFollowKeys(onlyPlan.nodes, 'active'), [nodeFor(onlyPlan, idle).key]);
-  assert.deepEqual(mindmapRunFollowKeys(buildRunMindmap(snapshot([local])).nodes, 'active'), []);
+  assert.deepEqual(mindmapRunFollowKeys(onlyPlan.nodes, 'active'), [nodeFor(onlyPlan, idle).key, rootFor(onlyPlan).key]);
+  const resting = buildRunMindmap(snapshot([local]));
+  assert.deepEqual(mindmapRunFollowKeys(resting.nodes, 'active'), [rootFor(resting).key]);
+  const withReferences = buildRunMindmap({ ...snapshot([local], [active]), references: [{
+    kind: 'history', stage: 'opened', source_db: 'peer.sqlite3', target_type: 'item', run_id: 'old-run',
+    item_id: 20, stable_id: 'TASK-20', title: 'Old evidence'
+  }] });
+  assert.ok(mindmapRunFollowKeys(withReferences.nodes, 'active').every(key =>
+    withReferences.nodes.find(node => node.key === key).kind !== 'history'));
   for (const status of ['completed', 'archived', 'queued']) assert.equal(mindmapRunFollowKeys(graph.nodes, status), undefined);
 });
 
-test('automatic framing enlarges readable PLAN/TASK context and fits short or narrow views', () => {
+test('automatic framing keeps RUN and PLAN/TASK context visible in short or narrow views', () => {
   const graph = buildRunMindmap(snapshot([plan(1)], [task(1, { status: 'In Progress', spec_id: 'PLAN-1' })]));
   const keys = new Set(mindmapRunFollowKeys(graph.nodes, 'active'));
   const nodes = graph.nodes.filter(node => keys.has(node.key));
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 740 }, { width: 390, height: 260 }, { width: 240, height: 180 }]) {
     const camera = mindmapFollowCamera(nodes, viewport);
     assert.ok(camera.zoom > 0 && camera.zoom <= 1.6);
-    if (viewport.width === 1440) assert.equal(camera.zoom, 1.6, 'combined pair can zoom in beyond the former normal zoom');
+    if (viewport.width === 1440) assert.ok(camera.zoom > 1, 'RUN and executing branch retain readable enlargement');
     for (const node of nodes) {
       const x = node.x * camera.zoom + camera.x, y = node.y * camera.zoom + camera.y;
       assert.ok(Math.abs(x) + node.width * camera.zoom / 2 <= viewport.width / 2 - 15);

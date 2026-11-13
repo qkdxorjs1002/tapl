@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+from pathlib import Path
 import re
 import sqlite3
 import unicodedata
@@ -302,10 +303,17 @@ def emit_recall_once(conn, *, run_id, query, now=None, recall_reader=None):
         _budget(result)
         if not result["memories"]:
             result["status"] = "empty"
+        from . import run_references
+        source_db = Path(conn.execute("PRAGMA database_list").fetchone()[2]).name
+        references = [run_references.memory_reference(memory, "retrieved", source_db=source_db)
+                      for memory in result["memories"]]
+        references = [ref for ref in references if ref is not None
+                      and (ref["source_db"], ref["run_id"]) != (source_db, run_id)]
         _event(conn, run_id, "memory_recall_attempted", {
             "memory_ids": [m["id"] for m in result["memories"]],
             "memory_sources": [{"memory_id": m["id"], "source_db": m.get("source_db"),
                                 "source_run_id": m["source"]["run_id"]} for m in result["memories"]],
+            "references": references,
         }, now)
         return result
 

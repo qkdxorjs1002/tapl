@@ -14,6 +14,8 @@
   --mm-completed: var(--tapl-success);
   --mm-blocked: var(--tapl-error);
   --mm-pending: var(--tapl-muted);
+  --mm-memory: var(--tapl-reference-memory);
+  --mm-history: var(--tapl-reference-history);
   --mm-shadow: var(--tapl-shadow-item);
   --mm-grid: color-mix(in srgb, var(--tapl-muted) 12%, transparent);
   position: relative;
@@ -276,6 +278,74 @@ html:not([data-tapl-theme]) > body:is(.vscode-high-contrast, .vscode-high-contra
   border-radius: 15px;
   padding: 15px 17px;
   gap: 9px;
+}
+.wb-run-mindmap .wb-mm-node[data-kind='memory'],
+.wb-run-mindmap [data-reference-kind='memory'],
+.wb-run-mindmap [data-relation='memory'] {
+  --mm-reference: var(--mm-memory);
+}
+.wb-run-mindmap .wb-mm-node[data-kind='history'],
+.wb-run-mindmap [data-reference-kind='history'],
+.wb-run-mindmap [data-relation='history'],
+.wb-run-mindmap [data-relation='memory-source'] {
+  --mm-reference: var(--mm-history);
+}
+.wb-run-mindmap .wb-mm-node:is([data-kind='memory'], [data-kind='history']) .wb-mm-node-button {
+  border-color: color-mix(in srgb, var(--mm-reference) 46%, var(--mm-line));
+  background: color-mix(in srgb, var(--mm-reference) 5%, var(--mm-surface));
+}
+.wb-run-mindmap .wb-mm-node[data-reference-stage='retrieved'] .wb-mm-node-button {
+  border-style: dashed;
+}
+.wb-mm-reference-kind,
+.wb-mm-reference-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.wb-mm-reference-kind {
+  color: var(--mm-reference);
+  font: 11px/1.3 var(--tapl-font);
+  letter-spacing: normal;
+}
+.wb-mm-reference-stage {
+  font-size: 10px;
+  color: var(--mm-muted);
+}
+.wb-mm-reference-kind .wb-icon,
+.wb-mm-reference-stage .wb-icon {
+  width: 12px;
+  height: 12px;
+}
+.wb-mm-reference-origin {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mm-muted);
+  font: 10px/1.3 var(--tapl-font);
+}
+.wb-mm-reference-jump {
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 3px 7px;
+  margin: -3px 0;
+  border: 1px solid color-mix(in srgb, var(--mm-reference) 35%, var(--mm-line));
+  border-radius: 6px;
+  background: var(--mm-surface);
+}
+.wb-mm-reference-jump:hover {
+  background: color-mix(in srgb, var(--mm-reference) 8%, var(--mm-surface));
+}
+.wb-mm-reference-jump:focus-visible {
+  outline: 2px solid var(--mm-focus);
+  outline-offset: 3px;
+}
+.wb-run-mindmap [data-relation] .wb-mm-edge {
+  stroke: color-mix(in srgb, var(--mm-reference) 50%, var(--mm-line));
+}
+.wb-run-mindmap [data-relation].wb-mm-edge-active .wb-mm-edge {
+  stroke: var(--mm-reference);
 }
 .wb-mm-meta {
   display: flex;

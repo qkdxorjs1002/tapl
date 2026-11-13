@@ -69,6 +69,7 @@ export function snapshotForView(view: WebviewView): TaplRunSnapshot | undefined 
       task_counts: status.task_counts,
       active_batches: status.active_batches ?? [],
       active_executions: status.active_executions ?? [],
+      references: status.references,
       readonly: status.active_run.writable === false,
       active_runs: status.active_runs
     };

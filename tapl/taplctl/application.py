@@ -14,7 +14,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
 
-from . import clients, config, config_editor, context as tapl_context, db, history, prompt, recall as memory_store, recommendations, sessions, validation
+from . import clients, config, config_editor, context as tapl_context, db, history, prompt, recall as memory_store, recommendations, run_references, sessions, validation
 from .prompt import authoring_policy_update
 
 
@@ -137,6 +137,8 @@ class WorkflowApplication:
             "viewer_capabilities": {"associativeMemory": True, "discardRun": True},
             "memory_review": state["memory_review"] if settings.recall.enabled else {"status": "disabled"},
             "active_run": state.get("active_run"),
+            "references": state.get("references") or [],
+            "reference_limits": run_references.limits(),
             "task_counts": state.get("task_counts") or {},
             "incomplete_tasks": state.get("incomplete_tasks", 0),
             "counts": {
@@ -385,13 +387,19 @@ class WorkflowApplication:
             return tapl_context.build_context(conn, event=event, settings=self._settings())
 
     def search_history(self, query: str, *, limit: int | None = None) -> dict[str, Any]:
-        return self._history().search(query, limit=limit)
+        return self._reference_read("search_history", lambda: self._history().search(query, limit=limit))
 
     def recall(self, query: str = "", *, limit: int = 3, offset: int = 0) -> dict[str, Any]:
-        return self._history().recall(query, limit=limit, offset=offset)
+        return self._reference_read("recall", lambda: self._history().recall(query, limit=limit, offset=offset))
 
     def get_memory(self, memory_id: str, *, source_db: str | None = None) -> dict[str, Any]:
-        return self._history().get_memory(memory_id, source_db=source_db)
+        return self._reference_read("get_memory", lambda: self._history().get_memory(memory_id, source_db=source_db))
+
+    def _reference_read(self, operation: str, reader: Any) -> dict[str, Any]:
+        captured = run_references.capture(self)
+        result = reader()
+        run_references.record(captured, operation, result)
+        return result
 
     def update_memory(
         self, memory_id: str, *, expected_revision: int,
@@ -452,21 +460,21 @@ class WorkflowApplication:
 
     def get_item(self, item_id: int, *, source_db: str | None = None) -> dict[str, Any]:
         try:
-            return self._history().get_item(item_id, source_db=source_db)
+            return self._reference_read("get_item", lambda: self._history().get_item(item_id, source_db=source_db))
         except history.HistoryError as exc:
             raise WorkflowApplicationError(str(exc)) from exc
 
     def get_run(self, run_id: str, *, source_db: str | None = None) -> dict[str, Any]:
         try:
-            return self._history().get_run(run_id, source_db=source_db)
+            return self._reference_read("get_run", lambda: self._history().get_run(run_id, source_db=source_db))
         except history.HistoryError as exc:
             raise WorkflowApplicationError(str(exc)) from exc
 
     def list_records(self, query: str = "", *, scope: str = "all", run_id: str | None = None,
                      source_db: str | None = None, offset: int = 0, limit: int = 50) -> dict[str, Any]:
         try:
-            return self._history().list_records(query, scope=scope, run_id=run_id, source_db=source_db,
-                                              offset=offset, limit=limit)
+            return self._reference_read("list_records", lambda: self._history().list_records(
+                query, scope=scope, run_id=run_id, source_db=source_db, offset=offset, limit=limit))
         except history.HistoryError as exc:
             raise WorkflowApplicationError(str(exc)) from exc
 
@@ -479,7 +487,7 @@ class WorkflowApplication:
         """Return one archive and its items/events without a CLI hop."""
 
         try:
-            return self._history().get_archive(archive_id, source_db=source_db)
+            return self._reference_read("get_archive", lambda: self._history().get_archive(archive_id, source_db=source_db))
         except history.HistoryError as exc:
             raise WorkflowApplicationError(str(exc)) from exc
 

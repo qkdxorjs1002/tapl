@@ -46,6 +46,8 @@ html:not([data-tapl-theme]) > body {
   --tapl-highlight: var(--vscode-textLink-foreground, #3794ff);
   --tapl-info: var(--vscode-editorInfo-foreground, var(--tapl-highlight));
   --tapl-skipped: var(--vscode-testing-iconSkipped, var(--vscode-symbolIcon-enumeratorForeground, #b180d7));
+  --tapl-reference-memory: var(--vscode-charts-purple, #b180d7);
+  --tapl-reference-history: var(--vscode-charts-orange, #d99b65);
   --tapl-focus: var(--vscode-focusBorder, var(--tapl-accent));
   /* Use the host's actual separator color, including its intended alpha.
      Modern framed editors have their own border; older hosts use workbench separators. */

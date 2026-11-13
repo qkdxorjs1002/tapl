@@ -17,6 +17,8 @@ html[data-tapl-theme='light'] {
   --tapl-highlight: #355e62;
   --tapl-info: #3c6797;
   --tapl-skipped: #785ba5;
+  --tapl-reference-memory: #785ba5;
+  --tapl-reference-history: #956127;
   --tapl-focus: #355e62;
   --tapl-primary: #355e62;
   --tapl-primary-content: #fff;
@@ -60,6 +62,8 @@ html[data-tapl-theme='dark'] {
   --tapl-highlight: #a7c9cb;
   --tapl-info: #adccf0;
   --tapl-skipped: #baa2e4;
+  --tapl-reference-memory: #baa2e4;
+  --tapl-reference-history: #e2b384;
   --tapl-focus: #a7c9cb;
   --tapl-primary: #a7c9cb;
   --tapl-primary-content: #152e32;

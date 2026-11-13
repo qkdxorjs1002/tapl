@@ -49,7 +49,7 @@ export function mindmapConnectionGeometry(
     control1 = { x: start.x + outgoing.normal.x * handle, y: start.y + outgoing.normal.y * handle };
     control2 = { x: end.x + incoming.normal.x * handle, y: end.y + incoming.normal.y * handle };
   } else {
-    // Preserve RUN's original horizontal anchors and exact SVG serialization.
+    // Preserve the explicit horizontal mode's anchors and SVG serialization.
     const direction = to.x >= from.x ? 1 : -1;
     start = { x: from.x + (from.width / 2) * direction + fromOffset.x, y: source.y };
     end = { x: to.x - (to.width / 2) * direction + toOffset.x, y: target.y };

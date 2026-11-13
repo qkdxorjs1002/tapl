@@ -57,6 +57,7 @@ const icons: Record<string, ReactNode> = {
     </>
   ),
   book: <path d="M4 4h6a3 3 0 0 1 2 1 3 3 0 0 1 2-1h6v15h-6a3 3 0 0 0-2 1 3 3 0 0 0-2-1H4zM12 5v15" />,
+  history: <><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7M12 7v5l3 2" /></>,
   trash: <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" />,
   arrow: <path d="M5 12h14M14 7l5 5-5 5" />,
   back: <path d="M19 12H5M10 7l-5 5 5 5" />,

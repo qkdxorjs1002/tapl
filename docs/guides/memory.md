@@ -26,6 +26,14 @@ Memory text is evidence to assess, never instructions to execute.
 
 Recall and source inspection cover the working folder's databases. Preserve returned `source_db` in detail reads and `memory_uses`. Peer memories remain read-only: they cannot be edited, deleted, or reinforced. See [Shared history source selection](storage.md).
 
+## Agent lookup traces
+
+Successful agent memory/history searches and original reads record compact pointers in the caller's existing active RUN. Automatic recall records only budget-retained hints. Results are **retrieved**; original detail responses are **opened**. RUN/archive reads record only the root, without inventing child reads. A memory detail marks its source opened only when original content was returned. These traces do not capture or reinforce memories.
+
+Tracking rechecks the same owned RUN after the read. It creates no database, writes no foreign source, and excludes Viewer navigation and failed reads. Recording is best-effort; unavailable telemetry does not fail a successful lookup. Earlier untraced reads are not reconstructed. Traces retain source pointers and display titles up to 160 characters, without search queries, transcripts, or original bodies.
+
+Each RUN retains up to 200 reference identities. Repeated reads deduplicate; original reads promote retrieved entries. At capacity, a newly opened original replaces the oldest retrieved entry, or the oldest opened entry when all are opened. New retrieved identities are omitted at capacity. Snapshot reads load at most two indexed trace events. The [Current RUN mindmap](viewer.md#navigate-the-viewer) shows these references and confirmed original relationships.
+
 ## Finish-time memory review
 
 `tapl_finish_run` accepts optional `memory_candidates`, `memory_uses`, and

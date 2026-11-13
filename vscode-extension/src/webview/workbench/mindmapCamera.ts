@@ -87,7 +87,8 @@ type FollowRecord = { key: string; kind: string; status?: string; parent?: strin
 export function mindmapRunActiveKeys(nodes: FollowRecord[], status?: string): string[] | undefined {
   if (status !== 'active') return undefined;
   const tasks = nodes.filter(node => node.kind === 'task' && node.status === 'In Progress');
-  return (tasks.length ? tasks : nodes.filter(node => node.kind === 'plan' && node.status === 'In Progress')).map(node => node.key);
+  const plans = tasks.length ? [] : nodes.filter(node => node.kind === 'plan' && node.status === 'In Progress');
+  return (tasks.length ? tasks : plans.length ? plans : nodes.filter(node => node.kind === 'run')).map(node => node.key);
 }
 /** Use resolved graph parents: stable IDs alone cannot identify a source-safe PLAN. */
 export function mindmapRunFollowKeys(nodes: FollowRecord[], status?: string): string[] | undefined {
@@ -100,5 +101,8 @@ export function mindmapRunFollowKeys(nodes: FollowRecord[], status?: string): st
     const parent = node.kind === 'task' && node.parent && byKey.get(node.parent);
     if (parent && parent.kind === 'plan') keys.add(parent.key);
   }
+  // Keep the RUN visible alongside its executing branch; reference cards never
+  // pull the automatic camera away from the current workflow.
+  for (const node of nodes) if (node.kind === 'run') keys.add(node.key);
   return [...keys];
 }

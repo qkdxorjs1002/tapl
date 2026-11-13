@@ -27,6 +27,21 @@ export interface TaplWorkflowRun {
   record_count?: number;
 }
 
+/** Agent reads observed during this RUN; Viewer navigation never records references. */
+export interface TaplRunReference {
+  kind: 'memory' | 'history';
+  stage: 'retrieved' | 'opened';
+  source_db: string;
+  target_type: 'memory' | 'item' | 'run';
+  run_id: string;
+  title: string;
+  memory_id?: string;
+  item_id?: number;
+  stable_id?: string;
+  record_kind?: string;
+  source?: { source_db: string; run_id: string; item_id?: number | null; archive_id?: string | null };
+}
+
 export interface TaplRunSnapshot {
   run: TaplWorkflowRun;
   plans: TaplItem[];
@@ -37,9 +52,11 @@ export interface TaplRunSnapshot {
   active_executions: TaplExecution[];
   readonly: boolean;
   active_runs?: TaplWorkflowRun[];
+  references?: TaplRunReference[];
 }
 
 export interface TaplStatus {
+  references?: TaplRunReference[];
   source_db?: string;
   active_run: TaplWorkflowRun | null;
   session_id?: string;

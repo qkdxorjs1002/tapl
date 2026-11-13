@@ -26,6 +26,7 @@ import { BackLayerContext, EmptyState, NavCount, PageHeading } from './component
 import { CurrentRun, TaskStatus } from './RunViews';
 import { RecordsView } from './RecordsView';
 import { commandForRun, useWorkbench } from './useWorkbench';
+import { runReferenceCommand } from './runReferences';
 import { recordRunKey, routeIdentity, runKey, runTitle, tabRuns, taskCounts, type WorkbenchPage } from './model';
 
 export interface WorkbenchProps {
@@ -549,7 +550,11 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
                     </p>
                   </>
                 ) : (
-                  <CurrentRun snapshot={snapshot} title={t('wbCurrent')} open={openItem} back={back} />
+                  <CurrentRun snapshot={snapshot} title={t('wbCurrent')} open={openItem} back={back}
+                    openReference={(reference) => {
+                      const command = runReferenceCommand(reference);
+                      if (command) navigation.wrappedSend(command);
+                    }} />
                 ))}
               {page === 'tasks' && (
                 <TaskStatus

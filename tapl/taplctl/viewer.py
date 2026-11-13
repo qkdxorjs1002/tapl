@@ -303,6 +303,8 @@ class NativeJsonRunner:
             "session_id": state.get("session_id", ""),
             "active_runs": state.get("active_runs") or [],
             "active_run": state.get("active_run"),
+            "references": state.get("references") or [],
+            "reference_limits": state.get("reference_limits") or {},
             "task_counts": state.get("task_counts") or {},
             "incomplete_tasks": state.get("incomplete_tasks", 0),
             "counts": {

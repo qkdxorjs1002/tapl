@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useI18n } from '../i18n';
-import type { TaplItem, TaplRunSnapshot, TaplWorkflowRun } from '../types';
+import type { TaplItem, TaplRunReference, TaplRunSnapshot, TaplWorkflowRun } from '../types';
 import { Icon } from './Icon';
 import { buildRunMindmap, type MindmapNode } from './mindmap';
 import { useMindmapViewport } from './mindmapViewport';
@@ -10,6 +10,7 @@ import { MindmapEdge } from './MindmapEdges';
 import { buildMindmapRelationIndex, relatedMindmapNodes } from './mindmapRelations';
 import { useMindmapAction, useMindmapValue } from './useMindmapCache';
 import { latestMindmapItem, runMindmapProjection } from './mindmapCache';
+import { latestRunReference, runReferenceCommand } from './runReferences';
 import './run-mindmap.css';
 
 const openable = (item?: TaplItem) => typeof item?.id === 'number' && Number.isFinite(item.id);
@@ -26,10 +27,12 @@ const stateKind = (value?: string) =>
 export function RunMindmap({
   snapshot: incomingSnapshot,
   open: incomingOpen,
+  openReference: incomingOpenReference,
   back
 }: {
   snapshot: TaplRunSnapshot;
   open: (item: TaplItem, run?: TaplWorkflowRun) => void;
+  openReference?: (reference: TaplRunReference) => void;
   back?: () => void;
 }): JSX.Element {
   const { t, status } = useI18n();
@@ -39,11 +42,15 @@ export function RunMindmap({
     const latest = latestMindmapItem(snapshot, item);
     if (latest) incomingOpen(latest, snapshot.run);
   });
+  const openReference = useMindmapAction((reference: TaplRunReference) => {
+    const latest = latestRunReference(snapshot, reference);
+    if (latest) incomingOpenReference?.(latest);
+  });
   const graph = useMemo(() => buildRunMindmap(snapshot), [projection]);
   const runKey = JSON.stringify([snapshot.run.source_db ?? '', snapshot.run.id]);
   const follow = useMemo(() => mindmapRunFollowKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
   const [active, setActive] = useState<string>();
-  const relations = useMemo(() => buildMindmapRelationIndex(graph, 'node-parent'), [graph]);
+  const relations = useMemo(() => buildMindmapRelationIndex(graph), [graph]);
   const { hostRef, worldRef, controlsRef, edges, suppressClickCapture, following } = useMindmapViewport({
     graph,
     cameraKey: runKey,
@@ -51,6 +58,9 @@ export function RunMindmap({
     setActive
   });
   const executing = useMemo(() => mindmapRunActiveKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
+  const referenceGroups = useMemo(() => (['memory', 'history'] as const).map(kind => ({
+    kind, nodes: graph.nodes.filter(node => node.reference?.kind === kind)
+  })).filter(group => group.nodes.length), [graph]);
   const related = useMemo(() => {
     if (active && relations.keys.has(active)) return relatedMindmapNodes(relations, active);
     return following ? relatedMindmapNodes(relations, executing, { ancestorsOnly: true }) : undefined;
@@ -71,10 +81,11 @@ export function RunMindmap({
       <div className="wb-mm-pointer-light" aria-hidden="true" />
       <div className="wb-mm-world" ref={worldRef}>
         <svg className="wb-mm-connections" aria-hidden="true">
-          {edges.map((edge) => (
+          {edges.map((edge, index) => (
             <MindmapEdge
               key={`${edge.from}:${edge.to}`}
               edge={edge}
+              relation={graph.edges[index]?.relation}
               emphasis={related ? (related.has(edge.from) && related.has(edge.to) ? 'active' : 'dim') : undefined}
             />
           ))}
@@ -88,6 +99,7 @@ export function RunMindmap({
             runTitle={snapshot.run.slug || snapshot.run.id || ''}
             percent={graph.percent}
             open={open}
+            openReference={incomingOpenReference ? openReference : undefined}
             setActive={setActive}
           />
         ))}
@@ -122,13 +134,21 @@ export function RunMindmap({
           </button>
         )}
       </div>
-      <div className="wb-mm-legend" aria-label={t('status')}>
+      <div className="wb-mm-legend" aria-label={t('status')} data-mm-controls>
         {['In Progress', 'Completed', 'Blocked', 'Pending'].map((value) => (
           <span className="wb-mm-state" data-status={stateKind(value)} key={value}>
             <i />
             {status(value)}
           </span>
         ))}
+        {referenceGroups.map(({kind, nodes}) => <button key={kind} type="button"
+          className="wb-mm-reference-kind wb-mm-reference-jump" data-reference-kind={kind}
+          aria-label={t(kind === 'memory' ? 'wbRunReferenceShowMemory' : 'wbRunReferenceShowHistory')}
+          title={t(kind === 'memory' ? 'wbRunReferenceShowMemory' : 'wbRunReferenceShowHistory')}
+          onClick={() => controlsRef.current?.focus(nodes[0].key)}>
+          <Icon name={kind === 'memory' ? 'book' : 'history'} />
+          {t(kind === 'memory' ? 'wbRunReferenceMemory' : 'wbRunReferenceHistory')} <span>{nodes.length}</span>
+        </button>)}
       </div>
       <div className="wb-mm-camera-controls" data-mm-controls>
         <button
@@ -172,6 +192,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
   runTitle,
   percent,
   open,
+  openReference,
   setActive
 }: {
   node: MindmapNode;
@@ -180,13 +201,21 @@ const RunMindmapNode = memo(function RunMindmapNode({
   runTitle: string;
   percent: number;
   open: (item: TaplItem, run?: TaplWorkflowRun) => void;
+  openReference?: (reference: TaplRunReference) => void;
   setActive: (key?: string) => void;
 }): JSX.Element {
   const { t, status } = useI18n();
   const nodeContent = (node: MindmapNode) => (
     <>
       <span className="wb-mm-meta">
-        <span className="wb-mm-id">{node.kind === 'run' ? 'RUN' : node.item?.stable_id}</span>
+        <span className="wb-mm-id">{node.reference ? <span className="wb-mm-reference-kind" data-reference-kind={node.reference.kind}>
+          <Icon name={node.reference.kind === 'memory' ? 'book' : 'history'} />
+          {t(node.reference.kind === 'memory' ? 'wbRunReferenceMemory' : 'wbRunReferenceHistory')}
+        </span> : node.kind === 'run' ? 'RUN' : node.item?.stable_id}</span>
+        {node.reference && <span className="wb-mm-reference-stage" data-stage={node.reference.stage}>
+          <Icon name={node.reference.stage === 'opened' ? 'check' : 'search'} />
+          {t(node.reference.stage === 'opened' ? 'wbRunReferenceOpened' : 'wbRunReferenceRetrieved')}
+        </span>}
         {node.status && (
           <span className="wb-mm-state" data-status={stateKind(node.status)}>
             <i />
@@ -197,6 +226,9 @@ const RunMindmapNode = memo(function RunMindmapNode({
       <span className="wb-mm-title" title={node.title}>
         {node.title || (node.kind === 'run' ? runTitle : '')}
       </span>
+      {node.reference && <span className="wb-mm-reference-origin" title={node.reference.source_db}>
+        {node.reference.stable_id || node.reference.memory_id || 'RUN'} · {node.reference.source_db.split(/[\\/]/).filter(Boolean).pop()}
+      </span>}
       {node.kind === 'run' && (
         <span className="wb-mm-run-foot">
           <span className="wb-mm-run-numbers">
@@ -237,6 +269,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
     <div
       className={`wb-mm-node${emphasis ? ` wb-mm-${emphasis}` : ''}`}
       data-kind={node.kind}
+      data-reference-stage={node.reference?.stage}
       data-mindmap-node={node.key}
       style={
         {
@@ -262,12 +295,13 @@ const RunMindmapNode = memo(function RunMindmapNode({
         <button
           className="wb-mm-node-button"
           type="button"
-          disabled={!openable(node.item)}
-          title={!openable(node.item) ? t('wbRecordUnavailable') : undefined}
+          disabled={node.reference ? !openReference || !runReferenceCommand(node.reference) : !openable(node.item)}
+          title={node.reference ? node.reference.source_db : !openable(node.item) ? t('wbRecordUnavailable') : undefined}
           data-wb-focus={`${node.kind}:${node.item?.id ?? node.key}`}
           data-status={node.status}
           onClick={() => {
-            if (openable(node.item)) open(node.item!);
+            if (node.reference) openReference?.(node.reference);
+            else if (openable(node.item)) open(node.item!);
           }}
         >
           {nodeContent(node)}

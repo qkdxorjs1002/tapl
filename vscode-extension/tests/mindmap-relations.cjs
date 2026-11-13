@@ -93,7 +93,8 @@ test('automatic execution seeds exclude fitted parents and traverse shared ances
   assert.deepEqual(sorted(relatedMindmapNodes(index, ['plan-a', 'plan-b'], { ancestorsOnly: true })), ['plan-a', 'plan-b', 'run']);
   assert.equal(mindmapRunActiveKeys(nodes, 'archived'), undefined);
   nodes.filter(node => node.kind === 'plan').forEach(node => { node.status = 'Finalized'; });
-  assert.deepEqual(mindmapRunActiveKeys(nodes, 'active'), []);
+  assert.deepEqual(mindmapRunActiveKeys(nodes, 'active'), ['run']);
+  assert.deepEqual(sorted(relatedMindmapNodes(index, ['run'], { ancestorsOnly: true })), ['run']);
   assert.equal(relatedMindmapNodes(index, [], { ancestorsOnly: true }), undefined);
 });
 
@@ -169,7 +170,7 @@ test('memoized RUN cards keep all records, edge order, titles, focus targets and
     const html = render(locale, RunMindmap, { snapshot, open() {} });
     assertDomOrder(html, graph);
     assert.deepEqual(attributeValues(html, 'data-wb-focus'), ['plan:1', 'task:2', 'mindmap-follow']);
-    assert.match(html, locale === 'en' ? /aria-label="Follow active tasks"/ : /aria-label="진행 중 TASK 추적"/);
+    assert.match(html, locale === 'en' ? /aria-label="Follow RUN and active work"/ : /aria-label="RUN과 진행 중인 작업 추적"/);
     assert.match(html, /Run title/);
     assert.match(html, /tabindex="0"/);
     assert.match(html, locale === 'en' ? /Completed/ : /완료/);

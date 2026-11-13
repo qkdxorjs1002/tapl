@@ -1,8 +1,9 @@
-import type { TaplItem, TaplRunSnapshot } from '../types';
+import type { TaplItem, TaplRunReference, TaplRunSnapshot } from '../types';
+import { referenceOriginalKey, runMindmapReferences, runReferenceKey } from './runReferences';
 
 export interface MindmapNode {
   key: string;
-  kind: 'run' | 'plan' | 'task';
+  kind: 'run' | 'plan' | 'task' | 'memory' | 'history';
   /** Coordinates are node centers, in the RUN's coordinate system. */
   x: number;
   y: number;
@@ -10,6 +11,7 @@ export interface MindmapNode {
   height: number;
   parent?: string;
   item?: TaplItem;
+  reference?: TaplRunReference;
   title: string;
   status?: string;
   completed: number;
@@ -17,8 +19,9 @@ export interface MindmapNode {
 }
 
 export interface MindmapGraph {
+  routing: 'radial';
   nodes: MindmapNode[];
-  edges: { from: string; to: string; flowing: boolean }[];
+  edges: { from: string; to: string; flowing: boolean; relation?: 'memory' | 'history' | 'memory-source' }[];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   completed: number;
   total: number;
@@ -52,7 +55,7 @@ function compareItems(a: TaplItem, b: TaplItem): number {
   );
 }
 
-/** Build a source-safe, deterministic tree without mutating the snapshot or its records. */
+/** Preserve the workflow tree; reference relationships use only observed, exact provenance. */
 export function buildRunMindmap(snapshot: TaplRunSnapshot): MindmapGraph {
   const source = snapshot.run.source_db ?? '';
   const run = snapshot.run.id ?? '';
@@ -161,6 +164,45 @@ export function buildRunMindmap(snapshot: TaplRunSnapshot): MindmapGraph {
       }
     }
   }
+  const edges: MindmapGraph['edges'] = nodes.filter((node) => node.parent).map((node) => ({ from: node.parent!, to: node.key, flowing: executing.has(node.key) }));
+  // Keep the workflow layout unchanged as reads arrive. References occupy their own lower band.
+  const workflowBottom = Math.max(...nodes.map(node => node.y + node.height / 2));
+  const references = runMindmapReferences(snapshot);
+  const referenceNodes = references.map((reference): MindmapNode => ({
+    key: runReferenceKey(reference), kind: reference.kind, reference,
+    x: 0, y: 0, width: 238, height: 94, title: reference.title, completed: 0, total: 0
+  }));
+  const memoryNodes = referenceNodes.filter(node => node.kind === 'memory');
+  const historyNodes = referenceNodes.filter(node => node.kind === 'history');
+  for (const [column, group] of [memoryNodes, historyNodes].entries()) {
+    group.forEach((node, index) => { node.x = column === 0 ? -310 : 310; node.y = workflowBottom + 148 + index * 122; });
+  }
+  const linkedMemories = new Set<string>();
+  const memoriesByOriginal = new Map<string, MindmapNode[]>();
+  for (const memory of memoryNodes) {
+    const key = referenceOriginalKey(memory.reference!);
+    if (key === undefined) continue;
+    const group = memoriesByOriginal.get(key);
+    if (group) group.push(memory);
+    else memoriesByOriginal.set(key, [memory]);
+  }
+  for (const history of historyNodes) {
+    if (history.reference!.stage !== 'opened') continue;
+    const key = referenceOriginalKey(history.reference!);
+    const memories = key === undefined ? [] : memoriesByOriginal.get(key) ?? [];
+    if (memories.length) {
+      for (const memory of memories) {
+        edges.push({ from: memory.key, to: history.key, flowing: false, relation: 'memory-source' });
+        linkedMemories.add(memory.key);
+      }
+    } else edges.push({ from: root.key, to: history.key, flowing: false, relation: 'history' });
+  }
+  for (const memory of memoryNodes) {
+    if (memory.reference!.stage === 'opened' || linkedMemories.has(memory.key)) {
+      edges.push({ from: root.key, to: memory.key, flowing: false, relation: 'memory' });
+    }
+  }
+  nodes.push(...referenceNodes);
   const bounds = { minX: -119, minY: -79, maxX: 119, maxY: 79 };
   for (const node of nodes) {
     bounds.minX = Math.min(bounds.minX, node.x - node.width / 2);
@@ -169,8 +211,9 @@ export function buildRunMindmap(snapshot: TaplRunSnapshot): MindmapGraph {
     bounds.maxY = Math.max(bounds.maxY, node.y + node.height / 2);
   }
   return {
+    routing: 'radial',
     nodes,
-    edges: nodes.filter((node) => node.parent).map((node) => ({ from: node.parent!, to: node.key, flowing: executing.has(node.key) })),
+    edges,
     bounds,
     completed,
     total,

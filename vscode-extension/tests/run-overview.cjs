@@ -241,8 +241,8 @@ test('standalone TASK status retains every status, filtering, search and exact r
 test('active RUNs expose an accessible localized follow toggle; ended RUNs do not', () => {
   for (const locale of ['en', 'ko']) {
     const html = render(snapshot({ tasks: [task(1)] }), locale);
-    const label = locale === 'ko' ? '진행 중 TASK 추적' : 'Follow active tasks';
-    const tooltip = locale === 'ko' ? 'TASK 자동 추적 끄기' : 'Turn off automatic task following';
+    const label = locale === 'ko' ? 'RUN과 진행 중인 작업 추적' : 'Follow RUN and active work';
+    const tooltip = locale === 'ko' ? '자동 추적 끄기' : 'Turn off automatic following';
     assert.ok(html.includes(`aria-label="${label}" aria-pressed="true" title="${tooltip}"`));
     assert.ok(render(snapshot(), locale).includes('data-wb-focus="mindmap-follow"'), 'no executing TASK still allows following the RUN');
     for (const status of ['completed', 'archived', 'queued']) {

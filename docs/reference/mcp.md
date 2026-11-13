@@ -83,6 +83,8 @@ Search, lists, and recall read multiple databases in the working folder. Preserv
 | `tapl_update_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). `note` (1–240 characters), `cue` (3–5 entries), `state` (`active` or `superseded`). Explicit user request only. |
 | `tapl_delete_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). Explicit user request only; tombstones the memory so recall/reinforcement cannot use it. |
 
+Successful agent lookups may record compact pointers in the existing owned RUN for its mindmap. This does not capture/reinforce memory or write foreign history; Viewer reads are not tracked. See [Agent lookup traces](../guides/memory.md#agent-lookup-traces).
+
 Check original evidence from `tapl_get_item` or `tapl_get_archive` before using a recalled hint. Revision conflicts require fresh review before retrying memory edits. `recall.enabled=false` disables automatic recall/capture/review/reinforcement; manual inspection remains available. See [Associative memory](../guides/memory.md) for ranking and maintenance.
 
 ## RUNs, plans, findings, and approval

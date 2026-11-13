@@ -83,6 +83,8 @@ RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌�
 | `tapl_update_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). `note` (1–240자), `cue` (3–5개), `state` (`active` 또는 `superseded`). 명시적 사용자 요청이 필요합니다. |
 | `tapl_delete_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 명시적 사용자 요청이 필요하며 tombstone 처리해 회상·강화에서 제외합니다. |
 
+Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 DB에 간결한 포인터를 기록할 수 있습니다. 기억을 캡처·강화하거나 다른 DB에 쓰지 않으며 Viewer 조회는 기록하지 않습니다. [Agent 조회 기록](../guides/memory.ko.md#agent-조회-기록)을 참고하세요.
+
 회상한 단서를 사용하기 전에 `tapl_get_item` 또는 `tapl_get_archive`로 원본 근거를 확인합니다. 메모리 revision 충돌은 새 내용을 검토한 뒤 재시도해야 합니다. `recall.enabled=false`는 자동 회상·캡처·검토·강화를 끄지만 수동 조회는 유지합니다. 순위와 관리 절차는 [연상 메모리](../guides/memory.ko.md)를 보세요.
 
 ## RUN·계획·발견 사항·승인

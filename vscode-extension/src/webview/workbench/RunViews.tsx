@@ -1,5 +1,5 @@
 import { useI18n } from '../i18n';
-import type { TaplItem, TaplRunSnapshot, TaplWorkflowRun } from '../types';
+import type { TaplItem, TaplRunReference, TaplRunSnapshot, TaplWorkflowRun } from '../types';
 import { EmptyState, PageHeading, StatusMark, TaskDuration } from './components';
 import { filterTasks, TASK_STATUSES, taskCounts, type RunPageState } from './model';
 import { RunMindmap } from './RunMindmap';
@@ -9,10 +9,11 @@ function owner(item: TaplItem): string | undefined {
   const value = item.custom_fields?.owner ?? item.custom_fields?.assignee ?? item.executor_kind;
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
-export function CurrentRun({ snapshot, open, back }: {
+export function CurrentRun({ snapshot, open, openReference, back }: {
   snapshot?: TaplRunSnapshot;
   title: string;
   open: OpenItem;
+  openReference?: (reference: TaplRunReference) => void;
   back?: () => void;
 }): JSX.Element {
   const { t } = useI18n();
@@ -20,7 +21,7 @@ export function CurrentRun({ snapshot, open, back }: {
     <PageHeading title={t('wbCurrent')} back={back} />
     <EmptyState title={t('wbNoRun')} help={t('wbNoRunHelp')} />
   </>;
-  return <RunMindmap snapshot={snapshot} open={open} back={back} />;
+  return <RunMindmap snapshot={snapshot} open={open} openReference={openReference} back={back} />;
 }
 export function TaskStatus({
   snapshot,

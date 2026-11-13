@@ -347,7 +347,8 @@ test('glass flow follows executing paths, highlights related tubes without resta
     await page.waitForFunction(() => document.querySelectorAll('.wb-mm-flow').length === 0);
     assert.ok(await map.locator('.wb-mm-pulse').evaluateAll(nodes => nodes.every(node => +getComputedStyle(node).opacity === 0)), 'completed paths leave no stale light');
     await follow.click();
-    assert.equal(await map.locator('.wb-mm-emphasis').count(), 0, 'no executing targets means no automatic highlight');
+    assert.equal(await map.locator('[data-kind=run].wb-mm-emphasis').count(), 1, 'RUN remains the automatic fallback');
+    assert.equal(await map.locator('[data-kind=plan].wb-mm-emphasis, [data-kind=task].wb-mm-emphasis').count(), 0);
     overview.view.status.plans[0].status = 'In Progress'; await publish();
     await page.waitForFunction(() => document.querySelectorAll('.wb-run-mindmap [data-kind=plan].wb-mm-emphasis').length === 1);
     assert.equal(await map.locator('[data-kind=task].wb-mm-emphasis').count(), 0, 'PLAN fallback highlights ancestors without its idle descendants');
@@ -1378,7 +1379,7 @@ test('RUN follows executing TASK and PLAN context with resistant gestures, refre
   const centered = () => page.waitForFunction(() => {
     const map = document.querySelector('.wb-run-mindmap'), bounds = map.getBoundingClientRect();
     const tasks = [...map.querySelectorAll('[data-kind=task] button[data-status="In Progress"]')].map(el => el.closest('[data-kind]'));
-    const targets = new Set(tasks);
+    const targets = new Set([map.querySelector('[data-kind=run]'), ...tasks].filter(Boolean));
     if (tasks.length) {
       const nodes = [...map.querySelectorAll('[data-mindmap-node]')];
       for (const task of tasks) {
@@ -1404,8 +1405,8 @@ test('RUN follows executing TASK and PLAN context with resistant gestures, refre
     await shot(page, 'run-follow-task-plan');
     assert.ok((await camera()).z > 1, 'focused TASK and parent PLAN enlarge for readability');
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
-    assert.equal(await toggle.getAttribute('aria-label'), '진행 중 TASK 추적');
-    assert.equal(await toggle.getAttribute('title'), 'TASK 자동 추적 끄기');
+    assert.equal(await toggle.getAttribute('aria-label'), 'RUN과 진행 중인 작업 추적');
+    assert.equal(await toggle.getAttribute('title'), '자동 추적 끄기');
     const first = map.locator('[data-kind=task] button[data-status="In Progress"]');
     await first.hover(); assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'hover keeps following');
     await first.click(); await page.locator('.wb-record-page').waitFor();
@@ -1674,7 +1675,7 @@ test('same RUN refresh preserves sustained pointer, trackpad and native pinch ge
       el.style.width = ''; await frames(3);
       const nodes = [...el.querySelectorAll('[data-mindmap-node]')], active = nodes.filter(node => node.dataset.kind === 'task'
         && node.querySelector('button[data-status="In Progress"]'));
-      const targets = new Set(active);
+      const targets = new Set([el.querySelector('[data-kind=run]'), ...active].filter(Boolean));
       for (const task of active) {
         const edge = [...el.querySelectorAll('[data-from][data-to]')].find(edge => edge.dataset.to === task.dataset.mindmapNode);
         const parent = edge && nodes.find(node => node.dataset.mindmapNode === edge.dataset.from);

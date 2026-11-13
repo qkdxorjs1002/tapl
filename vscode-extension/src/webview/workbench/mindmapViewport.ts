@@ -27,7 +27,7 @@ export type MindmapViewportGraph = {
   bounds: MindmapBounds;
   routing?: MindmapRouting;
 };
-export type MindmapViewportControls = { fit: () => void; zoom: (factor: number) => void; toggleFollow: () => void };
+export type MindmapViewportControls = { fit: () => void; zoom: (factor: number) => void; toggleFollow: () => void; focus: (key: string) => void };
 type Camera = MindmapCamera;
 type Point = { x: number; y: number };
 type ElasticDrag = { origin: Point; base: Camera };
@@ -408,6 +408,14 @@ export function useMindmapViewport({
     controlsRef.current = {
       fit: () => { manual(); fit(); },
       zoom: (factor) => { manual(); zoomAt(factor, center()); },
+      focus: (key) => {
+        const node = byKey.get(key);
+        if (!node) return;
+        manual();
+        const zoom = Math.min(1, mindmapFollowCamera([node], bounds).zoom);
+        setTarget({ x: -node.x * zoom, y: -node.y * zoom, zoom });
+        setActive(key);
+      },
       toggleFollow: () => setFollowing(!tracking)
     };
     if (follow !== undefined) host.dataset.following = String(tracking);

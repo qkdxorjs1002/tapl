@@ -19,7 +19,7 @@ function assertBoundary(point, rectangle) {
   assert.ok(Math.abs(dx - rectangle.width / 2) < 1e-9 || Math.abs(dy - rectangle.height / 2) < 1e-9, 'anchor lies on rectangle boundary');
 }
 
-test('horizontal default preserves RUN anchors, midpoint controls and exact SVG paths', () => {
+test('horizontal compatibility mode preserves anchors, midpoint controls and exact SVG paths', () => {
   const from = node(-200, 0, 100, 60), to = node(0, -80, 100, 60);
   assert.deepEqual(connect(from, to), {
     start: { x: -150, y: 0 }, end: { x: -50, y: -80 }, middle: -100,

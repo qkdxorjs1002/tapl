@@ -1,11 +1,14 @@
 import type { AssociativeMemory, TaplItem, TaplRunSnapshot } from '../types';
+import { runMindmapReferences } from './runReferences';
 
 /** Only inputs consumed by RUN layout, cards, relationships and follow state belong here. */
 export function runMindmapProjection(snapshot: TaplRunSnapshot): unknown {
   const item = ({ id, stable_id, kind, title, status, source_db, run_id, spec_id }: TaplItem) =>
     [id, stable_id, kind, title, status, source_db, run_id, spec_id];
   const { id, source_db, status, request_summary, slug } = snapshot.run;
-  return [[id, source_db, status, request_summary, slug], snapshot.plans.map(item), snapshot.tasks.map(item)];
+  const references = runMindmapReferences(snapshot).map(({kind, stage, source_db, target_type, run_id, title, memory_id, item_id, stable_id, record_kind, source}) =>
+    [kind, stage, source_db, target_type, run_id, title, memory_id, item_id, stable_id, record_kind, source && [source.source_db, source.run_id, source.item_id]]);
+  return [[id, source_db, status, request_summary, slug], snapshot.plans.map(item), snapshot.tasks.map(item), references];
 }
 
 /** Strength decay and full source records do not change memory cards or their relationships. */
