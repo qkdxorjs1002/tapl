@@ -32,7 +32,7 @@ class HomebrewPrereleaseWorkflowTests(unittest.TestCase):
         update_step = self._step("Update taplctl Homebrew package")
 
         self.assertNotIn("if: steps.version.outputs.prerelease", update_step)
-        self.assertIn("RELEASE_PRERELEASE: ${{ steps.version.outputs.prerelease }}", update_step)
+        self.assertIn("RELEASE_PRERELEASE: ${{ needs.release.outputs.prerelease }}", update_step)
         self.assertIn("RELEASE_TAG: ${{ github.ref_name }}", update_step)
         self.assertIn("PRE_FORMULA_TEMPLATE: homebrew-tap/Formula/taplctl.rb", update_step)
         self.assertIn("--pre-formula homebrew-tap/Formula/taplctl-pre.rb", update_step)

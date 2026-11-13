@@ -52,7 +52,7 @@ class HomebrewMacosVerificationTests(unittest.TestCase):
         (site / "package/native.so").write_bytes(NATIVE)
         with mock.patch.object(verification, "verify_signature") as verify:
             self.assertEqual(verification.verify_installed(site, expected, TEAM), 1)
-        verify.assert_called_once_with(site / "package/native.so", TEAM)
+        verify.assert_called_once_with((site / "package/native.so").resolve(), TEAM)
 
     def test_relocated_bytes_fail_even_if_a_new_signature_would_verify(self):
         archive = self.archive({"native.so": NATIVE})
