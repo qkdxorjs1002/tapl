@@ -62,13 +62,19 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
       if (name === './taplMcpClient') return { TaplMcpClientPool: Pool, taplMcpCommandCandidates: () => ['tapl-mcp'] };
       return originalLoad.call(this, name, ...args);
     };
-    delete require.cache[require.resolve('../out/extension.js')];
-    require('../out/extension.js').activate({ extensionUri: 'extension', subscriptions: [] });
+    const mod = new Module(__filename, module); mod.filename = __filename; mod.paths = module.paths;
+    mod._compile(refreshHostSource, __filename);
+    mod.exports.activate({ extensionUri: 'extension', subscriptions: [] });
   } finally { Module._load = originalLoad; }
   const tick = () => new Promise(resolve => setImmediate(resolve));
+  const until = async predicate => {
+    const deadline = performance.now() + 1500;
+    while (!predicate() && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 1));
+    assert.ok(predicate(), 'Expected asynchronous host response');
+  };
   async function send(command) {
     const count = messages.length;
-    receive(command);
+    await receive(command);
     for (let i = 0; i < 50 && messages.length === count; i++) await tick();
     assert.ok(messages.length > count, `No response for ${command.command}`);
     return messages.at(-1);
@@ -137,13 +143,13 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
   unavailable = false;
   await send({ command: 'chooseWorkspace' }); await tick();
   assert.equal(messages.at(-1).workspace, '/work/second');
-  assert.equal(watcherCount, 15);
+  assert.equal(watcherCount, 11);
   assert.ok(watchedPatterns.includes('.tapl/tapl-*.db'));
   assert.ok(watchedPatterns.includes('.tapl/tapl-*.db-wal'));
-  assert.ok(watchedPatterns.includes('.tapl/tapl-*.db-shm'));
+  assert.ok(!watchedPatterns.includes('.tapl/tapl-*.db-shm'), 'SHM lock traffic cannot trigger a refresh');
   folders.push(folder('third')); foldersChanged(); await tick();
-  assert.equal(watcherCount, 22, 'watch newly added workspace folders and their config');
-  folders.splice(1, 1); foldersChanged(); await tick();
+  assert.equal(watcherCount, 16, 'watch newly added workspace folders and their config');
+  folders.splice(1, 1); foldersChanged(); await until(() => messages.at(-1).workspace === '/work/first');
   assert.equal(messages.at(-1).workspace, '/work/first');
   assert.equal(panel.title, 'first tapl');
   multiRun = true;
@@ -166,4 +172,169 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
   receive({ command: 'memories' }); await tick();
   assert.equal(calls.length, beforeUnsupported);
   disposed();
+});
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { buildSync } = require('esbuild');
+const refreshHostSource = buildSync({ entryPoints: [path.join(__dirname, '../src/extension.ts')], bundle: true,
+  write: false, platform: 'node', format: 'cjs', external: ['vscode', './taplMcpClient'] }).outputFiles[0].text;
+const settle = () => new Promise(resolve => setTimeout(resolve, 25));
+
+function refreshHost(t) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tapl-host-refresh-'));
+  const roots = ['first', 'second'].map(name => {
+    const root = path.join(directory, name); fs.mkdirSync(path.join(root, '.tapl'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.tapl', 'tapl.db'), Buffer.alloc(4096));
+    return { name, uri: { fsPath: root } };
+  });
+  const subscriptions = [], calls = [], messages = [], watchers = [], commands = new Map(), providers = [];
+  const disposable = { dispose() {} }; let receive, viewState, focusState, release, slow = false;
+  const state = { focused: true };
+  const panel = { title: '', visible: true, active: true, reveal() { this.visible = true; },
+    onDidChangeViewState(fn) { viewState = fn; return disposable; }, onDidDispose() { return disposable; },
+    webview: { html: '', cspSource: 'test:', asWebviewUri(uri) { return uri; },
+      onDidReceiveMessage(fn) { receive = fn; return disposable; },
+      async postMessage(message) { messages.push(message); return true; } } };
+  const vscode = {
+    Uri: { joinPath(_base, ...parts) { return parts.join('/'); } }, TreeItem: class {}, ThemeIcon: class {},
+    RelativePattern: class { constructor(root, pattern) { this.root = root.uri?.fsPath ?? root; this.pattern = pattern; } },
+    EventEmitter: class { event() {} fire() {} }, TreeItemCollapsibleState: { None: 0 }, ViewColumn: { One: 1 },
+    window: { state, onDidChangeWindowState(fn) { focusState = fn; return disposable; },
+      registerTreeDataProvider(_name, provider) { providers.push(provider); return disposable; }, createWebviewPanel() { return panel; } },
+    workspace: { workspaceFolders: roots, onDidChangeWorkspaceFolders() { return disposable; },
+      createFileSystemWatcher(pattern) {
+        const handlers = {}; watchers.push({ ...pattern, handlers });
+        return { ...disposable, onDidChange(fn) { handlers.change = fn; return disposable; },
+          onDidCreate(fn) { handlers.create = fn; return disposable; }, onDidDelete(fn) { handlers.delete = fn; return disposable; } };
+      } },
+    commands: { registerCommand(name, fn) { commands.set(name, fn); return disposable; },
+      executeCommand(name) { return commands.get(name)?.(); } }, env: { language: 'en' }
+  };
+  class Pool {
+    invalidate() {} async dispose() {}
+    async callTool(workspace, name, args) {
+      calls.push({ workspace: workspace.cwd, name, args });
+      if (name === 'tapl_get_status') {
+        // Reproduce SQLite's read-only sidecar churn without changing data.
+        fs.writeFileSync(path.join(workspace.cwd, '.tapl', 'tapl.db-shm'), Buffer.alloc(32768));
+        fs.writeFileSync(path.join(workspace.cwd, '.tapl', 'tapl.db-wal'), Buffer.alloc(32));
+        if (slow) { slow = false; await new Promise(resolve => { release = resolve; }); }
+        return { active_run: null, tasks: [], plans: [], findings: [], viewer_capabilities: {} };
+      }
+      if (name === 'tapl_list_archives') return { archives: [] };
+      throw new Error(`Unexpected tool ${name}`);
+    }
+  }
+  const load = Module._load; let extension;
+  try {
+    Module._load = function(name, ...args) {
+      if (name === 'vscode') return vscode;
+      if (name === './taplMcpClient') return { TaplMcpClientPool: Pool, taplMcpCommandCandidates: () => ['tapl-mcp'] };
+      return load.call(this, name, ...args);
+    };
+    const mod = new Module(__filename, module); mod.filename = __filename; mod.paths = module.paths;
+    // Keep production's trailing debounce semantics while avoiding seconds per case.
+    mod._compile("const setTimeout = (fn, ms) => require('node:timers').setTimeout(fn, ms === 2000 ? 5 : ms);\n" + refreshHostSource, __filename);
+    extension = mod.exports; extension.activate({ extensionUri: 'extension', subscriptions });
+  } finally { Module._load = load; }
+  t.after(async () => { subscriptions.forEach(value => value.dispose()); await extension.deactivate(); fs.rmSync(directory, { recursive: true, force: true }); });
+  return { calls, messages, commands, providers, panel, state, roots,
+    receive(message) { receive(message); },
+    visible(value) { panel.visible = value; viewState({ webviewPanel: panel }); },
+    focus(value) { state.focused = value; focusState(state); },
+    slow() { slow = true; }, get release() { return release; },
+    write(name = 'tapl.db', size = 8192, root = roots[0]) { fs.writeFileSync(path.join(root.uri.fsPath, '.tapl', name), Buffer.alloc(size)); },
+    emit(pattern = '.tapl/tapl.db-wal', event = 'change', root = roots[0]) {
+      const watcher = watchers.find(watcher => watcher.root === root.uri.fsPath && watcher.pattern === pattern);
+      assert.ok(watcher, `Missing watcher ${pattern}`); watcher.handlers[event]();
+    }
+  };
+}
+
+test('read sidecar events stop at metadata checks; real data and explicit refresh rebuild once', async t => {
+  const host = refreshHost(t);
+  await host.commands.get('taplWorkflow.openOverview')();
+  await host.commands.get('taplWorkflow.refresh')();
+  const initial = host.calls.length;
+  for (let i = 0; i < 3; i++) { host.emit(); await settle(); }
+  assert.equal(host.calls.length, initial, 'status sidecars cannot cause the former repeating full refresh');
+  host.write('tapl.db-wal', 0); host.emit(undefined, 'create'); await settle();
+  assert.equal(host.calls.length, initial);
+  host.write(); for (let i = 0; i < 50; i++) host.emit('.tapl/tapl.db'); await settle();
+  assert.equal(host.calls.length, initial + 2, 'a database burst loads one overview snapshot');
+  host.emit(); await settle(); assert.equal(host.calls.length, initial + 2);
+  host.write('tapl-peer.db', 4096); host.emit('.tapl/tapl-*.db', 'create'); await settle();
+  assert.equal(host.calls.length, initial + 4, 'new source databases invalidate the workspace');
+  host.write('tapl.db', 8192, host.roots[1]); host.emit('.tapl/tapl.db', 'change', host.roots[1]); await settle();
+  assert.equal(host.calls.length, initial + 4, 'other workspace events cannot refresh the selected workspace');
+  host.receive({ command: 'refresh' }); await settle(); assert.equal(host.calls.length, initial + 6);
+});
+
+test('hidden and unfocused panels defer full snapshots and resume once', async t => {
+  const host = refreshHost(t); await host.commands.get('taplWorkflow.openOverview')();
+  const initial = host.calls.length; host.visible(false);
+  host.write(); host.emit('.tapl/tapl.db'); await settle();
+  host.write('tapl-peer.db'); host.emit('.tapl/tapl-*.db'); await settle();
+  host.receive({ command: 'refresh' }); await settle();
+  assert.equal(host.calls.length, initial, 'retained hidden panels do not build data');
+  host.visible(true); host.visible(true); host.focus(true); await settle();
+  assert.equal(host.calls.length, initial + 2, 'visibility and focus share one catch-up');
+  host.focus(false); host.write('tapl.db', 12288); host.emit('.tapl/tapl.db'); await settle();
+  assert.equal(host.calls.length, initial + 2);
+  host.focus(true); host.focus(true); await settle(); assert.equal(host.calls.length, initial + 4);
+  host.focus(true); await settle(); assert.equal(host.calls.length, initial + 4, 'unchanged focus only checks revisions');
+});
+
+test('a real commit during a delayed read is followed by one snapshot; refreshes never overlap', async t => {
+  const host = refreshHost(t); await host.commands.get('taplWorkflow.openOverview')();
+  const initial = host.calls.length; host.slow();
+  const pending = host.commands.get('taplWorkflow.refresh')();
+  while (!host.release) await new Promise(resolve => setImmediate(resolve));
+  host.write(); for (let i = 0; i < 30; i++) host.emit('.tapl/tapl.db');
+  assert.equal(host.calls.length, initial + 1, 'events do not start another full read while one is pending');
+  host.release(); await pending; await settle();
+  assert.equal(host.calls.length, initial + 4, 'the concurrent commit retains exactly one trailing snapshot');
+  host.emit(); await settle(); assert.equal(host.calls.length, initial + 4);
+});
+
+test('hidden navigation invalidates an older in-flight snapshot before the catch-up', async t => {
+  const host = refreshHost(t); await host.commands.get('taplWorkflow.openOverview')();
+  host.slow(); const old = host.commands.get('taplWorkflow.openOverview')();
+  while (!host.release) await new Promise(resolve => setImmediate(resolve));
+  host.visible(false); host.receive({ command: 'debug' });
+  host.visible(true); await settle();
+  assert.equal(host.messages.at(-1).view.type, 'debug');
+  const count = host.messages.length; host.release(); await old; await settle();
+  assert.equal(host.messages.length, count, 'the old overview cannot overwrite hidden navigation');
+});
+
+
+test('tree reads cannot approve a retained hidden panel snapshot', async t => {
+  const host = refreshHost(t); await host.commands.get('taplWorkflow.openOverview')();
+  for (const provider of host.providers) {
+    host.visible(false); host.write('tapl.db', 12288);
+    await provider.getChildren();
+    const callsAfterTree = host.calls.length, messagesBeforeResume = host.messages.length;
+    host.emit('.tapl/tapl.db'); await settle();
+    assert.equal(host.calls.length, callsAfterTree, 'hidden panel defers its snapshot');
+    host.visible(true); await settle();
+    assert.equal(host.calls.length, callsAfterTree + 2, 'tree baseline cannot swallow the pending panel update');
+    assert.equal(host.messages.length, messagesBeforeResume + 1);
+  }
+});
+
+
+test('one standalone tree read cannot consume another tree update', async t => {
+  const host = refreshHost(t);
+  await host.providers[0].getChildren();
+  await host.commands.get('taplWorkflow.refresh')();
+  host.write();
+  await host.providers[1].getChildren();
+  let invalidations = 0;
+  const original = host.providers[0].refresh.bind(host.providers[0]);
+  host.providers[0].refresh = () => { invalidations++; original(); };
+  host.emit('.tapl/tapl.db'); await settle();
+  assert.equal(invalidations, 1, 'the active tree still receives the real-change invalidation');
 });

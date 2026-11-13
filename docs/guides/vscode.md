@@ -47,7 +47,9 @@ Manage these fields in the [TAPL configuration file](configuration.md#workspace-
 
 The initial target is the first VS Code workspace folder. Change folders in VS Code; the Viewer does not display a workspace picker. TAPL launches that folder's MCP process with the folder as its working directory and resolves executable settings for that folder. It does not search parent folders for a database.
 
-Connections are pooled by workspace. Database, WAL, and SHM changes (`.tapl/tapl-*.db`, `-wal`, `-shm`) trigger debounced refreshes. Changing the executable invalidates connections; changing workspace resets the dashboard route. RUN selection is retained per workspace and reads the selected owner's session. A stale read cannot overwrite a newer navigation or workspace selection.
+Connections are pooled by workspace. Database and WAL events are coalesced for two seconds, then checked for a changed database or WAL with data frames. SHM bookkeeping and empty WAL creation/removal do not reload the screens. Overlapping refresh requests are combined; a change during a read schedules a follow-up check. Hidden or unfocused Viewer panels defer data loading and catch up when visible and focused again. **Refresh Workflow Views** still forces a reload.
+
+Changing the executable invalidates connections; changing workspace resets the dashboard route. RUN selection is retained per workspace and reads the selected owner's session. A stale read cannot overwrite a newer navigation or workspace selection. The webview retains compact UI preferences and navigation state; screen data is fetched from TAPL when it reloads.
 
 ## Shared Viewer and capabilities
 

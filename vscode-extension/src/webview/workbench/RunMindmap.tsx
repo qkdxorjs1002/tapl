@@ -9,6 +9,7 @@ import { mindmapRunActiveKeys, mindmapRunFollowKeys } from './mindmapCamera';
 import { MindmapEdge } from './MindmapEdges';
 import { buildMindmapRelationIndex, relatedMindmapNodes } from './mindmapRelations';
 import { useMindmapAction, useMindmapValue } from './useMindmapCache';
+import { latestMindmapItem, runMindmapProjection } from './mindmapCache';
 import './run-mindmap.css';
 
 const openable = (item?: TaplItem) => typeof item?.id === 'number' && Number.isFinite(item.id);
@@ -32,9 +33,13 @@ export function RunMindmap({
   back?: () => void;
 }): JSX.Element {
   const { t, status } = useI18n();
-  const snapshot = useMindmapValue(incomingSnapshot);
-  const open = useMindmapAction(incomingOpen);
-  const graph = useMemo(() => buildRunMindmap(snapshot), [snapshot]);
+  const snapshot = incomingSnapshot;
+  const projection = useMindmapValue(runMindmapProjection(snapshot));
+  const open = useMindmapAction((item: TaplItem) => {
+    const latest = latestMindmapItem(snapshot, item);
+    if (latest) incomingOpen(latest, snapshot.run);
+  });
+  const graph = useMemo(() => buildRunMindmap(snapshot), [projection]);
   const runKey = JSON.stringify([snapshot.run.source_db ?? '', snapshot.run.id]);
   const follow = useMemo(() => mindmapRunFollowKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
   const [active, setActive] = useState<string>();
@@ -80,7 +85,7 @@ export function RunMindmap({
             node={node}
             index={index}
             emphasis={related ? (related.has(node.key) ? 'emphasis' : 'dim') : undefined}
-            run={snapshot.run}
+            runTitle={snapshot.run.slug || snapshot.run.id || ''}
             percent={graph.percent}
             open={open}
             setActive={setActive}
@@ -164,7 +169,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
   node,
   index,
   emphasis,
-  run,
+  runTitle,
   percent,
   open,
   setActive
@@ -172,7 +177,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
   node: MindmapNode;
   index: number;
   emphasis?: 'emphasis' | 'dim';
-  run: TaplWorkflowRun;
+  runTitle: string;
   percent: number;
   open: (item: TaplItem, run?: TaplWorkflowRun) => void;
   setActive: (key?: string) => void;
@@ -190,7 +195,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
         )}
       </span>
       <span className="wb-mm-title" title={node.title}>
-        {node.title || (node.kind === 'run' ? run.slug || run.id : '')}
+        {node.title || (node.kind === 'run' ? runTitle : '')}
       </span>
       {node.kind === 'run' && (
         <span className="wb-mm-run-foot">
@@ -262,7 +267,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
           data-wb-focus={`${node.kind}:${node.item?.id ?? node.key}`}
           data-status={node.status}
           onClick={() => {
-            if (openable(node.item)) open(node.item!, run);
+            if (openable(node.item)) open(node.item!);
           }}
         >
           {nodeContent(node)}

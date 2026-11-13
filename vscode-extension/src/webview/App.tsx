@@ -3,10 +3,8 @@ import { resolveLocale, type SupportedLocale } from '../i18n';
 import type {
   DisplayLayout,
   HostMessage,
-  HostCapabilities,
   RunDiscardResult,
   SettingsResult,
-  ViewerPreferences,
   TaplWorkflowRun,
   WebviewCommand,
   WebviewView,
@@ -20,6 +18,8 @@ import { Workbench } from './workbench';
 import { RecordDetail } from './workbench/RecordDetail';
 import { SecondaryView } from './workbench/SecondaryViews';
 import { Icon as WorkbenchIcon } from './workbench/Icon';
+import { mergePersistedAppState, type PersistedAppState } from './appState';
+import { sameMindmapValue } from './workbench/mindmapCache';
 
 const BOOTSTRAP_VIEW: WebviewView = {
   type: 'overview',
@@ -44,16 +44,6 @@ function resolveDisplayLayout(value: unknown): DisplayLayout {
   return value === 'small' || value === 'medium' || value === 'large' ? value : 'auto';
 }
 
-interface PersistedAppState {
-  view?: WebviewView;
-  locale?: SupportedLocale;
-  preferences?: ViewerPreferences;
-  layout?: unknown;
-  capabilities?: HostCapabilities;
-  workspace?: string;
-  workbench?: unknown;
-  workbenchWorkspace?: string;
-}
 function savedTheme(state: unknown): unknown {
   const theme = state && typeof state === 'object' ? (state as { theme?: unknown }).theme : undefined;
   return {
@@ -63,7 +53,8 @@ function savedTheme(state: unknown): unknown {
 }
 export function App(): JSX.Element {
   const api = vscodeApi();
-  const restored = api.getState() as PersistedAppState | undefined;
+  const [restored] = useState(() => api.getState() as PersistedAppState | undefined);
+  const persistedRef = useRef(restored);
   const [memorySupported, setMemorySupported] = useState(restored?.capabilities?.associativeMemory === true);
   const [discardSupported, setDiscardSupported] = useState(restored?.capabilities?.discardRun === true);
   const [discardResult, setDiscardResult] = useState<RunDiscardResult>();
@@ -85,13 +76,13 @@ export function App(): JSX.Element {
       : restored?.workbench
   );
   const persist = (values: Partial<PersistedAppState>) => {
-    const previous = api.getState();
-    const { userLocale: _legacyUserLocale, hostLocale: _legacyHostLocale, ...current } =
-      (previous && typeof previous === 'object' ? previous : {}) as Record<string, unknown>;
-    api.setState({
-      ...current,
-      ...values
-    });
+    const browser = typeof api.setPollingActive === 'function';
+    // BrowserApi also owns request/route context; preserve its live state merge behavior.
+    const previous = browser ? api.getState() : persistedRef.current;
+    const next = mergePersistedAppState(previous, values, browser);
+    if (!browser && sameMindmapValue(previous, next)) return;
+    persistedRef.current = next;
+    api.setState(next);
   };
 
   useEffect(() => {
@@ -128,7 +119,7 @@ export function App(): JSX.Element {
           message.workspace ??
           ('workspace' in message.view ? message.view.workspace : undefined) ??
           workspaceRef.current;
-        const state = api.getState() as PersistedAppState | undefined;
+        const state = persistedRef.current;
         const workspaceChanged = nextWorkspace !== workspaceRef.current;
         if (workspaceChanged) {
           setSettingsResult(undefined);

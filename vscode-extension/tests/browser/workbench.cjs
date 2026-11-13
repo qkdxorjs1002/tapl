@@ -1,14 +1,14 @@
 const { test, before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
-const { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } = require('node:fs');
+const { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, realpathSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { chromium } = require('@playwright/test');
 
 let server, browser, origin, python;
 const fixture = path.resolve(__dirname, '../fixtures/workbench.py');
-const workspace = mkdtempSync(path.join(tmpdir(), 'tapl-workbench-'));
+const workspace = realpathSync(mkdtempSync(path.join(tmpdir(), 'tapl-workbench-')));
 const secondWorkspace = path.join(workspace, 'second');
 async function startServer(extra = []) {
   const process = spawn(python, [fixture, '--workspace', workspace, '--port', '0', ...extra], { cwd: workspace, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -1663,8 +1663,15 @@ test('same RUN refresh preserves sustained pointer, trackpad and native pinch ge
       native('gestureend', 1.7);
       await enable(); await frames(10);
       wheel(50); window.dispatchEvent(new Event('blur'));
+      const blurred = read();
       payload.view.status.tasks.forEach((task, index, tasks) => { task.status = index === tasks.length - 1 ? 'In Progress' : 'Pending'; });
       await refresh(); await frames(3);
+      const afterBlurRefresh = read();
+      el.style.width = `${rect.width - 20}px`;
+      await frames(3);
+      const afterBlurResize = read();
+      window.dispatchEvent(new Event('focus')); await frames(3);
+      el.style.width = ''; await frames(3);
       const nodes = [...el.querySelectorAll('[data-mindmap-node]')], active = nodes.filter(node => node.dataset.kind === 'task'
         && node.querySelector('button[data-status="In Progress"]'));
       const targets = new Set(active);
@@ -1676,7 +1683,7 @@ test('same RUN refresh preserves sustained pointer, trackpad and native pinch ge
       const rectangles = [...targets].map(node => node.getBoundingClientRect()), viewport = el.getBoundingClientRect();
       const blurCenterError = Math.abs((Math.min(...rectangles.map(r => r.left)) + Math.max(...rectangles.map(r => r.right)) - viewport.left - viewport.right) / 2)
         + Math.abs((Math.min(...rectangles.map(r => r.top)) + Math.max(...rectangles.map(r => r.bottom)) - viewport.top - viewport.bottom) / 2);
-      return { held, afterRefresh, continued, pointerReleased, wheelHeld, wheelAfterRefresh, wheelReleased, nativeReleased, blurCenterError };
+      return { held, afterRefresh, continued, pointerReleased, wheelHeld, wheelAfterRefresh, wheelReleased, nativeReleased, blurred, afterBlurRefresh, afterBlurResize, blurCenterError };
     }, overview);
     const detail = JSON.stringify(trace);
     assert.ok(Math.abs(trace.afterRefresh.x - trace.held.x) < .05, `refresh retains the held position: ${detail}`);
@@ -1685,7 +1692,9 @@ test('same RUN refresh preserves sustained pointer, trackpad and native pinch ge
     assert.ok(Math.abs(trace.wheelAfterRefresh.x - trace.wheelHeld.x) < .05, `refresh retains wheel travel: ${detail}`);
     assert.equal(trace.wheelReleased, true, `wheel distance accumulates across refresh: ${detail}`);
     assert.equal(trace.nativeReleased, true, `native pinch keeps its gesture baseline: ${detail}`);
-    assert.ok(trace.blurCenterError < 1, `blur clears input activity and refresh follows the latest target: ${detail}`);
+    assert.deepEqual(trace.afterBlurRefresh, trace.blurred, `refresh cannot wake a blurred map: ${detail}`);
+    assert.deepEqual(trace.afterBlurResize, trace.blurred, `resize cannot wake a blurred map: ${detail}`);
+    assert.ok(trace.blurCenterError < 1, `focus resumes following the latest target after clearing input activity: ${detail}`);
   } finally { await page.close(); }
 });
 
@@ -1858,5 +1867,23 @@ test('surface exits are inert, reopen cancels cleanup, and reduced motion clears
     assert.equal(await page.locator('.wb-sidebar').evaluate(el => el.inert), true);
     assert.equal(await page.locator('.wb-page-scroll').evaluate(el => el.inert), false);
     assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+
+test('an unfocused mindmap applies its static camera on first mount', async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  try {
+    await page.addInitScript(() => { document.hasFocus = () => false; });
+    await page.goto(origin); await page.waitForLoadState('networkidle');
+    const world = page.locator('.wb-run-mindmap .wb-mm-world');
+    await world.waitFor({ state: 'attached' });
+    await page.waitForFunction(() => {
+      const world = document.querySelector('.wb-run-mindmap .wb-mm-world');
+      return world && world.style.transform && getComputedStyle(world).transform !== 'none';
+    });
+    const transform = await world.evaluate(element => element.style.transform);
+    await page.waitForTimeout(150);
+    assert.equal(await world.evaluate(element => element.style.transform), transform, 'unfocused motion stays suspended');
   } finally { await page.close(); }
 });

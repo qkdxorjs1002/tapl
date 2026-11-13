@@ -73,6 +73,8 @@ export function useMindmapViewport({
   const controlsRef = useRef<MindmapViewportControls>();
   const interactionRef = useRef<ViewportInteraction>();
   const suppressClickRef = useRef(0);
+  // Keep blur state across graph-effect replacements, including synthetic host blur events.
+  const focusedRef = useRef(typeof document === 'undefined' || document.hasFocus());
   const [, updateFollow] = useState(0);
   const following = follow !== undefined && (followPreferences.get(cameraKey) ?? true);
   const byKey = useMemo(() => new Map(graph.nodes.map((node) => [node.key, node])), [graph]);
@@ -176,7 +178,7 @@ export function useMindmapViewport({
       cameras.set(cameraKey, { ...target });
       if (cameras.size > 24) cameras.delete(cameras.keys().next().value!);
     };
-    const visible = () => !disposed && onScreen && !document.hidden;
+    const visible = () => !disposed && focusedRef.current && onScreen && !document.hidden;
     const transform = () => {
       if (renderedCamera && renderedCamera.x === camera.x && renderedCamera.y === camera.y && renderedCamera.zoom === camera.zoom) return false;
       canvas.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})`;
@@ -423,7 +425,9 @@ export function useMindmapViewport({
       fit();
       camera = { ...target };
     }
-    transform();
+    // A newly mounted world still needs its static fit while motion is suspended.
+    if (!visible() && !resume && !canvas.style.transform) camera = { ...target };
+    if (visible() || !canvas.style.transform) transform();
     const wheel = (event: WheelEvent) => {
       if ((event.target as Element).closest('[data-mm-controls]')) return;
       event.preventDefault();
@@ -692,14 +696,27 @@ export function useMindmapViewport({
       if (disposed) return;
       resetGesture();
       leave();
+      previousFrameTime = undefined;
+      returnMotion = undefined;
+      cameraVelocity = { x: 0, y: 0, zoom: 0 };
+      lastDecoration = -Infinity;
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       if (ambientTimer) window.clearTimeout(ambientTimer);
       ambientTimer = 0;
     };
     const visibility = () => {
-      if (document.hidden) suspend();
+      focusedRef.current = document.hasFocus();
+      if (document.hidden || !focusedRef.current) suspend();
       else wake();
+    };
+    const blurWindow = () => {
+      focusedRef.current = false;
+      suspend();
+    };
+    const focusWindow = () => {
+      focusedRef.current = true;
+      wake();
     };
     const motionChange = () => {
       reduced = motion.matches;
@@ -751,7 +768,8 @@ export function useMindmapViewport({
     host.addEventListener('gestureend', gestureEnd, { passive: false });
     host.addEventListener('gesturecancel', gestureEnd, { passive: false });
     document.addEventListener('visibilitychange', visibility);
-    window.addEventListener('blur', suspend);
+    window.addEventListener('blur', blurWindow);
+    window.addEventListener('focus', focusWindow);
     motion.addEventListener('change', motionChange);
     wake();
     return () => {
@@ -786,7 +804,8 @@ export function useMindmapViewport({
       host.removeEventListener('gestureend', gestureEnd);
       host.removeEventListener('gesturecancel', gestureEnd);
       document.removeEventListener('visibilitychange', visibility);
-      window.removeEventListener('blur', suspend);
+      window.removeEventListener('blur', blurWindow);
+      window.removeEventListener('focus', focusWindow);
       motion.removeEventListener('change', motionChange);
     };
   }, [cameraKey, graph, byKey, edges, follow, setActive]);

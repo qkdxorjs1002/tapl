@@ -62,7 +62,7 @@ test('exact RUN and library host routes keep source/page/context without rebindi
   } finally { Module._load = original; }
   async function send(message) {
     const count = messages.length;
-    receive(message);
+    await receive(message);
     for (let i = 0; i < 40 && messages.length === count; i++) await tick();
     assert.ok(messages.length > count, `No response to ${message.command}`);
     return messages.at(-1).view;

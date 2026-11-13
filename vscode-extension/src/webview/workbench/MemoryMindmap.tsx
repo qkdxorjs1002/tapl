@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useI18n } from '../i18n';
 import type { AssociativeMemory, WebviewCommand } from '../types';
@@ -8,6 +8,7 @@ import { useMindmapViewport } from './mindmapViewport';
 import { MindmapEdge } from './MindmapEdges';
 import { buildMindmapRelationIndex, relatedMindmapNodes } from './mindmapRelations';
 import { useMindmapAction, useMindmapValue } from './useMindmapCache';
+import { memoryMindmapProjection } from './mindmapCache';
 import './run-mindmap.css';
 import './memory-mindmap.css';
 
@@ -24,12 +25,12 @@ export function MemoryMindmap({
   workspaceKey?: string;
 }): JSX.Element {
   const { t } = useI18n();
-  const memories = useMindmapValue(incomingMemories);
+  const projection = useMindmapValue(memoryMindmapProjection(incomingMemories));
   const send = useMindmapAction(incomingSend);
   const workspaceTitle = workspaceKey?.split(/[\\/]/).filter(Boolean).pop() || t('wbWorkspace');
   const graph = useMemo(
-    () => buildMemoryMindmap(memories, { workspaceKey, workspaceTitle }),
-    [memories, workspaceKey, workspaceTitle]
+    () => buildMemoryMindmap(incomingMemories, { workspaceKey, workspaceTitle }),
+    [projection, workspaceKey, workspaceTitle]
   );
   const [active, setActive] = useState<string>();
   const relations = useMemo(() => buildMindmapRelationIndex(graph), [graph]);
@@ -39,17 +40,19 @@ export function MemoryMindmap({
     cameraKey,
     setActive
   });
-  const open = useCallback((node: MemoryMindmapNode) => {
+  const open = useMindmapAction((node: MemoryMindmapNode) => {
+    const memory = node.memory && incomingMemories.find((memory) =>
+      memory.id === node.memory!.id && memory.source_db === node.memory!.source_db);
     if (node.kind === 'workspace') {
       controlsRef.current?.fit();
     } else if (node.kind === 'cue' && node.cue !== undefined) {
       send({ command: 'memories', query: node.cue, offset: 0 });
-    } else if (node.memory && node.kind === 'memory') {
-      send({ command: 'openMemory', memoryId: node.memory.id, source_db: node.memory.source_db });
-    } else if (node.memory?.source_available && node.kind === 'source') {
-      send({ command: 'openMemorySource', memoryId: node.memory.id, source_db: node.memory.source_db });
+    } else if (memory && node.kind === 'memory') {
+      send({ command: 'openMemory', memoryId: memory.id, source_db: memory.source_db });
+    } else if (memory?.source_available && node.kind === 'source') {
+      send({ command: 'openMemorySource', memoryId: memory.id, source_db: memory.source_db });
     }
-  }, [controlsRef, send]);
+  });
   return (
     <div
       className="wb-mindmap wb-memory-mindmap"

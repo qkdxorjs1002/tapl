@@ -103,7 +103,10 @@ declare module 'vscode' {
 
   export interface WebviewPanel extends Disposable {
     title: string;
+    readonly visible: boolean;
+    readonly active: boolean;
     webview: Webview;
+    onDidChangeViewState(listener: (event: { webviewPanel: WebviewPanel }) => unknown): Disposable;
     reveal(viewColumn?: ViewColumn): void;
     onDidDispose(listener: () => unknown): Disposable;
   }
@@ -136,7 +139,11 @@ declare module 'vscode' {
 
   export type ProviderResult<T> = T | undefined | null | Thenable<T | undefined | null>;
 
+  export interface WindowState { readonly focused: boolean; }
+
   export namespace window {
+    export const state: WindowState;
+    export function onDidChangeWindowState(listener: (state: WindowState) => unknown): Disposable;
     export function showWorkspaceFolderPick(): Thenable<WorkspaceFolder | undefined>;
     export function registerTreeDataProvider<T>(viewId: string, treeDataProvider: TreeDataProvider<T>): Disposable;
     export function createWebviewPanel(
@@ -204,4 +211,11 @@ declare module 'node:os' {
 declare module 'node:fs' {
   export function readFileSync(path: string): Uint8Array;
   export function statSync(path: string): unknown;
+}
+
+declare module 'node:fs/promises' {
+  export function readdir(path: string): Promise<string[]>;
+  export function stat(path: string, options: { bigint: true }): Promise<{
+    ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint; isFile(): boolean;
+  }>;
 }

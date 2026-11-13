@@ -56,7 +56,7 @@ test('VS Code settings bind workspace without a RUN, validate mutations and keep
     mod.filename = path.join(__dirname, 'settings-host-virtual.cjs'); mod.paths = module.paths; mod._compile(output, mod.filename);
     extension = mod.exports; extension.activate({ extensionUri: 'extension', subscriptions: [] });
   } finally { Module._load = originalLoad; }
-  const send = async message => { receive(message); for (let i = 0; i < 8; i++) await tick(); return messages.at(-1); };
+  const send = async message => { await receive(message); return messages.at(-1); };
   await commands.get('taplWorkflow.openOverview')();
   await send({ command: 'selectRun', sessionId: 'archived-owner', source_db: 'peer.db' });
   await send({ command: 'openRun', runId: 'archived', source_db: 'peer.db' });

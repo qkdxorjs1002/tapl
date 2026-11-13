@@ -58,7 +58,7 @@ test('VSCode discard captures the target, rejects invalid commands, and preserve
     extension = require('../out/extension.js');
     extension.activate({ extensionUri: 'extension', subscriptions: [] });
   } finally { Module._load = originalLoad; }
-  const send = async message => { receive(message); for (let i = 0; i < 8; i++) await tick(); return messages.at(-1); };
+  const send = async message => { await receive(message); return messages.at(-1); };
   const discard = extra => ({ command: 'discardRun', runId: 'run-b', targetSessionId: 'b', workspace: '/work/first', confirmed: true, confirmationRunId: 'run-b', ...extra });
   await commands.get('taplWorkflow.openOverview')();
   assert.equal(messages.at(-1).capabilities.discardRun, true);
@@ -78,20 +78,20 @@ test('VSCode discard captures the target, rejects invalid commands, and preserve
     { run_id: 'run-b', confirmed: true, confirmation_run_id: 'run-b', session_id: 'b' });
 
   owners = ['a', 'b', 'c']; slow = true;
-  const captured = discard(); receive(captured);
+  const captured = discard(); const capturedResponse = receive(captured);
   while (!delayed) await tick();
   captured.workspace = '/work/second'; captured.targetSessionId = 'a'; captured.runId = 'run-a'; captured.confirmationRunId = 'run-a';
   await send({ command: 'selectRun', sessionId: 'c' });
   delayed(); delayed = undefined;
-  for (let i = 0; i < 10; i++) await tick();
+  await capturedResponse;
   assert.equal(messages.at(-1).view.status.session_id, 'c', 'newer selected owner survives mutation response');
   assert.deepEqual(calls.filter(call => call.name === 'tapl_discard_run').at(-1).args,
     { run_id: 'run-b', confirmed: true, confirmation_run_id: 'run-b', session_id: 'b' });
 
-  fail = true; receive(discard()); while (!delayed) await tick();
+  fail = true; const failedDiscard = receive(discard()); while (!delayed) await tick();
   await send({ command: 'selectRun', sessionId: 'a' });
   delayed(); delayed = undefined;
-  for (let i = 0; i < 10; i++) await tick();
+  await failedDiscard;
   assert.equal(messages.at(-1).type, 'error');
   assert.equal(messages.at(-1).discardResult.ok, false);
   assert.match(messages.at(-1).discardResult.message, /stale_run/);
@@ -107,11 +107,11 @@ test('VSCode discard captures the target, rejects invalid commands, and preserve
   await send(discard());
   assert.equal(calls.length, unsupportedBefore);
   supported = true; await commands.get('taplWorkflow.openOverview')();
-  slow = true; receive(discard()); while (!delayed) await tick();
+  slow = true; const workspaceDiscard = receive(discard()); while (!delayed) await tick();
   await send({ command: 'chooseWorkspace' });
   const workspaceCount = messages.length;
   delayed(); delayed = undefined;
-  for (let i = 0; i < 10; i++) await tick();
+  await workspaceDiscard;
   assert.equal(messages.length, workspaceCount, 'old workspace mutation cannot replace current board');
   assert.equal(messages.at(-1).workspace, '/work/second');
   await extension.deactivate();

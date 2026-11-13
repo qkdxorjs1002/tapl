@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { homedir } from 'node:os';
+import { DatabaseRevisions, ViewerRefreshQueue } from './viewerRefresh';
 import {
   resolveLocale,
   translate,
@@ -59,25 +60,35 @@ const DEFAULT_STATUS: TaplStatus = {
 };
 export function activate(context: vscode.ExtensionContext): void {
   taplMcpClients = new TaplMcpClientPool();
-  const activeProvider = new ActiveProvider();
-  const archiveProvider = new ArchiveProvider();
+  const revisions = new DatabaseRevisions();
+  const observeRead = async (workspace: string | undefined, before: string | undefined, valid: () => boolean) => {
+    if (workspace && !await revisions.observe(workspace, before, valid)) { refreshQueue.schedule(workspace, true); }
+  };
+  // Tree notifications do not await getChildren. Check standalone tree reads for
+  // concurrent changes; only a full refresh round advances the shared revision.
+  const observeTreeRead = async (workspace: string | undefined, before: string | undefined, valid: () => boolean) => {
+    if (!webviewManager.hasPanel()) { await observeRead(workspace, before, () => !webviewManager.hasPanel() && valid()); }
+  };
+  const activeProvider = new ActiveProvider(revisions, observeTreeRead);
+  const archiveProvider = new ArchiveProvider(revisions, observeTreeRead);
   const webviewManager = new WorkflowWebviewManager(context.extensionUri, () => {
     taplMcpClients?.invalidate();
-    refreshAll();
-  });
+    void refreshAll();
+  }, revisions, observeRead, () => refreshAll(), () => refreshTrees());
 
   const refreshTrees = () => {
     activeProvider.refresh();
     archiveProvider.refresh();
   };
-  const refreshAll = () => {
-    refreshTrees();
-    void webviewManager.refresh();
-  };
-  const debouncedRefresh = createDebouncedRefresh(refreshAll, TAPL_DB_WATCH_DEBOUNCE_MS);
+  const refreshQueue = new ViewerRefreshQueue(
+    () => getWorkspaceRoot()?.uri.fsPath, revisions,
+    async () => { refreshTrees(); await webviewManager.refresh(); },
+    TAPL_DB_WATCH_DEBOUNCE_MS
+  );
+  const refreshAll = () => refreshQueue.request(true);
 
   context.subscriptions.push(
-    debouncedRefresh,
+    refreshQueue,
     { dispose: () => taplMcpClients?.invalidate() },
     vscode.window.registerTreeDataProvider(`${COMMAND_PREFIX}.active`, activeProvider),
     vscode.window.registerTreeDataProvider(`${COMMAND_PREFIX}.archives`, archiveProvider),
@@ -110,9 +121,9 @@ export function activate(context: vscode.ExtensionContext): void {
     for (const root of roots) {
       if (workspaceWatchers.has(root.uri.fsPath)) { continue; }
       const watchers: vscode.Disposable[] = [];
-      for (const pattern of ['.tapl/tapl.db', '.tapl/tapl.db-wal', '.tapl/tapl.db-shm', '.tapl/tapl-*.db', '.tapl/tapl-*.db-wal', '.tapl/tapl-*.db-shm']) {
+      for (const pattern of ['.tapl/tapl.db', '.tapl/tapl.db-wal', '.tapl/tapl-*.db', '.tapl/tapl-*.db-wal']) {
         const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, pattern));
-        watchers.push(watcher, watcher.onDidChange(debouncedRefresh.schedule), watcher.onDidCreate(debouncedRefresh.schedule), watcher.onDidDelete(debouncedRefresh.schedule));
+        watchers.push(watcher, watcher.onDidChange(() => refreshQueue.schedule(root.uri.fsPath)), watcher.onDidCreate(() => refreshQueue.schedule(root.uri.fsPath)), watcher.onDidDelete(() => refreshQueue.schedule(root.uri.fsPath)));
       }
       const configWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '.tapl/config.toml'));
       const configChanged = () => webviewManager.configurationChanged();
@@ -127,10 +138,15 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     userConfigWatcher, userConfigWatcher.onDidChange(userConfigChanged), userConfigWatcher.onDidCreate(userConfigChanged), userConfigWatcher.onDidDelete(userConfigChanged),
     { dispose: () => { for (const watchers of workspaceWatchers.values()) { watchers.forEach((watcher) => watcher.dispose()); } } },
+    ...(vscode.window.onDidChangeWindowState ? [vscode.window.onDidChangeWindowState((state) => {
+      if (state.focused) {
+        if (!webviewManager.resume()) { void refreshQueue.request(); }
+      }
+    })] : []),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       syncWatchers();
       webviewManager.resetWorkspace();
-      refreshAll();
+      void refreshAll();
     })
   );
 }
@@ -180,6 +196,9 @@ class WorkflowNode extends vscode.TreeItem {
 }
 
 class ActiveProvider implements vscode.TreeDataProvider<WorkflowNode> {
+  constructor(private readonly revisions: DatabaseRevisions,
+    private readonly observeRead: (workspace: string | undefined, before: string | undefined, valid: () => boolean) => Promise<void>) {}
+
   private readonly changedEmitter = new vscode.EventEmitter<WorkflowNode | undefined>();
   readonly onDidChangeTreeData = this.changedEmitter.event;
 
@@ -199,7 +218,10 @@ class ActiveProvider implements vscode.TreeDataProvider<WorkflowNode> {
     if (!root) {
       return [emptyNode(localize('openWorkspaceFolder'))];
     }
+    const workspace = getWorkspaceRoot()?.uri.fsPath;
+    const before = workspace ? await this.revisions.read(workspace) : undefined;
     const result = await safeStatus();
+    await this.observeRead(workspace, before, () => result.ok && workspace === getWorkspaceRoot()?.uri.fsPath);
     if (!result.ok) {
       return [emptyNode(result.error)];
     }
@@ -228,6 +250,9 @@ class ActiveProvider implements vscode.TreeDataProvider<WorkflowNode> {
 }
 
 class ArchiveProvider implements vscode.TreeDataProvider<WorkflowNode> {
+  constructor(private readonly revisions: DatabaseRevisions,
+    private readonly observeRead: (workspace: string | undefined, before: string | undefined, valid: () => boolean) => Promise<void>) {}
+
   private readonly changedEmitter = new vscode.EventEmitter<WorkflowNode | undefined>();
   readonly onDidChangeTreeData = this.changedEmitter.event;
 
@@ -243,7 +268,10 @@ class ArchiveProvider implements vscode.TreeDataProvider<WorkflowNode> {
     if (element) {
       return [];
     }
+    const workspace = getWorkspaceRoot()?.uri.fsPath;
+    const before = workspace ? await this.revisions.read(workspace) : undefined;
     const result = await safeArchives();
+    await this.observeRead(workspace, before, () => result.ok && workspace === getWorkspaceRoot()?.uri.fsPath);
     if (!result.ok) {
       return [emptyNode(result.error)];
     }
@@ -276,8 +304,26 @@ class WorkflowWebviewManager {
   private settingsRevision: { workspace: string; revision: string } | undefined;
 
   private deferredConfigRefresh = false;
+  private deferredPanelRefresh = false;
+  private deferredDiscardResult: { workspace: string | undefined; result: RunDiscardResult } | undefined;
 
-  constructor(private readonly extensionUri: vscode.Uri, private readonly refreshConfiguration: () => void) {}
+  constructor(private readonly extensionUri: vscode.Uri, private readonly refreshConfiguration: () => void,
+    private readonly revisions: DatabaseRevisions,
+    private readonly observeRead: (workspace: string | undefined, before: string | undefined, valid: () => boolean) => Promise<void>,
+    private readonly requestRefresh: () => Promise<void>, private readonly refreshTreeViews: () => void) {}
+
+  hasPanel(): boolean { return this.panel !== undefined; }
+
+  panelVisible(): boolean {
+    return this.panel !== undefined && this.panel.visible !== false && vscode.window.state?.focused !== false;
+  }
+
+  resume(): boolean {
+    if (!this.deferredPanelRefresh || !this.panelVisible()) { return false; }
+    this.deferredPanelRefresh = false;
+    void this.requestRefresh();
+    return true;
+  }
 
   configurationChanged(): void {
     if (this.settingsWritePending) {
@@ -343,13 +389,16 @@ class WorkflowWebviewManager {
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'webview-dist')]
     });
-    this.panel.webview.onDidReceiveMessage((message: unknown) => { void this.handleMessage(message); });
+    this.panel.webview.onDidReceiveMessage((message: unknown) => this.handleMessage(message));
+    this.panel.onDidChangeViewState?.(() => { this.resume(); });
     this.panel.onDidDispose(() => {
       this.settingsWorkspaceGeneration += 1;
       this.settingsRevision = undefined;
       this.generation += 1;
       this.panel = undefined;
       this.shellReady = false;
+      this.deferredPanelRefresh = false;
+      this.deferredDiscardResult = undefined;
     });
     return this.panel;
   }
@@ -374,10 +423,18 @@ class WorkflowWebviewManager {
     const panel = this.panel;
     if (!panel) { return; }
     const generation = ++this.generation;
+    if (discardResult) { this.deferredDiscardResult = { workspace: getWorkspaceRoot()?.uri.fsPath, result: discardResult }; }
+    if (!this.panelVisible()) { this.deferredPanelRefresh = true; return; }
+    this.deferredPanelRefresh = false;
     const root = getWorkspaceRoot();
+    const workspace = root?.uri.fsPath;
+    const before = workspace ? await this.revisions.read(workspace) : undefined;
+    if (generation !== this.generation || panel !== this.panel || root !== getWorkspaceRoot()) { return; }
+    if (!this.panelVisible()) { this.deferredPanelRefresh = true; return; }
     const view = await this.buildCurrentView(this.currentView);
     // A slow read must not replace a newer navigation, workspace or closed panel.
     if (generation !== this.generation || panel !== this.panel || root !== getWorkspaceRoot()) { return; }
+    if (!this.panelVisible()) { this.deferredPanelRefresh = true; return; }
     if (view.type === 'overview' || view.type === 'debug') {
       this.capabilities = {
         associativeMemory: view.status.viewer_capabilities?.associativeMemory === true,
@@ -385,13 +442,18 @@ class WorkflowWebviewManager {
       };
     }
     panel.title = workspaceTaplTitle();
+    const pendingDiscard = this.deferredDiscardResult;
+    const pendingDiscardResult = pendingDiscard?.workspace === workspace ? pendingDiscard?.result : undefined;
     const message: HostWebviewMessage = {
       type, view, locale: displayLocale(), layout: displayLayout(),
       preferences: displayPreferences(),
       workspace: root?.uri.fsPath, capabilities: this.capabilities,
-      ...(discardResult ? { discardResult } : {})
+      ...(pendingDiscardResult ? { discardResult: pendingDiscardResult } : {})
     };
-    await panel.webview.postMessage(message);
+    const delivered = await panel.webview.postMessage(message);
+    if (delivered && pendingDiscard === this.deferredDiscardResult) { this.deferredDiscardResult = undefined; }
+    await this.observeRead(workspace, before, () => delivered && view.type !== 'error'
+      && generation === this.generation && panel === this.panel && this.panelVisible() && root === getWorkspaceRoot());
   }
 
   private async buildCurrentView(route: PanelView): Promise<WebviewView> {
@@ -477,7 +539,7 @@ class WorkflowWebviewManager {
     if (!isRecord(message) || typeof message.command !== 'string') { return; }
     switch (message.command) {
       case 'ready': await this.postCurrentView('hydrate'); return;
-      case 'refresh': await this.refresh(); return;
+      case 'refresh': await this.requestRefresh(); return;
       case 'discardRun': await this.discardRun(message); return;
       case 'getSettings':
       case 'saveSettings':
@@ -508,7 +570,7 @@ class WorkflowWebviewManager {
           if (typeof message.source_db === "string") selectedRunSources.set(root.uri.fsPath, message.source_db);
           else selectedRunSources.delete(root.uri.fsPath);
           await this.openOverview();
-          await vscode.commands.executeCommand(`${COMMAND_PREFIX}.refresh`);
+          this.refreshTreeViews();
         }
         return;
       }
@@ -523,7 +585,7 @@ class WorkflowWebviewManager {
           selectedWorkspacePath = root.uri.fsPath;
           this.capabilities = { associativeMemory: false };
           await this.openOverview();
-          await vscode.commands.executeCommand(`${COMMAND_PREFIX}.refresh`);
+          this.refreshTreeViews();
         }
         return;
       }
@@ -929,27 +991,6 @@ function searchResultFromItem(item: TaplItemDetail): TaplSearchResult {
     source_db: item.source_db,
     snippet: item.body || item.raw_text,
     search_source: 'item'
-  };
-}
-
-function createDebouncedRefresh(callback: () => void, delayMs: number): vscode.Disposable & { schedule: () => void } {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return {
-    schedule: () => {
-      if (timer) {
-        clearTimeout(timer);
-      }
-      timer = setTimeout(() => {
-        timer = undefined;
-        callback();
-      }, delayMs);
-    },
-    dispose: () => {
-      if (timer) {
-        clearTimeout(timer);
-        timer = undefined;
-      }
-    }
   };
 }
 
