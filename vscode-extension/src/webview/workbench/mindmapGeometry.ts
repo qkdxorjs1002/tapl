@@ -11,16 +11,22 @@ export type MindmapConnection = {
 };
 
 const zero = { x: 0, y: 0 };
+const SIDE_ANCHOR_SPAN = 0.35;
+const clamp = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value));
 
-/** Choose a facing side by center direction, then attach at that side's midpoint. */
+/** Project toward a facing side, using only the central 35% of its length. */
 function boundary(rectangle: MindmapRectangle, direction: MindmapPoint) {
   const halfWidth = Math.max(0, rectangle.width) / 2;
   const halfHeight = Math.max(0, rectangle.height) / 2;
   const across = direction.x ? halfWidth / Math.abs(direction.x) : Infinity;
   const down = direction.y ? halfHeight / Math.abs(direction.y) : Infinity;
   const normal = across <= down ? { x: Math.sign(direction.x), y: 0 } : { x: 0, y: Math.sign(direction.y) };
+  const distance = Math.min(across, down);
   return {
-    point: { x: rectangle.x + normal.x * halfWidth, y: rectangle.y + normal.y * halfHeight },
+    point: {
+      x: rectangle.x + (normal.x ? normal.x * halfWidth : clamp(direction.x * distance, halfWidth * SIDE_ANCHOR_SPAN)),
+      y: rectangle.y + (normal.y ? normal.y * halfHeight : clamp(direction.y * distance, halfHeight * SIDE_ANCHOR_SPAN))
+    },
     normal
   };
 }

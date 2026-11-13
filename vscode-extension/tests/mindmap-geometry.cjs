@@ -17,8 +17,8 @@ function assertBoundary(point, rectangle) {
   const dx = Math.abs(point.x - rectangle.x), dy = Math.abs(point.y - rectangle.y);
   assert.ok(dx <= rectangle.width / 2 + 1e-9 && dy <= rectangle.height / 2 + 1e-9, 'anchor is inside rectangle extents');
   assert.ok(Math.abs(dx - rectangle.width / 2) < 1e-9 || Math.abs(dy - rectangle.height / 2) < 1e-9, 'anchor lies on rectangle boundary');
-  assert.ok((Math.abs(dx - rectangle.width / 2) < 1e-9 && dy < 1e-9)
-    || (Math.abs(dy - rectangle.height / 2) < 1e-9 && dx < 1e-9), 'anchor is one of the four side midpoints');
+  assert.ok((Math.abs(dx - rectangle.width / 2) < 1e-9 && dy <= rectangle.height * .175 + 1e-9)
+    || (Math.abs(dy - rectangle.height / 2) < 1e-9 && dx <= rectangle.width * .175 + 1e-9), 'anchor stays in the central 35% of a side');
 }
 
 test('horizontal compatibility mode preserves anchors, midpoint controls and exact SVG paths', () => {
@@ -33,7 +33,7 @@ test('horizontal compatibility mode preserves anchors, midpoint controls and exa
   assert.deepEqual(connect(from, to, 'horizontal'), connect(from, to));
 });
 
-test('radial anchors select only side midpoints in all quadrants and axes', () => {
+test('radial anchors use only central side bands in all quadrants and axes', () => {
   const from = node(0, 0);
   for (const [dx, dy] of [[300, 400], [-300, 400], [-300, -400], [300, -400], [600, 80], [-600, 80], [0, 400], [0, -400], [400, 0], [-400, 0]]) {
     const to = node(dx, dy, 80, 100);
@@ -43,7 +43,23 @@ test('radial anchors select only side midpoints in all quadrants and axes', () =
     assert.ok(geometry.start.x * dx + geometry.start.y * dy > 0, 'source anchor faces target');
     assert.ok((geometry.end.x - dx) * dx + (geometry.end.y - dy) * dy < 0, 'target anchor faces source');
   }
-  closePoint(connect(from, node(300, 400, 80, 100), 'radial').start, { x: 0, y: 40 });
+  closePoint(connect(from, node(300, 400, 80, 100), 'radial').start, { x: 21, y: 40 });
+});
+
+test('side-band projection moves inside the band and clamps at both 35% boundaries', () => {
+  const from = node(0, 0);
+  closePoint(connect(from, node(600, 80), 'radial').start, { x: 60, y: 8 });
+  closePoint(connect(from, node(600, 200), 'radial').start, { x: 60, y: 14 });
+  closePoint(connect(from, node(600, -200), 'radial').start, { x: 60, y: -14 });
+  closePoint(connect(from, node(-600, 200), 'radial').start, { x: -60, y: 14 });
+  closePoint(connect(from, node(-600, -200), 'radial').start, { x: -60, y: -14 });
+  closePoint(connect(from, node(90, 600), 'radial').start, { x: 6, y: 40 });
+  closePoint(connect(from, node(400, 600), 'radial').start, { x: 21, y: 40 });
+  closePoint(connect(from, node(-400, -600), 'radial').start, { x: -21, y: -40 });
+  const below = connect(from, node(600, 139.999), 'radial').start;
+  const above = connect(from, node(600, 140.001), 'radial').start;
+  assert.ok(below.y < 14 && 14 - below.y < .001);
+  close(above.y, 14);
 });
 
 test('radial controls leave the correct side and reverse with the connection orientation', () => {
@@ -90,7 +106,7 @@ test('independent motion offsets reroute radial anchors on displaced rectangles 
   assert.deepEqual(moved, connect(movedFrom, movedTo, 'radial'));
   assertBoundary(moved.start, movedFrom);
   assertBoundary(moved.end, movedTo);
-  closePoint(moved.start, { x: 3, y: 38 });
+  closePoint(moved.start, { x: 24, y: 38 });
   closePoint(pointAt(moved, 0), moved.start);
   closePoint(pointAt(moved, 1), moved.end);
   closePoint(pointAt(moved, .5), {

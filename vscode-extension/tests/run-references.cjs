@@ -37,7 +37,7 @@ const memory = (extra = {}) => ({ kind: 'memory', stage: 'retrieved', target_typ
 const nodeFor = (graph, reference) => graph.nodes.find(node => node.key === runReferenceKey(reference));
 const referenceEdges = graph => graph.edges.filter(edge => edge.relation);
 
-test('RUN reference branches connect through upper and lower boundaries in both directions', () => {
+test('RUN reference branches connect through central upper and lower bands in both directions', () => {
   const m = memory({ stage: 'opened' });
   const graph = buildRunMindmap(snapshot([m]));
   assert.equal(graph.routing, 'radial');
@@ -45,9 +45,9 @@ test('RUN reference branches connect through upper and lower boundaries in both 
   const connect = compiled.exports.mindmapConnectionGeometry;
   const forward = connect(root, target, graph.routing);
   assert.equal(forward.start.y, root.y + root.height / 2);
-  assert.equal(forward.start.x, root.x);
+  assert.ok(Math.abs(forward.start.x - root.x) <= root.width * .175);
   assert.equal(forward.end.y, target.y - target.height / 2);
-  assert.equal(forward.end.x, target.x);
+  assert.ok(Math.abs(forward.end.x - target.x) <= target.width * .175);
   assert.ok(forward.control1.y > forward.start.y);
   assert.ok(forward.control2.y < forward.end.y);
   const reverse = connect(target, root, graph.routing);
