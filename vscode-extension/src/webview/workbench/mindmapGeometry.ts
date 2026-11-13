@@ -1,6 +1,9 @@
 export type MindmapPoint = { x: number; y: number };
 export type MindmapRectangle = MindmapPoint & { width: number; height: number };
 export type MindmapRouting = 'horizontal' | 'radial';
+export type MindmapSide = 'left' | 'right' | 'top' | 'bottom';
+export type MindmapAttachment = { side: MindmapSide; offset: number };
+export type MindmapAttachments = { from?: MindmapAttachment; to?: MindmapAttachment };
 export type MindmapConnection = {
   start: MindmapPoint;
   end: MindmapPoint;
@@ -8,10 +11,12 @@ export type MindmapConnection = {
   control2: MindmapPoint;
   middle: number;
   path: string;
+  fromSide?: MindmapSide;
+  toSide?: MindmapSide;
 };
 
 const zero = { x: 0, y: 0 };
-const SIDE_ANCHOR_SPAN = 0.35;
+export const MINDMAP_SIDE_ANCHOR_SPAN = 0.35;
 const clamp = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value));
 
 /** Project toward a facing side, using only the central 35% of its length. */
@@ -25,10 +30,26 @@ function boundary(rectangle: MindmapRectangle, direction: MindmapPoint, facing?:
   const distance = Number.isFinite(projectedDistance) ? projectedDistance : 0;
   return {
     point: {
-      x: rectangle.x + (normal.x ? normal.x * halfWidth : clamp(direction.x * distance, halfWidth * SIDE_ANCHOR_SPAN)),
-      y: rectangle.y + (normal.y ? normal.y * halfHeight : clamp(direction.y * distance, halfHeight * SIDE_ANCHOR_SPAN))
+      x: rectangle.x + (normal.x ? normal.x * halfWidth : clamp(direction.x * distance, halfWidth * MINDMAP_SIDE_ANCHOR_SPAN)),
+      y: rectangle.y + (normal.y ? normal.y * halfHeight : clamp(direction.y * distance, halfHeight * MINDMAP_SIDE_ANCHOR_SPAN))
     },
     normal
+  };
+}
+
+function sideOf(normal: MindmapPoint): MindmapSide {
+  return normal.x < 0 ? 'left' : normal.x > 0 ? 'right' : normal.y < 0 ? 'top' : 'bottom';
+}
+
+function attach(rectangle: MindmapRectangle, anchor: ReturnType<typeof boundary>, attachment?: MindmapAttachment) {
+  // A moving node can change its valid corridor. Never force an old side back.
+  if (!attachment || attachment.side !== sideOf(anchor.normal) || !Number.isFinite(attachment.offset)) return anchor;
+  const offset = clamp(attachment.offset, MINDMAP_SIDE_ANCHOR_SPAN / 2);
+  return {
+    normal: anchor.normal,
+    point: anchor.normal.x
+      ? { x: anchor.point.x, y: rectangle.y + Math.max(0, rectangle.height) * offset }
+      : { x: rectangle.x + Math.max(0, rectangle.width) * offset, y: anchor.point.y }
   };
 }
 
@@ -47,11 +68,13 @@ export function mindmapConnectionGeometry(
   to: MindmapRectangle,
   routing: MindmapRouting = 'horizontal',
   fromOffset: MindmapPoint = zero,
-  toOffset: MindmapPoint = zero
+  toOffset: MindmapPoint = zero,
+  attachments?: MindmapAttachments
 ): MindmapConnection {
   const source = { ...from, x: from.x + fromOffset.x, y: from.y + fromOffset.y };
   const target = { ...to, x: to.x + toOffset.x, y: to.y + toOffset.y };
   let start: MindmapPoint, end: MindmapPoint, control1: MindmapPoint, control2: MindmapPoint;
+  let fromSide: MindmapSide | undefined, toSide: MindmapSide | undefined;
   if (routing === 'radial') {
     const dx = target.x - source.x;
     const dy = target.y - source.y;
@@ -67,8 +90,10 @@ export function mindmapConnectionGeometry(
       if (!pair || vertical.distanceSquared < pair.distanceSquared) pair = vertical;
     }
     // Overlapping rectangles have no clear corridor; keep the finite fallback.
-    const outgoing = pair?.outgoing ?? boundary(source, direction);
-    const incoming = pair?.incoming ?? boundary(target, { x: -direction.x, y: -direction.y });
+    const outgoing = attach(source, pair?.outgoing ?? boundary(source, direction), attachments?.from);
+    const incoming = attach(target, pair?.incoming ?? boundary(target, { x: -direction.x, y: -direction.y }), attachments?.to);
+    fromSide = sideOf(outgoing.normal);
+    toSide = sideOf(incoming.normal);
     start = outgoing.point;
     end = incoming.point;
     const handle = Math.min(160, Math.hypot(end.x - start.x, end.y - start.y) * 0.45, (pair?.gap ?? Infinity) / 2);
@@ -89,6 +114,7 @@ export function mindmapConnectionGeometry(
     control1,
     control2,
     middle: (start.x + end.x) / 2,
+    ...(fromSide && toSide ? { fromSide, toSide } : {}),
     path: `M ${start.x} ${start.y} C ${control1.x} ${control1.y}, ${control2.x} ${control2.y}, ${end.x} ${end.y}`
   };
 }

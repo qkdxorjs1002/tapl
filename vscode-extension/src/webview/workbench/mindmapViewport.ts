@@ -8,6 +8,7 @@ import {
 } from './mindmapFollowGesture';
 import type { MindmapFollowWheel } from './mindmapFollowGesture';
 import { mindmapConnectionGeometry } from './mindmapGeometry';
+import { mindmapEdgeAttachments } from './mindmapPorts';
 import type { MindmapRouting } from './mindmapGeometry';
 import {
   MINDMAP_DECORATION_INTERVAL,
@@ -79,8 +80,9 @@ export function useMindmapViewport({
   const following = follow !== undefined && (followPreferences.get(cameraKey) ?? true);
   const byKey = useMemo(() => new Map(graph.nodes.map((node) => [node.key, node])), [graph]);
   const edges = useMemo(
-    () =>
-      graph.edges.flatMap((edge, index) => {
+    () => {
+      const attachments = mindmapEdgeAttachments(graph.nodes, graph.edges, graph.routing);
+      return graph.edges.flatMap((edge, index) => {
         const from = byKey.get(edge.from),
           to = byKey.get(edge.to);
         if (!from || !to) return [];
@@ -88,10 +90,12 @@ export function useMindmapViewport({
           {
             ...edge,
             index,
-            ...mindmapConnectionGeometry(from, to, graph.routing)
+            ...(attachments[index] ? { attachments: attachments[index] } : {}),
+            ...mindmapConnectionGeometry(from, to, graph.routing, undefined, undefined, attachments[index])
           }
         ];
-      }),
+      });
+    },
     [graph, byKey]
   );
 
@@ -272,7 +276,7 @@ export function useMindmapViewport({
             const edge = edges[index];
             const connection = mindmapConnectionGeometry(
               byKey.get(edge.from)!, byKey.get(edge.to)!, graph.routing,
-              offsets.get(nodeIndices.get(edge.from)!), offsets.get(nodeIndices.get(edge.to)!)
+              offsets.get(nodeIndices.get(edge.from)!), offsets.get(nodeIndices.get(edge.to)!), edge.attachments
             );
             setPath(index, connection.path);
           }

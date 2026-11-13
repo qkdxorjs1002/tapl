@@ -207,12 +207,12 @@ test('nearby PLAN and four TASK rows use facing horizontal ports without enterin
     const map = page.locator('.wb-run-mindmap'); await map.waitFor();
     await map.locator('.wb-mm-camera-controls button').nth(1).click();
     await assertSideBands(page, '.wb-run-mindmap');
-    const result = await map.evaluate(host => {
+    const inspect = () => map.evaluate(host => {
       const nodes = new Map([...host.querySelectorAll('[data-mindmap-node]')].map(node => [node.dataset.mindmapNode, node]));
-      const failures = [], signs = new Set(); let count = 0;
+      const failures = [], signs = new Set(), fans = new Map(); let count = 0;
       const rectangle = node => {
         const matrix = new DOMMatrix(node.style.transform), width = Number.parseFloat(node.style.width), height = Number.parseFloat(node.style.height);
-        return { left: matrix.e, right: matrix.e + width, centerX: matrix.e + width / 2, centerY: matrix.f + height / 2 };
+        return { left: matrix.e, right: matrix.e + width, centerX: matrix.e + width / 2, centerY: matrix.f + height / 2, height };
       };
       for (const edge of host.querySelectorAll('[data-from][data-to]')) {
         const from = nodes.get(edge.dataset.from), to = nodes.get(edge.dataset.to);
@@ -221,6 +221,8 @@ test('nearby PLAN and four TASK rows use facing horizontal ports without enterin
         const values = edge.querySelector('path').getAttribute('d').match(/[-+]?(?:\d*\.?\d+)(?:e[-+]?\d+)?/gi).map(Number);
         const expectedStart = sign > 0 ? source.right : source.left, expectedEnd = sign > 0 ? target.left : target.right;
         signs.add(sign); count++;
+        const fan = fans.get(edge.dataset.from) ?? { height: source.height, offsets: [] };
+        fan.offsets.push(values[1] - source.centerY); fans.set(edge.dataset.from, fan);
         if (Math.abs(values[0] - expectedStart) > .05 || Math.abs(values[6] - expectedEnd) > .05) {
           failures.push('TASK did not use its facing side'); continue;
         }
@@ -234,12 +236,35 @@ test('nearby PLAN and four TASK rows use facing horizontal ports without enterin
           if ((x - expectedStart) * sign < -.05 || (x - expectedStart) * sign > gap + .05) failures.push('curve entered sibling column');
         }
       }
-      return { count, signs: [...signs].sort(), failures };
+      return { count, signs: [...signs].sort(), failures, fans: [...fans.values()] };
     });
-    assert.equal(result.count, 8); assert.deepEqual(result.signs, [-1, 1]); assert.deepEqual(result.failures, []);
+    const verify = result => {
+      assert.equal(result.count, 8); assert.deepEqual(result.signs, [-1, 1]); assert.deepEqual(result.failures, []);
+      assert.equal(result.fans.length, 2);
+      for (const fan of result.fans) {
+        assert.equal(fan.offsets.length, 4);
+        const offsets = [...fan.offsets].sort((a, b) => a - b);
+        assert.equal(new Set(offsets.map(value => value.toFixed(3))).size, 4, 'four lines never collapse to two points');
+        offsets.forEach((offset, i) => assert.ok(Math.abs(offset - fan.height * (-.175 + i * .35 / 3)) < .05,
+          `PLAN attachment ${i} evenly spans the central 35%: ${offsets}`));
+      }
+    };
+    verify(await inspect());
     if (process.env.TAPL_SCREENSHOT_DIR) {
       mkdirSync(process.env.TAPL_SCREENSHOT_DIR, { recursive: true });
       await page.screenshot({ path: path.join(process.env.TAPL_SCREENSHOT_DIR, 'nearby-plan-task-ports.png'), animations: 'disabled' });
     }
+    const plan = map.locator('[data-kind=plan]').last();
+    const key = await plan.getAttribute('data-mindmap-node'), before = await plan.evaluate(node => node.style.transform);
+    const bounds = await plan.boundingBox();
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.bringToFront(); await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.mouse.move(bounds.x + bounds.width + 25, bounds.y + bounds.height / 2 + 15);
+    await page.waitForFunction(({ key, before }) => {
+      const node = [...document.querySelectorAll('[data-mindmap-node]')].find(node => node.dataset.mindmapNode === key);
+      return node && node.style.transform !== before;
+    }, { key, before });
+    verify(await inspect());
+    await assertSideBands(page, '.wb-run-mindmap');
   } finally { await page.close(); }
 });
