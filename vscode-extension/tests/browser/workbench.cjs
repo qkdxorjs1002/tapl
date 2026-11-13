@@ -62,6 +62,79 @@ async function setLanguage(page, locale) {
   await page.locator('.wb-back-layer .wb-back').click();
 }
 
+test('RUN tabs keep titles and identifiers on separate lines at every screen size', { timeout: 60000 }, async () => {
+  const longSlug = 'long-run-slug-'.repeat(12);
+  for (const locale of ['ko', 'en']) {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.route('**/api/message', async route => {
+      const response = await route.fetch();
+      const payload = await response.json();
+      const snapshot = payload.view?.status ?? payload.view?.snapshot ?? payload.view?.context;
+      const selectedRun = snapshot?.active_run ?? snapshot?.run;
+      for (const run of [selectedRun, ...(snapshot?.active_runs ?? [])].filter(Boolean)) {
+        run.request_summary = (locale === 'ko' ? '긴 제목의 RUN 탭 배치 검증 ' : 'Long RUN tab layout verification ').repeat(8);
+        run.slug = run.session_id === 'second-owner' ? longSlug : 'active';
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    try {
+      await page.goto(origin);
+      await page.waitForLoadState('networkidle');
+      await page.locator('.wb-run-mindmap').waitFor();
+      await setLanguage(page, locale);
+      const identifiers = await page.locator('.wb-run-tab-meta').allTextContents();
+      assert.ok(identifiers.includes(longSlug), 'fixture includes an overflowing slug');
+      assert.ok(identifiers.some(value => value.length === 8), 'fixture includes a short RUN ID');
+
+      for (const width of [320, 390, 768, 1024, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.waitForFunction(mobile => document.querySelector('.tapl-workbench')?.dataset.mobile === String(mobile), width <= 800);
+        const layouts = await page.locator('.wb-run-tab').evaluateAll(tabs => tabs.map(tab => {
+          const title = tab.querySelector('.wb-run-tab-title');
+          const text = title.querySelector('span:last-of-type');
+          const meta = tab.querySelector('.wb-run-tab-meta');
+          return {
+            tab: tab.getBoundingClientRect().toJSON(),
+            title: title.getBoundingClientRect().toJSON(),
+            meta: meta.getBoundingClientRect().toJSON(),
+            metaText: meta.textContent,
+            titleTruncated: text.scrollWidth > text.clientWidth && getComputedStyle(text).textOverflow === 'ellipsis',
+            metaTruncated: meta.scrollWidth > meta.clientWidth && getComputedStyle(meta).textOverflow === 'ellipsis'
+          };
+        }));
+        assert.equal(layouts.length, 2);
+        for (const layout of layouts) {
+          const context = `${locale}, ${width}px`;
+          assert.ok(layout.title.bottom <= layout.meta.top, `${context}: identifier stays below the title`);
+          for (const line of [layout.title, layout.meta]) {
+            assert.ok(line.left >= layout.tab.left && line.right <= layout.tab.right + 1, `${context}: line stays inside tab width`);
+            assert.ok(line.top >= layout.tab.top && line.bottom <= layout.tab.bottom, `${context}: line stays inside tab height`);
+          }
+          assert.ok(layout.titleTruncated, `${context}: long title keeps its ellipsis`);
+        }
+        assert.ok(layouts.some(layout => layout.metaText === longSlug && layout.metaTruncated), `${locale}, ${width}px: long slug keeps its ellipsis`);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        await shot(page, `run-tabs-${locale}-${width}`);
+      }
+
+      await page.setViewportSize({ width: 390, height: 900 });
+      await page.locator('.wb-run-tab').first().focus();
+      await page.keyboard.press('End');
+      await page.waitForFunction(() => document.querySelectorAll('.wb-run-tab')[1]?.getAttribute('aria-selected') === 'true');
+      await page.locator('.wb-run-tab').nth(1).focus();
+      await page.keyboard.press('Home');
+      await page.waitForFunction(() => document.querySelector('.wb-run-tab')?.getAttribute('aria-selected') === 'true');
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.unrouteAll({ behavior: 'wait' });
+      await page.close();
+    }
+  }
+});
+
 test('settings edits all CLI sections, saves model/profile changes together, and confirms reset', { timeout: 60000 }, async () => {
   const { page, errors } = await openPage();
   const configPath = path.join(workspace, '.tapl/config.toml');

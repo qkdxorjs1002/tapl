@@ -337,6 +337,7 @@ body:has(.tapl-workbench) {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  flex-wrap: nowrap;
   align-items: start;
   justify-content: center;
   gap: 5px;
