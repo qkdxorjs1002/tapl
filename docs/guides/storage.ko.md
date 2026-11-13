@@ -6,7 +6,12 @@ TAPL은 선택한 작업 영역의 `.tapl/tapl-{UUID}.db`에 각 로컬 환경�
 
 클라이언트 연결만으로 워크플로 DB를 하나 더 만들지는 않습니다. Codex와 Claude Code는 폴더의 설치 UUID·DB·이력 조회를 공유하며 Claude 소유자 ID는 별도 이름공간을 사용합니다. [클라이언트 제거 보호](../getting-started/claude-code.ko.md#연결과-제거)는 공통 설정과 이력을 보존합니다.
 
-Codex hook은 도구가 하위 디렉터리에서 실행되어도 Codex에서 선택한 폴더를 작업 영역으로 사용합니다. Hook 이벤트에는 여전히 존재하는 절대 경로 `cwd`가 필요합니다. TAPL은 일반 파일을 가리키는 절대 경로 `transcript_path`에서 1 MiB 이내의 첫 JSONL 레코드만 파싱하며 해당 경로의 symlink는 거부합니다. 레코드 유형이 `session_meta`이고 `payload.id`가 hook 세션과 정확히 일치하며 `payload.cwd`가 존재하는 절대 디렉터리 경로일 때만 그 작업 영역을 사용합니다. 작업 영역을 정하기 위해 이후 원문 대화 레코드를 파싱하거나 보관하지 않습니다.
+Codex hook은 도구가 다른 폴더에서 실행되어도 Codex에서 선택한 폴더를 작업 영역으로 사용합니다. Hook 이벤트에는 여전히 존재하는 절대 경로 `cwd`가 필요합니다. TAPL은 일반 파일을 가리키는 절대 경로 `transcript_path`에서 1 MiB 이내의 첫 JSONL 레코드만 읽으며 해당 경로의 symlink는 거부합니다. 레코드 유형은 `session_meta`, `payload.cwd`는 존재하는 절대 디렉터리여야 하며 다음 중 하나의 신원 검증을 통과해야 합니다.
+
+- 주 세션: 메타데이터 ID가 hook의 `session_id`와 정확히 일치합니다.
+- Subagent: hook의 비어 있지 않은 별도 `agent_id`가 메타데이터 ID와 일치하고, `source.subagent.thread_spawn.parent_thread_id`가 hook의 `session_id`와 일치합니다. 메타데이터 최상위에도 `parent_thread_id`가 있으면 같은 값이어야 합니다.
+
+Subagent의 hook 이벤트는 계속 부모 세션 소유로 기록하며 작업 영역 해석으로 실행 승인을 부여하지 않습니다. 이후 원문 대화 레코드를 검색하거나 조상 관계를 추론하지 않습니다. Codex는 부모 hook ID 동작을 명시하고 transcript 형식이 안정된 hook 인터페이스가 아니라고 안내하므로, 알 수 없는 메타데이터는 아래 fallback을 유지합니다. [Codex hook 입력](https://learn.chatgpt.com/docs/hooks#common-input-fields)을 참고하세요.
 
 해석한 폴더를 기준으로 hook의 DB·설정·자동 설치 갱신을 선택합니다. Hook의 `--db` 재정의도 해당 폴더의 DB를 가리켜야 합니다. 메타데이터가 없거나 읽을 수 없거나 크기 제한을 넘거나 형식·검증이 잘못되면 이벤트의 기존 절대 경로 `cwd`로 돌아갑니다. 따라서 사용 가능한 메타데이터가 없는 호스트에서는 이벤트마다 폴더를 선택하는 동작이 유지됩니다. Claude Code hook은 이벤트 `cwd`를 계속 사용하고, 관리 CLI는 선택한 폴더나 현재 폴더를 사용하며, MCP 서버는 시작 폴더에 고정됩니다.
 

@@ -309,3 +309,151 @@ def test_resolving_selected_workspace_preserves_existing_child_database(
     assert json.loads(capsys.readouterr().out)["workspace"]["workspace_root"] == str(tmp_path)
     assert child_db.read_bytes() == original
     assert db.local_db_path(tmp_path).is_file()
+
+
+AGENT_ID = "child-selected-workspace"
+
+
+def _subagent_metadata(root: Path) -> dict[str, object]:
+    return _metadata(root, id=AGENT_ID, parent_thread_id=SESSION_ID, source={
+        "subagent": {"thread_spawn": {"parent_thread_id": SESSION_ID, "depth": 1}},
+    })
+
+
+@pytest.mark.parametrize("outer_parent", [True, False])
+def test_verified_subagent_uses_original_workspace(tmp_path: Path, outer_parent: bool) -> None:
+    selected = tmp_path / "project"
+    skill = tmp_path / "skill"
+    selected.mkdir(); skill.mkdir()
+    record = _subagent_metadata(selected)
+    if not outer_parent:
+        del record["payload"]["parent_thread_id"]
+    transcript = _transcript(tmp_path, record)
+    payload = {**_payload(skill, transcript), "agent_id": AGENT_ID}
+
+    assert session_workspace.resolve_hook_workspace(payload, client="codex", fallback=skill) == selected
+    assert payload["session_id"] == SESSION_ID
+    assert payload["cwd"] == str(skill)
+    assert not (selected / ".tapl").exists()
+    assert not (skill / ".tapl").exists()
+
+
+@pytest.mark.parametrize("case", [
+    "missing-agent", "empty-agent", "numeric-agent", "other-agent", "parent-as-agent",
+    "missing-source", "source-string", "source-list", "missing-subagent", "subagent-string",
+    "missing-spawn", "spawn-string", "missing-parent", "other-parent", "nested-ancestor",
+    "outer-other-parent", "outer-null-parent", "outer-empty-parent", "outer-numeric-parent",
+])
+def test_unverified_subagent_never_redirects(tmp_path: Path, case: str) -> None:
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    record = _subagent_metadata(tmp_path)
+    metadata = record["payload"]
+    source = metadata["source"]
+    spawn = source["subagent"]["thread_spawn"]
+    payload = {"session_id": SESSION_ID, "cwd": str(skill), "agent_id": AGENT_ID}
+    if case == "missing-agent":
+        del payload["agent_id"]
+    elif case in {"empty-agent", "numeric-agent", "other-agent", "parent-as-agent"}:
+        payload["agent_id"] = {"empty-agent": "", "numeric-agent": 1,
+                               "other-agent": "unrelated-child", "parent-as-agent": SESSION_ID}[case]
+    elif case == "missing-source":
+        del metadata["source"]
+    elif case in {"source-string", "source-list"}:
+        metadata["source"] = "subagent" if case == "source-string" else []
+    elif case == "missing-subagent":
+        del source["subagent"]
+    elif case == "subagent-string":
+        source["subagent"] = "thread_spawn"
+    elif case == "missing-spawn":
+        del source["subagent"]["thread_spawn"]
+    elif case == "spawn-string":
+        source["subagent"]["thread_spawn"] = SESSION_ID
+    elif case == "missing-parent":
+        del spawn["parent_thread_id"]
+    elif case in {"other-parent", "nested-ancestor"}:
+        spawn["parent_thread_id"] = "another-parent"
+        if case == "nested-ancestor":
+            metadata["parent_thread_id"] = "another-parent"
+            spawn["depth"] = 2
+    else:
+        metadata["parent_thread_id"] = {
+            "outer-other-parent": "unrelated-parent", "outer-null-parent": None,
+            "outer-empty-parent": "", "outer-numeric-parent": 1,
+        }[case]
+    payload["transcript_path"] = str(_transcript(tmp_path, record))
+
+    assert session_workspace.resolve_hook_workspace(payload, client="codex", fallback=skill) == skill
+    assert not (tmp_path / ".tapl").exists()
+
+
+@pytest.mark.parametrize("cwd", ["relative", "missing", "file"])
+def test_verified_subagent_still_requires_existing_absolute_workspace(tmp_path: Path, cwd: str) -> None:
+    skill = tmp_path / "skill"; skill.mkdir()
+    ordinary = tmp_path / "ordinary"; ordinary.touch()
+    record = _subagent_metadata(tmp_path)
+    record["payload"]["cwd"] = {"relative": ".", "missing": str(tmp_path / "absent"), "file": str(ordinary)}[cwd]
+    payload = {**_payload(skill, _transcript(tmp_path, record)), "agent_id": AGENT_ID}
+    assert session_workspace.resolve_hook_workspace(payload, client="codex", fallback=skill) == skill
+
+
+def test_main_session_precedence_preserves_existing_hints_contract(tmp_path: Path) -> None:
+    skill = tmp_path / "skill"; skill.mkdir()
+    record = _metadata(tmp_path, parent_thread_id="another-parent", source="cli")
+    payload = {**_payload(skill, _transcript(tmp_path, record)), "agent_id": AGENT_ID}
+    assert session_workspace.resolve_hook_workspace(payload, client="codex", fallback=skill) == tmp_path
+
+
+@pytest.mark.parametrize("existing_skill_database", [False, True])
+def test_observe_subagent_hook_initializes_only_original_project_and_keeps_parent_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], existing_skill_database: bool,
+) -> None:
+    selected = tmp_path / "project"; selected.mkdir()
+    skill = tmp_path / "skill"; skill.mkdir()
+    previous_database = Path(db.initialize_workspace(skill)["db"]) if existing_skill_database else None
+    previous_bytes = previous_database.read_bytes() if previous_database else None
+    payload = {**_payload(skill, _transcript(tmp_path, _subagent_metadata(selected))),
+               "agent_id": AGENT_ID, "agent_type": "default", "tool_name": "Bash",
+               "tool_input": {"command": "nl -ba SKILL.md"}}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    with mock.patch.object(hook_cli.tapl_install, "auto_install_if_needed"):
+        assert hook_cli.main(["--client", "codex", "--event", "PreToolUse", "--mode", "observe", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["workspace"]["workspace_root"] == str(selected)
+    with sqlite3.connect(db.local_db_path(selected)) as conn:
+        row = conn.execute("SELECT session_id, payload_json FROM events WHERE event_type = 'PreToolUse'").fetchone()
+        assert row[0] == SESSION_ID
+        assert json.loads(row[1]) == payload
+        assert conn.execute("SELECT count(*) FROM workflow_runs").fetchone()[0] == 0
+    if previous_database:
+        assert previous_database.read_bytes() == previous_bytes
+        assert list((skill / ".tapl").iterdir()) == [previous_database]
+    else:
+        assert not (skill / ".tapl").exists()
+
+
+@pytest.mark.parametrize("mode", ["observe", "enforce"])
+def test_subagent_routing_does_not_grant_execution_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], mode: str,
+) -> None:
+    selected = tmp_path / "project"; selected.mkdir()
+    skill = tmp_path / "skill"; skill.mkdir()
+    path = db.local_db_path(selected, create_identity=True)
+    conn = db.connect(path, session_id=SESSION_ID)
+    try:
+        db.ensure_active_run(conn, work_type="implementation", workflow_mode="fast")
+        db.upsert_plan(conn, plan_id="PLAN-001", title="Parent plan", status="Finalized")
+        db.upsert_task(conn, task_id="TASK-001", title="Parent task", spec_id="PLAN-001",
+                       goal="Change a file", action="Write it", verification="Read it", status="Pending")
+    finally:
+        conn.close()
+    payload = {**_payload(skill, _transcript(tmp_path, _subagent_metadata(selected))),
+               "agent_id": AGENT_ID, "tool_name": "Write", "tool_input": {"file_path": str(selected / "new.txt")}}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    with mock.patch.object(hook_cli.tapl_install, "auto_install_if_needed"):
+        code = hook_cli.main(["--client", "codex", "--event", "PreToolUse", "--mode", mode, "--json"])
+    result = json.loads(capsys.readouterr().out)
+    assert result["block"] is (mode == "enforce")
+    assert code == (2 if mode == "enforce" else 0)
+    assert "execution_approval_missing" in result["message"]
+    assert not (selected / "new.txt").exists()
+    assert not (skill / ".tapl").exists()

@@ -6,7 +6,12 @@ TAPL writes each local environment's records to `.tapl/tapl-{UUID}.db` in the se
 
 Client integration does not create a second workflow database: Codex and Claude Code share the folder’s installation UUID/database and history reader. Claude owner IDs occupy a separate namespace; [client removal safeguards](../getting-started/claude-code.md#connect-and-remove) protect shared settings and history.
 
-For Codex hooks, the workspace is the folder selected in Codex, even when a tool runs in a subdirectory. Hook events still require an existing absolute `cwd`. TAPL parses only the first JSONL record, limited to 1 MiB, from an absolute `transcript_path` pointing to a regular file; a symlink at that path is rejected. It uses the record's `payload.cwd` only when its type is `session_meta`, its `payload.id` exactly matches the hook session, and the workspace is an existing absolute directory. It does not parse or retain later conversation records to resolve the workspace.
+For Codex hooks, the workspace is the folder selected in Codex, even when a tool runs elsewhere. Hook events still require an existing absolute `cwd`. TAPL reads only the first JSONL record, limited to 1 MiB, from an absolute `transcript_path` pointing to a regular file; a symlink at that path is rejected. The record must be `session_meta` with an existing absolute directory in `payload.cwd`, and satisfy one of these identity checks:
+
+- Main session: the metadata ID exactly matches the hook's `session_id`.
+- Subagent: a nonempty, distinct hook `agent_id` matches the metadata ID, and `source.subagent.thread_spawn.parent_thread_id` matches the hook's `session_id`. If the metadata also has a top-level `parent_thread_id`, it must agree.
+
+The Subagent's hook still records events under the parent session owner; resolving a workspace does not grant execution approval. TAPL does not scan later conversation records or infer ancestor relationships. Codex documents the parent hook identity and warns that transcript format is not a stable hook interface; unrecognized metadata keeps the fallback below. See [Codex hook inputs](https://learn.chatgpt.com/docs/hooks#common-input-fields).
 
 The resolved folder selects the hook's database, configuration, and automatic installation refresh. A hook `--db` override must point to that folder's database. If the metadata is missing, unreadable, oversized, malformed, or fails validation, the hook falls back to the event's existing absolute `cwd`. Hosts without usable metadata therefore retain per-event folder selection. Claude Code hooks continue to use their event `cwd`; administrative CLI commands use their selected/current folder, and MCP servers remain bound to their startup folder.
 

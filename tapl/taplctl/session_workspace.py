@@ -35,7 +35,9 @@ def resolve_hook_workspace(
         if not path.is_absolute():
             return fallback
         metadata = _read_session_metadata(path)
-        if metadata is None or metadata.get("id") != session_id:
+        if metadata is None or not _matches_hook_session(
+            metadata, session_id=session_id, agent_id=payload.get("agent_id"),
+        ):
             return fallback
         cwd = metadata.get("cwd")
         if not isinstance(cwd, str) or not cwd or not Path(cwd).is_absolute():
@@ -46,6 +48,27 @@ def resolve_hook_workspace(
         # Metadata is an optional hint. Keep legacy hooks working if the file
         # disappears, access is denied, or a path cannot be resolved.
         return fallback
+
+
+def _matches_hook_session(
+    metadata: dict[str, Any], *, session_id: str, agent_id: Any,
+) -> bool:
+    if metadata.get("id") == session_id:
+        return True
+    # Codex owns a subagent hook with the parent session ID, while the
+    # supplied transcript belongs to the child. Require both identities and
+    # the explicit direct-parent link; never infer an ancestor or scan logs.
+    if (
+        not isinstance(agent_id, str) or not agent_id or agent_id == session_id
+        or metadata.get("id") != agent_id
+    ):
+        return False
+    source = metadata.get("source")
+    subagent = source.get("subagent") if isinstance(source, dict) else None
+    spawn = subagent.get("thread_spawn") if isinstance(subagent, dict) else None
+    if not isinstance(spawn, dict) or spawn.get("parent_thread_id") != session_id:
+        return False
+    return "parent_thread_id" not in metadata or metadata["parent_thread_id"] == session_id
 
 
 def _read_session_metadata(path: Path) -> dict[str, Any] | None:

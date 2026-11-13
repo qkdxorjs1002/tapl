@@ -8,7 +8,7 @@ Delegation preferences are client-scoped: `[subagents]` belongs to Codex, while 
 
 ## Workspace and file selection
 
-Agent sessions write to `.tapl/tapl-{UUID}.db` in their exact working folder and read other `tapl-*.db` history there. Hooks require an existing absolute `cwd`; a hook `--db` must name that folder's current local database. The MCP server stays bound to its startup folder. Parent databases, Git roots, and repository markers are not searched, so child folders keep separate history. Administrative CLI commands retain explicit `--db` and `--workspace-root` overrides. See [Local identity and shared history](storage.md) for UUID persistence and legacy migration.
+Agent sessions write to `.tapl/tapl-{UUID}.db` in the selected workspace and read other `tapl-*.db` history there. Codex hooks resolve that workspace from validated main-session or Subagent metadata, falling back to the event's existing absolute `cwd` when validation fails. A hook `--db` must identify the resolved workspace's current local database. The MCP server stays bound to its startup folder. Parent databases, Git roots, and repository markers are not searched, so child folders keep separate history. Administrative CLI commands retain explicit `--db` and `--workspace-root` overrides. See [Local identity and shared history](storage.md) for UUID persistence and legacy migration.
 
 Configuration selects **one file**, in this order:
 
