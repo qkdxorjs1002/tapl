@@ -69,12 +69,35 @@ async function jump(page, kind) {
   assert.equal(await page.locator('[data-wb-focus=mindmap-follow]').getAttribute('aria-pressed'), 'false');
 }
 
+async function assertSideMidpoints(page, selector) {
+  const result = await page.locator(selector).evaluate(host => {
+    const nodes = new Map([...host.querySelectorAll('[data-mindmap-node]')].map(node => [node.dataset.mindmapNode, node]));
+    const failures = [], edges = [...host.querySelectorAll('[data-from][data-to]')];
+    for (const edge of edges) {
+      const values = edge.querySelector('path').getAttribute('d').match(/[-+]?(?:\d*\.?\d+)(?:e[-+]?\d+)?/gi).map(Number);
+      for (const [key, point] of [[edge.dataset.from, values.slice(0, 2)], [edge.dataset.to, values.slice(-2)]]) {
+        const node = nodes.get(key), matrix = new DOMMatrix(node.style.transform);
+        const width = Number.parseFloat(node.style.width), height = Number.parseFloat(node.style.height);
+        const centers = [[matrix.e + width / 2, matrix.f], [matrix.e + width, matrix.f + height / 2],
+          [matrix.e + width / 2, matrix.f + height], [matrix.e, matrix.f + height / 2]];
+        if (!centers.some(center => Math.hypot(center[0] - point[0], center[1] - point[1]) < .05)) {
+          failures.push({ kind: node.dataset.kind, point, centers });
+        }
+      }
+    }
+    return { count: edges.length, failures };
+  });
+  assert.ok(result.count > 0);
+  assert.deepEqual(result.failures, [], 'every SVG endpoint attaches at one of four side midpoints');
+}
+
 test('real agent reads show exact original-only links; Viewer navigation leaves trace and owning RUN intact', async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR', reducedMotion: 'reduce' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   try {
     await page.goto(origin); await page.waitForLoadState('networkidle');
     const map = page.locator('.wb-run-mindmap'); await map.waitFor();
+    await assertSideMidpoints(page, '.wb-run-mindmap');
     assert.equal(await map.locator('[data-kind=memory]').count(), 2);
     assert.equal(await map.locator('[data-kind=history]').count(), 1);
     assert.equal(await map.locator('[data-relation=memory-source]').count(), 1);
@@ -106,6 +129,16 @@ test('real agent reads show exact original-only links; Viewer navigation leaves 
     assert.equal(runPython(context + `with sqlite3.connect(app._db_path) as conn:
  print(json.dumps(conn.execute("SELECT count(*) FROM events WHERE event_type='run_references_updated'").fetchone()[0]))`), evidence.events);
     assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
+test('associative-memory SVG connections also use only the four side midpoints', async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  try {
+    await page.goto(origin); await page.waitForLoadState('networkidle');
+    await page.locator('[data-wb-focus="nav:memories"]').click();
+    await page.locator('.wb-memory-mindmap').waitFor();
+    await assertSideMidpoints(page, '.wb-memory-mindmap');
   } finally { await page.close(); }
 });
 

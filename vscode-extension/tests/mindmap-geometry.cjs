@@ -17,6 +17,8 @@ function assertBoundary(point, rectangle) {
   const dx = Math.abs(point.x - rectangle.x), dy = Math.abs(point.y - rectangle.y);
   assert.ok(dx <= rectangle.width / 2 + 1e-9 && dy <= rectangle.height / 2 + 1e-9, 'anchor is inside rectangle extents');
   assert.ok(Math.abs(dx - rectangle.width / 2) < 1e-9 || Math.abs(dy - rectangle.height / 2) < 1e-9, 'anchor lies on rectangle boundary');
+  assert.ok((Math.abs(dx - rectangle.width / 2) < 1e-9 && dy < 1e-9)
+    || (Math.abs(dy - rectangle.height / 2) < 1e-9 && dx < 1e-9), 'anchor is one of the four side midpoints');
 }
 
 test('horizontal compatibility mode preserves anchors, midpoint controls and exact SVG paths', () => {
@@ -31,19 +33,17 @@ test('horizontal compatibility mode preserves anchors, midpoint controls and exa
   assert.deepEqual(connect(from, to, 'horizontal'), connect(from, to));
 });
 
-test('radial anchors intersect actual rectangles along center rays in all quadrants and axes', () => {
+test('radial anchors select only side midpoints in all quadrants and axes', () => {
   const from = node(0, 0);
   for (const [dx, dy] of [[300, 400], [-300, 400], [-300, -400], [300, -400], [600, 80], [-600, 80], [0, 400], [0, -400], [400, 0], [-400, 0]]) {
     const to = node(dx, dy, 80, 100);
     const geometry = connect(from, to, 'radial');
     assertBoundary(geometry.start, from);
     assertBoundary(geometry.end, to);
-    close(geometry.start.x * dy - geometry.start.y * dx, 0);
-    close((geometry.end.x - dx) * dy - (geometry.end.y - dy) * dx, 0);
     assert.ok(geometry.start.x * dx + geometry.start.y * dy > 0, 'source anchor faces target');
     assert.ok((geometry.end.x - dx) * dx + (geometry.end.y - dy) * dy < 0, 'target anchor faces source');
   }
-  closePoint(connect(from, node(300, 400, 80, 100), 'radial').start, { x: 30, y: 40 });
+  closePoint(connect(from, node(300, 400, 80, 100), 'radial').start, { x: 0, y: 40 });
 });
 
 test('radial controls leave the correct side and reverse with the connection orientation', () => {
@@ -90,7 +90,7 @@ test('independent motion offsets reroute radial anchors on displaced rectangles 
   assert.deepEqual(moved, connect(movedFrom, movedTo, 'radial'));
   assertBoundary(moved.start, movedFrom);
   assertBoundary(moved.end, movedTo);
-  assert.notDeepEqual(moved.start, { x: 33, y: 38 }, 'changed center ray recalculates attachment');
+  closePoint(moved.start, { x: 3, y: 38 });
   closePoint(pointAt(moved, 0), moved.start);
   closePoint(pointAt(moved, 1), moved.end);
   closePoint(pointAt(moved, .5), {

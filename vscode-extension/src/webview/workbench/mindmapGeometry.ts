@@ -12,16 +12,16 @@ export type MindmapConnection = {
 
 const zero = { x: 0, y: 0 };
 
-/** Intersect a center ray with the rectangle, keeping its outgoing side normal. */
+/** Choose a facing side by center direction, then attach at that side's midpoint. */
 function boundary(rectangle: MindmapRectangle, direction: MindmapPoint) {
   const halfWidth = Math.max(0, rectangle.width) / 2;
   const halfHeight = Math.max(0, rectangle.height) / 2;
   const across = direction.x ? halfWidth / Math.abs(direction.x) : Infinity;
   const down = direction.y ? halfHeight / Math.abs(direction.y) : Infinity;
-  const distance = Math.min(across, down);
+  const normal = across <= down ? { x: Math.sign(direction.x), y: 0 } : { x: 0, y: Math.sign(direction.y) };
   return {
-    point: { x: rectangle.x + direction.x * distance, y: rectangle.y + direction.y * distance },
-    normal: across <= down ? { x: Math.sign(direction.x), y: 0 } : { x: 0, y: Math.sign(direction.y) }
+    point: { x: rectangle.x + normal.x * halfWidth, y: rectangle.y + normal.y * halfHeight },
+    normal
   };
 }
 

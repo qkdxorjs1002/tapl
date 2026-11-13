@@ -45,7 +45,9 @@ test('RUN reference branches connect through upper and lower boundaries in both 
   const connect = compiled.exports.mindmapConnectionGeometry;
   const forward = connect(root, target, graph.routing);
   assert.equal(forward.start.y, root.y + root.height / 2);
+  assert.equal(forward.start.x, root.x);
   assert.equal(forward.end.y, target.y - target.height / 2);
+  assert.equal(forward.end.x, target.x);
   assert.ok(forward.control1.y > forward.start.y);
   assert.ok(forward.control2.y < forward.end.y);
   const reverse = connect(target, root, graph.routing);
