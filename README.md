@@ -4,6 +4,11 @@
 <h1 align="center">tapl</h1>
 <p align="center"><strong>Give your coding agent a memory.</strong></p>
 <p align="center">TAPL keeps your Codex and Claude Code plans, approvals, tasks, findings, and history in a SQLite database in the session working folder.</p>
+
+<p align="center">
+  <img src="assets/tapl-viewer.png" alt="TAPL Viewer showing connected plans, tasks, memories, and history" width="960" />
+</p>
+
 <p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a></p>
 <p align="center">
   <a href="https://github.com/qkdxorjs1002/tapl/releases"><img src="https://img.shields.io/github/v/release/qkdxorjs1002/tapl" alt="Latest stable release" /></a>

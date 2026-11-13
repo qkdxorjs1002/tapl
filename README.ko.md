@@ -6,6 +6,10 @@
 <p align="center">요청부터 계획, 발견 사항, 완료 기록까지 코드 옆에 남겨 다음 세션에서도 이어갑니다.</p>
 
 <p align="center">
+  <img src="assets/tapl-viewer.png" alt="계획, 작업, 기억과 과거 기록을 연결해 보여주는 TAPL Viewer" width="960" />
+</p>
+
+<p align="center">
   <a href="README.md">English</a> · <strong>한국어</strong>
 </p>
 <p align="center">
