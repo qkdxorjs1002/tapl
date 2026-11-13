@@ -155,6 +155,11 @@ function configHost(t, options = {}) {
     Module._load = function(name, ...args) {
       if (name === 'vscode') return vscode;
       if (name === 'node:os') return { ...os, homedir: () => home };
+      if (name === 'node:fs/promises' && options.ioDelayMs) return { ...fs.promises,
+        readdir: async (...args) => {
+          await new Promise(resolve => setTimeout(resolve, options.ioDelayMs));
+          return fs.promises.readdir(...args);
+        } };
       if (name === './taplMcpClient') return { TaplMcpClientPool: Pool,
         taplMcpCommandCandidates: value => value === '' ? ['tapl-mcp'] : [value] };
       return originalLoad.call(this, name, ...args);
@@ -165,54 +170,70 @@ function configHost(t, options = {}) {
   } finally { Module._load = originalLoad; }
   t.after(async () => { subscriptions.forEach(item => item.dispose()); await extension.deactivate(); fs.rmSync(directory, { recursive: true, force: true }); });
   const flush = async () => { for (let i = 0; i < 10; i++) await tick(); };
+  // A fixed number of event-loop turns does not wait for filesystem I/O.
+  // Observe the real watcher result without triggering an extra refresh.
+  const waitFor = async (predicate, description) => {
+    const deadline = performance.now() + 2000;
+    while (!predicate() && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.ok(predicate(), description);
+  };
   const send = async message => { receive(message); await flush(); return message.requestId
     ? messages.findLast(reply => reply.requestId === message.requestId) : messages.at(-1); };
   const fire = (file, event = 'change') => {
     const watcher = watchers.find(item => path.join(item.pattern.base, item.pattern.pattern) === file);
     assert.ok(watcher, `Expected config watcher for ${file}`); watcher.handlers[event]({ fsPath: file });
   };
-  return { local, user, folders, write, calls, messages, trace, watchers, vscode, commands, send, flush, fire,
+  return { local, user, folders, write, calls, messages, trace, watchers, vscode, commands, send, flush, waitFor, fire,
     receive: message => receive(message), workspaceChanged: () => folderChanged(), grantTrust: () => trustGranted(),
     invalidations: () => invalidations };
 }
 
 test('host bootstraps custom command before MCP and follows file creation/deletion, auto locale and workspace changes', async t => {
-  const h = configHost(t, { language: 'ko-KR', prepare({ user, write }) {
+  const h = configHost(t, { language: 'ko-KR', ioDelayMs: 15, prepare({ user, write }) {
     write(user, '[viewer]\nlanguage="en"\nlayout="large"\nmcp_path="/a directory/custom-mcp"');
   } });
   await h.commands.get('taplWorkflow.openOverview')();
   assert.deepEqual(h.calls[0].commands, ['/a directory/custom-mcp']);
   assert.equal(h.messages.at(-1).locale, 'en'); assert.equal(h.messages.at(-1).layout, 'large');
   assert.deepEqual(h.messages.at(-1).preferences, { language: 'en', layout: 'large', mcp_path: '/a directory/custom-mcp' });
-  h.write(h.local, '[viewer]\nlayout="medium"'); h.fire(h.local, 'create'); await h.flush();
+  h.write(h.local, '[viewer]\nlayout="medium"'); h.fire(h.local, 'create');
+  await h.waitFor(() => h.messages.at(-1)?.layout === 'medium', 'created workspace config is rendered');
   assert.equal(h.messages.at(-1).locale, 'ko'); assert.equal(h.messages.at(-1).layout, 'medium');
   assert.deepEqual(h.calls.at(-1).commands, ['tapl-mcp']);
-  fs.unlinkSync(h.local); h.fire(h.local, 'delete'); await h.flush();
+  fs.unlinkSync(h.local); h.fire(h.local, 'delete');
+  await h.waitFor(() => h.messages.at(-1)?.layout === 'large', 'deleted config restores user preferences');
   assert.equal(h.messages.at(-1).locale, 'en'); assert.equal(h.messages.at(-1).layout, 'large');
-  h.write(h.user, '[viewer]\nlanguage="ko"'); h.fire(h.user); await h.flush();
+  h.write(h.user, '[viewer]\nlanguage="ko"'); h.fire(h.user);
+  await h.waitFor(() => h.messages.at(-1)?.locale === 'ko', 'changed user config is rendered');
   assert.equal(h.messages.at(-1).locale, 'ko'); assert.equal(h.messages.at(-1).layout, 'auto');
   const secondConfig = path.join(h.folders[1].uri.fsPath, '.tapl', 'config.toml');
   h.write(secondConfig, '[viewer]\nlanguage="en"\nlayout="small"');
   await h.send({ command: 'chooseWorkspace' });
+  await h.waitFor(() => h.messages.at(-1)?.workspace === h.folders[1].uri.fsPath
+    && h.messages.at(-1)?.locale === 'en' && h.messages.at(-1)?.layout === 'small', 'selected workspace preferences are rendered');
   assert.equal(h.messages.at(-1).workspace, h.folders[1].uri.fsPath);
   assert.equal(h.messages.at(-1).locale, 'en'); assert.equal(h.messages.at(-1).layout, 'small');
 });
 
 test('host blocks malformed selected configuration and untrusted workspace executables without fallback', async t => {
-  const h = configHost(t, { trusted: false, prepare({ local, user, write }) {
+  const h = configHost(t, { trusted: false, ioDelayMs: 15, prepare({ local, user, write }) {
     write(user, '[viewer]\nmcp_path="user-mcp"'); write(local, '[viewer]\nlanguage="invalid"');
   } });
   await h.commands.get('taplWorkflow.openOverview')();
   assert.equal(h.calls.length, 0); assert.equal(h.messages.at(-1).view.type, 'error');
   assert.match(h.messages.at(-1).view.message, /viewer.language/);
-  h.write(h.local, '[viewer]\nmcp_path="workspace-mcp"'); h.fire(h.local); await h.flush();
+  h.write(h.local, '[viewer]\nmcp_path="workspace-mcp"'); h.fire(h.local);
+  await h.waitFor(() => /Trust this workspace/.test(h.messages.at(-1)?.view?.message ?? ''), 'workspace executable remains blocked');
   assert.equal(h.calls.length, 0); assert.match(h.messages.at(-1).view.message, /Trust this workspace/);
-  h.vscode.workspace.isTrusted = true; h.grantTrust(); await h.flush();
+  h.vscode.workspace.isTrusted = true; h.grantTrust();
+  await h.waitFor(() => h.messages.at(-1)?.view?.type === 'overview', 'granting trust refreshes the view');
   assert.deepEqual(h.calls.at(-1).commands, ['workspace-mcp']);
-  h.vscode.workspace.isTrusted = false; fs.unlinkSync(h.local); h.fire(h.local, 'delete'); await h.flush();
+  h.vscode.workspace.isTrusted = false; fs.unlinkSync(h.local); h.fire(h.local, 'delete');
+  await h.waitFor(() => /Trust this workspace/.test(h.messages.at(-1)?.view?.message ?? ''), 'relative user executable remains blocked');
   assert.match(h.messages.at(-1).view.message, /Trust this workspace/);
   const executable = path.resolve('/trusted/user-mcp');
-  h.write(h.user, `[viewer]\nmcp_path=${JSON.stringify(executable)}`); h.fire(h.user); await h.flush();
+  h.write(h.user, `[viewer]\nmcp_path=${JSON.stringify(executable)}`); h.fire(h.user);
+  await h.waitFor(() => h.messages.at(-1)?.view?.type === 'overview', 'absolute user executable refreshes the view');
   assert.deepEqual(h.calls.at(-1).commands, [executable]);
 });
 
