@@ -62,6 +62,75 @@ test('side-band projection moves inside the band and clamps at both 35% boundari
   close(above.y, 14);
 });
 
+test('nearby PLAN and all four TASK rows use facing horizontal ports on either side', () => {
+  const plan = node(0, 0, 216, 100);
+  for (const sign of [-1, 1]) for (const y of [-132, -44, 44, 132]) {
+    const task = node(sign * 300, y, 210, 66);
+    const geometry = connect(plan, task, 'radial');
+    close(geometry.start.x, sign * 108);
+    close(geometry.end.x, sign * (300 - 105));
+    assertBoundary(geometry.start, plan); assertBoundary(geometry.end, task);
+    const reverse = connect(task, plan, 'radial');
+    closePoint(reverse.start, geometry.end); closePoint(reverse.end, geometry.start);
+    closePoint(reverse.control1, geometry.control2); closePoint(reverse.control2, geometry.control1);
+    closePoint(pointAt(reverse, .73), pointAt(geometry, .27));
+  }
+});
+
+test('above and below cards retain facing vertical ports and diagonal ties are deterministic', () => {
+  const from = node(0, 0, 216, 100);
+  for (const sign of [-1, 1]) for (const x of [-40, 0, 40]) {
+    const target = node(x, sign * 200, 210, 66), geometry = connect(from, target, 'radial');
+    close(geometry.start.y, sign * 50);
+    close(geometry.end.y, sign * (200 - 33));
+    assertBoundary(geometry.start, from); assertBoundary(geometry.end, target);
+  }
+  const square = node(0, 0, 100, 100), diagonal = node(200, 200, 100, 100);
+  const forward = connect(square, diagonal, 'radial'), reverse = connect(diagonal, square, 'radial');
+  close(forward.start.x, 50); close(forward.end.x, 150);
+  closePoint(forward.start, reverse.end); closePoint(forward.control1, reverse.control2);
+});
+
+test('curves stay inside narrow and touching column gaps instead of entering TASK siblings', () => {
+  const from = node(0, 0, 216, 100);
+  for (const sign of [-1, 1]) for (const gap of [0, .001, 8, 87]) {
+    const target = node(sign * (213 + gap), 132, 210, 66), geometry = connect(from, target, 'radial');
+    close(geometry.start.x, sign * 108);
+    close(geometry.end.x, sign * (108 + gap));
+    const controls = [geometry.start, geometry.control1, geometry.control2, geometry.end];
+    for (let i = 0; i < controls.length; i++) {
+      const distance = (controls[i].x - geometry.start.x) * sign;
+      assert.ok(distance >= -1e-9 && distance <= gap + 1e-9);
+      if (i) assert.ok((controls[i].x - controls[i - 1].x) * sign >= -1e-9);
+    }
+    for (let i = 0; i <= 40; i++) {
+      const distance = (pointAt(geometry, i / 40).x - geometry.start.x) * sign;
+      assert.ok(distance >= -1e-9 && distance <= gap + 1e-9, 'cubic remains outside both endpoint interiors');
+    }
+  }
+});
+
+test('motion recalculates valid corridors when offsets close a narrow horizontal gap', () => {
+  const from = node(0, 0, 216, 100), target = node(213.5, 132, 210, 66);
+  close(connect(from, target, 'radial').start.x, 108);
+  const moved = connect(from, target, 'radial', { x: 3, y: 0 }, { x: -3, y: 0 });
+  close(moved.start.y, 50); close(moved.end.y, 99);
+  assert.deepEqual(moved, connect({ ...from, x: 3 }, { ...target, x: 210.5 }, 'radial'));
+});
+
+test('rotated narrow and touching row gaps also contain the complete cubic', () => {
+  const from = node(0, 0, 100, 216);
+  for (const sign of [-1, 1]) for (const gap of [0, .001, 8, 87]) {
+    const target = node(132, sign * (213 + gap), 66, 210), geometry = connect(from, target, 'radial');
+    close(geometry.start.y, sign * 108); close(geometry.end.y, sign * (108 + gap));
+    const controls = [geometry.start, geometry.control1, geometry.control2, geometry.end];
+    for (const point of [...controls, ...Array.from({ length: 41 }, (_, i) => pointAt(geometry, i / 40))]) {
+      const distance = (point.y - geometry.start.y) * sign;
+      assert.ok(distance >= -1e-9 && distance <= gap + 1e-9);
+    }
+  }
+});
+
 test('radial controls leave the correct side and reverse with the connection orientation', () => {
   const from = node(0, 0);
   for (const to of [node(0, 400), node(0, -400), node(600, 80), node(-600, -80), node(300, 400, 80, 100)]) {

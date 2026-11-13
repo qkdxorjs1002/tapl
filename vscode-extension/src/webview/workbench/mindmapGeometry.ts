@@ -15,13 +15,14 @@ const SIDE_ANCHOR_SPAN = 0.35;
 const clamp = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value));
 
 /** Project toward a facing side, using only the central 35% of its length. */
-function boundary(rectangle: MindmapRectangle, direction: MindmapPoint) {
+function boundary(rectangle: MindmapRectangle, direction: MindmapPoint, facing?: MindmapPoint) {
   const halfWidth = Math.max(0, rectangle.width) / 2;
   const halfHeight = Math.max(0, rectangle.height) / 2;
   const across = direction.x ? halfWidth / Math.abs(direction.x) : Infinity;
   const down = direction.y ? halfHeight / Math.abs(direction.y) : Infinity;
-  const normal = across <= down ? { x: Math.sign(direction.x), y: 0 } : { x: 0, y: Math.sign(direction.y) };
-  const distance = Math.min(across, down);
+  const normal = facing ?? (across <= down ? { x: Math.sign(direction.x), y: 0 } : { x: 0, y: Math.sign(direction.y) });
+  const projectedDistance = normal.x ? across : down;
+  const distance = Number.isFinite(projectedDistance) ? projectedDistance : 0;
   return {
     point: {
       x: rectangle.x + (normal.x ? normal.x * halfWidth : clamp(direction.x * distance, halfWidth * SIDE_ANCHOR_SPAN)),
@@ -29,6 +30,15 @@ function boundary(rectangle: MindmapRectangle, direction: MindmapPoint) {
     },
     normal
   };
+}
+
+function facingPair(source: MindmapRectangle, target: MindmapRectangle, direction: MindmapPoint, horizontal: boolean, gap: number) {
+  const sign = (horizontal ? direction.x : direction.y) >= 0 ? 1 : -1;
+  const normal = horizontal ? { x: sign, y: 0 } : { x: 0, y: sign };
+  const outgoing = boundary(source, direction, normal);
+  const incoming = boundary(target, { x: -direction.x, y: -direction.y }, { x: -normal.x, y: -normal.y });
+  const dx = incoming.point.x - outgoing.point.x, dy = incoming.point.y - outgoing.point.y;
+  return { outgoing, incoming, gap, distanceSquared: dx * dx + dy * dy };
 }
 
 /** Nodes use center coordinates. Offsets are applied before routing so moving edges stay attached. */
@@ -47,11 +57,21 @@ export function mindmapConnectionGeometry(
     const dy = target.y - source.y;
     // Coincident centers still get deterministic, finite boundary anchors.
     const direction = dx || dy ? { x: dx, y: dy } : { x: 1, y: 0 };
-    const outgoing = boundary(source, direction);
-    const incoming = boundary(target, { x: -direction.x, y: -direction.y });
+    const horizontalGap = Math.abs(dx) - (Math.max(0, source.width) + Math.max(0, target.width)) / 2;
+    const verticalGap = Math.abs(dy) - (Math.max(0, source.height) + Math.max(0, target.height)) / 2;
+    // Choose the pair together: a flat TASK must not independently turn a nearby
+    // PLAN's horizontal connection into a vertical entry through sibling cards.
+    let pair = horizontalGap >= 0 ? facingPair(source, target, direction, true, horizontalGap) : undefined;
+    if (verticalGap >= 0) {
+      const vertical = facingPair(source, target, direction, false, verticalGap);
+      if (!pair || vertical.distanceSquared < pair.distanceSquared) pair = vertical;
+    }
+    // Overlapping rectangles have no clear corridor; keep the finite fallback.
+    const outgoing = pair?.outgoing ?? boundary(source, direction);
+    const incoming = pair?.incoming ?? boundary(target, { x: -direction.x, y: -direction.y });
     start = outgoing.point;
     end = incoming.point;
-    const handle = Math.min(160, Math.hypot(end.x - start.x, end.y - start.y) * 0.45);
+    const handle = Math.min(160, Math.hypot(end.x - start.x, end.y - start.y) * 0.45, (pair?.gap ?? Infinity) / 2);
     control1 = { x: start.x + outgoing.normal.x * handle, y: start.y + outgoing.normal.y * handle };
     control2 = { x: end.x + incoming.normal.x * handle, y: end.y + incoming.normal.y * handle };
   } else {

@@ -185,3 +185,61 @@ print('true')`);
     }
   } finally { await page.close(); }
 });
+
+test('nearby PLAN and four TASK rows use facing horizontal ports without entering sibling columns', async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  try {
+    await page.route('**/api/message', async route => {
+      const response = await route.fetch(), payload = await response.json();
+      if (payload.view?.type === 'overview') {
+        const status = payload.view.status, seed = status.tasks[0];
+        status.plans = status.plans.slice(0, 2).map(plan => ({ ...plan, status: 'Finalized' }));
+        status.tasks = status.plans.flatMap((plan, branch) => Array.from({ length: 4 }, (_, row) => ({
+          ...seed, id: 1000 + branch * 4 + row, stable_id: `TASK-${String(5 + branch * 4 + row).padStart(3, '0')}`,
+          title: `Nearby TASK ${branch * 4 + row + 1}`, spec_id: plan.stable_id, status: 'Completed',
+          run_id: status.active_run.id, source_db: status.source_db
+        })));
+        status.task_counts = { Completed: 8 }; status.references = [];
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    await page.goto(origin); await page.waitForLoadState('networkidle');
+    const map = page.locator('.wb-run-mindmap'); await map.waitFor();
+    await map.locator('.wb-mm-camera-controls button').nth(1).click();
+    await assertSideBands(page, '.wb-run-mindmap');
+    const result = await map.evaluate(host => {
+      const nodes = new Map([...host.querySelectorAll('[data-mindmap-node]')].map(node => [node.dataset.mindmapNode, node]));
+      const failures = [], signs = new Set(); let count = 0;
+      const rectangle = node => {
+        const matrix = new DOMMatrix(node.style.transform), width = Number.parseFloat(node.style.width), height = Number.parseFloat(node.style.height);
+        return { left: matrix.e, right: matrix.e + width, centerX: matrix.e + width / 2, centerY: matrix.f + height / 2 };
+      };
+      for (const edge of host.querySelectorAll('[data-from][data-to]')) {
+        const from = nodes.get(edge.dataset.from), to = nodes.get(edge.dataset.to);
+        if (from.dataset.kind !== 'plan' || to.dataset.kind !== 'task') continue;
+        const source = rectangle(from), target = rectangle(to), sign = Math.sign(target.centerX - source.centerX);
+        const values = edge.querySelector('path').getAttribute('d').match(/[-+]?(?:\d*\.?\d+)(?:e[-+]?\d+)?/gi).map(Number);
+        const expectedStart = sign > 0 ? source.right : source.left, expectedEnd = sign > 0 ? target.left : target.right;
+        signs.add(sign); count++;
+        if (Math.abs(values[0] - expectedStart) > .05 || Math.abs(values[6] - expectedEnd) > .05) {
+          failures.push('TASK did not use its facing side'); continue;
+        }
+        const gap = (expectedEnd - expectedStart) * sign;
+        for (const x of [values[0], values[2], values[4], values[6]]) {
+          if ((x - expectedStart) * sign < -.05 || (x - expectedStart) * sign > gap + .05) failures.push('control outside corridor');
+        }
+        for (let i = 0; i <= 40; i++) {
+          const p = i / 40, q = 1 - p;
+          const x = q*q*q*values[0] + 3*q*q*p*values[2] + 3*q*p*p*values[4] + p*p*p*values[6];
+          if ((x - expectedStart) * sign < -.05 || (x - expectedStart) * sign > gap + .05) failures.push('curve entered sibling column');
+        }
+      }
+      return { count, signs: [...signs].sort(), failures };
+    });
+    assert.equal(result.count, 8); assert.deepEqual(result.signs, [-1, 1]); assert.deepEqual(result.failures, []);
+    if (process.env.TAPL_SCREENSHOT_DIR) {
+      mkdirSync(process.env.TAPL_SCREENSHOT_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.TAPL_SCREENSHOT_DIR, 'nearby-plan-task-ports.png'), animations: 'disabled' });
+    }
+  } finally { await page.close(); }
+});
