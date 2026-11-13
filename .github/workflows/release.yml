@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  windows-installer-preflight:
-    name: Windows release preflight (Python ${{ matrix.python-version }})
+  windows-installer-fixtures:
+    name: Windows installer fixtures (Python ${{ matrix.python-version }})
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -48,6 +48,26 @@ jobs:
       - name: Test standalone Windows bootstrap
         run: python -m unittest -v tapl.tests.test_installer_bootstrap --failfast
 
+      - name: Run Windows installer tests (stdlib-only fixtures)
+        run: python -m unittest -v tapl.tests.test_installer_windows --failfast
+
+  windows-installer-preflight:
+    name: Windows release preflight (Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
       - name: Test Windows runtime regressions
         run: |
           python -m pip install "./tapl[test]"
@@ -67,9 +87,6 @@ jobs:
         run: |
           $wheel = (Get-ChildItem -LiteralPath dist -Filter 'taplctl-*.whl').FullName
           ./.github/scripts/windows_install_smoke.ps1 -Wheel $wheel -Python (Get-Command python).Source
-
-      - name: Run Windows installer tests (stdlib-only fixtures)
-        run: python -m unittest -v tapl.tests.test_installer_windows --failfast
 
   macos-runtime:
     name: Sign macOS runtime (${{ matrix.target }})
@@ -197,18 +214,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: signed-runtime-${{ matrix.target }}
-          path: release-dist/*.tar.gz
+          path: release-dist/taplctl-mcp-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz
           if-no-files-found: error
           retention-days: 1
 
-  release:
-    name: Build and publish release
-    needs: [windows-installer-preflight, macos-runtime]
-    outputs:
-      prerelease: ${{ steps.version.outputs.prerelease }}
-      version: ${{ steps.version.outputs.version }}
-    permissions:
-      contents: write
+  build-packages:
+    name: Build Python wheel and VSIX
     runs-on: ubuntu-latest
 
     steps:
@@ -221,18 +232,6 @@ jobs:
           python .github/scripts/release_version.py
           "${GITHUB_REF_NAME}"
           --github-output "${GITHUB_OUTPUT}"
-
-      - name: Require Homebrew tap token
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
-            echo "Set the HOMEBREW_TAP_TOKEN secret with write access to qkdxorjs1002/homebrew-tap." >&2
-            exit 1
-          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -298,9 +297,72 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --wheel --outdir ../release-dist
 
+      - name: Build VS Code extension package
+        working-directory: vscode-extension
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm exec -- vsce package \
+            --no-dependencies \
+            --allow-missing-repository \
+            --out "../release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix"
+
+      - name: Verify versioned packages
+        env:
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "release-dist/taplctl-${PYTHON_VERSION}-py3-none-any.whl"
+          test -f "release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix"
+
+      - name: Upload versioned packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages-${{ steps.version.outputs.version }}
+          path: |
+            release-dist/taplctl-${{ steps.version.outputs.python_version }}-py3-none-any.whl
+            release-dist/tapl-workflow-viewer-${{ steps.version.outputs.version }}.vsix
+          if-no-files-found: error
+          retention-days: 1
+
+  linux-runtime:
+    name: Build Linux runtime (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-arm64
+            platform: manylinux2014_aarch64
+          - target: linux-x86_64
+            platform: manylinux2014_x86_64
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve release version
+        id: version
+        run: >-
+          python .github/scripts/release_version.py
+          "${GITHUB_REF_NAME}"
+          --github-output "${GITHUB_OUTPUT}"
+
       - name: Build MCP runtime wheelhouses
         env:
           TAG_VERSION: ${{ steps.version.outputs.version }}
+          RUNTIME_TARGET: ${{ matrix.target }}
+          RUNTIME_PLATFORM: ${{ matrix.platform }}
         shell: bash
         run: |
           set -euo pipefail
@@ -317,26 +379,24 @@ jobs:
           PY
           )"
 
-          targets=(linux-arm64 linux-x86_64)
-          platforms=(manylinux2014_aarch64 manylinux2014_x86_64)
-          for index in "${!targets[@]}"; do
-            target="${targets[index]}"
-            platform="${platforms[index]}"
-            wheelhouse="${RUNNER_TEMP}/taplctl-mcp-runtime-${target}"
-            archive="release-dist/taplctl-mcp-runtime-${TAG_VERSION}-${target}.tar.gz"
+          target="${RUNTIME_TARGET}"
+          platform="${RUNTIME_PLATFORM}"
+          wheelhouse="${RUNNER_TEMP}/taplctl-mcp-runtime-${target}"
+          archive="release-dist/taplctl-mcp-runtime-${TAG_VERSION}-${target}.tar.gz"
+          mkdir -p release-dist
 
-            rm -rf "${wheelhouse}"
-            mkdir -p "${wheelhouse}"
-            python -m pip download \
-              --disable-pip-version-check \
-              --only-binary=:all: \
-              --platform "${platform}" \
-              --python-version 3.12 \
-              --implementation cp \
-              --dest "${wheelhouse}" \
-              "${mcp_requirement}"
+          rm -rf "${wheelhouse}"
+          mkdir -p "${wheelhouse}"
+          python -m pip download \
+            --disable-pip-version-check \
+            --only-binary=:all: \
+            --platform "${platform}" \
+            --python-version 3.12 \
+            --implementation cp \
+            --dest "${wheelhouse}" \
+            "${mcp_requirement}"
 
-            python - "${wheelhouse}" <<'PY'
+          python - "${wheelhouse}" <<'PY'
           import re
           import sys
           from pathlib import Path
@@ -355,36 +415,102 @@ jobs:
                   raise SystemExit(f"unexpected MCP runtime asset: {path.name}")
           PY
 
-            tar \
-              --sort=name \
-              --mtime='UTC 1970-01-01' \
-              --owner=0 \
-              --group=0 \
-              --numeric-owner \
-              -C "${wheelhouse}" \
-              -czf "${archive}" \
-              .
-          done
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -C "${wheelhouse}" \
+            -czf "${archive}" \
+            .
 
-      - name: Download signed macOS runtimes
-        uses: actions/download-artifact@v4
+      - name: Upload Linux runtime
+        uses: actions/upload-artifact@v4
         with:
-          pattern: signed-runtime-macos-*
-          merge-multiple: true
-          path: release-dist
+          name: runtime-${{ matrix.target }}
+          path: release-dist/taplctl-mcp-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Build VS Code extension package
-        working-directory: vscode-extension
+  release:
+    name: Validate and publish release
+    needs: [windows-installer-fixtures, windows-installer-preflight, build-packages, linux-runtime, macos-runtime]
+    outputs:
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      version: ${{ steps.version.outputs.version }}
+      python_version: ${{ steps.version.outputs.python_version }}
+      wheel_url: ${{ steps.assets.outputs.wheel_url }}
+      wheel_sha256: ${{ steps.assets.outputs.wheel_sha256 }}
+      mcp_runtime_macos_arm64_url: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
+      mcp_runtime_macos_arm64_sha256: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_sha256 }}
+      mcp_runtime_macos_x86_64_url: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_url }}
+      mcp_runtime_macos_x86_64_sha256: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_sha256 }}
+      mcp_runtime_linux_arm64_url: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_url }}
+      mcp_runtime_linux_arm64_sha256: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_sha256 }}
+      mcp_runtime_linux_x86_64_url: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_url }}
+      mcp_runtime_linux_x86_64_sha256: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_sha256 }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        run: >-
+          python .github/scripts/release_version.py
+          "${GITHUB_REF_NAME}"
+          --github-output "${GITHUB_OUTPUT}"
+
+      - name: Require Homebrew tap token
         env:
-          TAG_VERSION: ${{ steps.version.outputs.version }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
 
-          npm exec -- vsce package \
-            --no-dependencies \
-            --allow-missing-repository \
-            --out "../release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix"
+          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
+            echo "Set the HOMEBREW_TAP_TOKEN secret with write access to qkdxorjs1002/homebrew-tap." >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download versioned packages
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages-${{ steps.version.outputs.version }}
+          path: release-dist
+
+      - name: Download signed macOS arm64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-runtime-macos-arm64
+          path: release-dist
+
+      - name: Download signed macOS x86_64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-runtime-macos-x86_64
+          path: release-dist
+
+      - name: Download Linux arm64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-linux-arm64
+          path: release-dist
+
+      - name: Download Linux x86_64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-linux-x86_64
+          path: release-dist
 
       - name: Prepare release assets
         id: assets
@@ -518,6 +644,26 @@ jobs:
           if actual_sha256 != wheel_sha256:
               raise SystemExit(
                   f"wheel SHA-256 mismatch: expected {wheel_sha256}, got {actual_sha256}"
+              )
+
+          expected_assets = {
+              expected_wheel_name,
+              f"tapl-workflow-viewer-{os.environ['TAG_VERSION']}.vsix",
+              "install.ps1",
+              "install.cmd",
+              "taplctl-install-manifest.json",
+              *(
+                  f"taplctl-mcp-runtime-{os.environ['TAG_VERSION']}-{target}.tar.gz"
+                  for target in ("macos-arm64", "macos-x86_64", "linux-arm64", "linux-x86_64")
+              ),
+          }
+          actual_assets = {path.name for path in Path("release-dist").iterdir() if path.is_file()}
+          if actual_assets != expected_assets or any(
+              not path.is_file() for path in Path("release-dist").iterdir()
+          ):
+              raise SystemExit(
+                  f"release asset set mismatch: missing={sorted(expected_assets - actual_assets)}, "
+                  f"unexpected={sorted(actual_assets - expected_assets)}"
               )
 
           required_runtime_distributions = {
@@ -655,6 +801,15 @@ jobs:
             gh release create "${RELEASE_TAG}" release-dist/* "${create_args[@]}"
           fi
 
+  homebrew:
+    name: Update Homebrew tap
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
       - name: Checkout Homebrew tap
         uses: actions/checkout@v4
         with:
@@ -664,20 +819,20 @@ jobs:
 
       - name: Update taplctl Homebrew package
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.python_version }}
-          RELEASE_PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          RELEASE_VERSION: ${{ needs.release.outputs.python_version }}
+          RELEASE_PRERELEASE: ${{ needs.release.outputs.prerelease }}
           RELEASE_TAG: ${{ github.ref_name }}
           PRE_FORMULA_TEMPLATE: homebrew-tap/Formula/taplctl.rb
-          WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
-          WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
-          MCP_RUNTIME_MACOS_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
-          MCP_RUNTIME_MACOS_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_sha256 }}
-          MCP_RUNTIME_MACOS_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_url }}
-          MCP_RUNTIME_MACOS_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_sha256 }}
-          MCP_RUNTIME_LINUX_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_url }}
-          MCP_RUNTIME_LINUX_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_sha256 }}
-          MCP_RUNTIME_LINUX_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_url }}
-          MCP_RUNTIME_LINUX_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_sha256 }}
+          WHEEL_SHA256: ${{ needs.release.outputs.wheel_sha256 }}
+          WHEEL_URL: ${{ needs.release.outputs.wheel_url }}
+          MCP_RUNTIME_MACOS_ARM64_URL: ${{ needs.release.outputs.mcp_runtime_macos_arm64_url }}
+          MCP_RUNTIME_MACOS_ARM64_SHA256: ${{ needs.release.outputs.mcp_runtime_macos_arm64_sha256 }}
+          MCP_RUNTIME_MACOS_X86_64_URL: ${{ needs.release.outputs.mcp_runtime_macos_x86_64_url }}
+          MCP_RUNTIME_MACOS_X86_64_SHA256: ${{ needs.release.outputs.mcp_runtime_macos_x86_64_sha256 }}
+          MCP_RUNTIME_LINUX_ARM64_URL: ${{ needs.release.outputs.mcp_runtime_linux_arm64_url }}
+          MCP_RUNTIME_LINUX_ARM64_SHA256: ${{ needs.release.outputs.mcp_runtime_linux_arm64_sha256 }}
+          MCP_RUNTIME_LINUX_X86_64_URL: ${{ needs.release.outputs.mcp_runtime_linux_x86_64_url }}
+          MCP_RUNTIME_LINUX_X86_64_SHA256: ${{ needs.release.outputs.mcp_runtime_linux_x86_64_sha256 }}
         shell: bash
         run: |
           set -euo pipefail

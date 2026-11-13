@@ -28,9 +28,14 @@ python3 .github/scripts/release_version.py 2.0.1-beta4
 
 ## 빌드와 게시 흐름
 
-Windows 사전 검사와 양쪽 macOS 서명 job이 성공해야 Ubuntu 릴리스 job이 시작합니다. 사전 검사는 Python 3.11/3.12, PowerShell 5.1 구문 검사, bootstrap·런타임·버전 고정 자산 테스트, 실제 wheel 빌드, 설치·업데이트·재설치·제거와 CLI·MCP smoke를 수행합니다.
+Workflow는 다음 독립 검사와 자산 생성 job을 병렬 실행합니다.
 
-릴리스 job은 Python 3.12·Node.js 22를 사용해 버전을 주입하고 확장 호스트 테스트와 공유 Viewer 빌드를 수행합니다. Python wheel·Linux 런타임 wheelhouse를 만들고 서명된 macOS 런타임을 받아 VSIX와 릴리스 설치기·manifest를 준비합니다. 자산 검증은 버전·정확한 URL·SHA-256·필수 런타임 distribution·렌더링된 Windows 설치기를 검사합니다. 격리 Linux x86_64 venv smoke는 설치 버전과 native MCP 도구 목록·상태를 검증합니다.
+- Windows 설치기 fixture는 Python 3.11/3.12 matrix로 PowerShell 5.1 구문 검사, bootstrap 테스트, stdlib-only 설치기 fixture를 실행합니다.
+- Windows 런타임 사전 검사는 별도 Python 3.11/3.12 matrix로 런타임 회귀, 버전 고정 자산·아이콘 계약, 실제 wheel 빌드, 설치·업데이트·재설치·제거와 CLI·MCP smoke를 수행합니다.
+- `build-packages`는 Python 3.12·Node.js 22를 사용해 태그·Python 버전을 주입하고 확장 호스트 테스트와 공유 Viewer 컴파일을 수행한 뒤 애플리케이션 wheel과 VSIX를 빌드합니다.
+- Linux 런타임 job은 arm64/x86_64 matrix로 wheelhouse를 빌드합니다. macOS arm64/x86_64 matrix는 런타임 wheelhouse에 서명하고 실제 Homebrew 설치·재설치를 검증한 뒤 서명 artifact를 올립니다.
+
+Ubuntu `release` job은 모든 검사와 생성 job의 성공을 기다립니다. 정확한 버전별 wheel·VSIX·런타임 아카이브를 내려받아 설치기·manifest를 준비하고 자산 바이트·버전·정확한 URL·SHA-256·필수 런타임 distribution·렌더링된 Windows 설치기를 검증합니다. 격리 Linux x86_64 venv smoke는 설치 버전과 native MCP 도구 목록·상태를 검증합니다. GitHub Release 게시 전에 Homebrew 토큰 검사도 통과해야 합니다.
 
 | 자산 | 용도 |
 | --- | --- |
@@ -45,11 +50,11 @@ Windows 사전 검사와 양쪽 macOS 서명 job이 성공해야 Ubuntu 릴리�
 
 위 `PYTHON_VERSION`·`TAG`는 이름 자리표시자이며 prerelease 표기가 서로 다릅니다. Manifest에는 모든 런타임 아카이브가 들어 있지 않습니다. 릴리스·Homebrew용 런타임 URL·해시는 최종 자산 바이트에서 별도로 계산합니다. 위 tarball 대상에 Windows wheelhouse는 없습니다.
 
-Workflow는 태그의 GitHub Release를 만들거나 갱신하고 자산을 올립니다. 기존 릴리스에서는 `--clobber`를 사용합니다. Prerelease 여부는 명시적으로 지정합니다. 재실행은 같은 태그 자산을 교체할 수 있으므로 게시 전에 구체적 소스와 생성 내용을 검토하세요.
+Workflow는 태그의 GitHub Release를 만들거나 갱신하고 검증한 자산을 올립니다. 기존 릴리스에서는 `--clobber`를 사용합니다. Prerelease 여부는 명시적으로 지정합니다. 성공 후 Homebrew 갱신과 정식 태그 전용 Marketplace 게시가 독립된 후속 job으로 실행되며 어느 한쪽 실패가 다른 쪽 실행을 막지 않습니다. 재실행은 같은 태그 자산을 교체할 수 있으므로 게시 전에 구체적 소스와 생성 내용을 검토하세요.
 
 ## Homebrew 채널
 
-`qkdxorjs1002/homebrew-tap` 쓰기 권한을 가진 `HOMEBREW_TAP_TOKEN`이 필요합니다. Job은 기존 `Formula/taplctl.rb`를 템플릿으로 사용하고 릴리스 시 `Formula/taplctl-pre.rb`와 `Aliases/taplctl@pre`를 갱신합니다. 정식 릴리스는 stable formula와 존재하는 `taplctl-semantic.rb`도 갱신하고 prerelease는 stable formula를 유지합니다. Updater는 현재 formula보다 오래된 버전을 건너뛰며 생성 Ruby 구문을 검사한 뒤 tap에 commit·push합니다.
+`qkdxorjs1002/homebrew-tap` 쓰기 권한을 가진 `HOMEBREW_TAP_TOKEN`이 필요하며 GitHub 게시 전에 확인합니다. 후속 `homebrew` job은 `release`에 의존하며 tap을 checkout한 뒤 formula를 갱신하고 변경을 commit·push합니다. 기존 `Formula/taplctl.rb`를 템플릿으로 사용하고 릴리스 시 `Formula/taplctl-pre.rb`와 `Aliases/taplctl@pre`를 갱신합니다. 정식 릴리스는 stable formula와 존재하는 `taplctl-semantic.rb`도 갱신하고 prerelease는 stable formula를 유지합니다. Updater는 현재 formula보다 오래된 버전을 건너뛰며 생성 Ruby 구문을 검사한 뒤 tap에 commit·push합니다.
 
 세 formula는 같은 명령을 제공하므로 서로 충돌합니다. 런타임 wheelhouse URL·체크섬은 macOS·Linux 아키텍처에 맞게 선택합니다. Viewer 서비스는 8000 포트를 사용하며 semantic formula도 `searchd`를 자동 시작하지 않습니다. [Viewer 서비스](../guides/viewer.ko.md#homebrew-서비스로-실행)를 보세요.
 
@@ -98,9 +103,9 @@ Bootstrap은 옵션, 내려받은 PowerShell 구문과 선언된 인자 지원�
 
 ### 서명과 Homebrew 검증
 
-아키텍처별 job은 identity를 임시 keychain에 가져오고 검색 목록에 추가한 뒤 모든 런타임 Mach-O 파일에 secure timestamp·hardened runtime으로 서명합니다. Wheel 재패키징은 `RECORD` 해시를 갱신하고 더 이상 유효하지 않은 upstream `RECORD.jws`·`RECORD.p7s` 서명을 제거합니다. 다시 풀어서 해시·서명을 검증하며 순수 Python wheel은 바이트 그대로 보존합니다. 실패 경로를 포함한 종료 정리는 검색 목록을 복원하고 임시 keychain·`.p12`를 삭제합니다. 완료한 런타임 아카이브만 중간 artifact로 올립니다.
+아키텍처별 job은 identity를 임시 keychain에 가져오고 검색 목록에 추가한 뒤 모든 런타임 Mach-O 파일에 secure timestamp·hardened runtime으로 서명합니다. Wheel 재패키징은 `RECORD` 해시를 갱신하고 더 이상 유효하지 않은 upstream `RECORD.jws`·`RECORD.p7s` 서명을 제거합니다. 다시 풀어서 해시·서명을 검증하며 순수 Python wheel은 바이트 그대로 보존합니다. 실패 경로를 포함한 종료 정리는 검색 목록을 복원하고 임시 keychain·`.p12`를 삭제합니다. 서명과 Homebrew 설치·재설치 검사가 성공한 뒤에만 런타임 아카이브를 중간 artifact로 올립니다.
 
-Ubuntu job은 서명 성공을 기다린 뒤 정확히 서명된 아카이브 바이트로 릴리스·Homebrew 해시를 계산합니다. 자격 증명 누락·잘못된 identity·서명 실패는 게시를 중단하며 서명 없는 fallback은 없습니다. 기존 릴리스 자산은 게시할 때만 바뀌며 workflow 병합·revert 자체로 바뀌지 않습니다.
+`release` job은 모든 런타임 matrix의 성공을 기다린 뒤 서명된 macOS 아카이브를 포함해 내려받은 정확한 아카이브 바이트로 릴리스·Homebrew 해시를 계산합니다. 자격 증명 누락·잘못된 identity·서명 실패는 게시를 중단하며 서명 없는 fallback은 없습니다. 기존 릴리스 자산은 게시할 때만 바뀌며 workflow 병합·revert 자체로 바뀌지 않습니다.
 
 생성 Homebrew formula는 `preserve_rpath`를 사용합니다. 서명된 native 라이브러리의 `@rpath` dylib ID를 설치 중 경로 변경·ad-hoc 재서명 없이 유지해야 합니다. 미리 빌드한 wheel을 `--no-index --no-deps --no-compile`로 가상 환경에 설치합니다. 게시 전 두 아키텍처 모두 실제 Homebrew **설치·재설치**를 확인합니다. 설치한 Mach-O 바이트를 서명 wheel과 비교하고 Developer ID authority·Team ID·timestamp·runtime flag를 검증하며 설치된 MCP를 실행합니다. Ad-hoc 서명이 유효한 것만으로는 부족합니다. 별도 [macOS Homebrew workflow](../../.github/workflows/macos-homebrew.yml)로 게시 런타임의 보존 검사를 반복할 수 있습니다.
 
@@ -117,9 +122,9 @@ codesign --display --verbose=4 /path/to/unpacked/native-library.so
 
 ## VS Code Marketplace
 
-정식 태그는 릴리스 job의 VSIX 검증 후 **`paragonnov.tapl-workflow-viewer`**를 게시합니다. Alpha·beta·RC 태그는 GitHub Release VSIX 자산을 유지하고 Marketplace 게시는 건너뜁니다. GitHub OIDC로 Marketplace Trusted Publishing에 직접 인증합니다. Azure 구독, Entra application, `azure/login`, `AZURE_*` secret, Marketplace PAT가 필요하지 않습니다.
+정식 태그는 `release` job이 VSIX를 검증하고 GitHub Release를 게시한 뒤 **`paragonnov.tapl-workflow-viewer`**를 게시합니다. Marketplace job은 `release`에 직접 의존하며 후속 Homebrew job과 독립적으로 실행됩니다. Alpha·beta·RC 태그는 GitHub Release VSIX 자산을 유지하고 Marketplace 게시는 건너뜁니다. GitHub OIDC로 Marketplace Trusted Publishing에 직접 인증합니다. Azure 구독, Entra application, `azure/login`, `AZURE_*` secret, Marketplace PAT가 필요하지 않습니다.
 
-확장 아이콘 `vscode-extension/resources/icon.png`는 `assets/readme/tapl-logo.png`에서 만듭니다. 로고 비율과 투명도를 유지하면서 가로·세로를 각각 **1024픽셀 이하**로 맞추세요. 릴리스 사전 검사는 빌드 전에 확장 manifest가 참조하는 PNG를 확인합니다. 로컬 VSIX 빌드 성공만으로 Marketplace 승인까지 확인되는 것은 아닙니다.
+확장 아이콘 `vscode-extension/resources/icon.png`는 `assets/readme/tapl-logo.png`에서 만듭니다. 로고 비율과 투명도를 유지하면서 가로·세로를 각각 **1024픽셀 이하**로 맞추세요. 게시하려면 릴리스 사전 검사에서 확장 manifest가 참조하는 PNG를 확인해야 합니다. 로컬 VSIX 빌드 성공만으로 Marketplace 승인까지 확인되는 것은 아닙니다.
 
 ### 최초 설정
 

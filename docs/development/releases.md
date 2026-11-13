@@ -28,9 +28,14 @@ python3 .github/scripts/release_version.py 2.0.1-beta4
 
 ## Build and publication flow
 
-Windows preflight and both macOS signing jobs must succeed before the Ubuntu release job. Preflight uses Python 3.11/3.12 and PowerShell 5.1 parsing, tests the bootstrap/runtime/version-bound assets, builds a real wheel, and runs install/update/reinstall/uninstall plus CLI/MCP smoke checks.
+The workflow runs these independent checks and artifact producers concurrently:
 
-The release job uses Python 3.12 and Node.js 22, injects versions, runs extension host tests and the shared Viewer build, builds the Python wheel and Linux runtime wheelhouses, downloads signed macOS runtimes, packages the VSIX, and prepares release installers/manifest. Asset validation checks versions, exact URLs, SHA-256 values, required runtime distributions, and rendered Windows installer contents. An isolated Linux x86_64 venv smoke verifies the installed version and native MCP tool inventory/status.
+- Windows installer fixtures use a Python 3.11/3.12 matrix for PowerShell 5.1 parsing, bootstrap tests, and stdlib-only installer fixtures.
+- Windows runtime preflight uses a separate Python 3.11/3.12 matrix for runtime regressions, version-bound asset/icon contracts, a real wheel build, and install/update/reinstall/uninstall plus CLI/MCP smoke checks.
+- `build-packages` uses Python 3.12 and Node.js 22, injects tag/Python versions, runs extension host tests and compiles the shared Viewer, then builds the application wheel and VSIX.
+- Linux runtime jobs build arm64/x86_64 wheelhouses in a matrix. The macOS arm64/x86_64 matrix signs runtime wheelhouses and verifies real Homebrew install/reinstall before uploading signed artifacts.
+
+The Ubuntu `release` job waits for every check and producer to succeed. It downloads the exact versioned wheel, VSIX, and runtime archives, prepares installers/manifest, and validates asset bytes, versions, exact URLs, SHA-256 values, required runtime distributions, and rendered Windows installer contents. An isolated Linux x86_64 venv smoke verifies the installed version and native MCP tool inventory/status. The Homebrew token guard must also pass before GitHub Release publication.
 
 | Asset | Purpose |
 | --- | --- |
@@ -45,11 +50,11 @@ The release job uses Python 3.12 and Node.js 22, injects versions, runs extensio
 
 `PYTHON_VERSION` and `TAG` above are naming placeholders, including their different prerelease syntax. The manifest does not list every runtime archive; release/Homebrew runtime URL/hash metadata is computed separately from the final asset bytes. A Windows wheelhouse is not among these tarball targets.
 
-The workflow creates or updates the tagged GitHub Release and uploads assets (`--clobber` on an existing release). Prereleases are marked explicitly. Re-running can replace same-tag assets, so review the concrete source and generated contents before publication.
+The workflow creates or updates the tagged GitHub Release and uploads the validated assets (`--clobber` on an existing release). Prereleases are marked explicitly. After this succeeds, Homebrew updates and stable-only Marketplace publication run as independent downstream jobs; failure in either does not suppress the other. Re-running can replace same-tag assets, so review the concrete source and generated contents before publication.
 
 ## Homebrew channels
 
-`HOMEBREW_TAP_TOKEN` is required with write access to `qkdxorjs1002/homebrew-tap`. The job uses the existing `Formula/taplctl.rb` as the template and updates `Formula/taplctl-pre.rb` plus `Aliases/taplctl@pre` on releases. Stable releases also update the stable formula and `taplctl-semantic.rb` when present. Prereleases leave the stable formulas unchanged. The updater skips a version older than the formula's current version and validates generated Ruby syntax before committing/pushing the tap.
+`HOMEBREW_TAP_TOKEN` is required with write access to `qkdxorjs1002/homebrew-tap` and is checked before GitHub publication. The downstream `homebrew` job depends on `release`, then checks out the tap, updates formulas, and commits/pushes changes. It uses the existing `Formula/taplctl.rb` as the template and updates `Formula/taplctl-pre.rb` plus `Aliases/taplctl@pre` on releases. Stable releases also update the stable formula and `taplctl-semantic.rb` when present. Prereleases leave the stable formulas unchanged. The updater skips a version older than the formula's current version and validates generated Ruby syntax before committing/pushing the tap.
 
 The three formulas conflict because they provide the same commands. Runtime wheelhouse URLs and checksums select the matching macOS/Linux architecture. Viewer services use port 8000; the semantic formula does not automatically start `searchd`. See [Viewer services](../guides/viewer.md#run-as-a-homebrew-service).
 
@@ -98,9 +103,9 @@ The release jobs sign Mach-O files inside **both macOS MCP runtime wheelhouses**
 
 ### Signing and Homebrew verification
 
-Each architecture job imports the identity into a temporary keychain, adds it to the keychain search list, and signs all runtime Mach-O files with secure timestamps and hardened runtime. Repacking updates wheel `RECORD` hashes and removes obsolete upstream `RECORD.jws`/`RECORD.p7s` signatures. It unpacks the repacked wheels again to verify hashes/signatures; pure-Python wheels remain byte-for-byte unchanged. Exit cleanup restores the search list and removes the temporary keychain/`.p12`, including failure paths. Only completed runtime archives are uploaded as intermediate artifacts.
+Each architecture job imports the identity into a temporary keychain, adds it to the keychain search list, and signs all runtime Mach-O files with secure timestamps and hardened runtime. Repacking updates wheel `RECORD` hashes and removes obsolete upstream `RECORD.jws`/`RECORD.p7s` signatures. It unpacks the repacked wheels again to verify hashes/signatures; pure-Python wheels remain byte-for-byte unchanged. Exit cleanup restores the search list and removes the temporary keychain/`.p12`, including failure paths. Runtime archives are uploaded as intermediate artifacts only after signing and the Homebrew install/reinstall checks succeed.
 
-The Ubuntu job waits for successful signing and computes release/Homebrew hashes from the exact signed archive bytes. Missing credentials, incorrect identity, or failed signatures stop release publication; there is no unsigned fallback. Existing release assets change only through publication, not a workflow merge or revert.
+The `release` job waits for every runtime matrix to succeed and computes release/Homebrew hashes from the exact downloaded archive bytes, including the signed macOS archives. Missing credentials, incorrect identity, or failed signatures stop release publication; there is no unsigned fallback. Existing release assets change only through publication, not a workflow merge or revert.
 
 Generated Homebrew formulas use `preserve_rpath`: signed native libraries' `@rpath` dylib IDs must survive installation without path rewriting/ad-hoc re-signing. They install prebuilt wheels into a virtual environment with `--no-index --no-deps --no-compile`. Both architectures undergo real Homebrew install **and reinstall** checks before publication. The checks compare installed Mach-O bytes with the signed wheels, verify Developer ID authority, Team ID, timestamp and runtime flag, and run installed MCP. Ad-hoc signature validity alone is insufficient. The separate [macOS Homebrew workflow](../../.github/workflows/macos-homebrew.yml) can repeat preservation checks with published runtimes.
 
@@ -117,9 +122,9 @@ Check `Authority=Developer ID Application: …`, intended `TeamIdentifier`, `Tim
 
 ## VS Code Marketplace
 
-Stable tags publish **`paragonnov.tapl-workflow-viewer`** after the release job validates the VSIX. Alpha/beta/RC tags retain GitHub Release VSIX assets and skip Marketplace publication. Authentication uses GitHub OIDC directly with Marketplace Trusted Publishing. No Azure subscription, Entra application, `azure/login`, `AZURE_*` secrets, or Marketplace PAT is required.
+Stable tags publish **`paragonnov.tapl-workflow-viewer`** after the `release` job validates the VSIX and publishes the GitHub Release. The Marketplace job depends directly on `release` and runs independently of the downstream Homebrew job. Alpha/beta/RC tags retain GitHub Release VSIX assets and skip Marketplace publication. Authentication uses GitHub OIDC directly with Marketplace Trusted Publishing. No Azure subscription, Entra application, `azure/login`, `AZURE_*` secrets, or Marketplace PAT is required.
 
-The extension icon at `vscode-extension/resources/icon.png` is derived from `assets/readme/tapl-logo.png`. Keep both dimensions at or below **1024 pixels**, preserving the logo's aspect ratio and transparency. Release preflight checks the PNG referenced by the extension manifest before building; a successful local VSIX build alone does not establish Marketplace acceptance.
+The extension icon at `vscode-extension/resources/icon.png` is derived from `assets/readme/tapl-logo.png`. Keep both dimensions at or below **1024 pixels**, preserving the logo's aspect ratio and transparency. Publication requires the release preflight check of the PNG referenced by the extension manifest; a successful local VSIX build alone does not establish Marketplace acceptance.
 
 ### One-time setup
 

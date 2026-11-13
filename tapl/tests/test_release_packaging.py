@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import io
 import os
 import shutil
 import struct
 import subprocess
 import sys
+import tarfile
 import tempfile
 import textwrap
 import tomllib
@@ -403,6 +406,182 @@ class WindowsInstallerAssetTests(unittest.TestCase):
 
 
 class ReleaseWorkflowContractTests(unittest.TestCase):
+    def test_producers_run_concurrently_and_publication_requires_every_gate(self) -> None:
+        workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding='utf-8'))
+        jobs = workflow['jobs']
+        producers = {'windows-installer-fixtures', 'windows-installer-preflight',
+                     'build-packages', 'linux-runtime', 'macos-runtime'}
+        self.assertEqual(set(jobs), producers | {'release', 'homebrew', 'marketplace'})
+        self.assertEqual(set(jobs['release']['needs']), producers)
+        for name in producers:
+            self.assertNotIn('needs', jobs[name], f'{name} must start independently')
+        for name, job in jobs.items():
+            self.assertNotIn('continue-on-error', job)
+            if name != 'marketplace':
+                self.assertNotIn('if', job, f'{name} must require successful dependencies')
+            for step in job['steps']:
+                self.assertNotIn('continue-on-error', step)
+                self.assertNotIn('always()', step.get('if', ''))
+        self.assertEqual(workflow['concurrency'], {
+            'group': 'release-${{ github.ref }}', 'cancel-in-progress': False,
+        })
+        steps = {step['name']: step for step in jobs['release']['steps']}
+        names = list(steps)
+        self.assertLess(names.index('Require Homebrew tap token'), names.index('Publish GitHub Release'))
+        self.assertIn('exit 1', steps['Require Homebrew tap token']['run'])
+        for before, after in zip(
+            ('Prepare release assets', 'Validate release assets', 'Smoke-test isolated MCP runtime'),
+            ('Validate release assets', 'Smoke-test isolated MCP runtime', 'Publish GitHub Release'),
+        ):
+            self.assertLess(names.index(before), names.index(after))
+        self.assertNotIn('Build Python wheel', steps)
+        self.assertNotIn('Build MCP runtime wheelhouses', steps)
+
+    def test_versioned_artifact_handoffs_preserve_viewer_build_order(self) -> None:
+        jobs = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding='utf-8'))['jobs']
+        build_steps = {step['name']: step for step in jobs['build-packages']['steps']}
+        names = list(build_steps)
+        ordered = ['Resolve release version', 'Sync package versions', 'Build shared viewer assets',
+                   'Build Python wheel', 'Build VS Code extension package', 'Verify versioned packages',
+                   'Upload versioned packages']
+        self.assertEqual(sorted(ordered, key=names.index), ordered)
+        self.assertIn('release_version.py', build_steps['Resolve release version']['run'])
+        self.assertEqual(build_steps['Sync package versions']['env'], {
+            'PYTHON_VERSION': '${{ steps.version.outputs.python_version }}',
+            'TAG_VERSION': '${{ steps.version.outputs.version }}',
+        })
+        viewer = build_steps['Build shared viewer assets']['run']
+        self.assertLess(viewer.index('npm run test:host'), viewer.index('npm run compile'))
+        packages = build_steps['Upload versioned packages']['with']
+        self.assertEqual(packages['name'], 'release-packages-${{ steps.version.outputs.version }}')
+        self.assertEqual(packages['path'].splitlines(), [
+            'release-dist/taplctl-${{ steps.version.outputs.python_version }}-py3-none-any.whl',
+            'release-dist/tapl-workflow-viewer-${{ steps.version.outputs.version }}.vsix',
+        ])
+        self.assertEqual(packages['if-no-files-found'], 'error')
+        verification = build_steps['Verify versioned packages']['run']
+        self.assertIn('set -euo pipefail', verification)
+        self.assertIn('test -f "release-dist/taplctl-${PYTHON_VERSION}-py3-none-any.whl"', verification)
+        self.assertIn('test -f "release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix"', verification)
+        for job_name, upload_name, artifact_name in (
+            ('linux-runtime', 'Upload Linux runtime', 'runtime-${{ matrix.target }}'),
+            ('macos-runtime', 'Upload signed macOS runtime', 'signed-runtime-${{ matrix.target }}'),
+        ):
+            upload = next(step for step in jobs[job_name]['steps'] if step['name'] == upload_name)
+            self.assertEqual(upload['with']['name'], artifact_name)
+            self.assertEqual(upload['with']['path'],
+                             'release-dist/taplctl-mcp-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz')
+            self.assertEqual(upload['with']['if-no-files-found'], 'error')
+        downloads = [step['with'] for step in jobs['release']['steps']
+                     if step.get('uses') == 'actions/download-artifact@v4']
+        self.assertEqual(downloads, [{'name': name, 'path': 'release-dist'} for name in (
+            packages['name'], 'signed-runtime-macos-arm64', 'signed-runtime-macos-x86_64',
+            'runtime-linux-arm64', 'runtime-linux-x86_64',
+        )])
+
+    def test_downstream_channels_use_exact_validated_release_outputs(self) -> None:
+        jobs = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding='utf-8'))['jobs']
+        expected_outputs = {
+            key: '${{ steps.version.outputs.' + key + ' }}'
+            for key in ('version', 'python_version', 'prerelease')
+        }
+        asset_keys = ['wheel_url', 'wheel_sha256'] + [
+            f'mcp_runtime_{target}_{field}'
+            for target in ('macos_arm64', 'macos_x86_64', 'linux_arm64', 'linux_x86_64')
+            for field in ('url', 'sha256')
+        ]
+        expected_outputs.update({key: '${{ steps.assets.outputs.' + key + ' }}' for key in asset_keys})
+        self.assertEqual(jobs['release']['outputs'], expected_outputs)
+        homebrew = jobs['homebrew']
+        self.assertEqual(homebrew['needs'], 'release')
+        self.assertNotIn('if', homebrew)
+        steps = {step['name']: step for step in homebrew['steps']}
+        self.assertEqual(list(steps), ['Checkout source', 'Checkout Homebrew tap', 'Update taplctl Homebrew package'])
+        self.assertEqual(steps['Checkout Homebrew tap']['with']['token'], '${{ secrets.HOMEBREW_TAP_TOKEN }}')
+        update = steps['Update taplctl Homebrew package']
+        for key in asset_keys:
+            self.assertEqual(update['env'][key.upper()], '${{ needs.release.outputs.' + key + ' }}')
+        self.assertEqual(update['env']['RELEASE_VERSION'], '${{ needs.release.outputs.python_version }}')
+        self.assertEqual(update['env']['RELEASE_PRERELEASE'], '${{ needs.release.outputs.prerelease }}')
+        for check in ('ruby -c .github/scripts/update_homebrew_formula.rb',
+                      'ruby -c homebrew-tap/Formula/taplctl-pre.rb', 'git -C homebrew-tap diff --cached --quiet'):
+            self.assertIn(check, update['run'])
+        stable_branch = update['run'].split('if [[ "${RELEASE_PRERELEASE}" == "false" ]]; then', 1)[1].split('\nfi', 1)[0]
+        self.assertIn('taplctl-semantic.rb', stable_branch)
+        self.assertIn('stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")', stable_branch)
+        self.assertIn('--pre-alias homebrew-tap/Aliases/taplctl@pre', update['run'])
+        marketplace = jobs['marketplace']
+        self.assertEqual(marketplace['needs'], 'release')
+        self.assertEqual(marketplace['if'], "needs.release.outputs.prerelease == 'false'")
+        self.assertEqual(marketplace['environment'], 'vscode-marketplace')
+        self.assertEqual(marketplace['permissions'], {'contents': 'read', 'id-token': 'write'})
+        self.assertNotIn('id-token', jobs['release']['permissions'])
+        self.assertEqual(yaml.safe_load(RELEASE_WORKFLOW.read_text())['permissions'], {'contents': 'read'})
+
+    def test_asset_validation_rejects_missing_extra_or_tampered_artifacts(self) -> None:
+        jobs = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding='utf-8'))['jobs']
+        validation = next(step for step in jobs['release']['steps'] if step['name'] == 'Validate release assets')
+        source = validation['run'].split("<<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
+        for tag, version in (('3.2.1', '3.2.1'), ('3.2.1-beta1', '3.2.1b1')):
+            with self.subTest(tag=tag), tempfile.TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                assets = root / 'release-dist'
+                assets.mkdir()
+                wheel_name = f'taplctl-{version}-py3-none-any.whl'
+                wheel = assets / wheel_name
+                wheel.write_bytes(b'wheel fixture')
+                wheel_hash = hashlib.sha256(wheel.read_bytes()).hexdigest()
+                base_url = f'https://github.com/example/tapl/releases/download/{tag}/'
+                wheel_url = base_url + wheel_name
+                manifest = assets / 'taplctl-install-manifest.json'
+                manifest.write_text(json.dumps({
+                    'schema_version': 1, 'version': version,
+                    'wheel': {'url': wheel_url, 'sha256': wheel_hash},
+                }))
+                for name in (f'tapl-workflow-viewer-{tag}.vsix', 'install.ps1', 'install.cmd'):
+                    (assets / name).write_bytes(b'fixture')
+                env = dict(os.environ, GITHUB_REPOSITORY='example/tapl', GITHUB_REF_NAME=tag, TAG_VERSION=tag)
+                for target in ('macos-arm64', 'macos-x86_64', 'linux-arm64', 'linux-x86_64'):
+                    name = f'taplctl-mcp-runtime-{tag}-{target}.tar.gz'
+                    archive = assets / name
+                    with tarfile.open(archive, 'w:gz') as output:
+                        for distribution in ('mcp', 'mcp_types', 'pydantic', 'pydantic_core', 'cryptography'):
+                            content = b'runtime fixture'
+                            info = tarfile.TarInfo(f'./{distribution}-1.0-py3-none-any.whl')
+                            info.size = len(content)
+                            output.addfile(info, io.BytesIO(content))
+                    key = target.upper().replace('-', '_')
+                    env[f'MCP_RUNTIME_{key}_URL'] = base_url + name
+                    env[f'MCP_RUNTIME_{key}_SHA256'] = hashlib.sha256(archive.read_bytes()).hexdigest()
+                self.assertEqual(len(list(assets.iterdir())), 9)
+
+                def validate() -> subprocess.CompletedProcess[str]:
+                    return subprocess.run(
+                        [sys.executable, '-c', source, str(manifest), str(wheel), version, wheel_url, wheel_hash],
+                        cwd=root, env=env, capture_output=True, text=True, check=False,
+                    )
+
+                result = validate()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                extra = assets / 'unexpected.tar.gz'
+                extra.write_bytes(b'extra')
+                self.assertIn('release asset set mismatch', validate().stderr)
+                extra.unlink()
+                missing = assets / 'install.cmd'
+                missing.unlink()
+                self.assertIn('release asset set mismatch', validate().stderr)
+                missing.mkdir()
+                self.assertIn('release asset set mismatch', validate().stderr)
+                missing.rmdir()
+                missing.write_bytes(b'fixture')
+                wheel.write_bytes(b'tampered wheel')
+                self.assertIn('wheel SHA-256 mismatch', validate().stderr)
+                wheel.write_bytes(b'wheel fixture')
+                env['MCP_RUNTIME_LINUX_ARM64_SHA256'] = '0' * 64
+                self.assertIn('MCP runtime SHA-256 mismatch', validate().stderr)
+                env['MCP_RUNTIME_LINUX_ARM64_URL'] = base_url + 'wrong-runtime.tar.gz'
+                self.assertIn('unexpected MCP runtime URL', validate().stderr)
+
     def test_windows_matrix_and_release_preflight_use_actual_wheel_lifecycle(self) -> None:
         windows = yaml.safe_load(
             (REPOSITORY_ROOT / '.github/workflows/windows.yml').read_text(encoding='utf-8')
@@ -410,31 +589,51 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding='utf-8'))
         ci_job = windows['jobs']['windows-installer-tests']
         preflight = release['jobs']['windows-installer-preflight']
-        self.assertEqual(ci_job['steps'], preflight['steps'])
-        for job in (ci_job, preflight):
+        fixtures = release['jobs']['windows-installer-fixtures']
+        setup_names = {'Checkout source', 'Set up Python'}
+        ci_checks = {step['name']: step for step in ci_job['steps'] if step['name'] not in setup_names}
+        release_checks = [step for job in (fixtures, preflight) for step in job['steps']
+                          if step['name'] not in setup_names]
+        self.assertEqual(len(release_checks), len(ci_checks), 'Every CI check must run exactly once')
+        self.assertEqual({step['name']: step for step in release_checks}, ci_checks)
+        for job in (ci_job, fixtures, preflight):
+            self.assertEqual(job['steps'][:2], ci_job['steps'][:2])
             self.assertEqual(job['runs-on'], 'windows-latest')
             self.assertEqual(job['strategy']['matrix']['python-version'], ['3.11', '3.12'])
-            steps = {step['name']: step for step in job['steps']}
-            parser = steps['Parse installer and lifecycle smoke with Windows PowerShell 5.1']
-            self.assertEqual(parser['shell'], 'powershell')
-            self.assertIn('Language.Parser]::ParseFile', parser['run'])
-            for script in ('install.ps1', '.github/scripts/install-windows.ps1',
-                           '.github/scripts/windows_install_smoke.ps1'):
-                self.assertIn(f"'{script}'", parser['run'])
-            installer_tests = steps['Run Windows installer tests (stdlib-only fixtures)']['run'].split()
-            self.assertEqual(installer_tests[:4], ['python', '-m', 'unittest', '-v'])
-            self.assertIn('tapl.tests.test_installer_windows', installer_tests)
-            bootstrap = steps['Test standalone Windows bootstrap']
-            self.assertIn('python -m unittest -v tapl.tests.test_installer_bootstrap', bootstrap['run'])
-            names = [step['name'] for step in job['steps']]
-            self.assertLess(names.index(bootstrap['name']), names.index('Test Windows runtime regressions'))
-            self.assertIn('tapl.tests.test_release_packaging.WindowsInstallerAssetTests',
-                          steps['Test version-bound Windows release assets']['run'])
-            self.assertIn('pip wheel --no-deps', steps['Build actual TAPL wheel']['run'])
-            smoke = steps['Test actual wheel install, update, reinstall, uninstall and CLI/MCP runtime']
-            self.assertEqual(smoke['shell'], 'powershell')
-            self.assertIn('windows_install_smoke.ps1 -Wheel $wheel -Python', smoke['run'])
-        self.assertIn('windows-installer-preflight', release['jobs']['release']['needs'])
+        fixture_steps = {step['name']: step for step in fixtures['steps']}
+        runtime_steps = {step['name']: step for step in preflight['steps']}
+        self.assertEqual(set(fixture_steps) - setup_names, {
+            'Parse installer and lifecycle smoke with Windows PowerShell 5.1',
+            'Test standalone Windows bootstrap', 'Run Windows installer tests (stdlib-only fixtures)',
+        })
+        parser = fixture_steps['Parse installer and lifecycle smoke with Windows PowerShell 5.1']
+        self.assertEqual(parser['shell'], 'powershell')
+        self.assertIn('Language.Parser]::ParseFile', parser['run'])
+        for script in ('install.ps1', '.github/scripts/install-windows.ps1',
+                       '.github/scripts/windows_install_smoke.ps1'):
+            self.assertIn(f"'{script}'", parser['run'])
+        installer_tests = fixture_steps['Run Windows installer tests (stdlib-only fixtures)']['run'].split()
+        self.assertEqual(installer_tests[:4], ['python', '-m', 'unittest', '-v'])
+        self.assertIn('tapl.tests.test_installer_windows', installer_tests)
+        self.assertIn('python -m unittest -v tapl.tests.test_installer_bootstrap',
+                      fixture_steps['Test standalone Windows bootstrap']['run'])
+        self.assertIn('pip install "./tapl[test]"', runtime_steps['Test Windows runtime regressions']['run'])
+        self.assertIn('pytest -q tapl/tests/test_windows_runtime.py',
+                      runtime_steps['Test Windows runtime regressions']['run'])
+        self.assertIn('tapl.tests.test_release_packaging.WindowsInstallerAssetTests',
+                      runtime_steps['Test version-bound Windows release assets']['run'])
+        self.assertIn('tapl.tests.test_release_packaging.VsCodeMarketplaceAssetTests',
+                      runtime_steps['Validate Marketplace icon dimensions']['run'])
+        self.assertIn('pip wheel --no-deps', runtime_steps['Build actual TAPL wheel']['run'])
+        smoke = runtime_steps['Test actual wheel install, update, reinstall, uninstall and CLI/MCP runtime']
+        self.assertEqual(smoke['shell'], 'powershell')
+        self.assertIn('windows_install_smoke.ps1 -Wheel $wheel -Python', smoke['run'])
+        runtime_names = list(runtime_steps)
+        self.assertLess(runtime_names.index('Test Windows runtime regressions'),
+                        runtime_names.index('Test version-bound Windows release assets'))
+        self.assertLess(runtime_names.index('Build actual TAPL wheel'), runtime_names.index(smoke['name']))
+        self.assertTrue({'windows-installer-fixtures', 'windows-installer-preflight'} <=
+                        set(release['jobs']['release']['needs']))
         release_steps = {step['name']: step for step in release['jobs']['release']['steps']}
         preparation = release_steps['Prepare release assets']['run']
         validation = release_steps['Validate release assets']['run']
@@ -468,9 +667,18 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         steps = workflow["jobs"]["release"]["steps"]
         named_steps = {step.get("name"): step for step in steps if step.get("name")}
 
-        runtime_step = named_steps["Build MCP runtime wheelhouses"]["run"]
-        for target in ("linux-arm64", "linux-x86_64"):
-            self.assertIn(target, runtime_step)
+        linux_job = workflow["jobs"]["linux-runtime"]
+        linux_steps = {step['name']: step for step in linux_job['steps']}
+        runtime_step = linux_steps["Build MCP runtime wheelhouses"]["run"]
+        self.assertEqual(linux_job['strategy']['matrix']['include'], [
+            {'target': 'linux-arm64', 'platform': 'manylinux2014_aarch64'},
+            {'target': 'linux-x86_64', 'platform': 'manylinux2014_x86_64'},
+        ])
+        self.assertIn('--platform "${platform}"', runtime_step)
+        self.assertIn('--python-version 3.12', runtime_step)
+        self.assertIn('--implementation cp', runtime_step)
+        self.assertIn('required = {"mcp", "mcp_types", "pydantic", "pydantic_core", "cryptography"}', runtime_step)
+        self.assertIn('unexpected MCP runtime asset', runtime_step)
         self.assertNotIn("macos-", runtime_step)
         self.assertIn("--only-binary=:all:", runtime_step)
         self.assertIn("mcp==", runtime_step)
@@ -515,12 +723,14 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             macos_names.index("Sign and verify macOS runtime wheels"),
             macos_names.index("Archive signed macOS runtime"),
         )
-        download = named_steps["Download signed macOS runtimes"]
-        self.assertEqual(download["with"]["pattern"], "signed-runtime-macos-*")
-        self.assertEqual(download["with"]["path"], "release-dist")
-        self.assertIs(download["with"]["merge-multiple"], True)
         names = [step.get("name") for step in steps]
-        self.assertLess(names.index("Download signed macOS runtimes"), names.index("Prepare release assets"))
+        for target in ("arm64", "x86_64"):
+            download_name = f"Download signed macOS {target} runtime"
+            download = named_steps[download_name]
+            self.assertEqual(download["with"]["name"], f"signed-runtime-macos-{target}")
+            self.assertEqual(download["with"]["path"], "release-dist")
+            self.assertNotIn('pattern', download['with'])
+            self.assertLess(names.index(download_name), names.index("Prepare release assets"))
 
         validation_step = named_steps["Validate release assets"]
         for env_name in (
@@ -537,13 +747,12 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("Client(server)", smoke_step)
         self.assertIn('call_tool("tapl_get_status"', smoke_step)
 
-        update_step = named_steps["Update taplctl Homebrew package"]
+        homebrew = workflow['jobs']['homebrew']
+        self.assertEqual(homebrew['needs'], 'release')
+        update_step = next(step for step in homebrew['steps'] if step['name'] == 'Update taplctl Homebrew package')
         self.assertIn("update_homebrew_formula.rb", update_step["run"])
         self.assertIn("MCP_RUNTIME_MACOS_ARM64_SHA256", update_step["env"])
-        self.assertLess(
-            [step.get("name") for step in steps].index("Publish GitHub Release"),
-            [step.get("name") for step in steps].index("Update taplctl Homebrew package"),
-        )
+        self.assertNotIn('Update taplctl Homebrew package', named_steps)
 
 
 class ReleaseMcpSmokeTests(unittest.TestCase):
