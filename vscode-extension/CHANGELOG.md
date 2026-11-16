@@ -2,6 +2,14 @@
 
 All notable changes to TAPL Workflow Viewer are documented in this file.
 
+## 2.21.3 - 2026-11-16
+
+- Follow Draft and Finalized PLANs before any TASK exists, while prioritizing executing work and keeping the RUN visible.
+- Keep visible mindmaps rendering and following updates without window focus; pause hidden or offscreen maps and catch up automatically when shown again.
+- Refresh visible VS Code Viewer panels even when another window has focus, while coalescing updates for hidden panels.
+- Use concise automatic-following tooltips in Korean and English.
+- Keep RUN titles and identifiers on separate lines at responsive screen sizes.
+
 ## 2.1.0 - 2026-08-18 (Pre-release)
 
 - Open the Microsoft Marketplace pre-release channel for early updates.
