@@ -95,7 +95,7 @@ taplctl doctor
 
 Inspect the reported source path before changing settings. A malformed selected file fails rather than falling through to another file. Removing a value must still leave the complete configuration valid; for example, completed enabled delegation requires an allowed model pair. `config get` reports defaults and inferred values, so removing a key does not necessarily make its effective value disappear.
 
-The next full MCP policy lookup reflects changed policy settings and returns a changed `policy_revision`. Restart the affected host after changing its MCP/hooks integration; restart the Viewer service after changing its origin settings. Installation config merge/overwrite policies concern installation-time file updates, separately from runtime file selection; see [Installation](../getting-started/installation.md).
+Workflow entry returns only the [execution settings needed by the agent](../reference/mcp.md#entry-inspection-and-setup); CLI `config get` and `doctor`, Viewer settings and `tapl_get_settings` retain full administrative views. The next MCP policy lookup changes `policy_revision` only when delivered policy, guidance, execution settings or effective authoring policy changes. Search, Viewer and saved-catalog-only changes do not force a policy resend when the delivered source and client identity stay the same. Restart the affected host after changing its MCP/hooks integration; restart the Viewer service after changing its origin settings. Installation config merge/overwrite policies concern installation-time file updates, separately from runtime file selection; see [Installation](../getting-started/installation.md).
 
 ## Related pages
 

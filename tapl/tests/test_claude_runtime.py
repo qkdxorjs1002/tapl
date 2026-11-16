@@ -209,7 +209,9 @@ def test_mcp_environment_capture_isolates_host_policy_and_owner_every_call(works
                 assert not next_result.is_error, next_result.content
                 details = next_result.structured_content
                 assert details["config"].get("client", "codex") == expected_client
-                assert details["config"]["subagents"]["strategy"] == strategy
+                assert "strategy" not in details["config"]["subagents"]
+                status = (await transport.call_tool("tapl_get_status", {"session_id": owner})).structured_content
+                assert status["config"]["subagents"]["strategy"] == strategy
                 return receipt.structured_content["active_run"]["id"]
 
             ids = await asyncio.gather(
@@ -230,8 +232,11 @@ def test_mcp_environment_capture_isolates_host_policy_and_owner_every_call(works
             assert not configured.is_error, configured.content
             claude_settings = (await cc.call_tool("tapl_get_next", {"session_id": "claude-code:native"})).structured_content["config"]
             codex_settings = (await cx.call_tool("tapl_get_next", {"session_id": "native"})).structured_content["config"]
-            assert claude_settings["subagents"]["strategy"] == "balanced"
-            assert codex_settings["subagents"]["strategy"] == "conservative"
+            assert "strategy" not in claude_settings["subagents"]
+            assert "strategy" not in codex_settings["subagents"]
+            assert configured.structured_content["subagents"]["strategy"] == "balanced"
+            assert (await cc.call_tool("tapl_get_status", {"session_id": "claude-code:native"})).structured_content["config"]["subagents"]["strategy"] == "balanced"
+            assert (await cx.call_tool("tapl_get_status", {"session_id": "native"})).structured_content["config"]["subagents"]["strategy"] == "conservative"
 
     asyncio.run(exercise())
     assert clients.current_client() == "codex"

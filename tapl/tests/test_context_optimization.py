@@ -106,7 +106,20 @@ def test_entry_options_keep_complete_policy_and_fresh_state(tmp_path, search, re
             current = config.load(start=root)
             assert full["workflow_policy"] == prompt.mcp_server_instructions(subagents=current.subagents)
             assert full["subagent_guidance"] == prompt.subagent_current_guidance(current.subagents)
-            assert full["config"] == current.as_dict()
+            runtime = full["config"]
+            assert set(runtime) == {"path", "exists", "workflow", "recall", "subagents"}
+            assert runtime["path"] == current.path and runtime["exists"] == current.exists
+            assert runtime["workflow"] == current.workflow.as_dict()
+            assert runtime["recall"] == current.recall.as_dict()
+            if current.subagents.setup_complete and current.subagents.enabled:
+                assert runtime["subagents"] == {
+                    **{key: value for key, value in current.subagents.as_dict().items()
+                       if key != "available_models"},
+                    "profiles": [profile.as_dict() for profile in current.subagents.profiles],
+                }
+            else:
+                assert runtime["subagents"] == {"enabled": current.subagents.enabled,
+                                                 "setup_complete": current.subagents.setup_complete}
             assert "model_changes" not in full
             cached = (await client.call_tool("tapl_get_next", {"known_policy_revision": full["policy_revision"]})).structured_content
             assert cached["policy_unchanged"] and "workflow_policy" not in cached

@@ -26,6 +26,7 @@ from taplctl.application import WorkflowApplication
 
 
 PROMPTS = {
+    "responses": "TAPL 응답 계약을 읽기 전용으로 확인해주세요. 일반 진입 뒤 현재 정책을 문맥에 유지한 상태에서 같은 policy_revision으로 get_next를 조회해 정책 묶음 생략을 확인하세요. 이어서 사용자가 요청한 모델 설정 점검으로 현재 위임 도구가 실제 노출한 전체 모델·effort를 available_models와 catalog_complete=true로 한 번 비교하고, 변경된 모델의 before/after를 확인해주세요. 실제 선택값·프로필은 구조화 설정에만 있고 전체 저장 catalog·검색·Viewer 설정은 일반 진입에 없는지도 확인하세요. 파일·설정 변경과 SubAgent 실행은 하지 마세요. 설정 유지/갱신 결정을 요청하는 대신 비교 결과만 보고하고 읽기 전용 작업을 완료 처리해주세요.",
     "scout": "저장소의 주 문서에 철자 오류가 있는지 조사해주세요. 읽기 전용 SubAgent 한 명에게 탐색을 맡기고, 근거와 확인한 범위를 받아 결과만 보고해주세요. 파일 수정이나 테스트 실행은 승인하지 않습니다. 확인 후 완료 처리해주세요.",
     "inspection": "README.md에 철자 오류가 있는지만 확인하고 발견한 내용만 알려주세요. 파일 수정이나 구현 계획은 필요 없습니다. 읽기 전용 확인을 마치고 완료 처리해주세요.",
     "edit": "README.md의 transactoin 오타를 transaction으로 고쳐주세요. 다른 변경은 필요 없습니다. 수정하고 결과를 검증한 뒤 작업을 완료 처리해주세요.",
@@ -231,6 +232,86 @@ def entry_errors(events):
     return errors
 
 
+def response_contract_errors(events):
+    """Audit delivered execution config, retained policy and real catalog deltas."""
+    calls = [call for call in completed_calls(events)
+             if call["tool"] == "tapl_get_next" and successful_call(call)]
+    if not calls:
+        return ["Response check did not receive a successful entry"]
+    errors = []
+    entry = structured_result(calls[0])
+    settings = entry.get("config") or {}
+    selected = settings.get("subagents") or {}
+    if {"search", "viewer"}.intersection(settings) or "available_models" in selected:
+        errors.append("Execution entry leaked administrative settings or saved catalog")
+    if not {"path", "exists", "workflow", "recall", "subagents"} <= settings.keys():
+        errors.append("Execution entry omitted required workflow settings")
+    if not {"enabled", "setup_complete", "strategy", "preference", "models", "profiles"} <= selected.keys():
+        errors.append("Enabled entry omitted confirmed delegation settings")
+    profiles = selected.get("profiles")
+    if not isinstance(profiles, list) or not any(
+        profile.get("name") == "response-fixture-profile" for profile in profiles if isinstance(profile, dict)
+    ):
+        errors.append("Execution entry lost its confirmed profile")
+    policy = str(entry.get("workflow_policy", "")) + str(entry.get("subagent_guidance", ""))
+    if "response-fixture-profile" in policy or "Preserve response fixture priority." in policy:
+        errors.append("Policy text repeated confirmed profile or preference values")
+    retained = [structured_result(call) for call in calls[1:]
+                if call.get("arguments", {}).get("known_policy_revision")
+                and "available_models" not in call.get("arguments", {})
+                and structured_result(call).get("policy_unchanged") is True]
+    if not retained or any({"workflow_policy", "subagent_guidance", "config"}.intersection(value)
+                           for value in retained):
+        errors.append("Retained revision did not omit its policy bundle")
+    if any(not {"state_summary", "recommendations"} <= value.keys() for value in retained):
+        errors.append("Retained revision lost current state or recommendations")
+    comparisons = [structured_result(call) for call in calls
+                   if call.get("arguments", {}).get("catalog_complete") is True]
+    if len(comparisons) != 1:
+        errors.append("Response check requires one explicit complete live-catalog comparison")
+        return errors
+    compared = comparisons[0]
+    change = compared.get("model_changes") or {}
+    deltas = change.get("changes")
+    if (change.get("comparison_status") != "compared" or change.get("baseline_recorded") is not True
+            or change.get("changed") is not True or not isinstance(deltas, list) or not deltas):
+        errors.append("Complete comparison did not deliver changed before/after values")
+        return errors
+    if {"added", "removed", "reasoning_efforts_changed"}.intersection(change):
+        errors.append("Catalog comparison repeated legacy model-name arrays")
+    for delta in deltas:
+        if (not isinstance(delta, dict) or set(delta) != {"model", "before", "after"}
+                or not isinstance(delta["model"], str)
+                or any(value is not None and (not isinstance(value, list)
+                       or any(not isinstance(effort, str) for effort in value))
+                       for value in (delta.get("before"), delta.get("after")))):
+            errors.append("Catalog delta has an invalid absence/effort representation")
+            break
+    if not any(delta == {"model": "retired-response-fixture", "before": ["high"], "after": None}
+               for delta in deltas):
+        errors.append("Complete comparison did not identify the historical fixture removal")
+    if compared.get("policy_unchanged") is not False or not {
+        "workflow_policy", "subagent_guidance", "config"
+    } <= compared.keys():
+        errors.append("Changed catalog did not resend self-contained policy and settings")
+    return errors
+
+
+def entry_refresh_errors(events):
+    """Permit a repeated entry only after a successful policy-refresh receipt."""
+    seen, refresh_required = False, False
+    errors = []
+    for call in completed_calls(events):
+        if call["tool"] == "tapl_get_next":
+            if seen and not refresh_required:
+                errors.append("Repeated entry lacks a preceding policy-refresh receipt")
+            seen = True
+            refresh_required = False
+        elif successful_call(call):
+            refresh_required = refresh_required or structured_result(call).get("policy_refresh_required") is True
+    return errors
+
+
 def rollout_metrics(directory):
     """Usage-only projection; never retain or report account rate-limit fields.
 
@@ -397,6 +478,10 @@ def command_exit_codes(output):
 
 def scenario_audit(directory, condition, conn):
     """Fail closed on missing recovery/source receipts for the added scenarios."""
+    if condition == "responses":
+        path = directory / "events.jsonl"
+        return (response_contract_errors(read_events(path)) if path.exists()
+                else ["Missing live response-contract receipts"])
     if condition not in {"memory_reuse", "batch_recovery", "context_loss"}:
         return []
     errors = []
@@ -727,7 +812,7 @@ def main(args):
     run("git", "add", ".", cwd=root)
     run("git", "commit", "-qm", "Synthetic fixture", cwd=root)
     install.install_repo(repo=root, taplctl_command=shutil.which("taplctl"))
-    enabled = args.condition in {"delegation", "scout", "batch_recovery"}
+    enabled = args.condition in {"delegation", "scout", "batch_recovery", "responses"}
     recall = args.condition in {"recall", "memory_reuse"}
     (root / ".tapl/config.toml").write_text(
         '[search]\nmode="bm25"\n[recall]\nenabled=' + str(recall).lower() + '\n'
@@ -735,6 +820,16 @@ def main(args):
         'strategy="aggressive"\npreference="독립 작업은 병렬 실행"\n'
         + ('[subagents.models]\n"' + args.model + '"=["high"]\n' if enabled else '')
     )
+    if args.condition == "responses":
+        with (root / ".tapl/config.toml").open("a") as target:
+            target.write(
+                '\n[subagents.available_models]\n' + json.dumps(args.model) + '=["low"]\n'
+                '"retired-response-fixture"=["high"]\n'
+                '[[subagents.profiles]]\nname="response-fixture-profile"\n'
+                'description="Preserve response fixture priority."\ncharacteristics="Bounded read-only inspection"\n'
+                'delegation_bias="avoid"\ncandidates=[]\n'
+            )
+    initial_settings = (root / ".tapl/config.toml").read_bytes()
     seed_run_id = None
     scenario = {}
     if args.condition == "memory_reuse":
@@ -782,7 +877,6 @@ def main(args):
             scenario = {"kind": "fresh-session persisted-run recovery; not actual compaction",
                         "run_id": (status.get("active_run") or {}).get("id"),
                         "setup_unchanged": (root / "README.md").read_text() == "# Example\n\nAn atomic transactoin.\n"}
-            from taplctl import db
             scenario["setup_items"] = [{"id": item["id"], "stable_id": item["stable_id"], "kind": item["kind"],
                                          "body": item["body"],
                                          "fields": {field: item[field] for _, field in db.markdown_body_fields(item["kind"])}}
@@ -830,9 +924,10 @@ def main(args):
     entry = next((c for c in calls if c["tool"] == "tapl_get_next"), {})
     check(not any(key in entry.get("arguments", {}) for key in ("available_models", "catalog_complete", "known_policy_revision")),
           "Ordinary entry must omit catalog and retained-policy arguments")
-    # A repeat is flagged for trace review; the evaluator must check whether a
-    # preceding truncation/failure/policy-loss legitimately required it.
-    check(names.count("tapl_get_next") == 1, "Review repeated entry for a legitimate policy-loss condition")
+    # Mode changes can legitimately require fresh policy in this same session.
+    # The response scenario separately asks for retained and catalog probes.
+    if args.condition != "responses":
+        errors.extend(entry_refresh_errors(events))
     check(all(c.get("status") == "completed" for c in calls), "Failed MCP call")
     for call in calls:
         result = call.get("result") or {}
@@ -850,17 +945,26 @@ def main(args):
             "JOIN items i ON i.id=te.task_item_id")]
         memory_reviews = [json.loads(row[0]) for row in conn.execute(
             "SELECT payload_json FROM events WHERE event_type='memory_review' ORDER BY id")]
-    if args.condition in {"inspection", "scout"}:
+    if args.condition == "responses":
+        errors.extend(response_contract_errors(events))
+        check((root / ".tapl/config.toml").read_bytes() == initial_settings, "Read-only response check changed settings")
+        check(not {"tapl_configure_subagents", "tapl_save_settings"}.intersection(names),
+              "Read-only response check entered settings mutation")
+        check(not delegation_evidence(output / "rollouts"), "Read-only response check spawned an agent")
+    if args.condition in {"inspection", "scout", "responses"}:
         check((root / "README.md").read_text() == "# Example\n\nAn atomic transactoin.\n", "Read-only inspection edited README")
         check((root / "alpha.txt").read_text() == "alhpa\n" and (root / "beta.txt").read_text() == "btea\n", "Inspection changed another artifact")
         check({p.name for p in root.iterdir()} == {"README.md", "alpha.txt", "beta.txt", ".git", ".codex", ".tapl"}, "Inspection created an unrelated artifact")
-        check(plans == 0 and not tasks, "Read-only Fast inspection created unnecessary plans/tasks")
+        check(not tasks, "Read-only inspection created executable tasks")
+        if args.condition != "responses":
+            check(plans == 0, "Read-only Fast inspection created unnecessary plans")
         check(not {"tapl_approve_execution", "tapl_start_task", "tapl_dispatch_tasks"}.intersection(names), "Read-only request entered execution")
         check(archives == 1 and "tapl_finish_run" in names and "tapl_finish_archive" in names, "Inspection did not complete lifecycle")
         summaries = [c.get("arguments", {}) for c in calls if c["tool"] == "tapl_summarize_run"]
         if args.condition == "inspection":
             check(bool(summaries) and summaries[-1].get("workflow_mode", "").lower() == "fast", "Known read-only inspection was not Fast")
-        check("transactoin" in (output / "answer.txt").read_text(), "Inspection omitted the observed typo")
+        if args.condition != "responses":
+            check("transactoin" in (output / "answer.txt").read_text(), "Inspection omitted the observed typo")
         if args.condition == "scout":
             children = delegation_evidence(output / "rollouts")
             check(len(children) == 1 and children[0]["completed"], "Expected one completed read-only helper")

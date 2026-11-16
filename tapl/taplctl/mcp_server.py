@@ -334,7 +334,7 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
     if payload.get("recommendations"):
         receipt["recommendations"] = mcp_next_recommendations(payload)["recommendations"]
     if receipt["operation"] == "subagents_configure":
-        for key in ("path", "changed", "subagents", "subagent_guidance"):
+        for key in ("path", "client", "subagents_config_key", "changed", "subagents", "subagent_guidance"):
             if key in payload:
                 receipt[key] = payload[key]
     if operation == "run_summarize" and "recall" in payload:
@@ -556,7 +556,7 @@ def _create_server(
         known_policy_revision: Annotated[str | None, Field(description="Only supply a returned revision when its complete workflow_policy, subagent_guidance and config remain in the current context. Omit after compaction, in a new session, or whenever uncertain; summaries are insufficient.")] = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
-        """Single entry for authoritative policy, state_summary and safe actions; omit model-catalog arguments for ordinary work. Complete catalog comparisons are optional settings checks, not session initialization. Read status only for missing details and reuse write recommendations. A retained revision omits unchanged policy/config; state and requested complete comparisons stay fresh. Revisions are not approval evidence."""
+        """Single entry for authoritative policy, execution config, state_summary and safe actions; omit model-catalog arguments for ordinary work. Complete catalog comparisons are optional settings checks, not session initialization; model_changes.changes contains before/after efforts or null for an absent model. Read status only for missing details and reuse write recommendations. A retained revision omits unchanged policy/config; state and requested complete comparisons stay fresh. Revisions are not approval evidence."""
 
         return mcp_next_recommendations(await call_application(
             application.get_next, session_id=session_id,
@@ -587,8 +587,9 @@ def _create_server(
         Use only models and
         efforts exposed by the current delegation tool, never a provider API catalog or guesses.
         If that catalog is unavailable, keep setup pending and work on the root agent. Preserve
-        existing choices unless the user requests an update. Returned settings and guidance
-        take effect immediately and supersede the MCP initialization snapshot.
+        existing choices unless the user requests an update. The receipt's top-level subagents contains
+        the complete confirmed settings, including explicit profiles=[]; subagent_guidance refers to it.
+        Apply both immediately without another get_next; they supersede the MCP initialization snapshot.
         """
 
         return await call_application_write(

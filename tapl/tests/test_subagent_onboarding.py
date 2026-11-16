@@ -28,7 +28,7 @@ def test_first_use_requires_an_answer_and_does_not_create_a_config(tmp_path: Pat
     path = root / ".tapl/config.toml"
     next_action = app.get_next(catalog_complete=True, available_models={"future-runtime": ["careful"]})
     assert next_action["recommendations"][0]["name"] == "configure-subagents"
-    assert "`preference` in concise English" in next_action["workflow_policy"]
+    assert "`preference` in concise English" in next_action["subagent_guidance"]
     assert "without inventing preferences" in next_action["subagent_guidance"]
     assert "catalog-only keep preserves existing text" in next_action["subagent_guidance"]
     assert not path.exists()
@@ -59,7 +59,10 @@ def test_model_catalog_changes_are_read_only_and_keep_acknowledges_them(tmp_path
     )
     saved = app.configure_subagents(**selection, available_models=catalog)
     assert saved["subagents"]["setup_complete"]
-    assert "품질 우선" in saved["subagent_guidance"]
+    assert saved["subagents"]["preference"] == "품질 우선"
+    assert saved["subagents"]["profiles"] == []
+    assert "품질 우선" not in saved["subagent_guidance"]
+    assert "`subagents`" in saved["subagent_guidance"]
     path = root / ".tapl/config.toml"
     original = path.read_bytes()
     same = app.get_next(catalog_complete=True, available_models={"small-runtime": ["quick"], "future-runtime": ["quick", "careful"]})
@@ -68,8 +71,11 @@ def test_model_catalog_changes_are_read_only_and_keep_acknowledges_them(tmp_path
     updated = app.get_next(catalog_complete=True, available_models=current)
     assert updated["model_changes"] == {
         "baseline_recorded": True, "changed": True, "comparison_status": "compared",
-        "added": ["new-runtime"], "removed": ["small-runtime"],
-        "reasoning_efforts_changed": ["future-runtime"],
+        "changes": [
+            {"model": "future-runtime", "before": ["careful", "quick"], "after": ["careful", "deep"]},
+            {"model": "new-runtime", "before": None, "after": ["quick"]},
+            {"model": "small-runtime", "before": ["quick"], "after": None},
+        ],
     }
     assert updated["recommendations"][0]["name"] == "review-subagent-models"
     assert path.read_bytes() == original
@@ -94,7 +100,7 @@ def test_catalog_empty_and_missing_are_distinct(tmp_path: Path) -> None:
     )
     assert "model_changes" not in app.get_next()
     empty = app.get_next(catalog_complete=True, available_models={})
-    assert empty["model_changes"]["removed"] == ["future-runtime"]
+    assert empty["model_changes"]["changes"] == [{"model": "future-runtime", "before": ["careful"], "after": None}]
     assert empty["model_changes"]["changed"]
 
 
@@ -114,7 +120,7 @@ def test_incomplete_observations_do_not_trigger_catalog_repair_or_change_prompts
         result = app.get_next(available_models=observation, known_policy_revision=entry["policy_revision"])
         assert result["model_changes"] == {
             "baseline_recorded": True, "comparison_status": "incomplete", "changed": False,
-            "added": [], "removed": [], "reasoning_efforts_changed": [],
+            "changes": [],
         }
         assert result["recommendations"] == entry["recommendations"]
         assert result["state_summary"] == entry["state_summary"]
@@ -124,7 +130,10 @@ def test_incomplete_observations_do_not_trigger_catalog_repair_or_change_prompts
     # Explicitly verified absence is distinguishable from a partial observation.
     complete = app.get_next(available_models=ordinary, catalog_complete=True,
                             known_policy_revision=entry["policy_revision"])
-    assert complete["model_changes"]["removed"] == ["gpt-5.3-codex-spark", "gpt-5.4"]
+    assert complete["model_changes"]["changes"] == [
+        {"model": "gpt-5.3-codex-spark", "before": ["medium"], "after": None},
+        {"model": "gpt-5.4", "before": ["high"], "after": None},
+    ]
     assert complete["model_changes"]["comparison_status"] == "compared"
     assert not complete["policy_unchanged"]
     assert path.read_bytes() == original
@@ -160,6 +169,7 @@ def test_disabled_choice_is_complete_and_legacy_allowlists_are_preserved(tmp_pat
     assert state["config"]["subagents"]["setup_complete"]
     assert not state["model_changes"]["baseline_recorded"]
     assert not state["model_changes"]["changed"]
+    assert state["model_changes"]["changes"] == []
     assert path.read_text(encoding="utf-8") == legacy
 
 
@@ -207,7 +217,11 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
             saved = await client.call_tool("tapl_configure_subagents", args)
             assert not saved.is_error
             assert saved.structured_content["operation"] == "subagents_configure"
-            assert "runtime-a[high]" in saved.structured_content["subagent_guidance"]
+            assert saved.structured_content["subagents"]["models"] == args["models"]
+            assert saved.structured_content["subagents"]["profiles"] == []
+            assert "`subagents`" in saved.structured_content["subagent_guidance"]
+            assert "config.subagents" not in saved.structured_content["subagent_guidance"]
+            assert "runtime-a" not in saved.structured_content["subagent_guidance"]
             assert saved.structured_content["subagents"]["available_models"] == args["available_models"]
             assert config.load(root / ".tapl/config.toml").subagents.preference == args["preference"]
             # Read-only helper policy becomes available in the same MCP session before
@@ -255,7 +269,8 @@ def test_mcp_setup_and_catalog_refresh_take_effect_without_restarting(tmp_path: 
             assert next_action.structured_content["recommendations"][0]["tool"] == "request_user_input"
             assert next_action.structured_content["model_changes"]["changed"]
             # Model discovery cannot silently widen the user's saved allowlist.
-            assert "Allowlist: runtime-a[high]" in next_action.structured_content["subagent_guidance"]
+            assert next_action.structured_content["config"]["subagents"]["models"] == args["models"]
+            assert "`config.subagents.models`" in next_action.structured_content["subagent_guidance"]
             assert "Skip unavailable model/effort pairs and use the root agent if none remain" in next_action.structured_content["subagent_guidance"]
             disabled = await client.call_tool("tapl_configure_subagents", {
                 "user_confirmed": True, "enabled": False, "strategy": "conservative",

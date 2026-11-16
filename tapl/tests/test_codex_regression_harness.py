@@ -415,3 +415,84 @@ def test_usage_initialization_and_metadata_enrichment_are_not_model_requests(tmp
 ])
 def test_exact_bytes_audit_rejects_printed_or_weaker_claims(command, valid):
     assert harness.exact_byte_verification(command) is valid
+
+
+@pytest.fixture
+def response_receipts():
+    full = {
+        "ok": True, "policy_unchanged": False, "policy_revision": "retained",
+        "workflow_policy": "Common workflow rules", "subagent_guidance": "Read current structured settings",
+        "state_summary": {}, "recommendations": [],
+        "config": {"path": "/case/.tapl/config.toml", "exists": True,
+                   "workflow": {"authoring_detail": "auto"}, "recall": {"enabled": False},
+                   "subagents": {"enabled": True, "setup_complete": True, "strategy": "balanced",
+                                 "preference": "Preserve response fixture priority.", "models": {"live": ["high"]},
+                                 "profiles": [{"name": "response-fixture-profile"}]}},
+    }
+    cached = {key: value for key, value in full.items()
+              if key not in {"workflow_policy", "subagent_guidance", "config"}}
+    cached["policy_unchanged"] = True
+    changed = json.loads(json.dumps(full))
+    changed["model_changes"] = {
+        "baseline_recorded": True, "comparison_status": "compared", "changed": True,
+        "changes": [{"model": "retired-response-fixture", "before": ["high"], "after": None}],
+    }
+    return [{"type": "item.completed", "item": {
+        "type": "mcp_tool_call", "tool": "tapl_get_next", "status": "completed",
+        "arguments": arguments, "result": {"structured_content": result},
+    }} for arguments, result in (
+        ({}, full), ({"known_policy_revision": "retained"}, cached),
+        ({"available_models": {"live": ["high"]}, "catalog_complete": True,
+          "known_policy_revision": "retained"}, changed),
+    )]
+
+
+@pytest.mark.parametrize("fault", [
+    None, "admin_settings", "missing_selection", "repeated_profile", "missing_retained",
+    "retained_policy", "retained_state", "missing_comparison", "legacy_arrays",
+    "invalid_delta", "missing_removal", "missing_review_bundle",
+])
+def test_response_audit_rejects_incomplete_or_misleading_receipts(response_receipts, fault):
+    events = response_receipts
+    entry, cached, changed = [event["item"]["result"]["structured_content"] for event in events]
+    if fault == "admin_settings":
+        entry["config"]["subagents"]["available_models"] = {"retired": ["high"]}
+    elif fault == "missing_selection":
+        del entry["config"]["subagents"]["models"]
+    elif fault == "repeated_profile":
+        entry["subagent_guidance"] += " response-fixture-profile"
+    elif fault == "missing_retained":
+        cached["policy_unchanged"] = False
+    elif fault == "retained_policy":
+        cached["config"] = entry["config"]
+    elif fault == "retained_state":
+        del cached["state_summary"]
+    elif fault == "missing_comparison":
+        events.pop()
+    elif fault == "legacy_arrays":
+        changed["model_changes"]["removed"] = ["retired-response-fixture"]
+    elif fault == "invalid_delta":
+        changed["model_changes"]["changes"].append({"model": "other", "before": "high", "after": []})
+    elif fault == "missing_removal":
+        changed["model_changes"]["changes"][0]["after"] = []
+    elif fault == "missing_review_bundle":
+        del changed["config"]
+    assert bool(harness.response_contract_errors(events)) is (fault is not None)
+
+
+@pytest.mark.parametrize("refresh,successful,extra_repeat,valid", [
+    (True, True, False, True), (False, True, False, False),
+    (True, False, False, False), (True, True, True, False),
+])
+def test_entry_refresh_audit_requires_successful_receipt(refresh, successful, extra_repeat, valid):
+    def event(tool, value, status="completed"):
+        return {"type": "item.completed", "item": {
+            "type": "mcp_tool_call", "tool": tool, "status": status,
+            "result": {"structured_content": value},
+        }}
+    entry = event("tapl_get_next", {"ok": True})
+    receipt = event("tapl_summarize_run", {"ok": successful, "policy_refresh_required": refresh})
+    events = [entry, receipt, entry]
+    if extra_repeat:
+        events.append(entry)
+    assert bool(harness.entry_refresh_errors(events)) is not valid

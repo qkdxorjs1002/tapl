@@ -1023,16 +1023,17 @@ def mcp_server_instructions(
     """Render the complete invariant workflow policy, preserved for full delivery."""
 
     authoring_detail = tapl_config.resolve_authoring_detail(authoring_detail)
-    settings = subagents or tapl_config.SubagentsConfig()
     return render(
         MCP_SERVER_INSTRUCTIONS_TEMPLATE,
         authoring_detail=authoring_detail,
         subagent_delegation_guidance=(
-            "Use the entry response's current settings. Ordinary entry requires no catalog comparison.\n\n"
-            + (subagent_delegation_guidance(settings, include_exploration=False, authoring_detail=authoring_detail) if settings.setup_complete else
-               "Setup pending: on the first concrete user request follow the entry response to ask preferences, then "
-               "save the confirmed preferences with `tapl_configure_subagents`, summarizing `preference` in concise English "
-               "rather than copying the user's reply verbatim. Until setup completes use the root agent.")
+            "SubAgent helpers and executable delegates require current completed/enabled setup and selections "
+            "allowed by both confirmed preferences and the live delegation tool. Use the current structured "
+            "config and subagent_guidance for selection, setup and handoffs. Ordinary entry requires no catalog "
+            "comparison. If setup is pending, delegation is disabled, or no eligible model/tool remains, use root "
+            "under TAPL. Separate explicit delegation requests retain their own authority. Read-only helpers may "
+            "run before/after planning. Follow current setup/model gates and handoffs in `tapl_get_next`'s "
+            "subagent_guidance; helpers cannot edit/test/write state or bypass executable-task lifecycle."
         ),
     )
 
@@ -1400,13 +1401,22 @@ def subagent_catalog_guidance() -> str:
 def subagent_current_guidance(
     subagents: tapl_config.SubagentsConfig, *, include_request: bool = True,
     authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
+    config_location: str = "config.subagents",
 ) -> str:
     authoring_detail = tapl_config.resolve_authoring_detail(authoring_detail)
+    inactive_settings = (
+        "Before requested changes or re-enabling existing preferences, read `tapl_get_settings` or "
+        "`taplctl config get` and preserve unrelated saved values. Omitted inactive execution fields do not "
+        "mean empty/default preferences; never guess them. Initial setup may ask for live choices."
+    )
     if not subagents.setup_complete:
-        return subagent_setup_guidance()
+        return subagent_setup_guidance().replace("config.subagents", config_location) + "\n\n" + inactive_settings
     if not subagents.enabled:
-        return "SubAgent setup is complete and delegation is disabled by the user's preference. Use the root agent."
-    parts = [subagent_delegation_guidance(subagents, authoring_detail=authoring_detail), subagent_catalog_guidance()]
+        return (f"Current `{config_location}` confirms setup is complete and delegation is disabled. Use the root agent. "
+                + inactive_settings)
+    parts = [subagent_delegation_guidance(
+        subagents, authoring_detail=authoring_detail, config_location=config_location,
+    ), subagent_catalog_guidance()]
     if include_request:
         parts.append(subagent_delegation_request_guidance(subagents))
     return "\n\n".join(parts)
@@ -1665,6 +1675,7 @@ def _render_builtin_profile(
 def subagent_delegation_guidance(
     subagents: tapl_config.SubagentsConfig | None = None, *, include_exploration: bool = True,
     authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
+    config_location: str | None = None,
 ) -> str:
     authoring_detail = tapl_config.resolve_authoring_detail(authoring_detail)
     if not subagents_enabled(subagents):
@@ -1673,7 +1684,7 @@ def subagent_delegation_guidance(
     if clients.current_client() == "claude-code":
         return _claude_subagent_delegation_guidance(
             subagents or tapl_config.SubagentsConfig(), include_exploration=include_exploration,
-            authoring_detail=authoring_detail,
+            authoring_detail=authoring_detail, config_location=config_location,
         )
     profiles = configured_subagent_profiles(subagents)
     models = configured_subagent_models(subagents)
@@ -1715,6 +1726,22 @@ def subagent_delegation_guidance(
             )
     else:
         profile_section = "- Profiles: disabled by explicit `profiles=[]`.\n"
+
+    if config_location is not None:
+        # Current MCP responses carry actual values once, in structured config.
+        # Standalone hook guidance above retains its self-contained settings.
+        preference_guidance = f"- Read current preference, strategy, models and ordered profiles from `{config_location}`.\n"
+        strategy_guidance = (
+            "conservative biases toward root unless delegation value clearly exceeds context, coordination and risk costs; "
+            "balanced weighs those costs neutrally; aggressive favors independent low-risk work with context savings or "
+            "parallel value, while retaining root when shared context or coordination dominates."
+        )
+        profile_section = (
+            "- Profiles: use all description/characteristics and ordered candidates from structured config; "
+            "an empty profiles array disables profiles. User profiles replace built-ins; "
+            "bias inherit=global strategy, prefer=delegate, neutral=neutral, avoid=root.\n"
+        )
+        available_models = f"use `{config_location}.models`, intersected with the live delegation tool"
 
     if not include_exploration:
         # MCP repeats this startup policy in tool descriptions. Keep detailed
@@ -1769,6 +1796,7 @@ def subagent_delegation_guidance(
 
 def _claude_subagent_delegation_guidance(
     settings: tapl_config.SubagentsConfig, *, include_exploration: bool, authoring_detail: str,
+    config_location: str | None = None,
 ) -> str:
     allowlist = "; ".join(
         f"{model.name}[{','.join(model.reasoning_efforts)}]" if model.reasoning_efforts else
@@ -1814,6 +1842,18 @@ def _claude_subagent_delegation_guidance(
         "Fresh dispatch has fresh execution IDs; stale IDs must not settle its executions. Root alone "
         "changes lifecycle state; Agent/SubagentStop completion itself does not settle a TAPL task.",
     ]
+    if config_location is not None:
+        parts[1:3] = [
+            f"Read current preference, strategy, requested-selection models, ordered profiles and selection_semantics "
+            f"from `{config_location}`. Intersect model/effort selections with the live Agent tool, except confirmed "
+            "inherit: it is a selection mode, not a catalog entry, and must not be rejected for catalog absence. Skip unavailable "
+            "candidates and fall back to the allowlist, then root when none remain. Conservative biases toward root "
+            "unless delegation value clearly exceeds costs; balanced weighs costs neutrally; aggressive favors "
+            "independent low-risk work with context savings or parallel value, retaining root when shared context "
+            "or coordination dominates. Profiles use all description/characteristics, most specific wins and order "
+            "breaks ties; preserve candidate order. Empty profiles disables profiles. Bias inherit=global strategy, "
+            "prefer=delegate, neutral=neutral, avoid=root."
+        ]
     if include_exploration:
         parts.append(_host_policy(subagent_exploration_guidance()))
     return "\n\n".join(parts)

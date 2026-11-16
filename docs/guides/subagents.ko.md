@@ -50,7 +50,7 @@ root agent가 처리합니다. Claude Code는 관찰한 기능과 catalog 제약
 목록은 그렇지 않습니다. 확인된 추가·제거·effort 변경에는 설정 변경/유지를 제안하고 실제
 답변 뒤에만 `tapl_configure_subagents`로 저장합니다. 유지를 선택하면 허용 목록은 그대로
 두고 확인한 전체 목록을 갱신합니다. 기준 목록이 없는 기존 설정도 계속 사용할 수 있으며
-설정 점검 시점에 기준을 기록합니다.
+설정 점검 시점에 기준을 기록합니다. 간결한 `model_changes` 응답은 변경된 모델별 실제 변경 전·후 effort 배열을 제공하며 [MCP 응답 계약](../reference/mcp.ko.md#진입조회설정)을 참고하세요.
 
 ## Profile과 모델 선택
 
@@ -73,8 +73,7 @@ profile의 candidate는 setup이 runtime-supported model/effort pair를 제공�
 `subagents.profiles` 배열은 template profile을 완전히 대체하며 candidate는
 `subagents.models`에 있어야 합니다.
 
-활성화하면 TAPL은 delegation policy, 활성 profile, model/reasoning allowlist를
-`tapl_get_next`로 전달합니다. matching은 advisory입니다. agent는 모든 task 특성을 평가하고
+설정이 완료되고 위임이 활성화되면 `tapl_get_next`는 승인된 선호·전략·활성 profile·model/reasoning allowlist를 실행 설정에 한 번만 전달합니다. 정책·지침은 공통 위임 규칙과 절차를 제공하며 저장된 runtime catalog는 생략합니다. 설정 저장 응답은 확인된 전체 설정과 현재 지침을 유지합니다. matching은 advisory입니다. agent는 모든 task 특성을 평가하고
 가장 구체적인 profile을 우선하며 설정 순서는 동률일 때만 사용합니다. 필요한 경우 이유를
 기록해 profile/candidate를 override하고, 사용할 수 없는 candidate는 건너뛰며, 필요하면
 다른 allowlisted pair 또는 root로 fallback합니다. 설치된 `.tapl/config.toml`은 선택한

@@ -107,9 +107,8 @@ def test_standalone_policy_and_delegation_use_normal_fallback():
     assert prompt.subagent_delegation_guidance(settings) == prompt.subagent_delegation_guidance(settings, authoring_detail="normal")
     assert "record executable-task decisions in canonical task fields" in prompt.subagent_current_guidance(settings, authoring_detail="precise")
     for detail in config.EFFECTIVE_AUTHORING_DETAILS:
-        with patch.object(prompt, "subagent_delegation_guidance", wraps=prompt.subagent_delegation_guidance) as provider:
-            prompt.mcp_server_instructions(subagents=settings, authoring_detail=detail)
-        assert provider.call_args.kwargs["authoring_detail"] == detail
+        assert prompt.mcp_server_instructions(subagents=settings, authoring_detail=detail) == \
+            prompt.mcp_server_instructions(authoring_detail=detail)
 
 
 @pytest.mark.parametrize("event", ["SessionStart", "UserPromptSubmit", "Stop"])

@@ -58,7 +58,7 @@ A complete empty catalog can establish removal, while a partial or omitted one
 cannot. Confirmed additions, removals and effort changes offer update or keep.
 Wait for the user's answer before saving through `tapl_configure_subagents`.
 Keeping records the confirmed catalog without changing the allowlist. Existing
-configurations without a catalog remain usable; record a baseline during settings review.
+configurations without a catalog remain usable; record a baseline during settings review. The compact `model_changes` response reports each changed model's actual before/after effort arrays; see the [MCP response contract](../reference/mcp.md#entry-inspection-and-setup).
 
 ## Profiles and model selection
 
@@ -82,8 +82,7 @@ An explicit `profiles = []` disables profiles. Any non-empty user
 `subagents.profiles` array fully replaces the template profiles, and its
 candidates must be present in `subagents.models`.
 
-When enabled, TAPL delivers its delegation policy, active profiles, and
-model/reasoning allowlist through `tapl_get_next`. Matching remains advisory: the
+When enabled and setup is complete, `tapl_get_next` delivers approved preferences, strategy, active profiles and the model/reasoning allowlist once in its execution settings. Policy and guidance provide the common delegation rules and procedures; the saved runtime catalog is omitted. A configuration receipt retains the full confirmed settings and current guidance. Matching remains advisory: the
 agent evaluates all task characteristics, prefers the most specific profile,
 and uses configured order only as a tie-break. It may choose and record a
 justified profile or candidate override, skips unavailable candidates, and

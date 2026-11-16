@@ -225,6 +225,32 @@ class WorkflowApplication:
                                    "approved": bool(approval.get("approved", False))},
         }
 
+    @staticmethod
+    def _execution_config(settings: config.TaplConfig) -> dict[str, Any]:
+        """Deliver only settings that govern the current workflow execution."""
+        subagents = settings.subagents
+        active = subagents.setup_complete and subagents.enabled
+        selected = subagents.as_dict()
+        runtime_subagents = {
+            key: selected[key] for key in ("enabled", "setup_complete")
+        }
+        if active:
+            runtime_subagents.update({key: selected[key] for key in (
+                "strategy", "preference", "models", "selection_semantics",
+            ) if key in selected})
+            # The full settings serializer omits empty profiles. Execution must
+            # distinguish explicit profile disabling from model-neutral defaults.
+            runtime_subagents["profiles"] = [profile.as_dict() for profile in subagents.profiles]
+        return {
+            "path": settings.path,
+            "exists": settings.exists,
+            **({"client": settings.client, "subagents_config_key": config.subagents_config_key(settings.client)}
+               if settings.client == "claude-code" else {}),
+            "workflow": settings.workflow.as_dict(),
+            "recall": settings.recall.as_dict(),
+            "subagents": runtime_subagents,
+        }
+
     def get_next(
         self,
         *,
@@ -245,7 +271,7 @@ class WorkflowApplication:
                 )
                 if workflow_policy is None else workflow_policy
             ),
-            "config": settings.as_dict(),
+            "config": self._execution_config(settings),
             "subagent_guidance": prompt.subagent_current_guidance(
                 settings.subagents, authoring_detail=authoring_policy["effective"],
             ),
@@ -265,21 +291,20 @@ class WorkflowApplication:
         if available_models is not None:
             current = config.parse_subagent_models(available_models, enabled=False, key="available_models")
             baseline = settings.subagents.available_models
-            previous = {model.name: set(model.reasoning_efforts) for model in (baseline or ())}
-            observed = {model.name: set(model.reasoning_efforts) for model in current}
+            previous = {model.name: sorted(model.reasoning_efforts) for model in (baseline or ())}
+            observed = {model.name: sorted(model.reasoning_efforts) for model in current}
+            delta = [
+                {"model": name, "before": previous.get(name), "after": observed.get(name)}
+                for name in sorted(previous.keys() | observed.keys())
+                if previous.get(name) != observed.get(name)
+            ] if catalog_complete and baseline is not None else []
             changes = {
                 "baseline_recorded": baseline is not None,
                 "comparison_status": "compared" if catalog_complete and baseline is not None else
                                      "no_baseline" if catalog_complete else "incomplete",
-                "added": sorted(observed.keys() - previous.keys()) if catalog_complete else [],
-                "removed": sorted(previous.keys() - observed.keys()) if catalog_complete else [],
-                "reasoning_efforts_changed": sorted(
-                    name for name in observed.keys() & previous.keys() if observed[name] != previous[name]
-                ) if catalog_complete else [],
+                "changes": delta,
+                "changed": bool(delta),
             }
-            changes["changed"] = baseline is not None and any(
-                changes[key] for key in ("added", "removed", "reasoning_efforts_changed")
-            )
             payload["model_changes"] = changes
             if not catalog_complete:
                 payload["model_catalog_note"] = (
@@ -355,9 +380,9 @@ class WorkflowApplication:
             "client": settings.client,
             "subagents_config_key": config.subagents_config_key(settings.client),
             "changed": edited.changed,
-            "subagents": edited.config.as_dict(),
+            "subagents": {**edited.config.as_dict(), "profiles": [profile.as_dict() for profile in edited.config.profiles]},
             "subagent_guidance": prompt.subagent_current_guidance(
-                edited.config, authoring_detail=authoring_policy["effective"],
+                edited.config, authoring_detail=authoring_policy["effective"], config_location="subagents",
             ),
         }
 

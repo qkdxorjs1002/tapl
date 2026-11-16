@@ -95,7 +95,7 @@ taplctl doctor
 
 변경 전 출력된 출처 경로를 확인하세요. 선택 파일이 잘못되었으면 다른 파일로 넘어가지 않고 실패합니다. 값을 제거한 뒤에도 전체 설정이 유효해야 합니다. 예를 들어 완료된 활성 위임 설정에는 허용된 모델 조합이 필요합니다. `config get`은 기본값과 추론값도 보여 주므로 키를 지워도 유효값이 사라지는 것은 아닙니다.
 
-다음 전체 MCP 정책 조회에서 변경된 설정과 새 `policy_revision`을 전달합니다. MCP/hook 연결 변경 뒤에는 해당 호스트를, origin 설정 변경 뒤에는 Viewer 서비스를 다시 시작합니다. 설치 시 config 병합·덮어쓰기 정책은 런타임 파일 선택과 별개입니다. [설치](../getting-started/installation.ko.md)를 참고하세요.
+워크플로 진입은 [에이전트 실행에 필요한 설정](../reference/mcp.ko.md#진입조회설정)만 반환하며 CLI `config get`·`doctor`, Viewer 설정, `tapl_get_settings`는 전체 관리 설정 조회를 유지합니다. 다음 MCP 정책 조회의 `policy_revision`은 전달할 정책·지침·실행 설정이나 유효 작성 정책이 바뀔 때만 달라집니다. 전달된 출처와 클라이언트 식별이 같고 검색·Viewer 설정이나 저장된 모델 목록만 바뀌면 정책을 다시 전송하지 않습니다. MCP/hook 연결 변경 뒤에는 해당 호스트를, origin 설정 변경 뒤에는 Viewer 서비스를 다시 시작합니다. 설치 시 config 병합·덮어쓰기 정책은 런타임 파일 선택과 별개입니다. [설치](../getting-started/installation.ko.md)를 참고하세요.
 
 ## 관련 페이지
 

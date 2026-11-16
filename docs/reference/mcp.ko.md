@@ -44,7 +44,7 @@ PLAN ID는 `PLAN-001` 또는 legacy `SPEC-001`, TASK ID는 `TASK-001` 형태로 
 
 | 도구 | 필수 인자 | 선택 인자와 동작 |
 | --- | --- | --- |
-| `tapl_get_next` | 없음 | `known_policy_revision`; 명시적 설정 확인용 `available_models`, `catalog_complete=false`. 정책·설정·상태 요약·다음 행동을 반환합니다. |
+| `tapl_get_next` | 없음 | `known_policy_revision`; 명시적 설정 확인용 `available_models`, `catalog_complete=false`. 정책·실행 설정·상태 요약·다음 행동을 반환합니다. |
 | `tapl_get_status` | 없음 | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). `full=false`, `include_events=false`, `events_limit=12` (0–100). 조회·재개·복구용 상세이며 `full=true`는 기록 본문도 포함합니다. |
 | `tapl_validate_state` | 없음 | 계획 상세, 작업 계약, 의존성, 실행 순서, 승인을 검증합니다. |
 | `tapl_get_context` | 없음 | `event="Manual"`로 수명주기 지침을 선택합니다. |
@@ -52,9 +52,15 @@ PLAN ID는 `PLAN-001` 또는 legacy `SPEC-001`, TASK ID는 `TASK-001` 형태로 
 
 MCP 초기화는 짧은 진입 안내를 제공합니다. 단순하지 않거나 불확실한 작업을 시작하기 전에 `tapl_get_next`를 **한 번** 호출해 전체 `workflow_policy`, `subagent_guidance`, `config`를 유지합니다. SessionStart bootstrap과 hook 진입은 같은 호출을 공유합니다. 일반 진입에서는 모델 목록 인자를 생략합니다. `state_summary`에는 RUN 식별·분류, 결과 기록 여부, 작업·대기·배치 수, 실행 승인이 들어 있습니다. 부족한 상세나 조회 권고가 있을 때만 `tapl_get_status`를 사용합니다.
 
-`policy_revision`은 정책·위임 지침·설정과 `authoring_policy`의 정확한 내용을 나타내므로 RUN 모드가 바뀌면 이전 묶음은 유효하지 않습니다. 해당 revision의 정책·지침·설정 전체가 현재 문맥에 남아 있을 때만 `known_policy_revision`을 전달합니다. 쓰기 응답에서 새 revision만 받았다고 전체 정책을 조회한 것은 아닙니다. 일치하면 바뀌지 않은 정책 필드를 생략하지만 상태·권고와 요청된 완전한 모델 목록 비교는 새로 반환합니다. 모르는 revision이나 내용 변경 시 전체 정책을 반환합니다. 새 세션, 문맥 압축 후, 내용 보존이 불확실할 때는 생략합니다. 상태 캐시나 승인 근거가 아닙니다.
+`config`에는 현재 실행에 필요한 설정만 포함합니다. 출처 경로·존재 여부, 해당 클라이언트 식별, `workflow.authoring_detail`, `recall.enabled`, 현재 SubAgent 설정 완료·활성화 상태를 제공합니다. 설정이 완료되고 위임이 활성화됐으면 승인된 선호·전략·모델/effort 허용 목록·프로필과 해당 Claude 선택 의미도 포함합니다. 비활성·설정 대기 상태에는 그 상태에 필요한 플래그·식별·지침만 반환합니다. 저장된 `available_models` 목록, 검색·Viewer 설정은 생략합니다. 실제 선택값과 선호는 구조화된 설정에 한 번만 두고 정책·지침은 공통 규칙과 절차를 제공합니다. 설정 상세도 선택 인자는 없습니다. 전체 관리 설정은 [사용자 설정](#사용자-설정), `taplctl config get`, `taplctl doctor`로 확인하세요.
+
+`policy_revision`은 실제 전달한 정책·위임 지침·실행 설정과 `authoring_policy`의 정확한 내용을 나타냅니다. RUN 모드를 포함해 이 묶음이 바뀌면 revision이 달라지지만 전달된 출처 경로·존재 여부와 클라이언트 식별이 같고 무관한 검색·Viewer 설정이나 저장된 모델 목록만 바뀌면 유지합니다. 해당 revision의 전체 묶음이 현재 문맥에 남아 있을 때만 `known_policy_revision`을 전달합니다. 쓰기 응답에서 새 revision만 받았다고 전체 정책을 조회한 것은 아닙니다. 일치하면 바뀌지 않은 정책 필드를 생략하지만 상태·권고와 요청된 모델 목록 비교는 새로 반환합니다. 완전한 비교에서 모델 변경이 확인되면 선호 검토에 필요한 현재 묶음과 차이를 함께 다시 전달합니다. 모르는 revision이나 내용 변경 시 전체 실행 정책 묶음을 반환합니다. 새 세션, 문맥 압축 후, 내용 보존이 불확실할 때는 revision을 생략합니다. 상태 캐시나 승인 근거가 아닙니다.
 
 사용자가 요청한 설정 비교에서는 고정 역할 모델까지 포함한 **현재 위임 도구의 전체 모델 목록**과 `catalog_complete=true`를 전달합니다. 검증된 빈 목록은 제거를 확인할 수 있습니다. 기본값 `false`에서는 전달된 목록을 불완전하게 취급하고(`comparison_status="incomplete"`) 변경을 추론하거나 재설정을 요청하지 않습니다. 부족한 live 항목을 저장 설정으로 채우지 마세요. 설정 확인은 실제 사용자 답변이나 정확한 변경 요청이어야 하며 시간 초과는 확인이 아닙니다. 모델은 provider API 목록이 아닌 현재 위임 도구가 노출한 값이어야 합니다. Claude Code는 확인받은 `models={inherit: []}` 선택도 지원하며 `available_models`에는 넣지 않습니다. Alias의 `[]`는 effort 미지정입니다. [Claude 모델 선택](../getting-started/claude-code.ko.md#모델과-agent-실행)을 참고하세요. 빈 `models`는 비활성일 때만 허용하며 `profiles=[]`는 권고 프로필을 끕니다.
+
+`model_changes`는 `baseline_recorded`, `comparison_status`, `changed`, `changes`를 제공합니다. `changes`의 각 항목은 실제 effort 배열을 담은 `{model, before, after}`입니다. `null`은 해당 쪽에 모델이 없음을 뜻하며 `[]`는 Claude의 effort 미지정 의미를 유지합니다. 불완전한 입력에서는 변경을 추론하지 않습니다. 저장된 기준 목록이 없는 기존 설정에 완전한 목록을 전달하면 `"no_baseline"`이며 현재 목록을 추가된 모델로 취급하지 않습니다. 변경/유지 확인 절차는 [SubAgent 최초 설정](../guides/subagents.ko.md#최초-설정)을 참고하세요.
+
+`tapl_configure_subagents` 성공 응답은 저장된 모델 목록을 포함한 확인된 `subagents` 설정 전체와 즉시 적용할 현재 지침을 반환합니다. 확인된 설정을 사용하기 위해서만 진입 조회를 반복할 필요는 없습니다.
 
 RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌면 쓰기 응답은 `policy_refresh_required=true`·`authoring_policy`와 최우선 `tapl_get_next` 권고를 유지합니다. 정책을 다시 조회한 뒤 현재 PLAN·미완료 TASK의 근거를 새 엄격도에 맞게 보완합니다. 완료·보관 기록은 자동으로 다시 쓰지 않습니다. 필수 근거와 Strict typed 필드 경고는 [작성 상세도](../guides/authoring-detail.ko.md#선택-예시와-검증)를 참고하세요.
 

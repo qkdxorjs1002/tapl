@@ -60,7 +60,7 @@ taplctl config unset workflow.authoring_detail  # 기본값 auto 복원
 
 유효 정책도 revision에 포함하므로 모드가 바뀌면 `policy_revision`이 달라집니다. `tapl_summarize_run`, RUN 분할, 아카이브·Stop 후 다음 RUN 활성화 등으로 모드나 유효 상세도가 바뀌면 응답은 `policy_refresh_required=true`를 표시하고 `tapl_get_next`를 최우선으로 권고합니다. 계속하기 전에 이 권고를 따라 현재 PLAN과 미완료 TASK의 근거를 재검토하고 새 엄격도에 맞는 위험·인터페이스·복구·검증을 보완합니다. 정책과 검증을 재평가해도 완료·보관 기록을 자동으로 다시 쓰거나 정리된 TASK를 재분할하지 않습니다.
 
-`known_policy_revision`은 해당 revision의 전체 정책·SubAgent 지침·설정을 현재 context에 보유할 때만 전달합니다. 쓰기 응답에서 새 revision을 받았다는 이유만으로 그 전체 정책을 조회했다고 볼 수 없습니다. 전체 내용이 없거나 보유 여부가 불확실하면 revision을 생략하세요. [MCP 진입](../reference/mcp.ko.md#진입조회설정)을 참고하세요.
+`known_policy_revision`은 해당 revision의 전체 정책·SubAgent 지침·전달된 실행 설정을 현재 context에 보유할 때만 전달합니다. 쓰기 응답에서 새 revision을 받았다는 이유만으로 그 전체 정책을 조회했다고 볼 수 없습니다. 전체 내용이 없거나 보유 여부가 불확실하면 revision을 생략하세요. [MCP 진입](../reference/mcp.ko.md#진입조회설정)을 참고하세요.
 
 검증은 필수 필드·승인·소유권·의존성을 계속 확인합니다. 현재 확정된 Strict PLAN에 미완료 작업이 있거나 TASK가 없으면 비어 있는 typed `risks`·`affected_files`·`validation`에 비차단 경고를 내어 실제 위험·인터페이스·롤백·검증 근거의 보완을 안내합니다. 모든 TASK가 정리된 PLAN은 이 경고에서 제외합니다. 구조 검사이며 NLP·키워드·단어 수로 의미를 평가하거나 근거의 충분성을 입증하지 않습니다.
 
