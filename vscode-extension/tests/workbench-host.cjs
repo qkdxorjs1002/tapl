@@ -4,7 +4,7 @@ const Module = require('node:module');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 test('exact RUN and library host routes keep source/page/context without rebinding active selection', async () => {
-  const calls = [], messages = [], commands = new Map();
+  const calls = [], messages = [], commands = new Map(), executed = [];
   const disposable = { dispose() {} }, folders = [{ name: 'work', uri: { fsPath: '/work' } }];
   let receive, release, revision = 1, memoryItem = false, oldHost = false;
   const panel = { title: '', reveal() {}, onDidDispose() { return disposable; }, webview: {
@@ -20,7 +20,7 @@ test('exact RUN and library host routes keep source/page/context without rebindi
     workspace: { workspaceFolders: folders, getConfiguration() { return { get(_key, fallback) { return fallback; } }; },
       onDidChangeConfiguration() { return disposable; }, onDidChangeWorkspaceFolders() { return disposable; },
       createFileSystemWatcher() { return { ...disposable, onDidChange() { return disposable; }, onDidCreate() { return disposable; }, onDidDelete() { return disposable; } }; } },
-    commands: { registerCommand(name, fn) { commands.set(name, fn); return disposable; }, async executeCommand(name) { return commands.get(name)?.(); } },
+    commands: { registerCommand(name, fn) { commands.set(name, fn); return disposable; }, async executeCommand(name) { executed.push(name); return commands.get(name)?.(); } },
     env: { language: 'en' }
   };
   const snapshot = (runId, sourceDb) => ({ run: { id: runId, session_id: 'past-owner', status: 'archived', source_db: sourceDb, writable: false },
@@ -68,6 +68,15 @@ test('exact RUN and library host routes keep source/page/context without rebindi
     return messages.at(-1).view;
   }
   await commands.get('taplWorkflow.openOverview')();
+  const beforeTheme = calls.length;
+  await receive({ command: 'toggleTheme', commandId: 'untrusted.command' });
+  assert.equal(executed.at(-1), 'workbench.action.toggleLightDarkThemes');
+  const savedFolders = vscode.workspace.workspaceFolders;
+  vscode.workspace.workspaceFolders = undefined;
+  await receive({ command: 'toggleTheme' });
+  vscode.workspace.workspaceFolders = savedFolders;
+  assert.equal(executed.filter(name => name === 'workbench.action.toggleLightDarkThemes').length, 2);
+  assert.equal(calls.length, beforeTheme, 'native theme changes need no workspace or workflow write');
   await send({ command: 'selectRun', sessionId: 'owner', source_db: 'tapl-local.db' });
   const exact = await send({ command: 'openRun', runId: 'past', source_db: 'tapl-peer.db' });
   assert.equal(exact.snapshot.run.id, 'past');

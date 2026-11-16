@@ -157,3 +157,58 @@ test('offline release checks preserve the current version link without an update
     assert.deepEqual(errors, []);
   } finally {await page.close();}
 });
+
+test('native theme button keeps VS Code tokens through toggles, old saved choices, reload and host theme changes', async () => {
+  const {page, errors} = await fixture({reducedMotion: 'reduce'});
+  await page.addInitScript(() => {
+    window.__nativeCommands = [];
+    window.__applyHostTheme = (mode) => {
+      sessionStorage.setItem('native-theme-mode', mode);
+      document.body.className = mode;
+      const light = mode === 'vscode-light' || mode === 'vscode-high-contrast-light';
+      const bg = light ? '#fff8e9' : '#102438', fg = light ? '#3c2850' : '#f0ead2';
+      for (const key of ['editor-background', 'sideBar-background', 'panel-background', 'editorWidget-background'])
+        document.body.style.setProperty(`--vscode-${key}`, bg);
+      document.body.style.setProperty('--vscode-editor-foreground', fg);
+      document.body.style.setProperty('--vscode-editor-border', light ? '#9f8260' : '#4d7b9e');
+      document.body.style.setProperty('--vscode-focusBorder', light ? '#74419c' : '#e5a36d');
+    };
+    window.acquireVsCodeApi = () => ({
+      getState: () => JSON.parse(sessionStorage.getItem('native-theme-state') || '{"workbench":{"version":1,"theme":"light"}}'),
+      setState(value) { sessionStorage.setItem('native-theme-state', JSON.stringify(value)); },
+      async postMessage(message) {
+        window.__nativeCommands.push(message);
+        if (message.command === 'toggleTheme') {
+          window.__applyHostTheme(document.body.classList.contains('vscode-dark') ? 'vscode-light' : 'vscode-dark');
+          return;
+        }
+        if (message.command === 'ready') window.__applyHostTheme(sessionStorage.getItem('native-theme-mode') || 'vscode-dark');
+        const response = await fetch('/api/message', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(message)});
+        const payload = await response.json(); payload.locale = 'ko'; window.__lastNativeView = payload;
+        window.postMessage(payload, '*');
+      }
+    });
+  });
+  const assertNative = async (light) => {
+    await page.waitForFunction(() => !document.documentElement.hasAttribute('data-tapl-theme'));
+    await page.waitForFunction(label => document.querySelector('[data-wb-focus="theme-toggle"]')?.getAttribute('aria-label') === label,
+      light ? 'VS Code 어두운 테마 사용' : 'VS Code 밝은 테마 사용');
+    assert.equal(await page.locator('.wb-run-mindmap').evaluate(element => getComputedStyle(element).backgroundColor), light ? 'rgb(255, 248, 233)' : 'rgb(16, 36, 56)');
+    assert.equal(await page.locator('.wb-topbar').evaluate(element => getComputedStyle(element).borderBottomColor), light ? 'rgb(159, 130, 96)' : 'rgb(77, 123, 158)');
+    assert.equal(await page.locator('[data-wb-focus="theme-toggle"]').getAttribute('aria-label'), light ? 'VS Code 어두운 테마 사용' : 'VS Code 밝은 테마 사용');
+  };
+  try {
+    await page.goto(origin); await page.locator('.wb-run-mindmap').waitFor(); await assertNative(false);
+    assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('native-theme-state')).workbench.theme), undefined, 'old web palette choice is cleared');
+    await page.locator('[data-wb-focus="theme-toggle"]').click(); await assertNative(true);
+    assert.equal(await page.evaluate(() => window.__nativeCommands.filter(message => message.command === 'toggleTheme').length), 1);
+    await page.reload(); await page.locator('.wb-run-mindmap').waitFor(); await assertNative(true);
+    await page.locator('[data-wb-focus="theme-toggle"]').click(); await assertNative(false);
+    for (const [mode, light] of [['vscode-light', true], ['vscode-dark', false], ['vscode-high-contrast-light', true], ['vscode-high-contrast', false]]) {
+      await page.evaluate(mode => window.__applyHostTheme(mode), mode); await assertNative(light);
+    }
+    await page.evaluate(() => window.postMessage({...window.__lastNativeView, workspace: '/native/second-workspace'}, '*'));
+    await assertNative(false);
+    await shot(page, 'viewer-native-theme-preserved'); assert.deepEqual(errors, []);
+  } finally {await page.close();}
+});

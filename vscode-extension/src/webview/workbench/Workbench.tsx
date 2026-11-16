@@ -102,7 +102,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
   pinnedRef.current = sidebarPinned;
   const [theme, setTheme] = useState<'light' | 'dark' | undefined>(() => {
     const restored = props.initialState as { theme?: unknown } | undefined;
-    return restored?.theme === 'light' || restored?.theme === 'dark' ? restored.theme : undefined;
+    return props.browser && (restored?.theme === 'light' || restored?.theme === 'dark') ? restored.theme : undefined;
   });
   const [systemDark, setSystemDark] = useState(
     () =>
@@ -213,8 +213,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
   }, [mobile, menuOpen]);
   useEffect(() => {
     const root = document.documentElement;
-    if (theme) root.dataset.taplTheme = theme;
-    else if (props.browser) root.dataset.taplTheme = systemDark ? 'dark' : 'light';
+    if (props.browser) root.dataset.taplTheme = theme ?? (systemDark ? 'dark' : 'light');
     else delete root.dataset.taplTheme;
     persistRef.current?.({ version: 1, pages: state.pages, theme, sidebarPinned });
   }, [theme, props.browser, systemDark, sidebarPinned]);
@@ -350,10 +349,11 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
             <button
               type="button"
               className="btn btn-ghost btn-sm btn-square"
-              aria-label={t(darkTheme ? 'wbLight' : 'wbDark')}
+              aria-label={t(props.browser ? (darkTheme ? 'wbLight' : 'wbDark') : (darkTheme ? 'wbVscodeLight' : 'wbVscodeDark'))}
               data-wb-focus="theme-toggle"
               onClick={() => {
-                setTheme(darkTheme ? 'light' : 'dark');
+                if (props.browser) setTheme(darkTheme ? 'light' : 'dark');
+                else props.send({ command: 'toggleTheme' });
               }}
             >
               <Icon name={darkTheme ? 'sun' : 'moon'} />

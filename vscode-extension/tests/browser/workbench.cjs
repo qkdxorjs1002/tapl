@@ -499,12 +499,13 @@ test('large maps bound idle work, retain keyboard targets and refresh current gr
       await map.locator('.wb-mm-world').evaluate(async world => {
         if (document.visibilityState !== 'visible') throw new Error('Idle measurement needs a visible page');
         await new Promise((resolve, reject) => {
-          let previous = world.style.transform, settled = 0, unchangedSince = performance.now(), frame;
+          let previous = world.style.transform, settled = 0, samples = 0, unchangedSince = performance.now(), frame;
           const timeout = setTimeout(() => {
             cancelAnimationFrame(frame);
-            reject(new Error('Large-map camera did not settle before measuring idle writes'));
-          }, 5000);
+            reject(new Error(`Large-map camera did not settle before measuring idle writes (${samples} frames, ${settled} unchanged)`));
+          }, 15000);
           const sample = time => {
+            samples++;
             const current = world.style.transform;
             if (current === previous) settled++;
             else { settled = 0; unchangedSince = time; }

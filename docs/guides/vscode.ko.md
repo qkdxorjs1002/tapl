@@ -43,6 +43,10 @@ language = "auto"
 
 이 값은 VS Code 설정 대신 [TAPL 설정 파일](configuration.ko.md#작업-공간과-파일-선택)에서 관리합니다. MCP 실행 전 TOML을 직접 읽으므로 커스텀 경로로도 초기 연결할 수 있습니다. 설정 페이지에서 저장하면 언어·레이아웃이 적용되고 파일을 외부에서 바꿔도 갱신됩니다. 워크스페이스에 정의한 실행 파일이나 작업공간 기준 상대 실행 파일은 Workspace Trust를 따라야 합니다. 잘못된 MCP 경로로 연결하지 못하면 파일을 직접 고치거나 `taplctl config unset viewer.mcp_path`로 자동 검색을 복원하세요.
 
+Viewer는 고대비 테마를 포함해 현재 VS Code 색상 팔레트를 항상 따릅니다. 해/달 버튼은 VS Code의 **Preferences: Toggle between Light/Dark Themes** 명령(`workbench.action.toggleLightDarkThemes`)을 실행하므로 편집기 전체 테마도 함께 바뀝니다. VS Code에 설정한 선호 밝은/어두운 테마 또는 고대비 테마를 사용하며, 이전에 저장한 Viewer 팔레트 선택은 이 색상을 덮어쓰지 않습니다. 재로드하거나 작업공간을 바꿔도 같은 동작을 유지합니다. 브라우저 Viewer의 테마 버튼은 브라우저 안에서만 동작합니다.
+
+`window.autoDetectColorScheme`이 켜져 있으면 VS Code 자체 명령은 전환 대신 설정 안내를 표시하며 TAPL은 이 선호를 변경하지 않습니다. 테마와 자동 감지 선호는 VS Code 설정에서 선택하세요. [네이티브 테마 명령](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/contrib/themes/browser/themes.contribution.ts#L724)을 참고하세요.
+
 ## 워크스페이스와 세션 라우팅
 
 처음에는 VS Code의 첫 번째 워크스페이스 폴더를 사용합니다. 폴더는 VS Code에서 변경하며 Viewer 내부에서는 선택기를 표시하지 않습니다. 해당 폴더를 작업 디렉터리로 MCP 프로세스를 실행하며 실행 파일 설정도 그 폴더의 값을 적용합니다. DB를 찾기 위해 부모 폴더를 검색하지 않습니다.

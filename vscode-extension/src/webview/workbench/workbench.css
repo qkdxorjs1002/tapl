@@ -1,4 +1,4 @@
-/* The host keeps its native VS Code theme until the user makes an explicit choice. */
+/* Explicit palettes belong to the browser Viewer; the native Viewer follows host tokens. */
 html[data-tapl-theme='light'] {
   color-scheme: light;
   --tapl-page-bg: #f7f8fa;
