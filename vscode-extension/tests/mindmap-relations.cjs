@@ -92,7 +92,13 @@ test('automatic execution seeds exclude fitted parents and traverse shared ances
   assert.deepEqual(mindmapRunActiveKeys(nodes, 'active'), ['plan-a', 'plan-b']);
   assert.deepEqual(sorted(relatedMindmapNodes(index, ['plan-a', 'plan-b'], { ancestorsOnly: true })), ['plan-a', 'plan-b', 'run']);
   assert.equal(mindmapRunActiveKeys(nodes, 'archived'), undefined);
-  nodes.filter(node => node.kind === 'plan').forEach(node => { node.status = 'Finalized'; });
+  nodes.find(node => node.key === 'plan-a').status = 'Draft';
+  nodes.find(node => node.key === 'plan-b').status = 'Finalized';
+  const preparing = mindmapRunActiveKeys(nodes, 'active');
+  assert.deepEqual(preparing, ['plan-a', 'plan-b']);
+  assert.deepEqual(sorted(relatedMindmapNodes(index, preparing, { ancestorsOnly: true })), ['plan-a', 'plan-b', 'run'],
+    'planning highlights exclude pending TASK descendants');
+  nodes.filter(node => node.kind === 'plan').forEach(node => { node.status = 'Completed'; });
   assert.deepEqual(mindmapRunActiveKeys(nodes, 'active'), ['run']);
   assert.deepEqual(sorted(relatedMindmapNodes(index, ['run'], { ancestorsOnly: true })), ['run']);
   assert.equal(relatedMindmapNodes(index, [], { ancestorsOnly: true }), undefined);

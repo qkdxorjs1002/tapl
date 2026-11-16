@@ -420,8 +420,12 @@ test('glass flow follows executing paths, highlights related tubes without resta
     await page.waitForFunction(() => document.querySelectorAll('.wb-mm-flow').length === 0);
     assert.ok(await map.locator('.wb-mm-pulse').evaluateAll(nodes => nodes.every(node => +getComputedStyle(node).opacity === 0)), 'completed paths leave no stale light');
     await follow.click();
-    assert.equal(await map.locator('[data-kind=run].wb-mm-emphasis').count(), 1, 'RUN remains the automatic fallback');
-    assert.equal(await map.locator('[data-kind=plan].wb-mm-emphasis, [data-kind=task].wb-mm-emphasis').count(), 0);
+    assert.equal(await map.locator('[data-kind=run].wb-mm-emphasis').count(), 1, 'planning follows its RUN ancestor');
+    assert.equal(await map.locator('[data-kind=plan].wb-mm-emphasis').count(), 2, 'Finalized PLANs follow after executing TASKs finish');
+    assert.equal(await map.locator('[data-kind=task].wb-mm-emphasis').count(), 0, 'planning highlights exclude completed descendants');
+    overview.view.status.plans.forEach(plan => { plan.status = 'Completed'; }); await publish();
+    await page.waitForFunction(() => document.querySelectorAll('.wb-run-mindmap [data-kind=plan].wb-mm-emphasis').length === 0);
+    assert.equal(await map.locator('[data-kind=run].wb-mm-emphasis').count(), 1, 'RUN remains the fallback without a matching PLAN or TASK');
     overview.view.status.plans[0].status = 'In Progress'; await publish();
     await page.waitForFunction(() => document.querySelectorAll('.wb-run-mindmap [data-kind=plan].wb-mm-emphasis').length === 1);
     assert.equal(await map.locator('[data-kind=task].wb-mm-emphasis').count(), 0, 'PLAN fallback highlights ancestors without its idle descendants');
@@ -483,6 +487,16 @@ test('large maps bound idle work, retain keyboard targets and refresh current gr
       await page.mouse.move(1400, 40); await page.waitForTimeout(1000);
       const map = page.locator('.wb-mindmap');
       assert.equal(await map.locator('[data-mindmap-node]').count(), count, 'every keyboard target stays mounted');
+      await map.locator('.wb-mm-world').evaluate(async world => {
+        let previous = world.style.transform, settled = 0;
+        for (let sample = 0; sample < 50; sample++) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          const current = world.style.transform;
+          settled = current === previous ? settled + 1 : 0; previous = current;
+          if (settled >= 2) return;
+        }
+        throw new Error('Large-map camera did not settle before measuring idle writes');
+      });
       const writes = await idleWrites();
       assert.equal(writes.node+writes.path+writes.world+writes.light, 0, `${kind}: settled geometry sleeps`);
       assert.equal(writes.pulse, 0, `${kind}: no executing work means no ambient flow writes`);
@@ -1461,7 +1475,10 @@ test('RUN follows executing TASK and PLAN context with resistant gestures, refre
         if (parent?.dataset.kind === 'plan') targets.add(parent);
       }
     } else {
-      for (const plan of map.querySelectorAll('[data-kind=plan] button[data-status="In Progress"]')) targets.add(plan.closest('[data-kind]'));
+      const plans = [...map.querySelectorAll('[data-kind=plan] button')];
+      const executing = plans.filter(plan => plan.dataset.status === 'In Progress');
+      for (const plan of executing.length ? executing : plans.filter(plan => ['Draft', 'Finalized'].includes(plan.dataset.status)))
+        targets.add(plan.closest('[data-kind]'));
     }
     if (!targets.size) return false;
     const rectangles = [...targets].map(node => node.getBoundingClientRect());
@@ -1497,6 +1514,7 @@ test('RUN follows executing TASK and PLAN context with resistant gestures, refre
     const held = await camera(); assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
     await page.mouse.move(x + direction * 221, y); await page.waitForTimeout(40);
     const released = await camera(); assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+    assert.equal(await toggle.getAttribute('title'), '자동 추적 켜기');
     assert.ok(Math.abs(released.x - held.x) < 3, 'crossing the magnet threshold has no jump');
     await page.mouse.move(x + direction * 251, y); await page.waitForTimeout(40);
     assert.ok(((await camera()).x - released.x) * direction > 20, 'same pointer gesture continues free pan');
@@ -1619,7 +1637,9 @@ test('RUN follows executing TASK and PLAN context with resistant gestures, refre
     overview.view.status.plans.forEach((plan, index) => { plan.status = index === 0 ? 'In Progress' : 'Finalized'; });
     await publish(); await centered();
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'PLAN-only execution remains framed');
-    overview.view.status.plans.forEach(plan => { plan.status = 'Finalized'; }); await publish();
+    overview.view.status.plans.forEach(plan => { plan.status = 'Finalized'; }); await publish(); await centered();
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'Finalized PLANs remain framed before more TASK execution');
+    overview.view.status.plans.forEach(plan => { plan.status = 'Completed'; }); await publish();
     await page.waitForFunction(() => { const m = new DOMMatrix(getComputedStyle(document.querySelector('.wb-mm-world')).transform); return Math.abs(m.e) < .1 && Math.abs(m.f) < .1; });
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'no executing TASK returns to RUN view without disabling');
     await toggle.click();
@@ -1741,23 +1761,28 @@ test('same RUN refresh preserves sustained pointer, trackpad and native pinch ge
       payload.view.status.tasks.forEach((task, index, tasks) => { task.status = index === tasks.length - 1 ? 'In Progress' : 'Pending'; });
       await refresh(); await frames(3);
       const afterBlurRefresh = read();
-      el.style.width = `${rect.width - 20}px`;
+      el.style.width = `${rect.width / 2}px`;
       await frames(3);
-      const afterBlurResize = read();
-      window.dispatchEvent(new Event('focus')); await frames(3);
+      const afterBlurResize = read(), resizedFraming = framing();
       el.style.width = ''; await frames(3);
-      const nodes = [...el.querySelectorAll('[data-mindmap-node]')], active = nodes.filter(node => node.dataset.kind === 'task'
-        && node.querySelector('button[data-status="In Progress"]'));
-      const targets = new Set([el.querySelector('[data-kind=run]'), ...active].filter(Boolean));
-      for (const task of active) {
-        const edge = [...el.querySelectorAll('[data-from][data-to]')].find(edge => edge.dataset.to === task.dataset.mindmapNode);
-        const parent = edge && nodes.find(node => node.dataset.mindmapNode === edge.dataset.from);
-        if (parent?.dataset.kind === 'plan') targets.add(parent);
+      function framing() {
+        const nodes = [...el.querySelectorAll('[data-mindmap-node]')], active = nodes.filter(node => node.dataset.kind === 'task'
+          && node.querySelector('button[data-status="In Progress"]'));
+        const targets = new Set([el.querySelector('[data-kind=run]'), ...active].filter(Boolean));
+        for (const task of active) {
+          const edge = [...el.querySelectorAll('[data-from][data-to]')].find(edge => edge.dataset.to === task.dataset.mindmapNode);
+          const parent = edge && nodes.find(node => node.dataset.mindmapNode === edge.dataset.from);
+          if (parent?.dataset.kind === 'plan') targets.add(parent);
+        }
+        const rectangles = [...targets].map(node => node.getBoundingClientRect()), viewport = el.getBoundingClientRect();
+        const left = Math.min(...rectangles.map(r => r.left)), right = Math.max(...rectangles.map(r => r.right));
+        const top = Math.min(...rectangles.map(r => r.top)), bottom = Math.max(...rectangles.map(r => r.bottom));
+        return { width: viewport.width,
+          centerError: Math.abs((left + right - viewport.left - viewport.right) / 2) + Math.abs((top + bottom - viewport.top - viewport.bottom) / 2),
+          overflow: Math.max(0, viewport.left - left, right - viewport.right, viewport.top - top, bottom - viewport.bottom) };
       }
-      const rectangles = [...targets].map(node => node.getBoundingClientRect()), viewport = el.getBoundingClientRect();
-      const blurCenterError = Math.abs((Math.min(...rectangles.map(r => r.left)) + Math.max(...rectangles.map(r => r.right)) - viewport.left - viewport.right) / 2)
-        + Math.abs((Math.min(...rectangles.map(r => r.top)) + Math.max(...rectangles.map(r => r.bottom)) - viewport.top - viewport.bottom) / 2);
-      return { held, afterRefresh, continued, pointerReleased, wheelHeld, wheelAfterRefresh, wheelReleased, nativeReleased, blurred, afterBlurRefresh, afterBlurResize, blurCenterError };
+      const blurCenterError = framing().centerError;
+      return { held, afterRefresh, continued, pointerReleased, wheelHeld, wheelAfterRefresh, wheelReleased, nativeReleased, blurred, afterBlurRefresh, afterBlurResize, resizedFraming, initialWidth: rect.width, blurCenterError };
     }, overview);
     const detail = JSON.stringify(trace);
     assert.ok(Math.abs(trace.afterRefresh.x - trace.held.x) < .05, `refresh retains the held position: ${detail}`);
@@ -1766,9 +1791,10 @@ test('same RUN refresh preserves sustained pointer, trackpad and native pinch ge
     assert.ok(Math.abs(trace.wheelAfterRefresh.x - trace.wheelHeld.x) < .05, `refresh retains wheel travel: ${detail}`);
     assert.equal(trace.wheelReleased, true, `wheel distance accumulates across refresh: ${detail}`);
     assert.equal(trace.nativeReleased, true, `native pinch keeps its gesture baseline: ${detail}`);
-    assert.deepEqual(trace.afterBlurRefresh, trace.blurred, `refresh cannot wake a blurred map: ${detail}`);
-    assert.deepEqual(trace.afterBlurResize, trace.blurred, `resize cannot wake a blurred map: ${detail}`);
-    assert.ok(trace.blurCenterError < 1, `focus resumes following the latest target after clearing input activity: ${detail}`);
+    assert.notDeepEqual(trace.afterBlurRefresh, trace.blurred, `visible blurred maps follow refreshed targets: ${detail}`);
+    assert.ok(trace.resizedFraming.width < trace.initialWidth * .6, `the unfocused viewport resizes: ${detail}`);
+    assert.ok(trace.resizedFraming.centerError < 1 && trace.resizedFraming.overflow < 1, `visible blurred maps retain their framed targets after resize: ${detail}`);
+    assert.ok(trace.blurCenterError < 1, `following reaches the latest target without a window focus event: ${detail}`);
   } finally { await page.close(); }
 });
 
@@ -1945,19 +1971,117 @@ test('surface exits are inert, reopen cancels cleanup, and reduced motion clears
 });
 
 
-test('an unfocused mindmap applies its static camera on first mount', async () => {
+test('visible unfocused RUNs follow PLAN preparation and live work while hidden or offscreen maps pause', { timeout: 30000 }, async () => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
-  try {
-    await page.addInitScript(() => { document.hasFocus = () => false; });
-    await page.goto(origin); await page.waitForLoadState('networkidle');
-    const world = page.locator('.wb-run-mindmap .wb-mm-world');
-    await world.waitFor({ state: 'attached' });
-    await page.waitForFunction(() => {
-      const world = document.querySelector('.wb-run-mindmap .wb-mm-world');
-      return world && world.style.transform && getComputedStyle(world).transform !== 'none';
-    });
-    const transform = await world.evaluate(element => element.style.transform);
+  let overview, templates;
+  await page.route('**/api/message', async route => {
+    const response = await route.fetch(), payload = await response.json();
+    if (payload.view?.type === 'overview') {
+      if (!overview) {
+        templates = { plans: structuredClone(payload.view.status.plans), tasks: structuredClone(payload.view.status.tasks) };
+        payload.view.status.plans = [{ ...templates.plans[0], status: 'Draft' }];
+        payload.view.status.tasks = [];
+        overview = structuredClone(payload);
+      } else payload.view.status = structuredClone(overview.view.status);
+    }
+    await route.fulfill({ response, json: payload });
+  });
+  const map = page.locator('.wb-run-mindmap'), world = map.locator('.wb-mm-world');
+  const toggle = page.locator('[data-wb-focus="mindmap-follow"]');
+  const camera = () => world.evaluate(element => element.style.transform);
+  const centered = () => page.waitForFunction(() => {
+    const map = document.querySelector('.wb-run-mindmap'), bounds = map?.getBoundingClientRect();
+    if (!bounds) return false;
+    const nodes = [...map.querySelectorAll('[data-mindmap-node]')];
+    const tasks = nodes.filter(node => node.dataset.kind === 'task' && node.querySelector('button[data-status="In Progress"]'));
+    const plans = nodes.filter(node => node.dataset.kind === 'plan');
+    const executing = plans.filter(node => node.querySelector('button[data-status="In Progress"]'));
+    const preparing = plans.filter(node => node.querySelector('button[data-status="Draft"],button[data-status="Finalized"]'));
+    const targets = new Set([map.querySelector('[data-kind=run]'), ...(tasks.length ? tasks : executing.length ? executing : preparing)].filter(Boolean));
+    for (const task of tasks) {
+      const edge = [...map.querySelectorAll('[data-from][data-to]')].find(edge => edge.dataset.to === task.dataset.mindmapNode);
+      const parent = edge && nodes.find(node => node.dataset.mindmapNode === edge.dataset.from);
+      if (parent?.dataset.kind === 'plan') targets.add(parent);
+    }
+    const rectangles = [...targets].map(node => node.getBoundingClientRect());
+    const left = Math.min(...rectangles.map(r => r.left)), right = Math.max(...rectangles.map(r => r.right));
+    const top = Math.min(...rectangles.map(r => r.top)), bottom = Math.max(...rectangles.map(r => r.bottom));
+    return Math.abs((left + right - bounds.left - bounds.right) / 2) < 1
+      && Math.abs((top + bottom - bounds.top - bounds.bottom) / 2) < 1
+      && left >= bounds.left && right <= bounds.right && top >= bounds.top && bottom <= bounds.bottom;
+  });
+  let revision = 0;
+  const publish = async () => {
+    const title = `Unfocused PLAN revision ${++revision}`;
+    overview.view.status.plans[0].title = title;
+    await page.evaluate(payload => window.postMessage({ ...payload, type: 'view:update' }, '*'), overview);
+    await page.waitForFunction(title => [...document.querySelectorAll('.wb-run-mindmap .wb-mm-title')].some(node => node.textContent === title), title);
+  };
+  const motionState = () => world.evaluate(element => ({ transform: element.style.transform, writes: window.__taplMindmapWrites }));
+  const assertPaused = async message => {
     await page.waitForTimeout(150);
-    assert.equal(await world.evaluate(element => element.style.transform), transform, 'unfocused motion stays suspended');
+    const paused = await motionState();
+    await page.waitForTimeout(180);
+    assert.deepEqual(await motionState(), paused, message);
+  };
+  try {
+    await page.addInitScript(() => {
+      document.hasFocus = () => false;
+      window.__taplDocumentHidden = false;
+      Object.defineProperty(document, 'hidden', { get: () => window.__taplDocumentHidden });
+      Object.defineProperty(document, 'visibilityState', { get: () => window.__taplDocumentHidden ? 'hidden' : 'visible' });
+    });
+    await page.goto(origin); await map.waitFor(); await centered();
+    assert.equal(await page.evaluate(() => document.hasFocus()), false);
+    assert.equal(await map.locator('[data-kind=task]').count(), 0);
+    assert.equal(await toggle.getAttribute('title'), '자동 추적 끄기');
+    await shot(page, 'run-follow-draft-plan-unfocused');
+    overview.view.status.plans[0].status = 'Finalized'; await publish(); await centered();
+    assert.ok((await map.locator('[data-kind=plan]').getAttribute('class')).includes('wb-mm-emphasis'));
+    await toggle.click();
+    assert.equal(await toggle.getAttribute('title'), '자동 추적 켜기');
+    await toggle.click(); await centered();
+    const firstCamera = await camera();
+    overview.view.status.plans.push({ ...templates.plans[1], status: 'Finalized' });
+    await publish(); await centered();
+    assert.notEqual(await camera(), firstCamera, 'later PLAN creation reframes without window focus');
+    overview.view.status.plans[0].status = 'In Progress'; await publish(); await centered();
+    assert.equal(await map.locator('[data-kind=plan].wb-mm-dim').count(), 1);
+    overview.view.status.tasks = [
+      { ...templates.tasks[0], spec_id: templates.plans[1].stable_id, status: 'In Progress' },
+      { ...templates.tasks[1], spec_id: templates.plans[1].stable_id, status: 'Pending' }
+    ];
+    await publish(); await centered();
+    assert.equal(await map.locator('[data-kind=task].wb-mm-dim').count(), 1, 'pending TASK siblings stay dim');
+    await map.evaluate(element => {
+      window.__taplMindmapWrites = 0;
+      new MutationObserver(records => { window.__taplMindmapWrites += records.length; })
+        .observe(element.querySelector('.wb-mm-world'), { subtree: true, attributes: true, attributeFilter: ['style', 'd'] });
+      new IntersectionObserver(([entry]) => { window.__taplMindmapIntersecting = entry.isIntersecting; }).observe(element);
+    });
+    const animated = await motionState();
+    await page.waitForTimeout(180);
+    assert.ok((await motionState()).writes > animated.writes, 'visible unfocused execution keeps its flow animation');
+    await page.evaluate(() => { window.__taplDocumentHidden = true; document.dispatchEvent(new Event('visibilitychange')); });
+    const beforeHiddenUpdate = await camera();
+    overview.view.status.tasks[0].spec_id = templates.plans[0].stable_id;
+    overview.view.status.tasks[1].status = 'In Progress';
+    await publish(); await assertPaused('document-hidden camera and decorations stay idle after graph updates');
+    assert.equal(await camera(), beforeHiddenUpdate);
+    await page.evaluate(() => { window.__taplDocumentHidden = false; document.dispatchEvent(new Event('visibilitychange')); });
+    await centered();
+    assert.notEqual(await camera(), beforeHiddenUpdate, 'document exposure catches up without focus');
+    await map.evaluate(element => { element.style.transform = 'translateX(200vw)'; });
+    await page.waitForFunction(() => window.__taplMindmapIntersecting === false);
+    const beforeOffscreenUpdate = await camera();
+    overview.view.status.tasks[0].spec_id = templates.plans[1].stable_id;
+    overview.view.status.tasks[1].status = 'Pending';
+    await publish(); await assertPaused('offscreen camera and decorations stay idle across effect replacements');
+    assert.equal(await camera(), beforeOffscreenUpdate);
+    await map.evaluate(element => { element.style.transform = ''; });
+    await page.waitForFunction(() => window.__taplMindmapIntersecting === true);
+    await centered();
+    assert.notEqual(await camera(), beforeOffscreenUpdate, 'intersection exposure catches up without focus');
+    await shot(page, 'run-follow-live-unfocused-revealed');
   } finally { await page.close(); }
 });

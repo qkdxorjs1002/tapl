@@ -9,7 +9,7 @@ const output = buildSync({
 }).outputFiles[0].text;
 const compiled = { exports: {} };
 new Function('module', 'exports', output)(compiled, compiled.exports);
-const { buildRunMindmap, constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapRunFollowKeys, mindmapFollowDrag, mindmapSpringCamera, MINDMAP_FOLLOW_DRAG_THRESHOLD, MINDMAP_FOLLOW_DRAG_RESISTANCE } = compiled.exports;
+const { buildRunMindmap, constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapRunActiveKeys, mindmapRunFollowKeys, mindmapFollowDrag, mindmapSpringCamera, MINDMAP_FOLLOW_DRAG_THRESHOLD, MINDMAP_FOLLOW_DRAG_RESISTANCE } = compiled.exports;
 const run = { id: 'run-1', source_db: 'main.sqlite3', request_summary: 'The actual user request', status: 'active' };
 const snapshot = (plans = [], tasks = [], selected = run) => ({
   run: selected, plans, tasks, findings: [], task_counts: { Completed: 900 },
@@ -273,6 +273,34 @@ test('automatic framing keeps RUN and PLAN/TASK context visible in short or narr
       assert.ok(Math.abs(y) + node.height * camera.zoom / 2 <= viewport.height / 2 - 23);
     }
   }
+});
+
+test('Draft and Finalized PLANs follow before TASK creation and preserve workflow priority', () => {
+  for (const status of ['Draft', 'Finalized']) {
+    const selected = plan(1, { status });
+    const graph = buildRunMindmap(snapshot([selected]));
+    assert.deepEqual(mindmapRunActiveKeys(graph.nodes, 'active'), [nodeFor(graph, selected).key]);
+    assert.deepEqual(mindmapRunFollowKeys(graph.nodes, 'active'), [nodeFor(graph, selected).key, rootFor(graph).key]);
+  }
+  const draft = plan(1, { status: 'Draft' }), finalized = plan(2, { status: 'Finalized' });
+  const executing = plan(3, { status: 'In Progress' }), completed = plan(4, { status: 'Completed' });
+  const selectedTask = task(1, { status: 'In Progress', spec_id: draft.stable_id });
+  const graph = buildRunMindmap(snapshot([draft, finalized, executing, completed], [selectedTask, task(2)]));
+  const taskKey = nodeFor(graph, selectedTask).key, runKey = rootFor(graph).key;
+  assert.deepEqual(mindmapRunActiveKeys(graph.nodes, 'active'), [taskKey]);
+  assert.deepEqual(mindmapRunFollowKeys(graph.nodes, 'active'), [taskKey, nodeFor(graph, draft).key, runKey]);
+  const withoutTasks = graph.nodes.filter(node => node.kind !== 'task');
+  assert.deepEqual(mindmapRunActiveKeys(withoutTasks, 'active'), [nodeFor(graph, executing).key]);
+  const withoutExecution = withoutTasks.filter(node => node.status !== 'In Progress');
+  assert.deepEqual(mindmapRunActiveKeys(withoutExecution, 'active'), [nodeFor(graph, draft).key, nodeFor(graph, finalized).key]);
+  const terminalPlans = buildRunMindmap(snapshot(['Completed', 'Blocked', 'Skipped', 'Cancelled'].map((status, index) => plan(index, { status }))));
+  assert.deepEqual(mindmapRunFollowKeys(terminalPlans.nodes, 'active'), [rootFor(terminalPlans).key]);
+  for (const status of ['completed', 'archived', 'discarded', 'failed', 'queued', undefined]) {
+    assert.equal(mindmapRunActiveKeys(graph.nodes, status), undefined);
+    assert.equal(mindmapRunFollowKeys(graph.nodes, status), undefined);
+  }
+  const foreign = buildRunMindmap(snapshot([plan(1, { status: 'Draft', source_db: 'peer.sqlite3' })]));
+  assert.deepEqual(mindmapRunFollowKeys(foreign.nodes, 'active'), [rootFor(foreign).key]);
 });
 
 test('return spring starts gently, rebounds slightly, settles continuously and agrees across refresh rates', () => {

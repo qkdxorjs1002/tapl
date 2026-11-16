@@ -272,17 +272,19 @@ test('read sidecar events stop at metadata checks; real data and explicit refres
   host.receive({ command: 'refresh' }); await settle(); assert.equal(host.calls.length, initial + 6);
 });
 
-test('hidden and unfocused panels defer full snapshots and resume once', async t => {
-  const host = refreshHost(t); await host.commands.get('taplWorkflow.openOverview')();
+test('visible unfocused panels refresh while hidden panels defer one catch-up', async t => {
+  const host = refreshHost(t); host.focus(false);
+  await host.commands.get('taplWorkflow.openOverview')();
+  assert.ok(host.calls.length > 0, 'a visible panel loads without window focus');
   const initial = host.calls.length; host.visible(false);
   host.write(); host.emit('.tapl/tapl.db'); await settle();
   host.write('tapl-peer.db'); host.emit('.tapl/tapl-*.db'); await settle();
   host.receive({ command: 'refresh' }); await settle();
   assert.equal(host.calls.length, initial, 'retained hidden panels do not build data');
-  host.visible(true); host.visible(true); host.focus(true); await settle();
-  assert.equal(host.calls.length, initial + 2, 'visibility and focus share one catch-up');
-  host.focus(false); host.write('tapl.db', 12288); host.emit('.tapl/tapl.db'); await settle();
-  assert.equal(host.calls.length, initial + 2);
+  host.visible(true); host.visible(true); await settle();
+  assert.equal(host.calls.length, initial + 2, 'exposure catches up once while the window stays unfocused');
+  host.write('tapl.db', 12288); host.emit('.tapl/tapl.db'); await settle();
+  assert.equal(host.calls.length, initial + 4, 'visible unfocused panels receive later database changes');
   host.focus(true); host.focus(true); await settle(); assert.equal(host.calls.length, initial + 4);
   host.focus(true); await settle(); assert.equal(host.calls.length, initial + 4, 'unchanged focus only checks revisions');
 });

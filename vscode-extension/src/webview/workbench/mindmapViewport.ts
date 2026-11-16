@@ -48,7 +48,7 @@ const cameras = new Map<string, Camera>();
 const followPreferences = new Map<string, boolean>();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
-/** Shared camera, gestures, focus visibility, and synchronized 2D edge motion. */
+/** Shared camera, gestures, exposure visibility, and synchronized 2D edge motion. */
 export function useMindmapViewport({
   graph: incomingGraph,
   cameraKey,
@@ -74,8 +74,8 @@ export function useMindmapViewport({
   const controlsRef = useRef<MindmapViewportControls>();
   const interactionRef = useRef<ViewportInteraction>();
   const suppressClickRef = useRef(0);
-  // Keep blur state across graph-effect replacements, including synthetic host blur events.
-  const focusedRef = useRef(typeof document === 'undefined' || document.hasFocus());
+  // Retain intersection state while live graph updates replace the viewport effect.
+  const onScreenRef = useRef(true);
   const [, updateFollow] = useState(0);
   const following = follow !== undefined && (followPreferences.get(cameraKey) ?? true);
   const byKey = useMemo(() => new Map(graph.nodes.map((node) => [node.key, node])), [graph]);
@@ -117,7 +117,6 @@ export function useMindmapViewport({
     let raf = 0,
       ambientTimer = 0,
       disposed = false,
-      onScreen = true,
       pointerInside = resume?.pointerInside ?? false;
     let pointer: Point = resume?.pointer ?? { x: bounds.width / 2, y: bounds.height / 2 };
     let lastPointer = { ...(resume?.lastPointer ?? pointer) };
@@ -182,7 +181,7 @@ export function useMindmapViewport({
       cameras.set(cameraKey, { ...target });
       if (cameras.size > 24) cameras.delete(cameras.keys().next().value!);
     };
-    const visible = () => !disposed && focusedRef.current && onScreen && !document.hidden;
+    const visible = () => !disposed && onScreenRef.current && !document.hidden;
     const transform = () => {
       if (renderedCamera && renderedCamera.x === camera.x && renderedCamera.y === camera.y && renderedCamera.zoom === camera.zoom) return false;
       canvas.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})`;
@@ -718,18 +717,14 @@ export function useMindmapViewport({
       ambientTimer = 0;
     };
     const visibility = () => {
-      focusedRef.current = document.hasFocus();
-      if (document.hidden || !focusedRef.current) suspend();
+      if (document.hidden) suspend();
       else wake();
     };
     const blurWindow = () => {
-      focusedRef.current = false;
-      suspend();
+      resetGesture();
+      leave();
     };
-    const focusWindow = () => {
-      focusedRef.current = true;
-      wake();
-    };
+    const focusWindow = () => wake();
     const motionChange = () => {
       reduced = motion.matches;
       decorationDirty = true;
@@ -757,8 +752,9 @@ export function useMindmapViewport({
       typeof IntersectionObserver === 'undefined'
         ? undefined
         : new IntersectionObserver(([entry]) => {
-            onScreen = entry.isIntersecting;
-            if (!onScreen) suspend();
+            if (disposed) return;
+            onScreenRef.current = entry.isIntersecting;
+            if (!onScreenRef.current) suspend();
             else wake();
           });
     intersection?.observe(host);

@@ -244,6 +244,7 @@ test('active RUNs expose an accessible localized follow toggle; ended RUNs do no
     const label = locale === 'ko' ? 'RUN과 진행 중인 작업 추적' : 'Follow RUN and active work';
     const tooltip = locale === 'ko' ? '자동 추적 끄기' : 'Turn off automatic following';
     assert.ok(html.includes(`aria-label="${label}" aria-pressed="true" title="${tooltip}"`));
+    assert.equal(translate(locale, 'wbMindmapFollowOn'), locale === 'ko' ? '자동 추적 켜기' : 'Turn on automatic following');
     assert.ok(render(snapshot(), locale).includes('data-wb-focus="mindmap-follow"'), 'no executing TASK still allows following the RUN');
     for (const status of ['completed', 'archived', 'queued']) {
       assert.ok(!render(snapshot({ run: { ...run, status } }), locale).includes('data-wb-focus="mindmap-follow"'));

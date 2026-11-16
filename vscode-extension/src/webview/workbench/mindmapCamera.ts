@@ -66,7 +66,7 @@ export function mindmapFollowDrag(x: number, y: number): { x: number; y: number;
 }
 
 type FollowNode = { x: number; y: number; width: number; height: number };
-/** Fit executing TASKs and their PLAN context, with padding that adapts to small views. */
+/** Fit selected workflow records and their context, with padding that adapts to small views. */
 export function mindmapFollowCamera(nodes: FollowNode[], viewport: Viewport): MindmapCamera {
   const normalZoom = clamp(Math.min((viewport.width - 72) / 1440, (viewport.height - 160) / 600), 0.72, 1);
   if (!nodes.length) return { x: 0, y: 0, zoom: normalZoom };
@@ -83,12 +83,16 @@ export function mindmapFollowCamera(nodes: FollowNode[], viewport: Viewport): Mi
 }
 
 type FollowRecord = { key: string; kind: string; status?: string; parent?: string };
-/** Highlight executing records, without treating fitted parent PLANs as executing seeds. */
+/** Select active work without treating fitted parent PLANs as additional highlight seeds. */
 export function mindmapRunActiveKeys(nodes: FollowRecord[], status?: string): string[] | undefined {
   if (status !== 'active') return undefined;
   const tasks = nodes.filter(node => node.kind === 'task' && node.status === 'In Progress');
-  const plans = tasks.length ? [] : nodes.filter(node => node.kind === 'plan' && node.status === 'In Progress');
-  return (tasks.length ? tasks : plans.length ? plans : nodes.filter(node => node.kind === 'run')).map(node => node.key);
+  if (tasks.length) return tasks.map(node => node.key);
+  const plans = nodes.filter(node => node.kind === 'plan');
+  const executing = plans.filter(node => node.status === 'In Progress');
+  if (executing.length) return executing.map(node => node.key);
+  const preparing = plans.filter(node => node.status === 'Draft' || node.status === 'Finalized');
+  return (preparing.length ? preparing : nodes.filter(node => node.kind === 'run')).map(node => node.key);
 }
 /** Use resolved graph parents: stable IDs alone cannot identify a source-safe PLAN. */
 export function mindmapRunFollowKeys(nodes: FollowRecord[], status?: string): string[] | undefined {
@@ -101,7 +105,7 @@ export function mindmapRunFollowKeys(nodes: FollowRecord[], status?: string): st
     const parent = node.kind === 'task' && node.parent && byKey.get(node.parent);
     if (parent && parent.kind === 'plan') keys.add(parent.key);
   }
-  // Keep the RUN visible alongside its executing branch; reference cards never
+  // Keep the RUN visible alongside its selected branch; reference cards never
   // pull the automatic camera away from the current workflow.
   for (const node of nodes) if (node.kind === 'run') keys.add(node.key);
   return [...keys];

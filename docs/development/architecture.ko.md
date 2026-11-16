@@ -84,4 +84,6 @@ BM25/전문 검색에는 선택적 의미 검색 의존성이 필요하지 않�
 
 공유 `src/webview/workbench/`는 화면 구조·원본을 포함한 이동·RUN별 설정·탐색 목록·RUN/TASK 화면·기록 검색을 맡습니다. `App.tsx`는 호스트 상태와 확인 후 RUN 삭제를 유지하며 `RecordDetail.tsx`·`MemoryView.tsx`·`SecondaryViews.tsx`가 읽기·보조 페이지를 구성합니다. `ValueTree.tsx`가 중첩 필드를 표시합니다. 브라우저 폴더 검증은 성공 후에만 식별자를 변경하며, 모달 아래의 페이지는 마운트 상태를 유지하므로 취소·잘못된 경로가 화면 문맥을 지우지 않습니다. 두 호스트는 읽기 전용 `tapl_get_run`·`tapl_list_records` 어댑터를 사용하며 목록은 페이지 분할 전 필터와 원본 오류를 제공합니다. 브라우저 내부 run/records 경로는 새 공개 CLI 명령이 아닙니다.
 
+지도 모션은 문서 표시 상태와 `IntersectionObserver`의 뷰포트 교차 여부를 사용하며, 창 포커스로 렌더링·자동 추적을 제한하지 않습니다. 브라우저 revision 폴링도 문서 표시 상태를 따릅니다. VS Code 스냅샷 조회는 `WebviewPanel.visible`을 기준으로 하며 숨겨진 패널이 다시 표시되면 밀린 변경을 한 번의 갱신으로 모아 반영합니다. 호스트가 보고하는 이 신호들은 화면의 정확한 물리적 노출을 측정하지 않습니다. [Page Visibility API](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API#concepts_and_usage)는 표시 여부와 포커스를, [VS Code API](https://code.visualstudio.com/api/references/vscode-api#WebviewPanel)는 패널 표시 여부와 활성 포커스를 구분합니다. `WindowState.active`는 표시 여부가 아닌 최근 입력 활동을 나타냅니다. 추적 대상 선택과 입력 규칙은 [Viewer 탐색](../guides/viewer.ko.md#viewer-탐색)을 참고하세요.
+
 이 경계를 바꿀 때는 세션 격리, 트랜잭션 상태, 구조화된 schema, 정확한 실행 정리, 공유 UI 동작을 보존해야 합니다. `test_session_mcp.py`, `test_application.py`, `test_context_optimization.py`, `test_search.py`, 메모리·폐기 테스트와 확장 호스트 테스트가 계약을 다룹니다. 명령은 [기여와 검증](contributing.ko.md), 패키징 경계는 [릴리스](releases.ko.md)를 보세요.

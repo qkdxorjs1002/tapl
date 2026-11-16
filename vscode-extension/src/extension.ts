@@ -315,7 +315,7 @@ class WorkflowWebviewManager {
   hasPanel(): boolean { return this.panel !== undefined; }
 
   panelVisible(): boolean {
-    return this.panel !== undefined && this.panel.visible !== false && vscode.window.state?.focused !== false;
+    return this.panel !== undefined && this.panel.visible !== false;
   }
 
   resume(): boolean {
