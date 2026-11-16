@@ -258,6 +258,7 @@ test('save watcher refresh waits for acknowledgement and result metadata applies
   assert.equal(saved.ok, true); assert.equal(saved.locale, 'ko'); assert.equal(saved.layout, 'large');
   assert.deepEqual(saved.preferences, { language: 'ko', layout: 'large', mcp_path: '/new executable/mcp' });
   assert.ok(h.trace.indexOf('invalidate') > h.trace.indexOf('message:save'));
+  await h.waitFor(() => h.calls.at(-1)?.commands[0] === '/new executable/mcp', 'save watcher refresh uses the saved executable');
   assert.deepEqual(h.calls.at(-1).commands, ['/new executable/mcp']);
   options.save = async () => { h.write(h.local, ''); h.fire(h.local); };
   const reset = await h.send({ command: 'resetSettings', requestId: 'reset', workspace, revision: 'r2', confirmed: true });
