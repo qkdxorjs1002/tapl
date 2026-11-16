@@ -2,7 +2,7 @@
 
 All notable changes to TAPL Workflow Viewer are documented in this file.
 
-## 2.22.0 - 2026-11-16
+## 2.22.1 - 2026-11-16
 
 - Keep VS Code's native palette through theme changes; the Viewer theme button now toggles VS Code's own preferred light/dark themes and clears old web-palette overrides in the extension.
 - Show the Viewer build version at the bottom center on every page, linking directly to its GitHub release.
