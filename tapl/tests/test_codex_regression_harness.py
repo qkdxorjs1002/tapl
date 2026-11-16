@@ -315,11 +315,11 @@ def test_heredoc_edits_exclude_reads_but_keep_other_writes(tail, expected):
     assert harness.command_edit_paths("/bin/bash -lc " + shlex.quote(command)) == expected
 
 
-@pytest.mark.parametrize("fault", [None, "same_session", "no_reentry", "retained_revision", "early_work", "missing_setup", "no_persisted_work", "missing_body", "empty_policy", "wrong_record", "late_body"])
+@pytest.mark.parametrize("fault", [None, "same_session", "foreign_owner", "source_mutated", "source_archived", "unfinished_task", "no_reentry", "retained_revision", "early_work", "missing_setup", "no_persisted_work", "missing_body", "empty_policy", "wrong_record", "late_body"])
 def test_context_loss_requires_two_real_sessions_and_full_reentry(workspace, fault):
     from taplctl import db
     from taplctl.application import WorkflowApplication
-    app = WorkflowApplication(workspace)
+    app = WorkflowApplication(workspace, session_id="first")
     run_id = app.summarize_run("Stored plan", work_type="implementation", workflow_mode="standard")["active_run"]["id"]
     plan = app.apply_plan("PLAN-001", title="README typo", objective="transactoin to transaction", status="Finalized")
     task = app.create_task("TASK-001", "Typo", "PLAN-001", "README", "Fix typo", "Exact bytes")
@@ -327,36 +327,52 @@ def test_context_loss_requires_two_real_sessions_and_full_reentry(workspace, fau
     persisted = [{"id": item["id"], "stable_id": item["stable_id"], "kind": item["kind"], "body": item["body"],
                   "fields": {key: item[key] for _, key in db.markdown_body_fields(item["kind"])}}
                  for item in stored["plans"] + stored["tasks"]]
-    app.record_approval(decision="approved", prompt="Second session approval", source="explicit_user")
-    app.start_task("TASK-001")
-    app.settle_task("TASK-001", status="Completed", verification="Exact bytes", result="Fixed")
-    app.finish_run("Done", expected_run_id=run_id, memory_review={"decision": "skip", "reason": "Test fixture"})
-    app.finish_archive("stored")
+    current = WorkflowApplication(workspace, session_id="second")
+    current_id = current.summarize_run("Reconstruct source plan", work_type="implementation", workflow_mode="standard")["active_run"]["id"]
+    current.apply_plan("PLAN-001", title="README typo", objective="transactoin to transaction", status="Finalized")
+    current.create_task("TASK-001", "Typo", "PLAN-001", "README", "Fix typo", "Exact bytes")
+    current.record_approval(decision="approved", prompt="Second session approval", source="explicit_user")
+    current.start_task("TASK-001")
+    current.settle_task("TASK-001", status="Completed", verification="Exact bytes", result="Fixed")
+    current.finish_run("Done", expected_run_id=current_id, memory_review={"decision": "skip", "reason": "Test fixture"})
+    current.finish_archive("stored")
     seed = {"run_id": run_id, "setup_unchanged": True, "setup_archives": 0, "setup_items": persisted}
-    setup = [{"type": "thread.started", "thread_id": "first"}, call("tapl_get_next"),
-             call("tapl_apply_plan", result=plan), call("tapl_create_task", result=task), {"type": "turn.completed"}]
-    events = [{"type": "thread.started", "thread_id": "second"}, call("tapl_get_next"),
-              call("tapl_get_status", {"full": True}, result=stored),
+    setup = [{"type": "thread.started", "thread_id": "first"}, call("tapl_get_next", {"session_id": "first"}),
+             call("tapl_apply_plan", {"session_id": "first"}, result=plan),
+             call("tapl_create_task", {"session_id": "first"}, result=task), {"type": "turn.completed"}]
+    events = [{"type": "thread.started", "thread_id": "second"}, call("tapl_get_next", {"session_id": "second"}),
+              call("tapl_get_item", {"session_id": "second"}, result={"ok": True, "item": stored["plans"][0]}),
+              call("tapl_get_item", {"session_id": "second"}, result={"ok": True, "item": stored["tasks"][0]}),
               {"type": "item.started", "item": {"type": "mcp_tool_call", "tool": "tapl_start_task"}},
               {"type": "turn.completed"}]
     if fault == "same_session":
         events[0]["thread_id"] = "first"
+    elif fault == "foreign_owner":
+        events[1]["item"]["arguments"]["session_id"] = "first"
+    elif fault in {"source_mutated", "source_archived", "unfinished_task"}:
+        with sqlite3.connect(db.default_db_path(workspace)) as conn:
+            if fault == "source_mutated":
+                conn.execute("UPDATE items SET status='Completed' WHERE run_id=? AND kind='task'", (run_id,))
+            elif fault == "source_archived":
+                conn.execute("UPDATE workflow_runs SET status='archived' WHERE id=?", (run_id,))
+            else:
+                conn.execute("UPDATE items SET status='Pending' WHERE run_id=? AND kind='task'", (current_id,))
     elif fault == "no_reentry":
         del events[1]
     elif fault == "retained_revision":
-        events[1]["item"]["arguments"] = {"known_policy_revision": "previous"}
+        events[1]["item"]["arguments"]["known_policy_revision"] = "previous"
     elif fault == "early_work":
         events.insert(1, {"type": "item.started", "item": {"type": "command_execution", "command": "cat README.md"}})
     elif fault == "no_persisted_work":
         del setup[3]
     elif fault == "missing_body":
-        del events[2]
+        del events[2:4]
     elif fault == "empty_policy":
         events[1]["item"]["result"] = {"structured_content": {"ok": True}}
     elif fault == "wrong_record":
-        events[2]["item"]["result"]["structured_content"]["tasks"][0]["id"] = -1
+        events[2]["item"]["result"]["structured_content"]["item"]["id"] = -1
     elif fault == "late_body":
-        events[2], events[3] = events[3], events[2]
+        events[2:5] = [events[4], events[2], events[3]]
     if fault != "missing_setup":
         save(workspace / "setup-events.jsonl", setup)
     save(workspace / "events.jsonl", events)

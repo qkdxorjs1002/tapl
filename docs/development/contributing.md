@@ -63,6 +63,8 @@ uv --directory tapl run --extra test python -m pytest -q tests/test_session_mcp.
 
 Run targeted tests while changing behavior, then the relevant complete suite before reporting completion. Tests that exercise real Codex conversations in an isolated environment must use **morae-mcp**, as required by the project instructions. Local unit tests are not evidence that a real host conversation passed. Do not publish private experiment conversations or tooling as public validation artifacts.
 
+The disposable fixture records project trust in its own user config before starting Codex so the [project hook layer](https://learn.chatgpt.com/docs/config-file/config-advanced#hooks) can load. The fresh-conversation recovery scenario requires policy entry before project work. It reads the prior session's plan and tasks without changing their RUN, then reconstructs approved work under the new session owner. This tests loss of conversation context, not actual host compaction.
+
 For Claude Code integration changes, check installation, hooks, session ownership and native Agent execution. Keep automated contract checks separate from real conversations; the [Claude Code guide](../getting-started/claude-code.md#verification-and-troubleshooting) records verified conditions and their limits.
 
 Platform checks have different scope. Windows CI parses installer scripts with PowerShell 5.1, tests Python 3.11/3.12, builds a real wheel, and exercises install/update/reinstall/uninstall plus CLI/MCP runtime. macOS signature preservation needs the dedicated Homebrew workflow; a Linux unit test cannot establish Developer ID signatures survived installation. See [Releases](releases.md).

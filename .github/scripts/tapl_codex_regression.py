@@ -37,10 +37,12 @@ PROMPTS = {
     "topics": "서로 다른 두 주제를 처리해주세요. 첫째 README.md의 transactoin 오타를 transaction으로 수정합니다. 둘째 .editorconfig의 indent_size를 4에서 2로 변경합니다. 두 주제는 별도 계획으로 관리해주세요. 필요한 수정과 검증을 승인하며, 검증 후 전체 작업을 완료 처리해주세요.",
     "memory_reuse": "README.md의 transactoin 오타를 transaction으로 고쳐주세요. 기존 README 검증 기억이 있으면 원문을 확인하고 적용해 검증해주세요. 필요한 수정과 검증을 승인합니다. 실제 사용한 기억을 기록하고 작업을 완료 처리해주세요.",
     "batch_recovery": "alpha.txt의 alhpa→alpha, beta.txt의 btea→beta 병렬 작업이 dispatch 후 실제 SubAgent 생성 전에 중단되었습니다. 저장된 batch와 실행 ID를 확인하고 recover_batch로 복구한 뒤 같은 작업들을 Root 순차 실행으로 전환해 수정·검증해주세요. 이 복구와 순차 전환, 실행을 승인합니다. 새 SubAgent는 필요하지 않습니다. 전체 작업을 완료 처리해주세요.",
-    "context_loss": "이전 세션에서 저장한 README.md 오타 수정 계획을 이어서 실행해주세요. 이 세션에는 이전 대화가 없습니다. 저장된 계획과 작업을 확인한 다음 transactoin을 transaction으로 수정하고 검증하는 실행을 승인합니다. 작업을 완료 처리해주세요.",
+    "context_loss": "이 새 대화에는 이전 문맥이 없습니다. 저장소 탐색보다 먼저 현재 hook session_id로 tapl_get_next를 호출하고 known_policy_revision 없이 전체 정책을 받으세요. 모든 TAPL 호출에 이 대화의 hook session_id를 사용하며 이전 세션 ID는 재사용하지 마세요. 이전 세션의 README.md 오타 수정 계획과 작업 원문을 조회하세요. 이전 RUN은 읽기 전용으로 보존하고 현재 세션 RUN에 그 계획을 바탕으로 작업을 작성해주세요. transactoin을 transaction으로 수정하고 검증하는 실행을 승인합니다. 현재 세션 작업만 완료 처리해주세요.",
 }
 
 CONTEXT_SETUP_PROMPT = (
+    "프로젝트 작업보다 먼저 hook이 제공한 현재 session_id로 tapl_get_next 전체 정책을 조회하고 "
+    "모든 TAPL 호출에 같은 현재 session_id를 사용하세요. "
     "README.md의 transactoin을 transaction으로 수정할 계획과 작업을 TAPL에 저장해주세요. "
     "계획은 확정하되 실제 수정과 실행은 아직 승인하지 않습니다. 저장한 뒤 다음 지시를 기다려주세요."
 )
@@ -578,8 +580,11 @@ def scenario_audit(directory, condition, conn):
         errors.extend(entry_errors(setup))
         first_ids = {e.get("thread_id") for e in setup if e.get("type") == "thread.started"}
         second_ids = {e.get("thread_id") for e in events if e.get("type") == "thread.started"}
-        if not first_ids or not second_ids or None in first_ids | second_ids or first_ids & second_ids:
+        if len(first_ids) != 1 or len(second_ids) != 1 or None in first_ids | second_ids or first_ids & second_ids:
             errors.append("Context-loss recovery did not use two distinct real sessions")
+        for transcript, owners in ((setup, first_ids), (events, second_ids)):
+            if any(call.get("arguments", {}).get("session_id") not in owners for call in completed_calls(transcript)):
+                errors.append("Context-loss call omitted or substituted its current session owner")
         if not any(e.get("type") == "turn.completed" for e in setup):
             errors.append("Context-loss setup session did not finish")
         setup_names = {c["tool"] for c in completed_calls(setup)}
@@ -591,17 +596,27 @@ def scenario_audit(directory, condition, conn):
         saved_ids = {structured_result(c).get("item", {}).get("id") for c in completed_calls(setup)
                      if successful_call(c) and c["tool"] in {"tapl_apply_plan", "tapl_create_task"}}
         for item in persisted:
-            row = conn.execute("SELECT id,stable_id,kind,run_id FROM items WHERE id=?", (item["id"],)).fetchone()
+            row = conn.execute("SELECT id,stable_id,kind,run_id,body,status FROM items WHERE id=?", (item["id"],)).fetchone()
             if (item["id"] not in saved_ids or row is None or row["run_id"] != seed.get("run_id")
-                    or row["stable_id"] != item["stable_id"] or row["kind"] != item["kind"]):
+                    or row["stable_id"] != item["stable_id"] or row["kind"] != item["kind"]
+                    or row["body"] != item["body"]
+                    or (item["kind"] == "task" and row["status"] != "Pending")):
                 errors.append("Fresh session did not preserve a first-session record identity")
         if {"tapl_approve_execution", "tapl_start_task", "tapl_dispatch_tasks", "tapl_finish_run"} & setup_names:
             errors.append("Context-loss setup entered an unapproved execution lifecycle")
         if not seed.get("setup_unchanged") or seed.get("setup_archives") != 0:
             errors.append("Unapproved context-loss setup changed or finished the fixture")
-        archived = [r[0] for r in conn.execute("SELECT run_id FROM archives")]
-        if archived != [seed.get("run_id")]:
-            errors.append("Fresh session replaced the persisted run")
+        source_run = conn.execute("SELECT session_id,status FROM workflow_runs WHERE id=?", (seed.get("run_id"),)).fetchone()
+        archived = list(conn.execute("SELECT r.id,r.session_id FROM archives a JOIN workflow_runs r ON r.id=a.run_id"))
+        if (source_run is None or source_run["session_id"] not in first_ids or source_run["status"] != "active"
+                or len(archived) != 1 or archived[0]["id"] == seed.get("run_id")
+                or archived[0]["session_id"] not in second_ids):
+            errors.append("Fresh session did not preserve the source RUN and finish only its own RUN")
+        if len(archived) == 1:
+            completed = [row[0] for row in conn.execute(
+                "SELECT status FROM items WHERE run_id=? AND kind='task'", (archived[0]["id"],))]
+            if not completed or any(status != "Completed" for status in completed):
+                errors.append("Fresh session did not complete its own reconstructed tasks")
         execution_index = next((i for i, e in enumerate(events) if e.get("type") == "item.started"
                                 and (e.get("item", {}).get("tool") in {"tapl_start_task", "tapl_dispatch_tasks"}
                                      or e.get("item", {}).get("type") == "file_change")), len(events))
@@ -852,12 +867,11 @@ def main(args):
     # This is a fresh, test-owned Box. Its configuration has no external MCPs.
     codex_config = Path("/root/.codex/config.toml")
     codex_config.parent.mkdir(exist_ok=True)
-    codex_config.write_text('cli_auth_credentials_store="file"\n')
+    codex_config.write_text('cli_auth_credentials_store="file"\n[projects."/case"]\ntrust_level="trusted"\n')
     command = ["codex", "exec", "--json", "--ignore-rules",
                "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
                "-C", str(root), "-m", args.model, "-c", 'model_reasoning_effort="high"',
                "-c", 'features.multi_agent=true',
-               "-c", 'projects."/case".trust_level="trusted"',
                "-c", f'mcp_servers.tapl.command={json.dumps(sys.executable)}',
                "-c", 'mcp_servers.tapl.args=["-m","taplctl.mcp_server"]',
                "-c", 'mcp_servers.tapl.cwd="/case"',
@@ -872,9 +886,11 @@ def main(args):
         if args.condition == "context_loss":
             setup_command = command[:-3] + ["-o", str(output / "setup-answer.txt"), CONTEXT_SETUP_PROMPT]
             setup_exit, setup_timeout = execute_session(setup_command, output, "setup-")
-            app = WorkflowApplication(root)
+            setup_events = read_events(output / "setup-events.jsonl")
+            setup_owner = next((e["thread_id"] for e in setup_events if e.get("type") == "thread.started"), "")
+            app = WorkflowApplication(root, session_id=setup_owner)
             status = app.get_status(full=True)
-            scenario = {"kind": "fresh-session persisted-run recovery; not actual compaction",
+            scenario = {"kind": "fresh-session plan reconstruction with source-owner isolation; not actual compaction",
                         "run_id": (status.get("active_run") or {}).get("id"),
                         "setup_unchanged": (root / "README.md").read_text() == "# Example\n\nAn atomic transactoin.\n"}
             scenario["setup_items"] = [{"id": item["id"], "stable_id": item["stable_id"], "kind": item["kind"],
@@ -938,7 +954,7 @@ def main(args):
         conn.row_factory = sqlite3.Row
         archives = conn.execute("SELECT count(*) FROM archives").fetchone()[0]
         plans = conn.execute("SELECT count(*) FROM items WHERE kind='plan'").fetchone()[0]
-        tasks = [dict(row) for row in conn.execute("SELECT stable_id,status FROM items WHERE kind='task'")]
+        tasks = [dict(row) for row in conn.execute("SELECT stable_id,status,run_id FROM items WHERE kind='task'")]
         archived_ids = [row[0] for row in conn.execute("SELECT run_id FROM archives")]
         executions = [dict(row) for row in conn.execute(
             "SELECT te.id,i.stable_id AS task_id,te.state FROM task_executions te "
@@ -980,7 +996,9 @@ def main(args):
         check(archives == 0 and "tapl_finish_run" not in names, "Planning-only work was finished or archived")
     else:
         check(archives == (2 if args.condition == "memory_reuse" else 1), "Unexpected archive count")
-        check(bool(tasks) and all(task["status"] == "Completed" for task in tasks), "Tasks were not completed")
+        owned_tasks = ([task for task in tasks if task["run_id"] in archived_ids]
+                       if args.condition == "context_loss" else tasks)
+        check(bool(owned_tasks) and all(task["status"] == "Completed" for task in owned_tasks), "Tasks were not completed")
         check("tapl_finish_run" in names and "tapl_finish_archive" in names, "Missing completion lifecycle")
         if args.condition in {"delegation", "batch_recovery"}:
             check((root / "alpha.txt").read_text() == "alpha\n" and (root / "beta.txt").read_text() == "beta\n", "Independent edits incomplete")
