@@ -43,9 +43,9 @@ Labels above are the English labels under **TAPL Workflow**; the UI also support
 
 Manage these fields in the [TAPL configuration file](configuration.md#workspace-and-file-selection), rather than VS Code settings. Native TOML bootstrap reads them before MCP starts, including a custom executable. Saving applies language/layout; external file edits also refresh the Viewer. Workspace-defined and workspace-relative executables respect Workspace Trust. If an invalid MCP path prevents connection, edit the file directly or run `taplctl config unset viewer.mcp_path` to restore discovery.
 
-The Viewer always follows VS Code's current color palette, including high-contrast themes. Its sun/moon button runs VS Code's **Preferences: Toggle between Light/Dark Themes** command (`workbench.action.toggleLightDarkThemes`), so it changes the editor's theme as well. VS Code uses its preferred light/dark or high-contrast themes; previously saved Viewer palette choices do not override those colors. Reloading or changing workspace preserves this behavior. The browser Viewer's theme button remains local to the browser.
+TAPL's sun/moon button switches only its own local light/dark appearance. VS Code retains its chosen theme and settings. Initially TAPL follows the host's appearance; a local choice is remembered across reloads and workspace changes. The browser Viewer also keeps its appearance choice local.
 
-If `window.autoDetectColorScheme` is enabled, VS Code's native command shows its settings guidance instead of switching; TAPL does not change that preference. Select themes and automatic-detection preferences in VS Code settings. See the [native theme command](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/contrib/themes/browser/themes.contribution.ts#L724).
+TAPL continues to follow VS Code's live color palette. A matching light/dark appearance uses the native colors and border roles unchanged. For the opposite appearance, TAPL derives readable surfaces, text and boundaries from those colors while retaining their hue and the native primary-button color pair. High-contrast boundaries remain distinct. A host theme change updates the palette while preserving the selected TAPL brightness. See [theming webview content](https://code.visualstudio.com/api/extension-guides/webview#theming-webview-content).
 
 ## Workspace and session routing
 

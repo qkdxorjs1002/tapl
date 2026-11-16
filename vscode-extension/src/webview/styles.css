@@ -99,13 +99,13 @@ body {
   --color-error-content: var(--tapl-panel);
 }
 
-:root:not([data-tapl-theme]):has(> body.vscode-light),
-:root:not([data-tapl-theme]):has(> body.vscode-high-contrast-light) {
+:root:not([data-tapl-theme]):not([data-tapl-native-tone]):has(> body.vscode-light),
+:root:not([data-tapl-theme]):not([data-tapl-native-tone]):has(> body.vscode-high-contrast-light) {
   color-scheme: light;
 }
 
-:root:not([data-tapl-theme]):has(> body.vscode-dark),
-:root:not([data-tapl-theme]):has(> body.vscode-high-contrast) {
+:root:not([data-tapl-theme]):not([data-tapl-native-tone]):has(> body.vscode-dark),
+:root:not([data-tapl-theme]):not([data-tapl-native-tone]):has(> body.vscode-high-contrast) {
   color-scheme: dark;
 }
 

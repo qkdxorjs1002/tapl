@@ -1,0 +1,92 @@
+/* A local appearance choice never changes VS Code's variables or theme classes.
+   Matching/automatic appearance keeps the unmodified host palette. */
+html[data-tapl-native-tone='light'],
+html[data-tapl-native-tone='light'] > body { color-scheme: light; }
+html[data-tapl-native-tone='dark'],
+html[data-tapl-native-tone='dark'] > body { color-scheme: dark; }
+
+html[data-tapl-native-tone='light']:has(> body:is(.vscode-dark, .vscode-high-contrast)) {
+  --tapl-tone-fill: white;
+  --tapl-tone-ink: black;
+  --tapl-tone-page: 10%;
+  --tapl-tone-panel: 6%;
+  --tapl-tone-surface: 4%;
+  --tapl-tone-soft: 15%;
+  --tapl-tone-hover: 20%;
+  --tapl-tone-semantic: 50%;
+  --tapl-tone-muted-neutral: color-mix(in oklab, white 20%, black);
+  --tapl-tone-border-neutral: color-mix(in oklab, white 75%, black);
+}
+html[data-tapl-native-tone='dark']:has(> body:is(.vscode-light, .vscode-high-contrast-light)) {
+  --tapl-tone-fill: black;
+  --tapl-tone-ink: white;
+  --tapl-tone-page: 22%;
+  --tapl-tone-panel: 26%;
+  --tapl-tone-surface: 32%;
+  --tapl-tone-soft: 35%;
+  --tapl-tone-hover: 40%;
+  --tapl-tone-semantic: 35%;
+  --tapl-tone-muted-neutral: color-mix(in oklab, white 80%, black);
+  --tapl-tone-border-neutral: color-mix(in oklab, white 40%, black);
+}
+
+/* Resolve aliases on body as well: VS Code injects custom colors there.
+   Achromatic OKLab mixing retains the source hue while adjusting contrast. */
+html[data-tapl-native-tone='light']:has(> body:is(.vscode-dark, .vscode-high-contrast)),
+html[data-tapl-native-tone='light'] > body:is(.vscode-dark, .vscode-high-contrast),
+html[data-tapl-native-tone='dark']:has(> body:is(.vscode-light, .vscode-high-contrast-light)),
+html[data-tapl-native-tone='dark'] > body:is(.vscode-light, .vscode-high-contrast-light) {
+  --tapl-page-bg: color-mix(in oklab, var(--vscode-sideBar-background, var(--vscode-panel-background, var(--vscode-editor-background, #252526))) var(--tapl-tone-page), var(--tapl-tone-fill));
+  --tapl-panel: color-mix(in oklab, var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e)) var(--tapl-tone-panel), var(--tapl-tone-fill));
+  --tapl-surface: color-mix(in oklab, var(--vscode-editorWidget-background, #252526) var(--tapl-tone-surface), var(--tapl-tone-fill));
+  --tapl-surface-muted: color-mix(in oklab, var(--vscode-input-background, #3c3c3c) var(--tapl-tone-soft), var(--tapl-tone-fill));
+  --tapl-item-bg: color-mix(in oklab, var(--vscode-editor-background, #1e1e1e) var(--tapl-tone-panel), var(--tapl-tone-fill));
+  --tapl-hover: color-mix(in oklab, var(--vscode-list-hoverBackground, #2a2d2e) var(--tapl-tone-hover), var(--tapl-tone-fill));
+  --tapl-foreground: color-mix(in oklab, var(--vscode-editor-foreground, #cccccc) 20%, var(--tapl-tone-ink));
+  --tapl-muted: color-mix(in oklab, var(--vscode-descriptionForeground, #9d9d9d) 20%, var(--tapl-tone-muted-neutral));
+  --tapl-accent: color-mix(in oklab, var(--vscode-focusBorder, #007fd4) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-highlight: color-mix(in oklab, var(--vscode-textLink-foreground, #3794ff) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-link-hover: color-mix(in oklab, var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground, #3794ff)) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-success: color-mix(in oklab, var(--vscode-testing-iconPassed, #89d185) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-warning: color-mix(in oklab, var(--vscode-editorWarning-foreground, #cca700) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-error: color-mix(in oklab, var(--vscode-errorForeground, #f48771) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-info: color-mix(in oklab, var(--vscode-editorInfo-foreground, var(--vscode-textLink-foreground, #3794ff)) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-skipped: color-mix(in oklab, var(--vscode-testing-iconSkipped, var(--vscode-symbolIcon-enumeratorForeground, #b180d7)) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-reference-memory: color-mix(in oklab, var(--vscode-charts-purple, #b180d7) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-reference-history: color-mix(in oklab, var(--vscode-charts-orange, #d99b65) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-focus: var(--tapl-accent);
+  --tapl-native-border-base: var(--vscode-editor-border, var(--vscode-surface-border, var(--vscode-sideBar-border, var(--vscode-panel-border, var(--vscode-editorGroup-border, color-mix(in srgb, var(--vscode-editor-foreground, #cccccc) 24%, var(--vscode-panel-background, var(--vscode-editor-background, #1e1e1e))))))));
+  --tapl-native-border-panel: var(--vscode-editorWidget-border, var(--vscode-widget-border, var(--tapl-native-border-base)));
+  --tapl-native-border-control: var(--vscode-input-border, var(--tapl-native-border-base));
+  --tapl-border-base: color-mix(in oklab, var(--tapl-native-border-base) 20%, var(--tapl-tone-border-neutral));
+  --tapl-border-subtle: var(--tapl-border-base);
+  --tapl-border: var(--tapl-border-base);
+  --tapl-border-panel: color-mix(in oklab, var(--tapl-native-border-panel) 20%, var(--tapl-tone-border-neutral));
+  --tapl-border-item: var(--tapl-border-base);
+  --tapl-border-control: color-mix(in oklab, var(--tapl-native-border-control) 20%, var(--tapl-tone-border-neutral));
+  --tapl-border-chrome: var(--tapl-border-base);
+  --tapl-border-strong: var(--tapl-focus);
+  /* Keep native primary normal/hover/content together; adapt secondary surfaces. */
+  --tapl-secondary: color-mix(in oklab, var(--vscode-button-secondaryBackground, var(--vscode-panel-background, #1e1e1e)) var(--tapl-tone-soft), var(--tapl-tone-fill));
+  --tapl-secondary-content: color-mix(in oklab, var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground, #cccccc)) 20%, var(--tapl-tone-ink));
+  --tapl-secondary-hover: color-mix(in oklab, var(--vscode-button-secondaryHoverBackground, var(--vscode-editorWidget-background, #252526)) var(--tapl-tone-hover), var(--tapl-tone-fill));
+  --tapl-input-content: color-mix(in oklab, var(--vscode-input-foreground, var(--vscode-editor-foreground, #cccccc)) 20%, var(--tapl-tone-ink));
+  --tapl-code-bg: color-mix(in oklab, var(--vscode-textCodeBlock-background, var(--vscode-input-background, #3c3c3c)) var(--tapl-tone-soft), var(--tapl-tone-fill));
+  --tapl-tooltip-bg: color-mix(in oklab, var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #252526)) var(--tapl-tone-surface), var(--tapl-tone-fill));
+  --tapl-tooltip-content: color-mix(in oklab, var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground, #cccccc)) 20%, var(--tapl-tone-ink));
+  --tapl-tooltip-border: color-mix(in oklab, var(--vscode-editorHoverWidget-border, var(--tapl-native-border-control)) 20%, var(--tapl-tone-border-neutral));
+  --tapl-tech-blue: var(--tapl-primary);
+  --tapl-tech-cyan: var(--tapl-highlight);
+}
+
+/* Preserve a strong, source-colored contrast border in the opposite local tone. */
+html[data-tapl-native-tone='light'] > body.vscode-high-contrast,
+html[data-tapl-native-tone='dark'] > body.vscode-high-contrast-light {
+  --tapl-native-contrast: color-mix(in oklab, var(--vscode-contrastBorder, var(--tapl-native-border-base)) var(--tapl-tone-semantic), var(--tapl-tone-ink));
+  --tapl-border-chrome: var(--tapl-native-contrast);
+  --tapl-border-subtle: var(--tapl-native-contrast);
+  --tapl-border: var(--tapl-native-contrast);
+  --tapl-border-panel: var(--tapl-native-contrast);
+  --tapl-border-item: var(--tapl-native-contrast);
+  --tapl-border-control: var(--tapl-native-contrast);
+}

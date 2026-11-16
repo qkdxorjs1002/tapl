@@ -158,26 +158,59 @@ test('offline release checks preserve the current version link without an update
   } finally {await page.close();}
 });
 
-test('native theme button keeps VS Code tokens through toggles, old saved choices, reload and host theme changes', async () => {
+const luminance = color => color.slice(0, 3).map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
+const contrast = (a, b) => (Math.max(luminance(a), luminance(b)) + .05) / (Math.min(luminance(a), luminance(b)) + .05);
+
+test('native appearance switches only TAPL while following live VS Code palette colors', async () => {
   const {page, errors} = await fixture({reducedMotion: 'reduce'});
   await page.addInitScript(() => {
     window.__nativeCommands = [];
-    window.__applyHostTheme = (mode) => {
+    window.__applyHostTheme = mode => {
       sessionStorage.setItem('native-theme-mode', mode);
       document.body.className = mode;
       const light = mode === 'vscode-light' || mode === 'vscode-high-contrast-light';
-      const bg = light ? '#fff8e9' : '#102438', fg = light ? '#3c2850' : '#f0ead2';
-      for (const key of ['editor-background', 'sideBar-background', 'panel-background', 'editorWidget-background'])
-        document.body.style.setProperty(`--vscode-${key}`, bg);
-      document.body.style.setProperty('--vscode-editor-foreground', fg);
-      document.body.style.setProperty('--vscode-editor-border', light ? '#9f8260' : '#4d7b9e');
-      document.body.style.setProperty('--vscode-focusBorder', light ? '#74419c' : '#e5a36d');
+      const values = {
+        'sideBar-background': light ? '#fff8e9' : '#102438',
+        'panel-background': light ? '#fcf5e8' : '#15293d',
+        'editor-background': light ? '#fff8e9' : '#102438',
+        'editorWidget-background': light ? '#fffdf6' : '#22394e',
+        'editor-foreground': light ? '#3c2850' : '#f0ead2',
+        'descriptionForeground': light ? '#6d606e' : '#a4b3c5',
+        'editor-border': light ? '#9f8260' : '#4d7b9e',
+        'input-border': light ? '#8e704d' : '#547694',
+        'editorWidget-border': light ? '#84653f' : '#60829f',
+        'input-background': light ? '#ede5df' : '#263d53',
+        'input-foreground': light ? '#3b2a42' : '#eaf2ff',
+        'focusBorder': light ? '#74419c' : '#e5a36d',
+        'textLink-foreground': light ? '#704398' : '#7bbfff',
+        'textLink-activeForeground': light ? '#653a8d' : '#91cfff',
+        'button-background': light ? '#684386' : '#27618c',
+        'button-foreground': '#ffffff',
+        'button-hoverBackground': light ? '#795397' : '#39739e',
+        'button-secondaryBackground': light ? '#e5d7e5' : '#304359',
+        'button-secondaryForeground': light ? '#4c3152' : '#eef2f7',
+        'button-secondaryHoverBackground': light ? '#d3c5d3' : '#405369',
+        'textCodeBlock-background': light ? '#e6dcd4' : '#0b1421',
+        'editorHoverWidget-background': light ? '#f9e8d8' : '#283f58',
+        'editorHoverWidget-foreground': light ? '#3e2434' : '#edf7ff',
+        'editorHoverWidget-border': light ? '#526b87' : '#9eabba',
+        'editorInfo-foreground': light ? '#285ead' : '#74bfff',
+        'testing-iconPassed': light ? '#247447' : '#8ad8ac',
+        'errorForeground': light ? '#a63c36' : '#f5a28a',
+        'editorWarning-foreground': light ? '#9b6b16' : '#ffd075',
+        'testing-iconSkipped': light ? '#7d4892' : '#ceafea',
+        'charts-purple': light ? '#764896' : '#cfa0ea',
+        'charts-orange': light ? '#9b6616' : '#eab17b',
+        'contrastBorder': light ? '#674fbe' : '#ffe066'
+      };
+      for (const [key, value] of Object.entries(values)) document.body.style.setProperty(`--vscode-${key}`, value);
     };
     window.acquireVsCodeApi = () => ({
-      getState: () => JSON.parse(sessionStorage.getItem('native-theme-state') || '{"workbench":{"version":1,"theme":"light"}}'),
+      getState: () => JSON.parse(sessionStorage.getItem('native-theme-state') || '{"workbench":{"version":1}}'),
       setState(value) { sessionStorage.setItem('native-theme-state', JSON.stringify(value)); },
       async postMessage(message) {
         window.__nativeCommands.push(message);
+        // Tripwire: an old/global theme message would visibly mutate the mock editor.
         if (message.command === 'toggleTheme') {
           window.__applyHostTheme(document.body.classList.contains('vscode-dark') ? 'vscode-light' : 'vscode-dark');
           return;
@@ -189,26 +222,91 @@ test('native theme button keeps VS Code tokens through toggles, old saved choice
       }
     });
   });
-  const assertNative = async (light) => {
-    await page.waitForFunction(() => !document.documentElement.hasAttribute('data-tapl-theme'));
-    await page.waitForFunction(label => document.querySelector('[data-wb-focus="theme-toggle"]')?.getAttribute('aria-label') === label,
-      light ? 'VS Code 어두운 테마 사용' : 'VS Code 밝은 테마 사용');
-    assert.equal(await page.locator('.wb-run-mindmap').evaluate(element => getComputedStyle(element).backgroundColor), light ? 'rgb(255, 248, 233)' : 'rgb(16, 36, 56)');
-    assert.equal(await page.locator('.wb-topbar').evaluate(element => getComputedStyle(element).borderBottomColor), light ? 'rgb(159, 130, 96)' : 'rgb(77, 123, 158)');
-    assert.equal(await page.locator('[data-wb-focus="theme-toggle"]').getAttribute('aria-label'), light ? 'VS Code 어두운 테마 사용' : 'VS Code 밝은 테마 사용');
+  const nativeState = () => page.evaluate(() => ({classes: document.body.className, variables: document.body.style.cssText,
+    commands: window.__nativeCommands.map(message => message.command)}));
+  const colors = () => page.evaluate(() => {
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d'), probe = document.createElement('span');
+    probe.style.position = 'absolute'; probe.style.visibility = 'hidden'; document.body.append(probe);
+    const rgba = color => {context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data];};
+    const names = ['page-bg', 'foreground', 'muted', 'panel', 'surface', 'surface-muted', 'input-content', 'primary', 'primary-content', 'primary-hover', 'secondary', 'secondary-content',
+      'tooltip-bg', 'tooltip-content', 'code-bg', 'highlight', 'focus', 'border', 'border-control', 'border-panel', 'success', 'warning', 'error', 'info', 'skipped', 'reference-memory', 'reference-history'];
+    const result = {};
+    for (const name of names) {probe.style.color = `var(--tapl-${name})`; result[name] = rgba(getComputedStyle(probe).color);}
+    result.map = rgba(getComputedStyle(document.querySelector('.wb-run-mindmap')).backgroundColor);
+    result.topbarBorder = rgba(getComputedStyle(document.querySelector('.wb-topbar')).borderBottomColor);
+    result.scheme = getComputedStyle(document.body).colorScheme;
+    result.hostMode = document.body.className;
+    probe.remove(); return result;
+  });
+  const appearance = async (tone) => {
+    await page.waitForFunction(value => document.documentElement.dataset.taplNativeTone === value, tone);
+    const result = await colors();
+    assert.equal(await page.locator('html').getAttribute('data-tapl-theme'), null, 'native appearance never selects the fixed web palette');
+    assert.equal(result.scheme, tone);
+    assert.ok(tone === 'light' ? luminance(result.map) > .6 : luminance(result.map) < .15, `visible ${tone} canvas`);
+    for (const [fg, bg] of [['foreground','page-bg'], ['muted','page-bg'], ['input-content','surface-muted'], ['secondary-content','secondary'], ['tooltip-content','tooltip-bg'], ['primary-content','primary']])
+      assert.ok(contrast(result[fg], result[bg]) >= 4.5, `${tone} ${fg}/${bg} contrast: ${contrast(result[fg], result[bg])}`);
+    const hostLight = result.hostMode === 'vscode-light' || result.hostMode === 'vscode-high-contrast-light';
+    if ((tone === 'light') !== hostLight) {
+      for (const name of ['highlight','success','warning','error','info','skipped','reference-memory','reference-history'])
+        assert.ok(contrast(result[name], result.panel) >= 4.5, `${tone} semantic ${name} contrast`);
+      assert.ok(contrast(result.focus, result['page-bg']) >= 3, `${tone} focus contrast`);
+    }
+    return result;
+  };
+  const toggleLocal = async tone => {
+    const before = await nativeState(); await page.locator('[data-wb-focus="theme-toggle"]').click();
+    assert.deepEqual(await nativeState(), before, 'no host class, variables or commands change'); return appearance(tone);
   };
   try {
-    await page.goto(origin); await page.locator('.wb-run-mindmap').waitFor(); await assertNative(false);
-    assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('native-theme-state')).workbench.theme), undefined, 'old web palette choice is cleared');
-    await page.locator('[data-wb-focus="theme-toggle"]').click(); await assertNative(true);
-    assert.equal(await page.evaluate(() => window.__nativeCommands.filter(message => message.command === 'toggleTheme').length), 1);
-    await page.reload(); await page.locator('.wb-run-mindmap').waitFor(); await assertNative(true);
-    await page.locator('[data-wb-focus="theme-toggle"]').click(); await assertNative(false);
-    for (const [mode, light] of [['vscode-light', true], ['vscode-dark', false], ['vscode-high-contrast-light', true], ['vscode-high-contrast', false]]) {
-      await page.evaluate(mode => window.__applyHostTheme(mode), mode); await assertNative(light);
+    await page.goto(origin); await page.locator('.wb-run-mindmap').waitFor();
+    await page.waitForFunction(() => document.body.classList.contains('vscode-dark'));
+    const original = await colors(); assert.deepEqual(original.map, [16,36,56,255]);
+    assert.equal(await page.locator('html').getAttribute('data-tapl-native-tone'), null, 'initial appearance follows the host');
+    const light = await toggleLocal('light');
+    for (const role of ['primary','primary-content','primary-hover']) assert.deepEqual(light[role], original[role], `native ${role} stays intact`);
+    assert.ok(light.highlight[2] > light.highlight[0], 'host blue accent retains its hue');
+    await shot(page, 'tapl-local-light-vscode-dark');
+    await page.evaluate(() => {
+      document.body.style.setProperty('--vscode-sideBar-background', '#341a36');
+      document.body.style.setProperty('--vscode-textLink-foreground', '#f28fce');
+    });
+    const pink = await appearance('light');
+    assert.notDeepEqual(pink.map, light.map, 'live host colors update the local light surface');
+    assert.ok(pink.highlight[0] > pink.highlight[2] && pink.highlight[2] > pink.highlight[1], 'new host pink accent remains pink');
+    await page.reload(); await page.locator('.wb-run-mindmap').waitFor(); await appearance('light');
+    assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('native-theme-state')).workbench.theme), 'light', 'local preference survives reload');
+    await page.evaluate(() => window.__applyHostTheme('vscode-light'));
+    const matchingLight = await appearance('light'); assert.deepEqual(matchingLight.map, [255,248,233,255]); assert.deepEqual(matchingLight.topbarBorder, [159,130,96,255]);
+    const dark = await toggleLocal('dark');
+    assert.deepEqual(dark.primary, [104,67,134,255], 'native purple button replaces neither theme nor palette');
+    await shot(page, 'tapl-local-dark-vscode-light');
+    await page.evaluate(() => window.__applyHostTheme('vscode-dark'));
+    const matchingDark = await appearance('dark'); assert.deepEqual(matchingDark.map, original.map); assert.deepEqual(matchingDark.topbarBorder, [77,123,158,255]);
+    await page.evaluate(() => document.body.style.setProperty('--vscode-editor-border', 'rgba(22,188,144,.4)'));
+    assert.equal(await page.locator('.wb-topbar').evaluate(element => getComputedStyle(element).borderBottomColor), 'rgba(22, 188, 144, 0.4)', 'matching native border alpha stays exact');
+    await toggleLocal('light'); await toggleLocal('dark'); assert.equal(await page.locator('.wb-topbar').evaluate(element => getComputedStyle(element).borderBottomColor), 'rgba(22, 188, 144, 0.4)');
+    await page.evaluate(() => window.__applyHostTheme('vscode-high-contrast'));
+    assert.deepEqual((await colors()).topbarBorder, [255,224,102,255]);
+    const hcLight = await toggleLocal('light'); assert.ok(contrast(hcLight.topbarBorder, hcLight['page-bg']) >= 3, 'opposite high-contrast border remains visible');
+    await page.evaluate(() => window.__applyHostTheme('vscode-high-contrast-light'));
+    assert.deepEqual((await colors()).topbarBorder, [103,79,190,255]);
+    const hcDark = await toggleLocal('dark'); assert.ok(contrast(hcDark.topbarBorder, hcDark['page-bg']) >= 3);
+    await page.evaluate(() => {
+      document.body.style.removeProperty('--vscode-input-foreground');
+      window.postMessage({...window.__lastNativeView, workspace: '/native/second-workspace'}, '*');
+    });
+    await appearance('dark'); await shot(page, 'tapl-local-dark-high-contrast-light');
+    for (const [mode, tone, ink] of [['vscode-light', 'dark', '#000000'], ['vscode-dark', 'light', '#ffffff']]) {
+      await page.evaluate(({mode, ink}) => {
+        window.__applyHostTheme(mode);
+        for (const name of ['descriptionForeground','focusBorder','textLink-foreground','testing-iconPassed','editorWarning-foreground','errorForeground','editorInfo-foreground','testing-iconSkipped','charts-purple','charts-orange'])
+          document.body.style.setProperty(`--vscode-${name}`, ink);
+      }, {mode, ink});
+      if (await page.locator('html').getAttribute('data-tapl-native-tone') !== tone) await toggleLocal(tone);
+      await appearance(tone);
     }
-    await page.evaluate(() => window.postMessage({...window.__lastNativeView, workspace: '/native/second-workspace'}, '*'));
-    await assertNative(false);
-    await shot(page, 'viewer-native-theme-preserved'); assert.deepEqual(errors, []);
+    assert.deepEqual(errors, []);
   } finally {await page.close();}
 });

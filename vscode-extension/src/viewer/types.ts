@@ -341,7 +341,6 @@ export type WebviewCommand = (
   | { command: 'saveSettings'; requestId: string; workspace: string; revision: string; values: Record<string, unknown> }
   | { command: 'resetSettings'; requestId: string; workspace: string; revision: string; confirmed: true }
   | { command: 'ready' }
-  | { command: 'toggleTheme' }
   | { command: 'chooseWorkspace' }
   | { command: 'selectWorkspace'; workspace: string }
   | { command: 'browseWorkspace'; requestId: string; path?: string }

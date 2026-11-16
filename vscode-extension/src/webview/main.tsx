@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './styles.css';
+import './nativeTheme.css';
 import './workbench/workbench.css';
 import './workbench/reading.css';
 import './workbench/secondary.css';

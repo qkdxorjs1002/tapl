@@ -539,7 +539,6 @@ class WorkflowWebviewManager {
     if (!isRecord(message) || typeof message.command !== 'string') { return; }
     switch (message.command) {
       case 'ready': await this.postCurrentView('hydrate'); return;
-      case 'toggleTheme': await vscode.commands.executeCommand('workbench.action.toggleLightDarkThemes'); return;
       case 'refresh': await this.requestRefresh(); return;
       case 'discardRun': await this.discardRun(message); return;
       case 'getSettings':

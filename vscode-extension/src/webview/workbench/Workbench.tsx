@@ -102,7 +102,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
   pinnedRef.current = sidebarPinned;
   const [theme, setTheme] = useState<'light' | 'dark' | undefined>(() => {
     const restored = props.initialState as { theme?: unknown } | undefined;
-    return props.browser && (restored?.theme === 'light' || restored?.theme === 'dark') ? restored.theme : undefined;
+    return restored?.theme === 'light' || restored?.theme === 'dark' ? restored.theme : undefined;
   });
   const [systemDark, setSystemDark] = useState(
     () =>
@@ -213,8 +213,14 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
   }, [mobile, menuOpen]);
   useEffect(() => {
     const root = document.documentElement;
-    if (props.browser) root.dataset.taplTheme = theme ?? (systemDark ? 'dark' : 'light');
-    else delete root.dataset.taplTheme;
+    if (props.browser) {
+      delete root.dataset.taplNativeTone;
+      root.dataset.taplTheme = theme ?? (systemDark ? 'dark' : 'light');
+    } else {
+      delete root.dataset.taplTheme;
+      if (theme) root.dataset.taplNativeTone = theme;
+      else delete root.dataset.taplNativeTone;
+    }
     persistRef.current?.({ version: 1, pages: state.pages, theme, sidebarPinned });
   }, [theme, props.browser, systemDark, sidebarPinned]);
   useEffect(() => {
@@ -349,11 +355,10 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
             <button
               type="button"
               className="btn btn-ghost btn-sm btn-square"
-              aria-label={t(props.browser ? (darkTheme ? 'wbLight' : 'wbDark') : (darkTheme ? 'wbVscodeLight' : 'wbVscodeDark'))}
+              aria-label={t(props.browser ? (darkTheme ? 'wbLight' : 'wbDark') : (darkTheme ? 'wbLocalLight' : 'wbLocalDark'))}
               data-wb-focus="theme-toggle"
               onClick={() => {
-                if (props.browser) setTheme(darkTheme ? 'light' : 'dark');
-                else props.send({ command: 'toggleTheme' });
+                setTheme(darkTheme ? 'light' : 'dark');
               }}
             >
               <Icon name={darkTheme ? 'sun' : 'moon'} />

@@ -69,14 +69,14 @@ test('exact RUN and library host routes keep source/page/context without rebindi
   }
   await commands.get('taplWorkflow.openOverview')();
   const beforeTheme = calls.length;
+  const commandsBeforeTheme = [...executed];
   await receive({ command: 'toggleTheme', commandId: 'untrusted.command' });
-  assert.equal(executed.at(-1), 'workbench.action.toggleLightDarkThemes');
   const savedFolders = vscode.workspace.workspaceFolders;
   vscode.workspace.workspaceFolders = undefined;
   await receive({ command: 'toggleTheme' });
   vscode.workspace.workspaceFolders = savedFolders;
-  assert.equal(executed.filter(name => name === 'workbench.action.toggleLightDarkThemes').length, 2);
-  assert.equal(calls.length, beforeTheme, 'native theme changes need no workspace or workflow write');
+  assert.deepEqual(executed, commandsBeforeTheme, 'cached theme messages cannot change VS Code or execute arbitrary commands');
+  assert.equal(calls.length, beforeTheme, 'local appearance needs no host command or workflow write');
   await send({ command: 'selectRun', sessionId: 'owner', source_db: 'tapl-local.db' });
   const exact = await send({ command: 'openRun', runId: 'past', source_db: 'tapl-peer.db' });
   assert.equal(exact.snapshot.run.id, 'past');
