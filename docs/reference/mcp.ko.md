@@ -86,10 +86,40 @@ RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌�
 | `tapl_get_archive` | `archive_id` | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 문자열 형태의 숫자 ID 또는 안정된 slug. 항목·이벤트를 반환합니다. |
 | `tapl_recall` | 없음 | `query=""` (최대 500자), `limit=3` (1–50), `offset=0` (0 이상). 빈 쿼리는 목록 조회이며 캡처·강화하지 않습니다. |
 | `tapl_get_memory` | `memory_id` | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 메모리와 원본을 반환하며 없거나 삭제된 메모리는 null입니다. |
+| `tapl_use_references` | `expected_run_id`, `references`, `session_id` | 같은 대화 세션에서 이미 원문을 확인한 자료의 현재 RUN 사용을 기록합니다. 배치 1–50개이며 각 항목은 출처별 정확한 식별자와 공백 제거 후 1–500자의 `usage`를 가집니다. 전체 검증 후 반영하며 반복 호출은 중복되지 않고 기억 강화와 별개입니다. |
 | `tapl_update_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). `note` (1–240자), `cue` (3–5개), `state` (`active` 또는 `superseded`). 명시적 사용자 요청이 필요합니다. |
 | `tapl_delete_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 명시적 사용자 요청이 필요하며 tombstone 처리해 회상·강화에서 제외합니다. |
 
 Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 DB에 간결한 포인터를 기록할 수 있습니다. 기억을 캡처·강화하거나 다른 DB에 쓰지 않으며 Viewer 조회는 기록하지 않습니다. [Agent 조회 기록](../guides/memory.ko.md#agent-조회-기록)을 참고하세요.
+
+`tapl_use_references`는 `session_id`를 명시해야 하며 빈 값이나 생략한 legacy 식별자는 지원하지 않습니다. 각 항목은 `kind`, 정확한 `source_db` 파일명, `usage`와 다음 대상 중 정확히 하나를 받습니다: `kind="memory", target_type="memory", memory_id`; `kind="history", target_type="item", item_id`(양의 정수); `kind="history", target_type="run", run_id`. 문자열 ID와 원본 이름은 1–256자입니다. 정의되지 않은 필드는 거절합니다. 제목과 출처 포인터는 호출자 입력이 아닌 실제 반환된 기억 노트·상세와 원문 조회 기록에서 가져옵니다. 완전한 회상 노트가 있으면 기억 상세를 다시 조회하지 않아도 되며, 정확한 원문에는 여전히 원문 확인 기록이 필요합니다.
+
+예시의 ID와 `source_db`는 같은 hook 세션에서 이전 원문 조회가 반환한 정확한 값으로 바꾸세요:
+
+```json
+{
+  "expected_run_id": "current-run-id",
+  "session_id": "current-hook-session-id",
+  "references": [
+    {
+      "kind": "history",
+      "source_db": "tapl-source.db",
+      "target_type": "item",
+      "item_id": 123,
+      "usage": "검증한 롤백 제약을 이번 구현 선택에 적용했다."
+    },
+    {
+      "kind": "memory",
+      "source_db": "tapl-source.db",
+      "target_type": "memory",
+      "memory_id": "memory-id",
+      "usage": "원문 확인을 마친 인덱싱 교훈을 적용했다."
+    }
+  ]
+}
+```
+
+배치 전체를 검증한 뒤 기록합니다. 응답은 입력 `index`와 `status="recorded"|"unchanged"`를 가진 간결한 `outcomes`, 요약 `counts`를 반환합니다. 반복 ID는 첫 사용 설명을 유지합니다. 기억의 일치하는 원문도 포함하되 기존 카드나 선을 중복하지 않으며, 고유 사용 ID 200개 상한에는 이 원문도 포함합니다. 진단 값은 `invalid_reference`, `session_required`, `stale_run`, `invalid_proof`, `reference_limit`이며 schema 오류는 application 처리 전에 거절될 수 있습니다. 근거가 없거나 폐기됐으면 빠진 기억 노트나 원문을 다시 확인해야 하며 사용 주장을 임의로 만들지 않습니다. 무관한 과거 조회는 가져오지 않습니다.
 
 회상한 단서를 사용하기 전에 `tapl_get_item` 또는 `tapl_get_archive`로 원본 근거를 확인합니다. 메모리 revision 충돌은 새 내용을 검토한 뒤 재시도해야 합니다. `recall.enabled=false`는 자동 회상·캡처·검토·강화를 끄지만 수동 조회는 유지합니다. 순위와 관리 절차는 [연상 메모리](../guides/memory.ko.md)를 보세요.
 

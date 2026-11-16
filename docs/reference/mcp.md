@@ -86,10 +86,40 @@ Search, lists, and recall read multiple databases in the working folder. Preserv
 | `tapl_get_archive` | `archive_id` | Optional `source_db` (exact source filename; omission selects local). Numeric ID as a string or stable slug; returns items and events. |
 | `tapl_recall` | None | `query=""` (at most 500 characters), `limit=3` (1–50), `offset=0` (nonnegative). Empty query lists memories. No capture/reinforcement. |
 | `tapl_get_memory` | `memory_id` | Optional `source_db` (exact source filename; omission selects local). Returns memory and original source; missing/deleted memory returns null. |
+| `tapl_use_references` | `expected_run_id`, `references`, `session_id` | Records actual use during this RUN from originals already opened in this exact conversation. Batch 1–50; each entry has source-qualified identity and trimmed `usage` (1–500 characters). Atomic, idempotent, and independent of memory reinforcement. |
 | `tapl_update_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). `note` (1–240 characters), `cue` (3–5 entries), `state` (`active` or `superseded`). Explicit user request only. |
 | `tapl_delete_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). Explicit user request only; tombstones the memory so recall/reinforcement cannot use it. |
 
 Successful agent lookups may record compact pointers in the existing owned RUN for its mindmap. This does not capture/reinforce memory or write foreign history; Viewer reads are not tracked. See [Agent lookup traces](../guides/memory.md#agent-lookup-traces).
+
+For `tapl_use_references`, `session_id` is explicitly required; blank or omitted legacy identity is unsupported. Every entry requires `kind`, exact `source_db` filename and `usage`, plus exactly one target shape: `kind="memory", target_type="memory", memory_id`; `kind="history", target_type="item", item_id` (positive integer); or `kind="history", target_type="run", run_id`. String IDs and source names are 1–256 characters. Unknown fields are rejected. Titles and source pointers come from recorded returned memory notes/details and opened originals, not caller-supplied metadata. A complete recall note qualifies without another memory-detail fetch; its exact original still needs an opened-read record.
+
+Replace the example IDs and `source_db` with the exact values returned by earlier original reads in the same hook session:
+
+```json
+{
+  "expected_run_id": "current-run-id",
+  "session_id": "current-hook-session-id",
+  "references": [
+    {
+      "kind": "history",
+      "source_db": "tapl-source.db",
+      "target_type": "item",
+      "item_id": 123,
+      "usage": "Used the verified rollback constraint to choose this implementation."
+    },
+    {
+      "kind": "memory",
+      "source_db": "tapl-source.db",
+      "target_type": "memory",
+      "memory_id": "memory-id",
+      "usage": "Applied the checked indexing lesson."
+    }
+  ]
+}
+```
+
+The entire batch is validated before writing. Responses contain compact `outcomes` with input `index` and `status="recorded"|"unchanged"`, plus `counts`; repeated identities preserve the first usage reason. A memory's matching original is included without duplicating an existing card or edge. The 200-used-identity limit includes these originals. Diagnostics include `invalid_reference`, `session_required`, `stale_run`, `invalid_proof` and `reference_limit`; schema errors can be rejected before application handling. Missing or discarded proof requires fetching the missing note or original, not an invented usage claim. Unrelated old lookups are never imported.
 
 Check original evidence from `tapl_get_item` or `tapl_get_archive` before using a recalled hint. Revision conflicts require fresh review before retrying memory edits. `recall.enabled=false` disables automatic recall/capture/review/reinforcement; manual inspection remains available. See [Associative memory](../guides/memory.md) for ranking and maintenance.
 

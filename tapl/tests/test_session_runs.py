@@ -182,6 +182,7 @@ def test_schema13_upgrade_preserves_legacy_owner_and_backs_up(tmp_path: Path) ->
         plan_and_task(conn, "Legacy work")
         db.record_event(conn, event_type="UserPromptSubmit", message="Legacy event")
         conn.execute("DROP INDEX idx_session_active_run")
+        conn.execute("DROP INDEX idx_events_session_type_id")
         conn.execute("ALTER TABLE workflow_runs DROP COLUMN session_id")
         conn.execute("ALTER TABLE events DROP COLUMN session_id")
         conn.execute("CREATE UNIQUE INDEX idx_single_active_run ON workflow_runs(status) WHERE status = 'active'")
@@ -189,6 +190,7 @@ def test_schema13_upgrade_preserves_legacy_owner_and_backs_up(tmp_path: Path) ->
         conn.commit()
     with closing(db.connect(path, session_id="new-session")) as named:
         assert db.active_run(named) is None
+        assert named.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_events_session_type_id'").fetchone()
         named_id = db.ensure_active_run(named)["id"]
         assert named_id != legacy_id
     with closing(db.connect(path)) as legacy:

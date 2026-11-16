@@ -143,6 +143,80 @@ test('associative-memory SVG connections also stay in central 35% side bands', a
   } finally { await page.close(); }
 });
 
+test('repeated used payloads promote one source card and path without changing workflow or camera', {timeout: 30000}, async () => {
+  for (const [locale, label] of [['en-US', 'Used'], ['ko-KR', '사용']]) {
+    const page = await browser.newPage({viewport: {width: 1440, height: 1000}, locale, reducedMotion: 'reduce'});
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    let overview, used = false;
+    const m = {kind: 'memory', stage: 'opened', target_type: 'memory', source_db: '/fixture/memory.sqlite3',
+      run_id: 'past', memory_id: 'M-USED', title: 'Reused conversation constraint',
+      source: {source_db: '/fixture/history.sqlite3', run_id: 'past', item_id: 7}};
+    const h = {kind: 'history', stage: 'opened', target_type: 'item', source_db: '/fixture/history.sqlite3',
+      run_id: 'past', item_id: 7, stable_id: 'TASK-007', record_kind: 'task', title: 'Reused exact original'};
+    const references = () => [m, h, ...(used ? [
+      {...m, stage: 'used', usage: 'Applied the source constraint'}, {...h, stage: 'used', usage: 'Applied the source constraint'},
+      {...m, stage: 'used', title: 'Repeated metadata', usage: 'Repeated reason'}, {...h, stage: 'used'}
+    ] : []), {...m, stage: 'retrieved'}, {...h, stage: 'retrieved'}, m, h];
+    await page.route('**/api/message', async route => {
+      const response = await route.fetch(), payload = await response.json();
+      if (payload.view?.type === 'overview') {
+        const status = payload.view.status;
+        status.plans = status.plans.slice(0, 1);
+        status.tasks = status.tasks.slice(0, 2).map((task, index) => ({...task,
+          spec_id: status.plans[0].stable_id, status: index === 0 ? 'Completed' : 'In Progress'}));
+        status.task_counts = {Completed: 1, 'In Progress': 1};
+        status.references = references();
+        overview = structuredClone(payload);
+      }
+      await route.fulfill({response, json: payload});
+    });
+    try {
+      await page.goto(origin); await page.waitForLoadState('networkidle');
+      const map = page.locator('.wb-run-mindmap'); await map.waitFor();
+      const read = () => map.evaluate(host => ({
+        runKey: host.dataset.runKey,
+        camera: host.querySelector('.wb-mm-world').style.transform,
+        progress: host.querySelector('.wb-mm-run-numbers').textContent,
+        workflow: [...host.querySelectorAll('[data-mindmap-node]:not([data-reference-stage])')].map(node =>
+          [node.dataset.mindmapNode, node.style.transform, node.className]),
+        flow: [...host.querySelectorAll('g[data-flow=running]')].map(edge => [edge.dataset.from, edge.dataset.to])
+      }));
+      await page.mouse.move(1400, 30);
+      await page.waitForFunction(() => document.querySelectorAll('.wb-mm-node[data-reference-stage=opened]').length === 2);
+      const before = await read();
+      const flow = map.locator('.wb-mm-flow').first();
+      assert.ok(await flow.count(), 'fixture has actual executing work');
+      await flow.evaluate(node => {node.__retainedUsedFlow = true;});
+      for (let repeat = 0; repeat < 3; repeat++) {
+        used = true; overview.view.status.references = references();
+        await page.evaluate(payload => window.postMessage({...payload, type: 'view:update'}, '*'), overview);
+        await page.waitForFunction(() => document.querySelectorAll('.wb-mm-node[data-reference-stage=used]').length === 2);
+        assert.equal(await map.locator('[data-kind=memory]').count(), 1);
+        assert.equal(await map.locator('[data-kind=history]').count(), 1);
+        assert.equal(await map.locator('[data-relation=memory]').count(), 1);
+        assert.equal(await map.locator('[data-relation=memory-source]').count(), 1);
+        assert.equal(await map.locator('[data-relation=history]').count(), 0);
+        assert.deepEqual(await map.locator('.wb-mm-reference-stage').allTextContents(), [label, label]);
+        assert.equal(await map.locator('[data-relation] .wb-mm-flow').count(), 0);
+        assert.equal(await map.locator('[data-kind=memory] .wb-mm-title').innerText(), m.title);
+        const edges = await map.locator('[data-from][data-to]').evaluateAll(nodes => nodes.map(node => JSON.stringify([node.dataset.from, node.dataset.to])));
+        assert.equal(new Set(edges).size, edges.length, 'every exact edge is unique');
+        assert.deepEqual(await read(), before, 'stage refresh retains workflow geometry, progress, highlight, flow and camera');
+        assert.equal(await flow.evaluate(node => node.__retainedUsedFlow), true, 'executing flow keeps its DOM identity');
+        assert.equal(await map.locator('[data-wb-focus=mindmap-follow]').getAttribute('aria-pressed'), 'true');
+      }
+      await map.locator('.wb-mm-camera-controls button').nth(1).click();
+      await page.locator('.wb-mm-reference-stage').first().waitFor({state: 'visible'});
+      await jump(page, 'memory');
+      if (process.env.TAPL_SCREENSHOT_DIR) {
+        mkdirSync(process.env.TAPL_SCREENSHOT_DIR, {recursive: true});
+        await page.screenshot({path: path.join(process.env.TAPL_SCREENSHOT_DIR, `run-references-used-${locale}.png`), animations: 'disabled'});
+      }
+      assert.deepEqual(errors, []);
+    } finally { await page.close(); }
+  }
+});
+
 test('opened RUN references navigate and return; palette and follow keep workflow context', async () => {
   runPython(context + `app.get_run(${JSON.stringify(evidence.run_memory.source.run_id)},source_db=${JSON.stringify(evidence.run_memory.source_db)})
 print('true')`);

@@ -614,6 +614,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     backfill_plan_rows(conn)
     ensure_column(conn, "workflow_runs", "session_id", "TEXT NOT NULL DEFAULT ''")
     ensure_column(conn, "events", "session_id", "TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_session_type_id ON events(session_id, event_type, id)")
     dedupe_active_runs(conn)
     conn.execute("DROP INDEX IF EXISTS idx_single_active_run")
     conn.execute(

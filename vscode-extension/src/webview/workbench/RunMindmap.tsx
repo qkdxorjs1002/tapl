@@ -215,8 +215,8 @@ const RunMindmapNode = memo(function RunMindmapNode({
           {t(node.reference.kind === 'memory' ? 'wbRunReferenceMemory' : 'wbRunReferenceHistory')}
         </span> : node.kind === 'run' ? 'RUN' : node.item?.stable_id}</span>
         {node.reference && <span className="wb-mm-reference-stage" data-stage={node.reference.stage}>
-          <Icon name={node.reference.stage === 'opened' ? 'check' : 'search'} />
-          {t(node.reference.stage === 'opened' ? 'wbRunReferenceOpened' : 'wbRunReferenceRetrieved')}
+          <Icon name={node.reference.stage === 'retrieved' ? 'search' : 'check'} />
+          {t(node.reference.stage === 'used' ? 'wbRunReferenceUsed' : node.reference.stage === 'opened' ? 'wbRunReferenceOpened' : 'wbRunReferenceRetrieved')}
         </span>}
         {node.status && (
           <span className="wb-mm-state" data-status={stateKind(node.status)}>

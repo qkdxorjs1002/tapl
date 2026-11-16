@@ -2,6 +2,11 @@
 
 All notable changes to TAPL Workflow Viewer are documented in this file.
 
+## Unreleased
+
+- Connect explicitly used memories and history from earlier RUNs of the same conversation to the current RUN after checking recorded original-read evidence.
+- Reuse existing source-qualified cards and connections, preserve the first usage reason, and show the Used state without duplicate nodes or edges.
+
 ## 2.21.4 - 2026-11-16
 
 - Fix the visible automatic-following tooltip to show the current action on hover and keyboard focus in Korean and English.

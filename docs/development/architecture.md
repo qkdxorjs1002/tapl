@@ -78,6 +78,8 @@ BM25/full-text search works without optional semantic dependencies. `embeddings.
 
 Associative memory stores short verified lessons with concrete cues and links to original records. Automatic recall/capture/review is controlled separately from manual inspection. A memory edit checks `expected_revision`; finish-time memory processing checks the active `expected_run_id`. Original-source verification belongs to the agent. See [Search](../guides/search.md) and [Associative memory](../guides/memory.md).
 
+Explicit reference use is separate from lookup observation and memory reinforcement. `tapl_use_references` validates the active owner and surviving original reads from the exact session, then writes only the local used-state event. Source-qualified keys deduplicate graph records. A session/event index supports historical proof lookup; it can scan retained observations, while current RUN projection reads at most three indexed state rows and remains capped at 200 identities. See [Agent lookup traces](../guides/memory.md#agent-lookup-traces) and the [MCP usage contract](../reference/mcp.md#history-and-memory).
+
 ## Viewer boundaries and validation
 
 Browser and VS Code share React components, CSS, and protocol types. Browser HTTP requests have origin/content/workspace checks; VS Code routes through a pooled stdio client and rejects stale workspace/navigation results. Advertised server capabilities enable memory and confirmed discard while preserving other screens with older servers. Memory screens are read-only.

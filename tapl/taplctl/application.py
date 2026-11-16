@@ -426,6 +426,17 @@ class WorkflowApplication:
         run_references.record(captured, operation, result)
         return result
 
+    def use_references(self, *, expected_run_id: str, references: list[dict[str, Any]]) -> dict[str, Any]:
+        """Link only explicitly used sources with surviving same-session reads."""
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                payload = run_references.use(conn, expected_run_id=expected_run_id, references=references)
+                conn.commit()
+                return payload
+            except run_references.ReferenceUseError as exc:
+                raise WorkflowApplicationError(str(exc)) from exc
+
     def update_memory(
         self, memory_id: str, *, expected_revision: int,
         note: str | None = None, cue: list[str] | None = None, state: str | None = None,
@@ -457,6 +468,21 @@ class WorkflowApplication:
         }
 
     def _reinforce_memory(self, conn: Any, run_id: str, use: Any, now: Any) -> dict[str, Any]:
+        result = self._reinforce_memory_only(conn, run_id, use, now)
+        # Projection and reinforcement are independent: a verified foreign use
+        # or cooldown skip still links to this RUN. Keep projection failures out
+        # of the durable finish result and existing review/retry semantics.
+        try:
+            with memory_store._transaction(conn, write=True):
+                run_references.use(conn, expected_run_id=run_id, references=[{
+                    "kind": "memory", "target_type": "memory", "memory_id": use["memory_id"],
+                    "source_db": use.get("source_db") or self.db_path.name, "usage": use["usage"],
+                }])
+        except Exception:
+            pass
+        return result
+
+    def _reinforce_memory_only(self, conn: Any, run_id: str, use: Any, now: Any) -> dict[str, Any]:
         memory_store.validate_use(use)
         selector = use.get("source_db")
         if selector is None:

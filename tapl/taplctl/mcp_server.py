@@ -10,9 +10,9 @@ from typing import Annotated, Any, Literal
 
 from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import __version__, db, install as tapl_install, prompt as tapl_prompt, sessions, settings
+from . import __version__, db, install as tapl_install, prompt as tapl_prompt, run_references, sessions, settings
 from .application import WorkflowApplication
 from .command_runtime import configure_stdio
 from .clients import client_scope, resolve_client, validate_session_key
@@ -90,6 +90,39 @@ class MemoryUse(BaseModel):
     source_checked: bool = Field(strict=True)
     usage: str = Field(min_length=1, max_length=500)
     source_db: SourceDb = None
+
+
+class _ReferenceUse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_db: str = Field(description="Exact source_db filename from the observed original read.", min_length=1, max_length=256, pattern=r"^[^/\\]+$")
+    usage: str = Field(description="Concrete actual use in this RUN; trimmed and nonempty, at most 500 characters.", min_length=1, max_length=500)
+
+    @field_validator("usage", mode="before")
+    @classmethod
+    def trim_usage(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
+
+
+class MemoryReferenceUse(_ReferenceUse):
+    kind: Literal["memory"]
+    target_type: Literal["memory"]
+    memory_id: str = Field(min_length=1, max_length=256)
+
+
+class ItemReferenceUse(_ReferenceUse):
+    kind: Literal["history"]
+    target_type: Literal["item"]
+    item_id: int = Field(ge=1, strict=True)
+
+
+class RunReferenceUse(_ReferenceUse):
+    kind: Literal["history"]
+    target_type: Literal["run"]
+    run_id: str = Field(min_length=1, max_length=256)
+
+
+ReferenceUse = Annotated[MemoryReferenceUse | ItemReferenceUse | RunReferenceUse, Field(discriminator="target_type")]
 
 
 class SplitRunRequest(BaseModel):
@@ -341,6 +374,10 @@ def mcp_write_receipt(payload: dict[str, Any], *, operation: str) -> dict[str, A
         receipt["recall"] = payload["recall"]
     if operation == "run_finish" and "memory" in payload:
         receipt["memory"] = payload["memory"]
+    if operation == "references_use":
+        for key in ("run_id", "outcomes", "counts"):
+            if key in payload:
+                receipt[key] = payload[key]
     object_fields = (
         (
             "active_run",
@@ -642,6 +679,20 @@ def _create_server(
     ) -> dict[str, Any]:
         """Read a memory and its original source without capture or reinforcement. Deleted or missing memories return null."""
         return await call_application(application.get_memory, memory_id, session_id=session_id, **compact_payload(source_db=source_db))
+
+    @server.tool(name="tapl_use_references", title="Record actual TAPL reference usage", annotations=ToolAnnotations(
+        read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False,
+    ))
+    async def use_references(
+        expected_run_id: Annotated[str, Field(description="Exact active RUN owned by this session.", min_length=1, max_length=256)],
+        references: Annotated[list[ReferenceUse], Field(description="Only sources actually used now, with surviving read evidence in this exact session. History must have been opened; memory needs its returned note and exact opened original.", min_length=1, max_length=run_references.MAX_USES)],
+        session_id: Annotated[str, Field(description="Required exact nonempty host hook conversation session_id; legacy omission is not supported for usage claims.", min_length=1, max_length=256, strict=True)],
+    ) -> dict[str, Any]:
+        """Connect actually used evidence read in this or an earlier RUN of the same session, without re-fetching. Returned memory hints qualify only with their exact opened original; search/list exposure alone, other sessions and discarded evidence do not. Validate atomically; return compact recorded/unchanged outcomes and preserve the first usage reason. At most 200 used references including memory originals per RUN. Does not reinforce memories or change foreign sources."""
+        return await call_application_write(
+            application, application.use_references, session_id=session_id, operation="references_use",
+            expected_run_id=expected_run_id, references=[entry.model_dump() for entry in references],
+        )
 
     @server.tool(name="tapl_update_memory", title="Update TAPL memory", annotations=MEMORY_WRITE)
     async def update_memory(

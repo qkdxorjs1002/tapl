@@ -1267,13 +1267,13 @@ def workflow_stage_progression_guidance() -> str:
 
 def history_search_guidance() -> str:
     return (
-        "Before planning non-trivial work, use emitted memory cues as an initial exploration lead, "
-        "then inspect original sources with `tapl_get_item` or `tapl_get_archive` before relying on them. "
-        "Prefer `tapl_get_item(compact=true)` for structured records; full formatted bodies remain available. "
-        "When cues are absent or insufficient, search relevant prior TAPL history with `tapl_search_history` "
-        "for decisions, implementation patterns, failures, or tradeoffs; ignore unrelated matches. "
-        "Forward returned `source_db` in source reads and memory uses. "
-        "During execution, search again as needed."
+        "Before non-trivial planning, follow memory cues and inspect original sources with `tapl_get_item` or `tapl_get_archive`. "
+        "Prefer `tapl_get_item(compact=true)`; full formatted bodies remain available. If cues are insufficient, use "
+        "`tapl_search_history` for relevant decisions, patterns, failures or tradeoffs; search again during execution as needed. "
+        "Preserve returned `source_db`. For actual reuse in this exact session, use `tapl_use_references` with "
+        "expected_run_id, references and session_id. Give concrete usage. Earlier RUN reads need no re-fetch. "
+        "Memory requires its returned note and checked original. Never claim search/list exposure alone or "
+        "copy prior reference snapshots wholesale."
     )
 
 

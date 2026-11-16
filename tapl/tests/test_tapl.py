@@ -144,7 +144,7 @@ class TaplRuntimeTests(unittest.TestCase):
         tools = asyncio.run(server.list_tools())
         by_name = {tool.name: tool for tool in tools}
 
-        self.assertEqual(len(tools), 34)
+        self.assertEqual(len(tools), 35)
         self.assertIn("tapl_get_status", by_name)
         self.assertIn("tapl_get_context", by_name)
         self.assertIn("tapl_list_archives", by_name)
@@ -339,7 +339,7 @@ class TaplRuntimeTests(unittest.TestCase):
                     return tools, result
 
             tools, result = asyncio.run(exercise())
-            self.assertEqual(len(tools.tools), 34)
+            self.assertEqual(len(tools.tools), 35)
             self.assertFalse(result.is_error)
             receipt = result.structured_content
             self.assertEqual(receipt["operation"], "run_summarize")
@@ -879,9 +879,13 @@ class TaplRuntimeTests(unittest.TestCase):
             "execution approval",
             "only active work is In Progress",
             "Reclassify upward only when scope, risk, or uncertainty grows",
-            "search relevant prior TAPL history",
-            "ignore unrelated matches",
-            "During execution, search again",
+            "`tapl_search_history` for relevant decisions",
+            "search again during execution as needed",
+            "For actual reuse in this exact session",
+            "use `tapl_use_references` with expected_run_id, references and session_id",
+            "Earlier RUN reads need no re-fetch",
+            "Memory requires its returned note and checked original",
+            "Never claim search/list exposure",
             "decision-relevant findings with source and impact",
             "never store raw dumps, long candidate lists, or stale findings",
             "Archive when no actionable work remains",

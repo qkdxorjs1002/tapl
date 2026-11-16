@@ -27,10 +27,10 @@ export interface TaplWorkflowRun {
   record_count?: number;
 }
 
-/** Agent reads observed during this RUN; Viewer navigation never records references. */
+/** Agent reads and explicit use during this RUN; Viewer navigation never records references. */
 export interface TaplRunReference {
   kind: 'memory' | 'history';
-  stage: 'retrieved' | 'opened';
+  stage: 'retrieved' | 'opened' | 'used';
   source_db: string;
   target_type: 'memory' | 'item' | 'run';
   run_id: string;
@@ -39,6 +39,7 @@ export interface TaplRunReference {
   item_id?: number;
   stable_id?: string;
   record_kind?: string;
+  usage?: string;
   source?: { source_db: string; run_id: string; item_id?: number | null; archive_id?: string | null };
 }
 

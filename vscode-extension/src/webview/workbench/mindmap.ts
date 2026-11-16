@@ -1,5 +1,5 @@
 import type { TaplItem, TaplRunReference, TaplRunSnapshot } from '../types';
-import { referenceOriginalKey, runMindmapReferences, runReferenceKey } from './runReferences';
+import { isOpenedReference, referenceOriginalKey, runMindmapReferences, runReferenceKey } from './runReferences';
 
 export interface MindmapNode {
   key: string;
@@ -187,7 +187,7 @@ export function buildRunMindmap(snapshot: TaplRunSnapshot): MindmapGraph {
     else memoriesByOriginal.set(key, [memory]);
   }
   for (const history of historyNodes) {
-    if (history.reference!.stage !== 'opened') continue;
+    if (!isOpenedReference(history.reference!)) continue;
     const key = referenceOriginalKey(history.reference!);
     const memories = key === undefined ? [] : memoriesByOriginal.get(key) ?? [];
     if (memories.length) {
@@ -198,7 +198,7 @@ export function buildRunMindmap(snapshot: TaplRunSnapshot): MindmapGraph {
     } else edges.push({ from: root.key, to: history.key, flowing: false, relation: 'history' });
   }
   for (const memory of memoryNodes) {
-    if (memory.reference!.stage === 'opened' || linkedMemories.has(memory.key)) {
+    if (isOpenedReference(memory.reference!) || linkedMemories.has(memory.key)) {
       edges.push({ from: root.key, to: memory.key, flowing: false, relation: 'memory' });
     }
   }

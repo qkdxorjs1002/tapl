@@ -28,7 +28,7 @@ def test_all_mcp_tools_can_route_a_session(workspace: Path) -> None:
     assert tools
     for tool in tools:
         assert "session_id" in tool.input_schema["properties"], tool.name
-        if tool.name == "tapl_discard_run":
+        if tool.name in ("tapl_discard_run", "tapl_use_references"):
             assert "session_id" in tool.input_schema.get("required", []), tool.name
         else:
             assert "session_id" not in tool.input_schema.get("required", []), tool.name

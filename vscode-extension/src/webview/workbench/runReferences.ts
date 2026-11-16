@@ -16,14 +16,21 @@ export function runReferenceCommand(reference: TaplRunReference): WebviewCommand
   return undefined;
 }
 
-/** A later retrieved result cannot demote an original that was already opened. */
+const referenceStageRank = { retrieved: 0, opened: 1, used: 2 } as const;
+
+/** Only known confirmed stages can establish provenance connections. */
+export function isOpenedReference(reference: TaplRunReference): boolean {
+  return reference.stage === 'opened' || reference.stage === 'used';
+}
+
+/** Later reads cannot demote explicit use; repeated stages retain their first metadata. */
 export function runMindmapReferences(snapshot: TaplRunSnapshot): TaplRunReference[] {
   const references = new Map<string, TaplRunReference>();
   for (const reference of snapshot.references ?? []) {
-    if (!runReferenceCommand(reference)) continue;
+    if ((reference.stage !== 'retrieved' && !isOpenedReference(reference)) || !runReferenceCommand(reference)) continue;
     if (reference.kind === 'history' && reference.source_db === (snapshot.run.source_db ?? '') && reference.run_id === snapshot.run.id) continue;
     const key = runReferenceKey(reference), previous = references.get(key);
-    if (previous?.stage === 'opened' && reference.stage !== 'opened') continue;
+    if (previous && referenceStageRank[previous.stage] >= referenceStageRank[reference.stage]) continue;
     references.set(key, reference);
   }
   return [...references.values()].sort((a, b) => runReferenceKey(a).localeCompare(runReferenceKey(b)));
@@ -36,7 +43,7 @@ export function latestRunReference(snapshot: TaplRunSnapshot, reference: TaplRun
 }
 
 export function memoryReferencesHistory(memory: TaplRunReference, history: TaplRunReference): boolean {
-  if (memory.kind !== 'memory' || history.kind !== 'history' || history.stage !== 'opened') return false;
+  if (memory.kind !== 'memory' || history.kind !== 'history' || !isOpenedReference(history)) return false;
   const key = referenceOriginalKey(memory);
   return key !== undefined && key === referenceOriginalKey(history);
 }

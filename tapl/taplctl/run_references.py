@@ -1,11 +1,13 @@
-"""Compact, best-effort exposure telemetry for an existing owned RUN.
+"""Observed reads and explicit usage for an existing owned RUN.
 
 This is separate from memory reinforcement. HistoryReader and Viewer never call
-the writer. One bounded state event makes reads independent of workflow history
-length: at most two indexed event rows and 200 references are loaded.
+the writer. Current projection loads three indexed state rows and at most 200
+references. Session proof lookup streams original observed events separately;
+used-state snapshots can never become proof that a source was opened.
 """
 from __future__ import annotations
 
+import heapq
 import json
 from pathlib import Path
 import sqlite3
@@ -15,12 +17,16 @@ from . import db
 
 
 EVENT_TYPE = "run_references_updated"
+USED_EVENT_TYPE = "run_references_used"
 MAX_REFERENCES = 200
+MAX_USES = 50
 TITLE_LIMIT = 160
+USAGE_LIMIT = 500
+STAGE_RANK = {"retrieved": 0, "opened": 1, "used": 2}
 
 
 def limits() -> dict[str, int]:
-    return {"max_references": MAX_REFERENCES, "title_characters": TITLE_LIMIT, "event_rows_scanned": 2}
+    return {"max_references": MAX_REFERENCES, "title_characters": TITLE_LIMIT, "event_rows_scanned": 3}
 
 
 def _title(value: Any) -> str:
@@ -97,7 +103,7 @@ def _validated(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     kind, stage, target = value.get("kind"), value.get("stage"), value.get("target_type")
-    if kind not in ("memory", "history") or stage not in ("retrieved", "opened"):
+    if kind not in ("memory", "history") or stage not in ("retrieved", "opened", "used"):
         return None
     if target not in (("memory",) if kind == "memory" else ("item", "run")):
         return None
@@ -110,6 +116,11 @@ def _validated(value: Any) -> dict[str, Any] | None:
     if not isinstance(value.get("title"), str):
         return None
     result["title"] = _title(value["title"])
+    if stage == "used":
+        usage = value.get("usage")
+        if not isinstance(usage, str) or not 1 <= len(usage.strip()) <= USAGE_LIMIT:
+            return None
+        result["usage"] = usage.strip()
     if target == "memory":
         if not isinstance(value.get("memory_id"), str) or not 1 <= len(value["memory_id"]) <= 256:
             return None
@@ -128,6 +139,10 @@ def _validated(value: Any) -> dict[str, Any] | None:
             pointer = source.get(key)
             if pointer is None or (key == "item_id" and type(pointer) is int and pointer > 0) or (key == "archive_id" and isinstance(pointer, str) and len(pointer) <= 256):
                 result["source"][key] = pointer
+            elif target == "memory":
+                # An invalid item pointer must never degrade into RUN-level
+                # proof; the stored original is an exact identity.
+                return None
     return result
 
 
@@ -140,41 +155,190 @@ def merge(existing: list[dict[str, Any]], incoming: list[dict[str, Any]]) -> lis
         key = _key(ref)
         previous = merged.get(key)
         if previous is not None:
-            if previous["stage"] != "opened" and ref["stage"] == "opened":
+            if STAGE_RANK[ref["stage"]] > STAGE_RANK[previous["stage"]]:
                 merged[key] = ref
         elif len(merged) < MAX_REFERENCES:
             merged[key] = ref
-        elif ref["stage"] == "opened":
+        elif ref["stage"] != "retrieved":
             # Details take precedence over search exposure. Dict order preserves
             # first-seen age; all-opened state evicts its oldest identity.
-            victim = next((identity for identity, value in merged.items() if value["stage"] == "retrieved"),
-                          next(iter(merged)))
-            del merged[victim]
-            merged[key] = ref
+            eligible = [identity for identity, value in merged.items()
+                        if STAGE_RANK[value["stage"]] <= STAGE_RANK[ref["stage"]]]
+            if eligible:
+                victim = min(eligible, key=lambda identity: STAGE_RANK[merged[identity]["stage"]])
+                del merged[victim]
+                merged[key] = ref
     return list(merged.values())
+
+
+def _payload_references(row: Any) -> list[dict[str, Any]]:
+    if row is None:
+        return []
+    try:
+        payload = json.loads(row["payload_json"])
+        return payload["references"][:MAX_REFERENCES] if isinstance(payload, dict) and isinstance(payload.get("references"), list) else []
+    except (ValueError, TypeError, KeyError):
+        return []
+
+
+def _latest(conn: sqlite3.Connection, run_id: str, event_type: str) -> Any:
+    return conn.execute("SELECT id,payload_json FROM events WHERE run_id=? AND event_type=? ORDER BY id DESC LIMIT 1",
+                        (run_id, event_type)).fetchone()
+
+
+def _read_observed(conn: sqlite3.Connection, run_id: str | None) -> list[dict[str, Any]]:
+    if run_id is None:
+        return []
+    rows = []
+    for event_type in (EVENT_TYPE, "memory_recall_attempted"):
+        row = _latest(conn, run_id, event_type)
+        if row is not None:
+            rows.append((row, event_type))
+    refs = []
+    for row, event_type in sorted(rows, key=lambda value: value[0]["id"]):
+        # Tracking events contain a complete retained observed state. Never
+        # recirculate used references, even from malformed historical events.
+        observed = [ref for value in _payload_references(row)
+                    if (ref := _validated(value)) is not None and ref["stage"] != "used"]
+        refs = merge([] if event_type == EVENT_TYPE else refs, observed)
+    return refs
+
+
+def _read_used(conn: sqlite3.Connection, run_id: str) -> list[dict[str, Any]]:
+    return merge([], [ref for value in _payload_references(_latest(conn, run_id, USED_EVENT_TYPE))
+                      if (ref := _validated(value)) is not None and ref["stage"] == "used"])
 
 
 def read(conn: sqlite3.Connection, run_id: str | None) -> list[dict[str, Any]]:
     if run_id is None:
         return []
-    rows = []
-    for event_type in (EVENT_TYPE, "memory_recall_attempted"):
-        row = conn.execute("SELECT id,payload_json FROM events WHERE run_id=? AND event_type=? ORDER BY id DESC LIMIT 1",
-                           (run_id, event_type)).fetchone()
-        if row is not None:
-            rows.append((row, event_type))
-    refs = []
-    for row, event_type in sorted(rows, key=lambda value: value[0]["id"]):
-        try:
-            payload = json.loads(row["payload_json"])
-            if not isinstance(payload, dict) or not isinstance(payload.get("references"), list):
-                continue
-            # Tracking events contain a complete retained state; older automatic
-            # entries must not resurrect an identity evicted from that state.
-            refs = merge([] if event_type == EVENT_TYPE else refs, payload["references"])
-        except (ValueError, TypeError, KeyError):
-            continue
-    return refs
+    return merge(_read_observed(conn, run_id), _read_used(conn, run_id))
+
+
+class ReferenceUseError(ValueError):
+    """Invalid usage claims cannot partially change a RUN's projection."""
+
+    def __init__(self, message: str, code: str = "invalid_reference") -> None:
+        self.code = code
+        super().__init__(f"{code}: {message}")
+
+
+def validate_use(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ReferenceUseError("reference must be an object")
+    kind, target = value.get("kind"), value.get("target_type")
+    if kind not in ("memory", "history") or target not in (("memory",) if kind == "memory" else ("item", "run")):
+        raise ReferenceUseError("kind and target_type must match memory, history item, or history run")
+    identity = {"memory": "memory_id", "item": "item_id", "run": "run_id"}[target]
+    if set(value) != {"kind", "source_db", "target_type", identity, "usage"}:
+        raise ReferenceUseError("reference requires only kind, source_db, target_type, its matching id, and usage")
+    source = value["source_db"]
+    if not isinstance(source, str) or not 1 <= len(source) <= 256 or Path(source).name != source or source in (".", "..") or "\\" in source:
+        raise ReferenceUseError("source_db must be an exact source database filename")
+    target_id = value[identity]
+    invalid_id = (type(target_id) is not int or target_id < 1) if target == "item" else (not isinstance(target_id, str) or not 1 <= len(target_id) <= 256)
+    if invalid_id:
+        raise ReferenceUseError("reference id must match its target_type")
+    usage = value["usage"]
+    if not isinstance(usage, str) or not 1 <= len(usage.strip()) <= USAGE_LIMIT:
+        raise ReferenceUseError("usage must contain 1–500 characters after trimming")
+    return {**value, "usage": usage.strip()}
+
+
+def _read_proofs(conn: sqlite3.Connection, identities: set[tuple]) -> dict[tuple, dict[str, Any]]:
+    """A returned memory note plus its opened original proves more than exposure alone."""
+    found: dict[tuple, dict[str, Any]] = {}
+    if not identities:
+        return found
+    owner = db.connection_session_id(conn)
+    query = (
+        "SELECT e.id,e.event_type,e.payload_json FROM events e JOIN workflow_runs r ON r.id=e.run_id "
+        "WHERE e.session_id=? AND e.event_type=? AND r.session_id=? "
+        "AND NOT EXISTS (SELECT 1 FROM events discarded, "
+        "json_each(CASE WHEN json_valid(discarded.payload_json) THEN discarded.payload_json ELSE '{}' END, '$.archived_run_ids') ids "
+        "WHERE discarded.session_id=? AND discarded.event_type='run_discarded' AND ids.value=r.id) ORDER BY e.id DESC"
+    )
+    event_types = (EVENT_TYPE, "memory_recall_attempted") if any(key[0] == "memory" for key in identities) else (EVENT_TYPE,)
+    cursors = []
+    try:
+        for event_type in event_types:
+            cursors.append(conn.execute(query, (owner, event_type, owner, owner)))
+        # Merge indexed streams without sorting/materializing the session's payloads.
+        for row in heapq.merge(*cursors, key=lambda entry: entry["id"], reverse=True):
+            for value in _payload_references(row):
+                ref = _validated(value)
+                if ref is None:
+                    continue
+                eligible = ref["stage"] == "opened" or (ref["kind"] == "memory" and ref["stage"] == "retrieved")
+                if row["event_type"] == "memory_recall_attempted":
+                    eligible = ref["kind"] == "memory" and ref["stage"] == "retrieved"
+                key = _key(ref)
+                if eligible and key in identities and key not in found:
+                    found[key] = ref
+            if identities <= found.keys():
+                break
+    finally:
+        for cursor in cursors:
+            cursor.close()
+    return found
+
+
+def use(conn: sqlite3.Connection, *, expected_run_id: str, references: Any) -> dict[str, Any]:
+    """Validate a whole batch under the caller's local write transaction."""
+    if not conn.in_transaction:
+        raise ReferenceUseError("reference usage requires a local write transaction")
+    owner = db.connection_session_id(conn)
+    run = db.active_run(conn)
+    if not owner:
+        raise ReferenceUseError("session_id is required for exact conversation reference usage", "session_required")
+    if run is None or run["id"] != expected_run_id or run["session_id"] != owner:
+        raise ReferenceUseError("expected_run_id must match the active owned run", "stale_run")
+    if not isinstance(references, list) or not 1 <= len(references) <= MAX_USES:
+        raise ReferenceUseError("references must contain 1–50 entries")
+    claims = [validate_use(value) for value in references]
+    proofs = _read_proofs(conn, {_key(claim) for claim in claims})
+    source_keys: dict[tuple, tuple] = {}
+    for claim in claims:
+        key = _key(claim)
+        proof = proofs.get(key)
+        if proof is None:
+            raise ReferenceUseError("reference has no qualifying read in this exact session", "invalid_proof")
+        if claim["kind"] == "memory":
+            source = proof.get("source")
+            if not source:
+                raise ReferenceUseError("memory has no observed original-source pointer", "invalid_proof")
+            item_id = source.get("item_id")
+            source_keys[key] = ("history", source["source_db"], "item" if item_id else "run", item_id or source["run_id"])
+    originals = _read_proofs(conn, set(source_keys.values()))
+    for key, source_key in source_keys.items():
+        original = originals.get(source_key)
+        if original is None or original["run_id"] != proofs[key]["source"]["run_id"]:
+            raise ReferenceUseError("memory's exact original source was not opened in this session", "invalid_proof")
+    previous = _read_used(conn, expected_run_id)
+    current = {_key(ref): ref for ref in previous}
+    outcomes = []
+    for index, claim in enumerate(claims):
+        key = _key(claim)
+        selected = [proofs[key]]
+        if key in source_keys:
+            selected.append(originals[source_keys[key]])
+        changed = False
+        for ref in selected:
+            identity = _key(ref)
+            if identity not in current:
+                current[identity] = {**ref, "stage": "used", "usage": claim["usage"]}
+                changed = True
+        outcomes.append({"index": index, "status": "recorded" if changed else "unchanged"})
+    if len(current) > MAX_REFERENCES:
+        raise ReferenceUseError(
+            f"used_count={len(previous)}, proposed_count={len(current)}, limit={MAX_REFERENCES}; "
+            "distinct used references include memory originals", "reference_limit")
+    retained = list(current.values())
+    if retained != previous:
+        conn.execute("INSERT INTO events(run_id,session_id,event_type,tool_name,payload_json,created_at) VALUES(?,?,?,?,?,?)",
+                     (expected_run_id, owner, USED_EVENT_TYPE, "use_references", json.dumps({"references": retained}, ensure_ascii=False), db.utc_now()))
+    return {"ok": True, "run_id": expected_run_id, "outcomes": outcomes,
+            "counts": {status: sum(outcome["status"] == status for outcome in outcomes) for status in ("recorded", "unchanged")}}
 
 
 def capture(application: Any) -> tuple[Path, str, str] | None:
@@ -211,7 +375,7 @@ def record(captured: tuple[Path, str, str] | None, operation: str, result: dict[
         run = db.active_run(conn)
         if run is None or str(run["id"]) != run_id or str(run["session_id"]) != owner:
             return
-        previous = read(conn, run_id)
+        previous = _read_observed(conn, run_id)
         current = merge(previous, refs)
         if previous == current:
             return

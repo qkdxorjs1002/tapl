@@ -121,6 +121,68 @@ test('a source RUN open creates one root target and never manufactures historica
   assert.deepEqual(referenceEdges(graph), [{ from: graph.nodes[0].key, to: runReferenceKey(ref), flowing: false, relation: 'history' }]);
 });
 
+test('unknown runtime stages cannot create or replace confirmed reference provenance', () => {
+  const confirmed = history({stage: 'used'});
+  for (const stage of [undefined, null, 'future', 'constructor', ['used'], {stage: 'used'}]) {
+    const malformed = history({stage});
+    assert.equal(memoryReferencesHistory(memory(), malformed), false);
+    const value = snapshot([confirmed, malformed, history({stage, item_id: 99}), memory({stage})]);
+    assert.deepEqual(runMindmapReferences(value), [confirmed]);
+    const graph = buildRunMindmap(value);
+    assert.equal(graph.nodes.filter(node => node.reference).length, 1);
+    assert.deepEqual(referenceEdges(graph), [{from: graph.nodes[0].key, to: runReferenceKey(confirmed), relation: 'history', flowing: false}]);
+  }
+});
+
+test('used promotion retains one exact provenance path and first use across repeated lower stages', () => {
+  const usedMemory = memory({ stage: 'used', usage: 'Applied the original constraint' });
+  const usedHistory = history({ stage: 'used', usage: 'Applied the original constraint' });
+  for (const references of [
+    [memory(), history(), memory({stage: 'opened'}), history({stage: 'opened'}), usedMemory, usedHistory],
+    [usedMemory, usedHistory, memory({stage: 'opened'}), history({stage: 'opened'}), memory(), history()],
+    [memory(), usedMemory, memory({stage: 'opened'}), usedHistory, history(), history({stage: 'opened'})]
+  ]) {
+    references.push({...usedMemory, title: 'Repeated metadata', usage: 'Repeated reason'}, {...usedHistory});
+    const value = snapshot(references);
+    value.tasks.push({id: 3, kind: 'task', stable_id: 'TASK-002', spec_id: 'PLAN-001', title: 'Executing', status: 'In Progress'});
+    const normalized = runMindmapReferences(value);
+    assert.equal(normalized.length, 2);
+    assert.ok(normalized.every(reference => reference.stage === 'used'));
+    assert.equal(latestRunReference(value, memory()), usedMemory);
+    assert.equal(memoryReferencesHistory(usedMemory, usedHistory), true);
+    const baseline = buildRunMindmap({...value, references: []}), graph = buildRunMindmap(value);
+    assert.equal(new Set(graph.nodes.map(node => node.key)).size, graph.nodes.length);
+    assert.deepEqual(referenceEdges(graph), [
+      {from: runReferenceKey(usedMemory), to: runReferenceKey(usedHistory), relation: 'memory-source', flowing: false},
+      {from: graph.nodes[0].key, to: runReferenceKey(usedMemory), relation: 'memory', flowing: false}
+    ]);
+    assert.equal(new Set(graph.edges.map(({from, to}) => JSON.stringify([from, to]))).size, graph.edges.length);
+    assert.deepEqual([graph.completed, graph.total, graph.percent], [1, 2, 50]);
+    assert.deepEqual(graph.nodes.filter(node => !node.reference), baseline.nodes);
+    assert.deepEqual(graph.edges.filter(edge => !edge.relation), baseline.edges);
+    assert.equal(graph.edges.filter(edge => edge.flowing).length, 2, 'executing TASK and its PLAN keep their flow');
+  }
+});
+
+test('used references preserve source-qualified collisions and never invent missing original pointers', () => {
+  const m = memory({stage: 'used'}), h = history({stage: 'used'});
+  const otherMemory = {...m, source_db: '/foreign/memory.sqlite3', source: undefined};
+  const otherHistory = {...h, source_db: '/foreign/history.sqlite3'};
+  const graph = buildRunMindmap(snapshot([m, h, otherMemory, otherHistory, {...m}, {...h}]));
+  assert.equal(graph.nodes.filter(node => node.reference).length, 4);
+  assert.equal(new Set(graph.nodes.map(node => node.key)).size, graph.nodes.length);
+  assert.equal(referenceEdges(graph).length, 4);
+  assert.equal(new Set(referenceEdges(graph).map(({from, to}) => JSON.stringify([from, to]))).size, 4);
+  assert.equal(referenceEdges(graph).filter(edge => edge.relation === 'memory-source').length, 1);
+  assert.ok(graph.edges.some(edge => edge.from === graph.nodes[0].key && edge.to === runReferenceKey(otherMemory)));
+  assert.ok(graph.edges.some(edge => edge.from === graph.nodes[0].key && edge.to === runReferenceKey(otherHistory)));
+  for (const source of [undefined, {source_db: h.source_db, run_id: h.run_id, item_id: null}]) {
+    const missing = {...m, source};
+    assert.equal(memoryReferencesHistory(missing, h), false);
+    assert.equal(referenceEdges(buildRunMindmap(snapshot([missing, h]))).filter(edge => edge.relation === 'memory-source').length, 0);
+  }
+});
+
 test('status projection carries references and invalidates card, stage and provenance changes', () => {
   const original = snapshot([memory(), history()]);
   const status = { active_run: run, ...original }; delete status.run;
@@ -128,6 +190,7 @@ test('status projection carries references and invalidates card, stage and prove
   const projection = runMindmapProjection(original);
   for (const change of [
     value => { value.references[1].stage = 'opened'; },
+    value => { value.references[1].stage = 'used'; },
     value => { value.references[0].title = 'A new title'; },
     value => { value.references[0].source.item_id = 99; },
     value => { value.references[0].source.source_db = '/other/source'; },
@@ -200,14 +263,15 @@ test('a retained RUN card invokes the latest committed reference handler without
 });
 
 test('reference stages, kind legend and jump controls render in both languages without completion badges', () => {
-  const value = snapshot([memory(), history({stage: 'opened', title: '<script>Escaped original</script>'})]);
-  for (const [locale, labels] of [['en', ['Retrieved', 'Opened', 'Show memory references', 'Show history references']],
-    ['ko', ['조회', '원문 확인', '기억 참조 보기', '과거 기록 참조 보기']]]) {
+  const value = snapshot([memory(), history({stage: 'opened', title: '<script>Escaped original</script>'}), memory({memory_id: 'M-008', stage: 'used'})]);
+  for (const [locale, labels] of [['en', ['Retrieved', 'Opened', 'Used', 'Show memory references', 'Show history references']],
+    ['ko', ['조회', '원문 확인', '사용', '기억 참조 보기', '과거 기록 참조 보기']]]) {
     const html = renderToStaticMarkup(React.createElement(I18nProvider, {locale}, React.createElement(CurrentRun,
       {snapshot: value, open() {}, openReference() {}})));
     labels.forEach(label => assert.ok(html.includes(label), label));
     assert.match(html, /data-kind="memory" data-reference-stage="retrieved"/);
     assert.match(html, /data-kind="history" data-reference-stage="opened"/);
+    assert.match(html, /data-kind="memory" data-reference-stage="used"/);
     assert.match(html, /&lt;script&gt;Escaped original&lt;\/script&gt;/);
     assert.equal((html.match(/wb-mm-run-numbers/g) ?? []).length, 1);
     assert.equal((html.match(/wb-mm-plan-track/g) ?? []).length, 1);
