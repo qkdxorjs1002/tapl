@@ -50,6 +50,15 @@ print(json.dumps({'item_memory':item_memory,'run_memory':run_memory,'run':app.ge
   });
   browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
 });
+
+async function isolatedPage(options) {
+  const page = await browser.newPage(options);
+  // These suites exercise workspace behavior; keep the public release check deterministic.
+  await page.route('https://api.github.com/repos/qkdxorjs1002/tapl/releases/latest', route =>
+    route.fulfill({json: {tag_name: require('../../package.json').version, draft: false, prerelease: false}}));
+  return page;
+}
+
 after(async () => {
   await browser?.close();
   if (server && server.exitCode === null) {
@@ -93,7 +102,7 @@ async function assertSideBands(page, selector) {
 }
 
 test('real agent reads show exact original-only links; Viewer navigation leaves trace and owning RUN intact', async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR', reducedMotion: 'reduce' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR', reducedMotion: 'reduce' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   try {
     await page.goto(origin); await page.waitForLoadState('networkidle');
@@ -134,7 +143,7 @@ test('real agent reads show exact original-only links; Viewer navigation leaves 
 });
 
 test('associative-memory SVG connections also stay in central 35% side bands', async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
   try {
     await page.goto(origin); await page.waitForLoadState('networkidle');
     await page.locator('[data-wb-focus="nav:memories"]').click();
@@ -145,7 +154,7 @@ test('associative-memory SVG connections also stay in central 35% side bands', a
 
 test('repeated used payloads promote one source card and path without changing workflow or camera', {timeout: 30000}, async () => {
   for (const [locale, label] of [['en-US', 'Used'], ['ko-KR', '사용']]) {
-    const page = await browser.newPage({viewport: {width: 1440, height: 1000}, locale, reducedMotion: 'reduce'});
+    const page = await isolatedPage({viewport: {width: 1440, height: 1000}, locale, reducedMotion: 'reduce'});
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     let overview, used = false;
     const m = {kind: 'memory', stage: 'opened', target_type: 'memory', source_db: '/fixture/memory.sqlite3',
@@ -220,7 +229,7 @@ test('repeated used payloads promote one source card and path without changing w
 test('opened RUN references navigate and return; palette and follow keep workflow context', async () => {
   runPython(context + `app.get_run(${JSON.stringify(evidence.run_memory.source.run_id)},source_db=${JSON.stringify(evidence.run_memory.source_db)})
 print('true')`);
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
   try {
     await page.goto(origin); await page.waitForLoadState('networkidle');
     const map = page.locator('.wb-run-mindmap'); await map.waitFor();
@@ -261,7 +270,7 @@ print('true')`);
 });
 
 test('nearby PLAN and four TASK rows use facing horizontal ports without entering sibling columns', async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
   try {
     await page.route('**/api/message', async route => {
       const response = await route.fetch(), payload = await response.json();

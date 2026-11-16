@@ -4,6 +4,9 @@ All notable changes to TAPL Workflow Viewer are documented in this file.
 
 ## Unreleased
 
+- Show the Viewer build version at the bottom center on every page, linking directly to its GitHub release.
+- Highlight newer stable releases with a subtle ambient glow and a direct release link; respect reduced motion and cache public update checks.
+
 - Connect explicitly used memories and history from earlier RUNs of the same conversation to the current RUN after checking recorded original-read evidence.
 - Reuse existing source-qualified cards and connections, preserve the first usage reason, and show the Used state without duplicate nodes or edges.
 

@@ -1,6 +1,8 @@
 export type SupportedLocale = 'en' | 'ko';
 
 const EN_MESSAGES = {
+  viewerVersionRelease: 'Viewer v{version} · Open GitHub release',
+  viewerVersionUpdate: 'Viewer v{current} · v{latest} is available · Open GitHub release',
   wbSettings: 'Settings',
   settingsIntro: 'Configure tapl for this workspace. Changes are saved to the configuration file shown below.',
   settingsRuntime: 'Runtime configuration',
@@ -449,6 +451,8 @@ export type TranslationKey = keyof typeof EN_MESSAGES;
 export type TranslationParams = Record<string, string | number>;
 
 const KO_MESSAGES: Record<TranslationKey, string> = {
+  viewerVersionRelease: 'Viewer v{version} · GitHub 릴리스 열기',
+  viewerVersionUpdate: 'Viewer v{current} · 새 버전 v{latest} 사용 가능 · GitHub 릴리스 열기',
   wbSettings: '설정',
   settingsIntro: '이 워크스페이스의 tapl 설정을 관리합니다. 변경 사항은 아래 설정 파일에 저장됩니다.',
   settingsRuntime: '런타임 설정',

@@ -418,6 +418,7 @@ allowed_origins = [
                 with opener.open(f"{origin}/", timeout=5) as response:
                     self.assertEqual(response.status, 200)
                     self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
+                    self.assertIn("connect-src 'self' https://api.github.com;", response.headers["Content-Security-Policy"])
                     self.assertIn(b"doctype html", response.read())
 
                 payload = json.dumps({"command": "ready"}).encode("utf-8")

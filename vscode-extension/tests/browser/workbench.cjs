@@ -35,6 +35,15 @@ beforeEach(() => {
     assert.equal(result.status, 0, result.stderr);
   }
 });
+
+async function isolatedPage(options) {
+  const page = await browser.newPage(options);
+  // These suites exercise workspace behavior; keep the public release check deterministic.
+  await page.route('https://api.github.com/repos/qkdxorjs1002/tapl/releases/latest', route =>
+    route.fulfill({json: {tag_name: require('../../package.json').version, draft: false, prerelease: false}}));
+  return page;
+}
+
 after(async () => { await browser?.close(); if (server) { const done = new Promise(resolve => server.once('exit', resolve)); server.kill(); await done; } rmSync(workspace, { recursive: true, force: true }); });
 async function shot(page, name) {
   const directory = process.env.TAPL_SCREENSHOT_DIR;
@@ -42,7 +51,7 @@ async function shot(page, name) {
 }
 
 async function openPage() {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   page.setDefaultTimeout(6000);
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -65,7 +74,7 @@ async function setLanguage(page, locale) {
 test('RUN tabs keep titles and identifiers on separate lines at every screen size', { timeout: 60000 }, async () => {
   const longSlug = 'long-run-slug-'.repeat(12);
   for (const locale of ['ko', 'en']) {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale });
+    const page = await isolatedPage({ viewport: { width: 1440, height: 900 }, locale });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -286,7 +295,7 @@ test('settings retains invalid and conflicting drafts, restores pages, and keeps
 });
 
 test('settings works without an active RUN and keeps unsaved inputs through background hydration', { timeout: 30000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR' });
+  const page = await isolatedPage({ viewport: { width: 1280, height: 800 }, locale: 'ko-KR' });
   let overview;
   await page.route('**/api/message', async route => {
     const response = await route.fetch(), payload = await response.json();
@@ -308,7 +317,7 @@ test('settings works without an active RUN and keeps unsaved inputs through back
 });
 
 test('glass flow follows executing paths, highlights related tubes without restarting, and stops on status refresh', { timeout: 45000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   let overview;
   await page.route('**/api/message', async route => {
@@ -443,7 +452,7 @@ test('glass flow follows executing paths, highlights related tubes without resta
 });
 
 test('large maps bound idle work, retain keyboard targets and refresh current graph geometry', { timeout: 60000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   let overview, memoryOverview;
   await page.addInitScript(() => {
@@ -488,17 +497,26 @@ test('large maps bound idle work, retain keyboard targets and refresh current gr
       const map = page.locator('.wb-mindmap');
       assert.equal(await map.locator('[data-mindmap-node]').count(), count, 'every keyboard target stays mounted');
       await map.locator('.wb-mm-world').evaluate(async world => {
-        let previous = world.style.transform, settled = 0;
-        for (let sample = 0; sample < 50; sample++) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          const current = world.style.transform;
-          settled = current === previous ? settled + 1 : 0; previous = current;
-          if (settled >= 2) return;
-        }
-        throw new Error('Large-map camera did not settle before measuring idle writes');
+        if (document.visibilityState !== 'visible') throw new Error('Idle measurement needs a visible page');
+        await new Promise((resolve, reject) => {
+          let previous = world.style.transform, settled = 0, unchangedSince = performance.now(), frame;
+          const timeout = setTimeout(() => {
+            cancelAnimationFrame(frame);
+            reject(new Error('Large-map camera did not settle before measuring idle writes'));
+          }, 5000);
+          const sample = time => {
+            const current = world.style.transform;
+            if (current === previous) settled++;
+            else { settled = 0; unchangedSince = time; }
+            previous = current;
+            if (settled >= 3 && time - unchangedSince >= 250) { clearTimeout(timeout); resolve(); }
+            else frame = requestAnimationFrame(sample);
+          };
+          frame = requestAnimationFrame(sample);
+        });
       });
       const writes = await idleWrites();
-      assert.equal(writes.node+writes.path+writes.world+writes.light, 0, `${kind}: settled geometry sleeps`);
+      assert.equal(writes.node+writes.path+writes.world+writes.light, 0, `${kind}: settled geometry sleeps ${JSON.stringify(writes)}`);
       assert.equal(writes.pulse, 0, `${kind}: no executing work means no ambient flow writes`);
       const pulses = await map.locator('.wb-mm-pulse').evaluateAll(nodes => nodes.filter(node => +getComputedStyle(node).opacity > 0).length);
       assert.equal(pulses, 0, 'pending work and memories remain static');
@@ -534,7 +552,17 @@ test('large maps bound idle work, retain keyboard targets and refresh current gr
         const compiled = { exports: {} }; new Function('module', 'exports', source)(compiled, compiled.exports);
         const graph = compiled.exports.buildRunMindmap({ ...s, run: { ...s.active_run, source_db: s.active_run.source_db ?? s.source_db }, readonly: false });
         await page.evaluate(payload => window.postMessage({ ...payload, type: 'view:update' }, '*'), next);
-        await page.waitForFunction(() => document.querySelectorAll('.wb-run-mindmap [data-mindmap-node]').length === 241); await page.waitForTimeout(60);
+        // React commits the retained nodes before the viewport effect restores their new positions.
+        await page.waitForFunction(nodes => {
+          const expected = new Map(nodes.map(node => [node.key, node]));
+          const elements = [...document.querySelectorAll('.wb-run-mindmap [data-mindmap-node]')];
+          return elements.length === nodes.length && elements.every(element => {
+            const node = expected.get(element.dataset.mindmapNode);
+            const matrix = new DOMMatrix(getComputedStyle(element).transform);
+            return node && Math.abs(matrix.e + element.offsetWidth / 2 - node.x) < .01 &&
+              Math.abs(matrix.f + element.offsetHeight / 2 - node.y) < .01;
+          });
+        }, graph.nodes.map(({key, x, y}) => ({key, x, y})));
         const actual = await map.locator('[data-mindmap-node]').evaluateAll(nodes => nodes.map(node => {
           const m = new DOMMatrix(getComputedStyle(node).transform);
           return { key: node.dataset.mindmapNode, x: m.e+node.offsetWidth/2, y: m.f+node.offsetHeight/2 };
@@ -658,7 +686,7 @@ test('icon navigation hides collapsed counts, expands over the map and preserves
 });
 
 test('large rail counts retain their full names and captions stay on one line throughout expansion', { timeout: 30000 }, async () => {
-  const page = await browser.newPage({ viewport:{width:1440,height:1000},locale:'ko-KR' });
+  const page = await isolatedPage({ viewport:{width:1440,height:1000},locale:'ko-KR' });
   try {
     await page.route('**/api/message',async route => {
       const response=await route.fetch(), payload=await response.json();
@@ -795,7 +823,7 @@ test('Explore stays reachable on short screens and closes across responsive navi
 
 
 test('theme control reflects automatic dark mode and follows system changes until overridden', async () => {
-  const page = await browser.newPage({ locale: 'en-US', colorScheme: 'dark', viewport: { width: 1280, height: 900 } });
+  const page = await isolatedPage({ locale: 'en-US', colorScheme: 'dark', viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(6000);
   try {
     await page.goto(origin);
@@ -1354,7 +1382,7 @@ test('automatic following shows the action tooltip on hover and keyboard focus i
     ['ko', '자동 추적 켜기', '자동 추적 끄기'],
     ['en', 'Turn on automatic following', 'Turn off automatic following']
   ]) {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: locale === 'ko' ? 'ko-KR' : 'en-US' });
+    const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: locale === 'ko' ? 'ko-KR' : 'en-US' });
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.emulateMedia({ colorScheme: locale === 'ko' ? 'dark' : 'light' });
     const toggle = page.locator('[data-wb-focus="mindmap-follow"]'), tooltip = page.getByRole('tooltip');
@@ -1394,7 +1422,7 @@ test('automatic following shows the action tooltip on hover and keyboard focus i
 
 test('an unselected initial workspace browses folders and opens a selection without typing a path', { timeout: 30000 }, async () => {
   const extra = await startServer(['--without-default']);
-  const page = await browser.newPage({ viewport: { width: 1000, height: 700 }, locale: 'en-US' });
+  const page = await isolatedPage({ viewport: { width: 1000, height: 700 }, locale: 'en-US' });
   try {
     await page.goto(extra.url);
     await page.locator('dialog.wb-workspace-dialog').waitFor();
@@ -1464,7 +1492,7 @@ test('archive fallback, events, recoverable errors and unsupported memory share 
 });
 
 test('initial loading retains the fixed shell', { timeout: 30000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US' });
+  const page = await isolatedPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US' });
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   await page.route('**/api/message', async route => { if (route.request().postDataJSON().command === 'ready') await gate; await route.continue(); });
@@ -1480,7 +1508,7 @@ test('initial loading retains the fixed shell', { timeout: 30000 }, async () => 
 });
 
 test('RUN follows executing TASK and PLAN context with resistant gestures, refresh and source-safe preferences', { timeout: 60000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   let overview;
   await page.route('**/api/message', async route => {
@@ -1757,7 +1785,7 @@ test('trackpad acceleration stays attached, direct input has no extra easing, an
 });
 
 test('same RUN refresh preserves sustained pointer, trackpad and native pinch gestures', { timeout: 30000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' });
   let overview;
   await page.route('**/api/message', async route => {
     const response = await route.fetch(), payload = await response.json();
@@ -1842,7 +1870,7 @@ test('same RUN refresh preserves sustained pointer, trackpad and native pinch ge
 });
 
 test('follow return settles smoothly and regrabbing or lifting one pinch finger never snaps', { timeout: 30000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   try {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -1925,7 +1953,7 @@ async function observeWorkbenchMotion(page) {
 }
 
 test('page motion waits for route content, ignores polling/filter/locale updates, and retains settings DOM', { timeout: 45000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await observeWorkbenchMotion(page);
   let overview, releaseRecords;
@@ -1974,7 +2002,7 @@ test('page motion waits for route content, ignores polling/filter/locale updates
 });
 
 test('surface exits are inert, reopen cancels cleanup, and reduced motion clears modal and mobile scrim immediately', { timeout: 45000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await observeWorkbenchMotion(page);
   try {
@@ -2015,7 +2043,7 @@ test('surface exits are inert, reopen cancels cleanup, and reduced motion clears
 
 
 test('visible unfocused RUNs follow PLAN preparation and live work while hidden or offscreen maps pause', { timeout: 30000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  const page = await isolatedPage({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
   let overview, templates;
   await page.route('**/api/message', async route => {
     const response = await route.fetch(), payload = await response.json();

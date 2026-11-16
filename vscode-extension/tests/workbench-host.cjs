@@ -112,5 +112,6 @@ test('exact RUN and library host routes keep source/page/context without rebindi
   release(); await tick(); await tick();
   assert.equal(messages.length, count, 'stale exact-run read cannot replace newer navigation');
   assert.match(panel.webview.html, /default-src 'none'/);
+  assert.match(panel.webview.html, /connect-src https:\/\/api\.github\.com;/);
   await extension.deactivate();
 });

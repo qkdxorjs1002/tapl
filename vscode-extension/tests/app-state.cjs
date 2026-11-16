@@ -40,7 +40,7 @@ function harness(restored, browser = false) {
   return { writes, messages, get reads() { return reads; }, render() {
     cursor = 0; effects = [];
     const tree = compiled.exports.App(); effects.forEach(effect => effect());
-    return tree.props.children.props.children.props;
+    return React.Children.toArray(tree.props.children.props.children).find(child => child.props && 'view' in child.props).props;
   }, receive(message) { listeners.get('message')({ data: message }); } };
 }
 

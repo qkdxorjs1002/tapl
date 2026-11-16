@@ -20,6 +20,7 @@ import { SecondaryView } from './workbench/SecondaryViews';
 import { Icon as WorkbenchIcon } from './workbench/Icon';
 import { mergePersistedAppState, type PersistedAppState } from './appState';
 import { sameMindmapValue } from './workbench/mindmapCache';
+import { ViewerVersion } from './ViewerVersion';
 
 const BOOTSTRAP_VIEW: WebviewView = {
   type: 'overview',
@@ -213,6 +214,7 @@ export function App(): JSX.Element {
             />
           )}
         />
+        <ViewerVersion />
       </div>
     </I18nProvider>
   );
