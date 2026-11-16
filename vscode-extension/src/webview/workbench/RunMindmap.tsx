@@ -57,6 +57,7 @@ export function RunMindmap({
     follow,
     setActive
   });
+  const followAction = t(following ? 'wbMindmapFollowOff' : 'wbMindmapFollowOn');
   const executing = useMemo(() => mindmapRunActiveKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
   const referenceGroups = useMemo(() => (['memory', 'history'] as const).map(kind => ({
     kind, nodes: graph.nodes.filter(node => node.reference?.kind === kind)
@@ -110,9 +111,10 @@ export function RunMindmap({
             className="wb-mm-icon-button wb-mm-follow"
             type="button"
             data-wb-focus="mindmap-follow"
+            data-wb-tooltip-text={followAction}
             aria-label={t('wbMindmapFollow')}
             aria-pressed={following}
-            title={t(following ? 'wbMindmapFollowOff' : 'wbMindmapFollowOn')}
+            title={followAction}
             onClick={() => controlsRef.current?.toggleFollow()}
           >
             <svg className="wb-icon" viewBox="0 0 24 24" aria-hidden="true">

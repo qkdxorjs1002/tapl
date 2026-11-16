@@ -2,6 +2,11 @@
 
 All notable changes to TAPL Workflow Viewer are documented in this file.
 
+## 2.21.4 - 2026-11-16
+
+- Fix the visible automatic-following tooltip to show the current action on hover and keyboard focus in Korean and English.
+- Preserve the toggle's accessible name and pressed state while showing the requested action text.
+
 ## 2.21.3 - 2026-11-16
 
 - Follow Draft and Finalized PLANs before any TASK exists, while prioritizing executing work and keeping the RUN visible.

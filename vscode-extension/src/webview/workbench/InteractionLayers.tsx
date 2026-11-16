@@ -63,7 +63,8 @@ export function IconTooltips({ navigationKey }: { navigationKey: string }): JSX.
           'aria-describedby',
           [target.getAttribute('aria-describedby'), id].filter(Boolean).join(' ')
         );
-        setShown({ label: target.getAttribute('aria-label') ?? '', target });
+        // An action tooltip can differ from the toggle's stable accessible name.
+        setShown({ label: target.dataset.wbTooltipText ?? target.getAttribute('aria-label') ?? '', target });
       };
       if (immediately) show();
       else timer.current = setTimeout(show, 300);

@@ -1349,6 +1349,49 @@ test('icon tooltips work on hover/focus and actual status colors stay distinct i
   } finally { await page.close(); }
 });
 
+test('automatic following shows the action tooltip on hover and keyboard focus in both languages', { timeout: 30000 }, async () => {
+  for (const [locale, on, off] of [
+    ['ko', '자동 추적 켜기', '자동 추적 끄기'],
+    ['en', 'Turn on automatic following', 'Turn off automatic following']
+  ]) {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: locale === 'ko' ? 'ko-KR' : 'en-US' });
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.emulateMedia({ colorScheme: locale === 'ko' ? 'dark' : 'light' });
+    const toggle = page.locator('[data-wb-focus="mindmap-follow"]'), tooltip = page.getByRole('tooltip');
+    const hide = async () => {
+      await page.mouse.move(700, 30);
+      await toggle.evaluate(element => element.blur());
+      await tooltip.waitFor({ state: 'hidden' });
+    };
+    const shown = async (label, input) => {
+      if (input === 'hover') await toggle.hover();
+      else await toggle.focus();
+      await tooltip.waitFor();
+      assert.equal(await tooltip.innerText(), label, `${locale}: rendered ${input} tooltip`);
+      const id = await tooltip.getAttribute('id');
+      assert.ok((await toggle.getAttribute('aria-describedby')).split(/\s+/).includes(id));
+      assert.equal(await toggle.getAttribute('title'), null, 'the custom layer suppresses duplicate native tooltips');
+    };
+    try {
+      await page.goto(origin); await toggle.waitFor();
+      const accessibleName = await toggle.getAttribute('aria-label');
+      assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+      await shown(off, 'hover'); await shot(page, `follow-tooltip-${locale}-on`);
+      await hide(); assert.equal(await toggle.getAttribute('title'), off, 'native title is restored after hover');
+      await toggle.click();
+      assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+      await hide(); await shown(on, 'hover'); await shot(page, `follow-tooltip-${locale}-off`);
+      await hide(); await shown(on, 'focus');
+      await page.keyboard.press('Space');
+      assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+      await hide(); await shown(off, 'focus');
+      assert.equal(await toggle.getAttribute('aria-label'), accessibleName, 'the toggle keeps its stable accessible name');
+      await hide(); assert.equal(await toggle.getAttribute('title'), off);
+      assert.deepEqual(errors, []);
+    } finally { await page.close(); }
+  }
+});
+
 test('an unselected initial workspace browses folders and opens a selection without typing a path', { timeout: 30000 }, async () => {
   const extra = await startServer(['--without-default']);
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 }, locale: 'en-US' });
