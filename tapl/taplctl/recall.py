@@ -15,6 +15,12 @@ import uuid
 from . import db, memory_search
 
 
+AUTOMATIC_RECALL_LIMIT = 3
+AUTOMATIC_RECALL_MAX_BYTES = 3600
+AUTOMATIC_RECALL_CANDIDATES = 24
+AUTOMATIC_RECALL_RULES_VERSION = 2
+
+
 class MemoryError(ValueError):
     def __init__(self, message: str, code: str = "invalid"):
         super().__init__(message)
@@ -197,14 +203,34 @@ def _fts_queries(query, spacing_aliases):
     return list(dict.fromkeys(expanded))
 
 
+def _search_branches(query):
+    branches, seen = [], set()
+    for variant in memory_search.query_variants(query):
+        bounded = _query(variant)
+        if not bounded:
+            continue
+        aliases = memory_search.korean_aliases(variant)
+        phrases = memory_search.query_phrases(variant) if aliases else set()
+        identity = (bounded, frozenset(aliases), frozenset(phrases))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        native = db.build_fts_queries(bounded)
+        exact_count = 2 if len(bounded.split()) > 1 else 1
+        exact = list(dict.fromkeys([*native[:exact_count], *(
+            [" OR ".join(f'"{alias}"' for alias in sorted(aliases))] if aliases else [])]))
+        fallbacks = [value for value in _fts_queries(bounded, aliases) if value not in exact]
+        branches.append((bounded, aliases, phrases, [*exact, *fallbacks], len(exact)))
+    return branches
+
+
 def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
+    """Collect ranked candidates; automatic response budgeting belongs to callers."""
     bounded_query = _query(query)
-    spacing_aliases = memory_search.korean_aliases(query)
-    spacing_phrases = memory_search.query_phrases(query) if spacing_aliases else set()
     if type(limit) is not int or not 1 <= limit <= 50 or type(offset) is not int or offset < 0 or offset > 1000000:
         raise MemoryError("limit must be 1–50 and offset must be 0–1000000")
     if automatic:
-        limit, offset = min(limit, 3), 0
+        limit, offset = min(limit, AUTOMATIC_RECALL_LIMIT), 0
     where = ["m.state='active'" if automatic else "m.state!='deleted'",
              "EXISTS(SELECT 1 FROM workflow_runs r WHERE r.id=m.source_run_id AND (m.source_item_id IS NOT NULL OR length(trim(r.result_summary))>0))",
              "(m.source_item_id IS NULL OR EXISTS(SELECT 1 FROM items i WHERE i.id=m.source_item_id AND i.run_id=m.source_run_id))"]
@@ -213,36 +239,74 @@ def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
         where.append("m.created_run_id!=?")
         params.append(current_run_id)
     clause = " AND ".join(where)
-    ranked = []
-    total = 0
+    total, scanned = 0, 0
     if bounded_query:
-        # Each fallback is bounded before materialization; OR never scans Python-side history.
-        queries = _fts_queries(bounded_query, spacing_aliases)
-        seen = set()
-        for priority, fts_query in enumerate(queries):
-            sql = "FROM memory_fts JOIN memories m ON m.id=memory_fts.rowid WHERE memory_fts MATCH ? AND " + clause
-            if not automatic:
-                # Manual results use the broadest safe FTS query for stable count/pagination.
-                if priority != len(queries) - 1:
-                    continue
-                total = conn.execute("SELECT count(*) " + sql, [fts_query, *params]).fetchone()[0]
-            rows = conn.execute("SELECT m.*,bm25(memory_fts) AS relevance " + sql + " ORDER BY relevance,m.id LIMIT ? OFFSET ?",
-                                [fts_query, *params, 24 - len(seen) if automatic else limit, 0 if automatic else offset]).fetchall()
-            for row in rows:
-                if row["id"] in seen:
-                    continue
-                seen.add(row["id"])
-                matched, accepted = _matches(row, bounded_query, spacing_aliases, spacing_phrases)
-                if automatic and not accepted:
-                    continue
-                memory = _dto(conn, row, now, matched=matched)
-                ranked.append((priority, row["relevance"], -memory["strength"], memory))
-            if automatic and len(seen) >= 24:
-                break
-        ranked.sort(key=lambda entry: entry[:3])
-        memories = [entry[3] for entry in ranked[:limit]]
+        branches = _search_branches(query)
+        base_sql = "FROM memory_fts JOIN memories m ON m.id=memory_fts.rowid WHERE memory_fts MATCH ? AND " + clause
         if automatic:
-            total = len(ranked)
+            # Visit every original/alias exact phase before broad fallbacks.
+            # The cache counts unique rows, but rejection under one spelling
+            # never prevents independent approval under a later safe variant.
+            phases = [(index, exact, branch, fts_query) for exact in (True, False) for index, branch in enumerate(branches)
+                      for fts_query in (branch[3][:branch[4]] if exact else branch[3][branch[4]:])]
+            seen, accepted = {}, {}
+            exact_scanned = [0] * len(branches)
+            for index, exact, branch, fts_query in phases:
+                remaining = AUTOMATIC_RECALL_CANDIDATES - len(seen)
+                if exact:
+                    # Reserve a fair unique-row share for every independent
+                    # spelling. A rejected original singleton cannot consume
+                    # all 24 slots before a canonical exact cue is searched.
+                    share = AUTOMATIC_RECALL_CANDIDATES // len(branches) + (index < AUTOMATIC_RECALL_CANDIDATES % len(branches))
+                    remaining = min(remaining, share - exact_scanned[index])
+                if remaining:
+                    exclusions = " AND m.id NOT IN (" + ",".join("?" for _ in seen) + ")" if seen else ""
+                    rows = conn.execute("SELECT m.*,bm25(memory_fts) AS relevance " + base_sql + exclusions +
+                                        " ORDER BY relevance,m.id LIMIT ?",
+                                        [fts_query, *params, *seen, remaining]).fetchall()
+                    seen.update((row["id"], row) for row in rows)
+                    if exact:
+                        exact_scanned[index] += len(rows)
+            if seen:
+                included = " AND m.id IN (" + ",".join("?" for _ in seen) + ")"
+                # Rank the bounded pool against each phase independently. This
+                # also restores original-exact priority for rows discovered
+                # later using an unused alias share or a broad fallback.
+                for priority, (_, _, branch, fts_query) in enumerate(phases):
+                    scores = conn.execute("SELECT m.id,bm25(memory_fts) AS relevance " + base_sql + included,
+                                          [fts_query, *params, *seen]).fetchall()
+                    for score in scores:
+                        row_id = score["id"]
+                        if row_id in accepted:
+                            continue
+                        row = seen[row_id]
+                        matched, approved = _matches(row, branch[0], branch[1], branch[2])
+                        if approved:
+                            memory = _dto(conn, row, now, matched=matched)
+                            accepted[row_id] = (priority, score["relevance"], -memory["strength"], memory)
+            ranked = sorted(accepted.values(), key=lambda entry: entry[:3])
+            memories = [entry[3] for entry in ranked]
+            total, scanned = len(memories), len(seen)
+        else:
+            # One stable broad union supplies both count and pagination. Exact
+            # original matches retain preference over canonicalized variants.
+            union = " OR ".join(f"({branch[3][-1]})" for branch in branches)
+            sql = base_sql
+            total = conn.execute("SELECT count(*) " + sql, [union, *params]).fetchone()[0]
+            exact = db.build_fts_queries(bounded_query)[0]
+            rows = conn.execute("SELECT m.*,bm25(memory_fts) AS relevance " + sql +
+                                " ORDER BY CASE WHEN m.id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?)"
+                                " THEN 0 ELSE 1 END,relevance,m.id LIMIT ? OFFSET ?",
+                                [union, *params, exact, limit, offset]).fetchall()
+            memories = []
+            for row in rows:
+                matched = []
+                for branch in branches:
+                    found, approved = _matches(row, branch[0], branch[1], branch[2])
+                    if found:
+                        matched = found
+                        break
+                memories.append(_dto(conn, row, now, matched=matched))
     elif automatic:
         memories = []
     else:
@@ -252,68 +316,166 @@ def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
     result = {"memories": memories, "total": total, "query": bounded_query, "offset": offset, "limit": limit,
               "diagnostics": diagnostics(conn, matched_count=total)}
     if automatic:
-        # Injection needs a hint and its original pointer, not Viewer metadata.
-        result["memories"] = [
-            {"id": m["id"], "revision": m["revision"], "note": m["note"],
-             "matched_cues": m["matched_cues"],
-             "source": {key: value for key, value in m["source"].items() if key != "title"}}
-            for m in memories
-        ]
-        _budget(result)
+        source_db = Path(conn.execute("PRAGMA database_list").fetchone()[2]).name
+        result["memories"] = [{**memory, "source_db": source_db} for memory in memories]
+        result["_recall_stats"] = {"scanned_count": scanned, "accepted_count": total,
+                                   "query_truncated": len(re.findall(r"[\w가-힣]+", _normal(query))) > 8}
     return result
 
 
-def _budget(payload):
-    # Budget the entire UTF-8 response, preserving each included source pointer.
-    candidates, payload["memories"] = payload["memories"], []
-    # Keep full errors on manual reads; automatic hints prioritize original pointers.
-    if "diagnostics" in payload:
-        payload["diagnostics"].pop("last_capture_error", None)
-        payload["diagnostics"]["injected_count"] = 0
-    if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 1200:
-        payload["query"] = ""
-    # Foreign-source failures remain fully visible in manual history reads.
-    # Automatic context has one shared byte budget, including diagnostics.
-    errors = payload.get("source_errors", [])
-    while errors and len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 600:
-        errors.pop()
-        payload["source_errors_omitted"] = payload.get("source_errors_omitted", 0) + 1
+def _response_bytes(payload):
+    return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+
+def _automatic_hint(memory):
+    source = memory.get("source") or {}
+    source_db = memory.get("source_db") or source.get("source_db")
+    if (not isinstance(memory.get("id"), str) or not memory["id"]
+            or type(memory.get("revision")) is not int or memory["revision"] < 1
+            or not isinstance(memory.get("note"), str)
+            or not isinstance(source_db, str) or not source_db
+            or not isinstance(source.get("run_id"), str) or not source["run_id"]):
+        return None
+    item_id = source.get("item_id")
+    if source.get("kind") == "item" or item_id is not None:
+        # Preserve the original identity; a malformed ITEM is never RUN proof.
+        if type(item_id) is not int or item_id <= 0:
+            return None
+        pointer = {"run_id": source["run_id"], "kind": "item", "item_id": item_id}
+    else:
+        archive_id = source.get("archive_id")
+        if archive_id is not None and not isinstance(archive_id, str):
+            return None
+        pointer = {"run_id": source["run_id"], "kind": "run", "archive_id": archive_id}
+    return {"id": memory["id"], "revision": memory["revision"], "note": memory["note"],
+            "source_db": source_db, "source": pointer}
+
+
+def finalize_automatic_recall(payload, *, stats=None):
+    """Pack intact hints once, after the complete automatic envelope exists.
+
+    Optional query, source errors and matched cues yield to full notes and their
+    source identities. Oversized ranked candidates do not block later matches.
+    Manual recall and detail DTOs never pass through this finalizer.
+    """
+    collected = payload.pop("_recall_stats", {})
+    candidates = payload.get("memories", [])
+    details = payload.get("diagnostics") or {}
+    payload["diagnostics"] = {"stored_count": details.get("stored_count", 0),
+                              "matched_count": details.get("matched_count", payload.get("total", len(candidates))),
+                              "injected_count": 0}
+    payload["memories"] = []
+    payload["status"] = "empty"
+    payload["limit"], payload["offset"] = min(payload.get("limit", AUTOMATIC_RECALL_LIMIT), AUTOMATIC_RECALL_LIMIT), 0
+    # Unknown reader metadata cannot make an otherwise empty envelope unbounded.
+    allowed = {"memories", "total", "query", "offset", "limit", "diagnostics", "status",
+               "source_errors", "source_errors_omitted"}
+    for key in set(payload) - allowed:
+        payload.pop(key)
+    if "source_errors" in payload:
+        payload["source_errors"] = list(payload["source_errors"])
+
+    def fit_metadata():
+        errors = payload.get("source_errors", [])
+        while errors and _response_bytes(payload) > AUTOMATIC_RECALL_MAX_BYTES:
+            errors.pop()
+            payload["source_errors_omitted"] = payload.get("source_errors_omitted", 0) + 1
+        if _response_bytes(payload) > AUTOMATIC_RECALL_MAX_BYTES:
+            payload["query"] = ""
+        return _response_bytes(payload) <= AUTOMATIC_RECALL_MAX_BYTES
+
+    fit_metadata()
+    dropped, invalid, selected = 0, 0, []
     for memory in candidates:
-        payload["memories"].append(memory)
-        if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 1200:
-            payload["memories"].pop()
-    if "diagnostics" in payload:
+        if len(selected) >= payload["limit"]:
+            break
+        hint = _automatic_hint(memory)
+        if hint is None:
+            invalid += 1
+            continue
+        payload["memories"].append(hint)
+        payload["status"] = "recalled"
         payload["diagnostics"]["injected_count"] = len(payload["memories"])
+        if fit_metadata():
+            selected.append((hint, memory))
+        else:
+            payload["memories"].pop()
+            payload["diagnostics"]["injected_count"] = len(selected)
+            payload["status"] = "recalled" if selected else "empty"
+            dropped += 1
+    # Cue explanations are optional, and never compete with a later core hint.
+    for hint, memory in selected:
+        matched = memory.get("matched_cues") or []
+        if matched:
+            hint["matched_cues"] = matched[:1]
+            if _response_bytes(payload) > AUTOMATIC_RECALL_MAX_BYTES:
+                hint.pop("matched_cues")
+    extras = ({"reason": "budget", "budget_dropped": dropped} if dropped else
+              {"reason": "invalid_source"} if invalid and not selected else
+              {"reason": "no_match"} if not selected else {})
+    for key, value in extras.items():
+        payload["diagnostics"][key] = value
+        if _response_bytes(payload) > AUTOMATIC_RECALL_MAX_BYTES:
+            payload["diagnostics"].pop(key)
+    if stats is not None:
+        stats.update({"scanned_count": collected.get("scanned_count", 0),
+                      "accepted_count": collected.get("accepted_count", len(candidates)),
+                      # Include oversized candidates examined before a later fit.
+                      "selected_count": len(selected) + dropped,
+                      "returned_count": len(selected), "budget_dropped": dropped,
+                      "final_bytes": _response_bytes(payload), "max_bytes": AUTOMATIC_RECALL_MAX_BYTES,
+                      "candidate_cap": AUTOMATIC_RECALL_CANDIDATES,
+                      "query_truncated": bool(collected.get("query_truncated", False)),
+                      "rules_version": AUTOMATIC_RECALL_RULES_VERSION})
+    return payload
+
+
+def collect_automatic_recall(conn, *, query="", current_run_id=None, limit=AUTOMATIC_RECALL_LIMIT, now=None):
+    """Return at most 24 unbudgeted, independently approved DB candidates."""
+    with _transaction(conn):
+        return _recall(conn, query=query, current_run_id=current_run_id, automatic=True,
+                       limit=limit, offset=0, now=_time(now))
 
 
 def recall_memories(conn, *, query="", current_run_id=None, automatic=False, limit=3, offset=0, now=None):
     with _transaction(conn):
-        return _recall(conn, query=query, current_run_id=current_run_id, automatic=automatic, limit=limit, offset=offset, now=_time(now))
+        result = _recall(conn, query=query, current_run_id=current_run_id, automatic=automatic, limit=limit, offset=offset, now=_time(now))
+        return finalize_automatic_recall(result) if automatic else result
 
 
-def emit_recall_once(conn, *, run_id, query, now=None, recall_reader=None):
+def emit_recall_once(conn, *, run_id, query, now=None, recall_reader=None,
+                     selection_mode="explicit", query_truncated=False):
     now = _time(now)
     with _transaction(conn, write=True):
         _current_run(conn, run_id)
         if conn.execute("SELECT 1 FROM events WHERE run_id=? AND event_type='memory_recall_attempted'", (run_id,)).fetchone():
             return {"status": "already_attempted", "memories": []}
         result = (recall_reader(run_id=run_id, query=query, now=now) if recall_reader is not None else
-                  _recall(conn, query=query, current_run_id=run_id, automatic=True, limit=3, offset=0, now=now))
-        result["status"] = "recalled" if result["memories"] else "empty"
-        _budget(result)
-        if not result["memories"]:
-            result["status"] = "empty"
-        from . import run_references
+                  _recall(conn, query=query, current_run_id=run_id, automatic=True,
+                          limit=AUTOMATIC_RECALL_LIMIT, offset=0, now=now))
         source_db = Path(conn.execute("PRAGMA database_list").fetchone()[2]).name
+        result["memories"] = [{**memory, "source_db": memory.get("source_db") or
+                               (memory.get("source") or {}).get("source_db") or source_db}
+                              for memory in result["memories"]]
+        # Existing proof excludes the caller's own original RUN. Apply that
+        # boundary before packing so every returned hint has the same event
+        # identity, including memories captured by another session's RUN.
+        result["memories"] = [memory for memory in result["memories"]
+                              if (memory["source_db"], memory["source"].get("run_id")) != (source_db, run_id)]
+        stats = {}
+        finalize_automatic_recall(result, stats=stats)
+        stats["selection_mode"] = selection_mode if selection_mode in ("explicit", "summary") else "explicit"
+        stats["query_truncated"] = bool(stats["query_truncated"] or query_truncated)
+        from . import run_references
         references = [run_references.memory_reference(memory, "retrieved", source_db=source_db)
                       for memory in result["memories"]]
         references = [ref for ref in references if ref is not None
                       and (ref["source_db"], ref["run_id"]) != (source_db, run_id)]
         _event(conn, run_id, "memory_recall_attempted", {
             "memory_ids": [m["id"] for m in result["memories"]],
-            "memory_sources": [{"memory_id": m["id"], "source_db": m.get("source_db"),
+            "memory_sources": [{"memory_id": m["id"], "source_db": m["source_db"],
                                 "source_run_id": m["source"]["run_id"]} for m in result["memories"]],
-            "references": references,
+            "references": references, "diagnostics": stats,
         }, now)
         return result
 

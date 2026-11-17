@@ -90,6 +90,13 @@ Search, lists, and recall read multiple databases in the working folder. Preserv
 | `tapl_update_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). `note` (1–240 characters), `cue` (3–5 entries), `state` (`active` or `superseded`). Explicit user request only. |
 | `tapl_delete_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). Explicit user request only; tombstones the memory so recall/reinforcement cannot use it. |
 
+Automatic recall from `tapl_summarize_run` has one final 3,600 UTF-8 byte cap
+for its full `recall` object, including status, diagnostics, and source errors.
+Compact hints keep the full note and exact source pointers; fewer than three may
+fit or qualify. This does not change manual recall/detail fields, pagination, or
+Viewer responses. Query aliases, candidate limits, and diagnostics are described
+in [Recall criteria and limits](../guides/memory.md#recall-criteria-and-limits).
+
 Successful agent lookups may record compact pointers in the existing owned RUN for its mindmap. This does not capture/reinforce memory or write foreign history; Viewer reads are not tracked. See [Agent lookup traces](../guides/memory.md#agent-lookup-traces).
 
 For `tapl_use_references`, `session_id` is explicitly required; blank or omitted legacy identity is unsupported. Every entry requires `kind`, exact `source_db` filename and `usage`, plus exactly one target shape: `kind="memory", target_type="memory", memory_id`; `kind="history", target_type="item", item_id` (positive integer); or `kind="history", target_type="run", run_id`. String IDs and source names are 1–256 characters. Unknown fields are rejected. Titles and source pointers come from recorded returned memory notes/details and opened originals, not caller-supplied metadata. A complete recall note qualifies without another memory-detail fetch; its exact original still needs an opened-read record.
@@ -127,7 +134,7 @@ Check original evidence from `tapl_get_item` or `tapl_get_archive` before using 
 
 | Tool | Required arguments | Optional arguments and behavior |
 | --- | --- | --- |
-| `tapl_summarize_run` | `summary` (1–2000 characters), `work_type`, `workflow_mode` | `recall_query` (at most 500 characters), one automatic recall per RUN. |
+| `tapl_summarize_run` | `summary` (1–2000 characters), `work_type`, `workflow_mode` | `recall_query` (at most 500 characters; prefer 3–8 core terms). Omission selects up to eight core summary tokens. At most three relevant automatic hints once per RUN. |
 | `tapl_split_run` | `requests` (2–20 objects) | Each object has `key`, `summary`, `work_type`, `workflow_mode`, optional `depends_on=[]` referencing earlier keys. For explicitly separate RUN lifecycles before planning. |
 | `tapl_apply_plan` | None in schema | `plan_id="PLAN-001"`, `title`, `summary`, `objective`, `requirements_trace`, `selected_approach`, `affected_files`, `execution_order`, `risks`, `validation`, `approval_needs`, `notes`, `custom_fields`, `status`. Workflow validation still requires an adequate plan. |
 | `tapl_add_finding` | `title` | `source=""`, `finding=""`, `impact=""`, `related_ids=""`. Record decision-relevant evidence and source. |

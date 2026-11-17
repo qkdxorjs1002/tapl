@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest import mock
 
 import pytest
@@ -208,3 +209,40 @@ def test_memory_mcp_detail_is_read_only_and_returns_current_source(app):
             result = await client.call_tool('tapl_get_memory', {'memory_id': memory_id})
             assert not result.is_error and result.structured_content['memory'] is None
     asyncio.run(read_deleted())
+
+
+@pytest.mark.parametrize('explicit,expected_mode', [(None, 'summary'), ('', 'summary'), ('   ', 'explicit')])
+def test_empty_recall_query_retains_summary_fallback_contract(app, explicit, expected_mode):
+    with mock.patch.object(recall, 'emit_recall_once', return_value={'status': 'empty', 'memories': []}) as emit:
+        app.summarize_run('sqlite migration', recall_query=explicit)
+    assert emit.call_args.kwargs['selection_mode'] == expected_mode
+    assert emit.call_args.kwargs['query'] == ('   ' if expected_mode == 'explicit' else 'sqlite migration')
+
+
+def test_long_summary_fallback_recalls_late_core_terms_and_finalizes_once(app):
+    memory_id = capture(app)
+    app.finish_archive('original')
+    summary = 'Please help me with this work and the context. ' * 500 + ' SQLite migration'
+    original = recall.finalize_automatic_recall
+    with mock.patch.object(recall, 'finalize_automatic_recall', wraps=original) as finalize:
+        result = app.summarize_run(summary)['recall']
+    assert finalize.call_count == 1
+    assert result['status'] == 'recalled'
+    assert [entry['id'] for entry in result['memories']] == [memory_id]
+    assert len(result['query'].split()) <= 8
+    with app._connection() as conn:
+        event = json.loads(conn.execute(
+            "SELECT payload_json FROM events WHERE run_id=? AND event_type='memory_recall_attempted'",
+            (app.get_status()['active_run']['id'],)).fetchone()[0])
+    assert event['diagnostics']['selection_mode'] == 'summary'
+    assert event['diagnostics']['query_truncated']
+    assert 'Please help' not in json.dumps(event)
+
+
+def test_explicit_recall_query_keeps_original_eight_token_boundary(app):
+    memory_id = capture(app)
+    app.finish_archive('original')
+    explicit = 'one two three four five six seven eight sqlite migration'
+    result = app.summarize_run('sqlite migration', recall_query=explicit)['recall']
+    assert result['query'] == 'one two three four five six seven eight'
+    assert result['memories'] == []

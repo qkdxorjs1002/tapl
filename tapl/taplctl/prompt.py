@@ -1280,7 +1280,8 @@ def history_search_guidance() -> str:
 def memory_guidance() -> str:
     return (
         "Read full structuredContent, including recall/memory. `tapl_summarize_run` recalls up to three hints once/run "
-        "from concrete recall_query cues. Manual recall: past-work questions, new blockers or topic changes only, "
+        "from ≤8 recall_query terms/IDs; omitted queries use summary terms. "
+        "Manual recall: past-work questions, new blockers or topic changes only, "
         "not routine status checks.\n"
         "At `tapl_finish_run`, review ALL criteria: recurring concrete cues, reduced future exploration, verified source. "
         "Capture qualifying lessons (at most two), each with 3–5 cues, a note of at most 240 characters (sentence count "

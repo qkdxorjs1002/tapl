@@ -160,7 +160,8 @@ def test_automatic_foreign_hint_and_finish_use_never_reinforce_a_colliding_local
     before_peer = fingerprint(peer)
     result = app.summarize_run("sqlite migration", work_type="answer", workflow_mode="fast")
     hint = result["recall"]["memories"][0]
-    assert hint["source_db"] == hint["source"]["source_db"] == peer.name
+    assert hint["source_db"] == peer.name
+    assert "source_db" not in hint["source"]
     assert hint["source"]["run_id"] == foreign_record["run_id"]
     use = {"memory_id": "collision", "revision": 1, "source_checked": True, "usage": "Checked migration evidence"}
     missing = app.finish_run("done", expected_run_id=result["active_run"]["id"], memory_uses=[use])
@@ -218,14 +219,14 @@ def test_automatic_recall_budgets_many_source_errors_and_retains_full_manual_err
     local = db.default_db_path(tmp_path)
     peer = tmp_path / ".tapl/tapl-peer.db"
     seed(peer, "foreign")
-    for index in range(20):
+    for index in range(40):
         (peer.parent / f"tapl-corrupt-{index}.db").write_bytes(b"corrupt")
     app = WorkflowApplication(tmp_path)
     hint = app.summarize_run("sqlite migration", work_type="answer", workflow_mode="fast")["recall"]
-    assert len(json.dumps(hint, ensure_ascii=False).encode("utf-8")) <= 1200
+    assert len(json.dumps(hint, ensure_ascii=False).encode("utf-8")) <= recall.AUTOMATIC_RECALL_MAX_BYTES
     assert hint["source_errors_omitted"] > 0
     assert hint["memories"][0]["source_db"] == peer.name
-    assert len(app.recall()["source_errors"]) == 20
+    assert len(app.recall()["source_errors"]) == 40
 
 
 def test_memory_mutations_reject_explicit_foreign_sources(sources):
@@ -266,3 +267,51 @@ def test_foreign_run_id_is_never_used_to_filter_local_recall_scope(sources):
                                           query="sqlite migration", now=recall._time())
     assert any(memory["source_db"] == peer.name and memory["source"]["run_id"] == foreign[0]["run_id"]
                for memory in payload["memories"])
+
+
+def test_three_full_korean_notes_across_databases_share_one_final_budget(tmp_path):
+    local = db.default_db_path(tmp_path)
+    paths = [local, tmp_path / '.tapl/tapl-peer-a.db', tmp_path / '.tapl/tapl-peer-b.db']
+    notes = ['가' * 239 + suffix for suffix in '나다라']
+    records = [seed(path, f'source-{index}')[0] for index, path in enumerate(paths)]
+    for index, (path, record, note) in enumerate(zip(paths, records, notes)):
+        with sqlite3.connect(path) as conn:
+            conn.execute('UPDATE memories SET note=?,source_item_id=?', (note, record['item_id'] if index == 1 else None))
+    app = WorkflowApplication(tmp_path, session_id='new-owner')
+    original = recall.finalize_automatic_recall
+    with mock.patch.object(recall, 'finalize_automatic_recall', wraps=original) as finalize:
+        summarized = app.summarize_run('sqlite migration', work_type='answer', workflow_mode='fast')
+    assert finalize.call_count == 1
+    result = summarized['recall']
+    assert len(result['memories']) == 3
+    assert {entry['note'] for entry in result['memories']} == set(notes)
+    assert len(json.dumps(result, ensure_ascii=False).encode('utf-8')) <= recall.AUTOMATIC_RECALL_MAX_BYTES
+    item = next(entry for entry in result['memories'] if entry['source']['kind'] == 'item')
+    assert item['source'] == {'run_id': records[1]['run_id'], 'kind': 'item', 'item_id': records[1]['item_id']}
+    assert all('source_db' not in entry['source'] for entry in result['memories'])
+    assert all(entry['source']['archive_id'] for entry in result['memories'] if entry['source']['kind'] == 'run')
+    with sqlite3.connect(local) as conn:
+        event = json.loads(conn.execute("SELECT payload_json FROM events WHERE run_id=? AND event_type='memory_recall_attempted'",
+                                        (summarized['active_run']['id'],)).fetchone()[0])
+    returned = [(entry['source_db'], entry['id']) for entry in result['memories']]
+    assert returned == [(entry['source_db'], entry['memory_id']) for entry in event['memory_sources']]
+    assert returned == [(entry['source_db'], entry['memory_id']) for entry in event['references']]
+    assert event['memory_ids'] == [entry['id'] for entry in result['memories']]
+    assert event['diagnostics']['scanned_count'] == event['diagnostics']['accepted_count'] == 3
+    assert event['diagnostics']['returned_count'] == 3
+    assert event['diagnostics']['final_bytes'] == len(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+    # Manual and Viewer/detail DTOs retain their complete, annotated provenance.
+    manual = app.get_memory(item['id'], source_db=item['source_db'])['memory']
+    assert manual['source']['source_db'] == item['source_db']
+    assert manual['source']['archive_id'] and manual['source']['title']
+    assert manual['source_record']['item']['id'] == item['source']['item_id']
+
+
+def test_independent_automatic_history_wrapper_finalizes_once(sources):
+    _, local, _, _, _, reader = sources
+    with closing(db.connect(local, session_id='reader')) as conn:
+        with mock.patch.object(recall, 'finalize_automatic_recall', wraps=recall.finalize_automatic_recall) as finalize:
+            result = reader.automatic_recall(local_conn=conn, run_id='reader', query='sqlite migration', now=recall._time())
+    assert finalize.call_count == 1
+    assert len(result['memories']) == 3
+    assert len(json.dumps(result, ensure_ascii=False).encode('utf-8')) <= recall.AUTOMATIC_RECALL_MAX_BYTES

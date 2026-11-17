@@ -90,6 +90,12 @@ RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌�
 | `tapl_update_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). `note` (1–240자), `cue` (3–5개), `state` (`active` 또는 `superseded`). 명시적 사용자 요청이 필요합니다. |
 | `tapl_delete_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 명시적 사용자 요청이 필요하며 tombstone 처리해 회상·강화에서 제외합니다. |
 
+`tapl_summarize_run`의 자동 회상은 상태·진단·원본 오류를 포함한 전체 `recall`
+객체에 최종 3,600 UTF-8 바이트 상한을 한 번 적용합니다. 짧은 힌트도 노트 전체와
+정확한 원본 포인터를 보존하며, 예산이나 적격성에 따라 3개보다 적게 반환할 수
+있습니다. 수동 회상·상세 필드, 페이지네이션, Viewer 응답은 그대로 유지합니다.
+질의 별칭·후보 상한·진단은 [회상 기준과 한계](../guides/memory.ko.md#회상-기준과-한계)를 참고하세요.
+
 Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 DB에 간결한 포인터를 기록할 수 있습니다. 기억을 캡처·강화하거나 다른 DB에 쓰지 않으며 Viewer 조회는 기록하지 않습니다. [Agent 조회 기록](../guides/memory.ko.md#agent-조회-기록)을 참고하세요.
 
 `tapl_use_references`는 `session_id`를 명시해야 하며 빈 값이나 생략한 legacy 식별자는 지원하지 않습니다. 각 항목은 `kind`, 정확한 `source_db` 파일명, `usage`와 다음 대상 중 정확히 하나를 받습니다: `kind="memory", target_type="memory", memory_id`; `kind="history", target_type="item", item_id`(양의 정수); `kind="history", target_type="run", run_id`. 문자열 ID와 원본 이름은 1–256자입니다. 정의되지 않은 필드는 거절합니다. 제목과 출처 포인터는 호출자 입력이 아닌 실제 반환된 기억 노트·상세와 원문 조회 기록에서 가져옵니다. 완전한 회상 노트가 있으면 기억 상세를 다시 조회하지 않아도 되며, 정확한 원문에는 여전히 원문 확인 기록이 필요합니다.
@@ -127,7 +133,7 @@ Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 
 
 | 도구 | 필수 인자 | 선택 인자와 동작 |
 | --- | --- | --- |
-| `tapl_summarize_run` | `summary` (1–2000자), `work_type`, `workflow_mode` | `recall_query` (최대 500자). RUN당 자동 회상 한 번. |
+| `tapl_summarize_run` | `summary` (1–2000자), `work_type`, `workflow_mode` | `recall_query` (최대 500자, 핵심 용어 3–8개 권장). 생략하면 요약의 핵심 토큰을 최대 8개 선택합니다. RUN당 한 번 관련 자동 힌트를 최대 3개 제공합니다. |
 | `tapl_split_run` | `requests` (객체 2–20개) | 객체마다 `key`, `summary`, `work_type`, `workflow_mode`, 선택 `depends_on=[]`가 있으며 앞선 키만 참조합니다. 계획 전 명시적으로 분리한 RUN 수명주기에 사용합니다. |
 | `tapl_apply_plan` | schema상 없음 | `plan_id="PLAN-001"`, `title`, `summary`, `objective`, `requirements_trace`, `selected_approach`, `affected_files`, `execution_order`, `risks`, `validation`, `approval_needs`, `notes`, `custom_fields`, `status`. 워크플로 검증에는 충분한 계획이 필요합니다. |
 | `tapl_add_finding` | `title` | `source=""`, `finding=""`, `impact=""`, `related_ids=""`. 판단에 필요한 근거와 출처를 기록합니다. |

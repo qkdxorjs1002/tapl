@@ -259,8 +259,13 @@ class HistoryReader:
         return {"ok": True, **self._recall(query=query, limit=limit, offset=offset)}
 
     def automatic_recall(self, *, local_conn: sqlite3.Connection, run_id: str, query: str, now: Any) -> dict[str, Any]:
+        return memory_store.finalize_automatic_recall(self.collect_automatic_recall(
+            local_conn=local_conn, run_id=run_id, query=query, now=now))
+
+    def collect_automatic_recall(self, *, local_conn: sqlite3.Connection, run_id: str,
+                               query: str, now: Any) -> dict[str, Any]:
         """Use the caller's local snapshot; foreign run ids never scope local work."""
-        return self._recall(query=query, limit=3, offset=0, automatic=True,
+        return self._recall(query=query, limit=memory_store.AUTOMATIC_RECALL_LIMIT, offset=0, automatic=True,
                             local_conn=local_conn, run_id=run_id, now=now)
 
     def _recall(self, *, query: str, limit: int, offset: int, automatic: bool = False,
@@ -273,9 +278,9 @@ class HistoryReader:
         for path in self.discover_sources():
             def read(conn: sqlite3.Connection) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 if automatic:
-                    payload = memory_store.recall_memories(
+                    payload = memory_store.collect_automatic_recall(
                         conn, query=query, current_run_id=run_id if conn is local_conn else None,
-                        automatic=True, limit=3, now=now,
+                        now=now,
                     )
                     return payload["memories"], payload
                 records, position, payload = [], 0, {}
@@ -294,11 +299,12 @@ class HistoryReader:
                         records, payload = read(conn)
                 ranked.append((path.name, [_memory(record, path.name) for record in records]))
                 total += payload["total"]
-                diagnostics.append({**payload["diagnostics"], "source_db": path.name})
+                diagnostics.append({**payload["diagnostics"], **payload.get("_recall_stats", {}), "source_db": path.name})
             except (sqlite3.Error, OSError, ValueError) as exc:
                 errors.append(self._error(path, exc))
         if normalized:
-            memories = embeddings.federated_results(ranked, limit=needed, preserve_score=True)
+            memories = embeddings.federated_results(ranked, limit=sum(len(records) for _, records in ranked) if automatic else needed,
+                                                     preserve_score=True)
         else:
             # Preserve each database's native ordering for equal timestamps;
             # sorting random memory ids would make a later page reorder page 1.
@@ -306,12 +312,14 @@ class HistoryReader:
             ordered.sort(key=lambda pair: (-memory_store._time(pair[0]["updated_at"]).timestamp(),
                                           pair[0]["source_db"], pair[1]))
             memories = [record for record, _ in ordered]
-        result = {"memories": memories[offset:needed], "total": total, "query": normalized,
+        result = {"memories": memories if automatic else memories[offset:needed], "total": total, "query": normalized,
                   "limit": limit, "offset": offset, "source_errors": errors,
                   "diagnostics": {"stored_count": sum(entry["stored_count"] for entry in diagnostics),
                                   "matched_count": total, "last_capture_error": next((
                                       {**entry["last_capture_error"], "source_db": entry["source_db"]}
                                       for entry in diagnostics if entry.get("last_capture_error")), None)}}
         if automatic:
-            memory_store._budget(result)
+            result["_recall_stats"] = {"scanned_count": sum(entry.get("scanned_count", 0) for entry in diagnostics),
+                                       "accepted_count": total,
+                                       "query_truncated": any(entry.get("query_truncated", False) for entry in diagnostics)}
         return result

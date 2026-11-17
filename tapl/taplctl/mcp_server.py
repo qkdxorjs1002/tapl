@@ -760,7 +760,7 @@ def _create_server(
             WorkflowMode,
             Field(description=tapl_prompt.field_help("run", "workflow_mode")),
         ],
-        recall_query: Annotated[str | None, Field(description="Optional compact cues for one automatic recall per run.", max_length=500)] = None,
+        recall_query: Annotated[str | None, Field(description="Optional focused terms/identifiers (up to eight lexical tokens) for one recall per RUN; omitted or empty selects summary terms.", max_length=500)] = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Summarize the request and explicitly classify its work type and workflow mode."""

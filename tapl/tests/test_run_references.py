@@ -172,7 +172,7 @@ def test_library_results_are_retrieved_and_missing_memory_has_no_trace(setup):
 def test_automatic_recall_tracks_only_memories_retained_after_final_budget(setup):
     app, local, peer, first, second, run_id = setup
     memories = app._history().recall(limit=50)["memories"]
-    memories[0]["note"] = "X" * 2000
+    memories[0]["note"] = "X" * (recall.AUTOMATIC_RECALL_MAX_BYTES + 1)
     with closing(db.connect(local, session_id="owner")) as conn:
         result = recall.emit_recall_once(conn, run_id=run_id, query="sqlite migration",
                                         recall_reader=lambda **kwargs: {"memories": memories, "query": "sqlite migration"})
@@ -355,7 +355,7 @@ def test_automatic_memory_hint_requires_retention_and_prior_same_session_origina
     app.get_run(second["run_id"], source_db=peer.name)
     memory = next(value for value in app._history().recall(limit=50)["memories"] if value["id"] == second["memory_id"])
     if not retained:
-        memory["note"] = "X" * 2000
+        memory["note"] = "X" * (recall.AUTOMATIC_RECALL_MAX_BYTES + 1)
     current = next_run(local)
     with closing(db.connect(local, session_id="owner")) as conn:
         emitted = recall.emit_recall_once(conn, run_id=current, query="sqlite migration",
@@ -664,3 +664,48 @@ def test_native_stdio_use_references_schema_receipt_and_projection(setup, tmp_pa
     asyncio.run(exercise())
     assert len(used_events(local)) == 1
     assert peer.read_bytes() == before
+
+
+def test_invalid_item_hint_has_no_event_reference_or_run_proof(setup):
+    app, local, peer, _, second, run_id = setup
+    memory = next(value for value in app._history().recall(limit=50)['memories'] if value['id'] == second['memory_id'])
+    memory['source'].update(kind='item', item_id=0)
+    with closing(db.connect(local, session_id='owner')) as conn:
+        result = recall.emit_recall_once(conn, run_id=run_id, query='sqlite migration',
+                                        recall_reader=lambda **kwargs: {'memories': [memory], 'query': 'sqlite migration'})
+        event = json.loads(conn.execute("SELECT payload_json FROM events WHERE run_id=? AND event_type='memory_recall_attempted'",
+                                        (run_id,)).fetchone()[0])
+    assert result['memories'] == event['memory_ids'] == event['memory_sources'] == event['references'] == []
+    assert refs(local, run_id) == []
+    with pytest.raises(WorkflowApplicationError, match='invalid_proof'):
+        app.use_references(expected_run_id=run_id, references=[claim(peer.name, 'memory', second['memory_id'])])
+
+
+def test_automatic_hint_excludes_own_original_from_another_creation_run_but_keeps_foreign_same_id(setup):
+    app, local, peer, _, second, run_id = setup
+    with closing(db.connect(local, session_id='owner')) as conn:
+        item = db.upsert_plan(conn, plan_id='PLAN-001', title='Current original', status='Finalized')
+    with closing(db.connect(local, session_id='other-owner')) as conn:
+        other = db.ensure_active_run(conn, request_summary='Another creation RUN', work_type='answer', workflow_mode='fast')
+        captured = recall.finish_memories(conn, run_id=other['id'], candidates=[{
+            'slot': 1, 'cue': ['sqlite migration', 'transaction', 'schema'], 'note': 'Another RUN captured this current original.',
+            'source_run_id': run_id, 'source_item_id': item['id']}])
+        own_memory_id = captured['captures'][0]['memory_id']
+    with closing(db.connect(local, session_id='owner')) as conn:
+        own_memory = recall.collect_automatic_recall(conn, query='sqlite migration', current_run_id=run_id)['memories']
+        own_memory = next(entry for entry in own_memory if entry['id'] == own_memory_id)
+        assert own_memory['source']['run_id'] == run_id
+        assert conn.execute('SELECT created_run_id FROM memories WHERE memory_id=?', (own_memory_id,)).fetchone()[0] == other['id']
+        # run_id equality alone never excludes an independent foreign database.
+        foreign = app._history().get_memory(second['memory_id'], source_db=peer.name)['memory']
+        foreign['source']['run_id'] = run_id
+        result = recall.emit_recall_once(conn, run_id=run_id, query='sqlite migration',
+                                        recall_reader=lambda **kwargs: {'memories': [own_memory, foreign], 'query': 'sqlite migration'})
+        event = json.loads(conn.execute("SELECT payload_json FROM events WHERE run_id=? AND event_type='memory_recall_attempted'",
+                                        (run_id,)).fetchone()[0])
+    assert [entry['id'] for entry in result['memories']] == event['memory_ids'] == [second['memory_id']]
+    assert [entry['memory_id'] for entry in event['memory_sources']] == [second['memory_id']]
+    assert [entry['memory_id'] for entry in event['references']] == [second['memory_id']]
+    assert event['references'][0]['source_db'] == peer.name
+    assert event['references'][0]['source']['run_id'] == run_id
+    assert own_memory_id not in {entry.get('memory_id') for entry in refs(local, run_id)}
