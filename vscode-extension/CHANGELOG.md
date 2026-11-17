@@ -2,6 +2,15 @@
 
 All notable changes to TAPL Workflow Viewer are documented in this file.
 
+## 2.23.0 - 2026-11-17
+
+- Close temporary read-only RUN tabs with the X button or Delete key and return to the previous view without changing source history.
+- Retain up to three complete automatic memory hints under one final 3,600-byte budget, preserving exact source pointers and duplicate-free reference tracking.
+- Reuse existing cue labels before storing memories and register new concepts only when storage succeeds.
+- Let agents merge equivalent cue labels, retain former labels as aliases, and deduplicate catalog links without rewriting existing memories or search indexes.
+- Preserve successful capture retries across later cue merges and retain schema 14 read-only compatibility when upgrading to schema 15.
+- Keep the original query tokenization and ranking without domain-specific synonym, particle, or summary-keyword heuristics.
+
 ## 2.22.2 - 2026-11-16
 
 - Keep light/dark appearance changes inside TAPL; the Viewer no longer changes VS Code's theme or settings.
