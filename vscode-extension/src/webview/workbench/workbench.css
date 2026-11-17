@@ -330,10 +330,16 @@ body:has(.tapl-workbench) {
   overflow-y: hidden;
   scrollbar-width: none;
 }
-.wb-run-tab.tab {
-  height: auto;
+.wb-run-tab-slot {
+  position: relative;
+  display: flex;
   flex: 1 0 140px;
   max-width: 220px;
+  min-width: 0;
+}
+.wb-run-tab.tab {
+  height: auto;
+  width: 100%;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -392,8 +398,39 @@ body:has(.tapl-workbench) {
   letter-spacing: 0.025em;
   color: var(--wb-muted);
 }
-.wb-run-tab.wb-run-tab-temporary {
+.wb-run-tab-slot-temporary {
   margin-inline-start: auto;
+}
+.wb-run-tab-slot-temporary .wb-run-tab.tab {
+  padding-inline-end: 38px;
+}
+.wb-run-tab-close {
+  position: absolute;
+  inset-inline-end: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-muted);
+  cursor: pointer;
+}
+.wb-run-tab-close:hover {
+  color: var(--wb-fg);
+  background: var(--tapl-hover);
+}
+.wb-run-tab-close:focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: -2px;
+}
+.wb-run-tab-close > .wb-icon {
+  width: 14px;
+  height: 14px;
 }
 .wb-mobile-menu.btn {
   display: none;
@@ -1566,8 +1603,10 @@ body:has(.tapl-workbench) {
     padding-inline: 6px;
     gap: 0;
   }
-  .wb-run-tab.tab {
+  .wb-run-tab-slot {
     flex-basis: 130px;
+  }
+  .wb-run-tab.tab {
     padding-inline: 10px;
   }
   .tapl-workbench[data-mobile='true'] .wb-page-content {

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import { useBrowserLayoutEffect } from './effects';
 import type { TaplRunSnapshot, TaplWorkflowRun, WebviewCommand, WebviewView } from '../types';
 import {
-  back,
   createNavigation,
   navigate,
   pageState,
@@ -13,6 +12,7 @@ import {
   runKey,
   runsForView,
   snapshotForView,
+  tabRuns,
   uniqueRuns,
   viewIdentity,
   type NavigationState,
@@ -116,6 +116,7 @@ export function useWorkbench({
   const [knownRuns, setKnownRuns] = useState<TaplWorkflowRun[]>(() => (initialSnapshot ? [initialSnapshot.run] : []));
   const [restore, setRestore] = useState(0);
   const visited = useRef(new Map<string, WorkbenchRoute>());
+  const returnRoute = useRef<WorkbenchRoute>();
   const afterRun = useRef<{
     expected: string;
     route: WorkbenchRoute;
@@ -159,6 +160,8 @@ export function useWorkbench({
   const capture = () =>
     update((current) => {
       visited.current.set(current.route.runKey, current.route);
+      if (!current.route.runKey || tabRuns(activeRuns, undefined).some((run) => runKey(run) === current.route.runKey))
+        returnRoute.current = current.route;
       const saved = pageState(current);
       return patchPage(current, {
         positions: {
@@ -249,16 +252,41 @@ export function useWorkbench({
     go(route, command, false, run);
     afterRun.current = nextFollowUp;
   };
-  const goBack = () => {
+  const restoreRoute = (route: WorkbenchRoute, trail: WorkbenchRoute[]) => {
     afterRun.current = undefined;
-    const previous = stateRef.current.trail[stateRef.current.trail.length - 1];
-    if (!previous) return;
     capture();
-    const command = requestForRoute(previous);
-    const run = snapshots[previous.runKey]?.run ?? knownRuns.find((candidate) => runKey(candidate) === previous.runKey);
-    update((current) => back(current, command && expectedForCommand(command, run)));
+    const command: WebviewCommand | undefined = requestForRoute(route) ??
+      (route.page === 'records' ? { command: 'records', scope: 'all' } : undefined);
+    const run = snapshots[route.runKey]?.run ?? knownRuns.find((candidate) => runKey(candidate) === route.runKey);
+    update((current) => navigate({ ...current, trail }, route, 'replace', command && expectedForCommand(command, run)));
     setRestore((value) => value + 1);
     if (command) send(command);
+  };
+  const goBack = () => {
+    const { trail } = stateRef.current;
+    const previous = trail[trail.length - 1];
+    if (previous) restoreRoute(previous, trail.slice(0, -1));
+  };
+  const closeTemporaryRun = () => {
+    const current = stateRef.current;
+    const regularRuns = tabRuns(activeRuns, undefined);
+    const regularRoute = (route: WorkbenchRoute) =>
+      !route.runKey || regularRuns.some((run) => runKey(run) === route.runKey);
+    if (!current.route.runKey || regularRoute(current.route)) return;
+    // Skip details belonging to the temporary RUN so closing cannot reopen it.
+    let index = current.trail.length - 1;
+    while (index >= 0 && !regularRoute(current.trail[index])) index--;
+    const previous = current.trail[index];
+    const origin = returnRoute.current;
+    const fallback = regularRuns[0];
+    const route: WorkbenchRoute = previous ?? (origin && regularRoute(origin) ? origin : undefined) ??
+      (fallback
+        ? visited.current.get(runKey(fallback)) ?? { page: 'current', runKey: runKey(fallback) }
+        : { page: 'records', runKey: '' });
+    restoreRoute(
+      route,
+      index >= 0 ? current.trail.slice(0, index).filter((entry) => entry.runKey !== current.route.runKey) : []
+    );
   };
   const selectPage = (page: WorkbenchPage) => {
     afterRun.current = undefined;
@@ -335,6 +363,7 @@ export function useWorkbench({
     prefs: pageState(state),
     go,
     goBack,
+    closeTemporaryRun,
     selectPage,
     switchRun,
     changePage,

@@ -380,44 +380,61 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
           {tabs.map((run, index) => {
             const key = runKey(run),
               selected = key === selectedKey;
-            const temporary = !activeRuns.some((candidate) => runKey(candidate) === key);
+            const temporary = !tabRuns(activeRuns, undefined).some((candidate) => runKey(candidate) === key);
             return (
-              <button
-                type="button"
-                role="tab"
-                key={key}
-                className={`tab wb-run-tab ${temporary ? 'wb-run-tab-temporary' : ''}`}
-                aria-selected={selected}
-                aria-controls="wb-page-content"
-                id={`wb-run-tab-${index}`}
-                tabIndex={
-                  selected || (index === 0 && !tabs.some((candidate) => runKey(candidate) === selectedKey)) ? 0 : -1
-                }
-                title={[runTitle(run), run.id, run.source_db].filter(Boolean).join('\n')}
-                data-wb-focus={`run:${key}`}
-                onClick={() => openRun(run, false)}
-                onKeyDown={(event) => {
-                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-                  event.preventDefault();
-                  const next =
-                    event.key === 'Home'
-                      ? 0
-                      : event.key === 'End'
-                        ? tabs.length - 1
-                        : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-                  openRun(tabs[next], false);
-                  document.getElementById(`wb-run-tab-${next}`)?.focus({ preventScroll: true });
-                }}
-              >
-                <span className="wb-run-tab-title">
-                  <span className="wb-tab-dot" aria-hidden="true" />
-                  <span>{runTitle(run)}</span>
-                  {temporary && <Icon name="lock" />}
-                </span>
-                <span className="wb-run-tab-meta">
-                  {run.slug && run.slug !== 'active' ? run.slug : run.id?.slice(0, 8)}
-                </span>
-              </button>
+              <div key={key} role="presentation" className={`wb-run-tab-slot ${temporary ? 'wb-run-tab-slot-temporary' : ''}`}>
+                <button
+                  type="button"
+                  role="tab"
+                  className={`tab wb-run-tab ${temporary ? 'wb-run-tab-temporary' : ''}`}
+                  aria-selected={selected}
+                  aria-controls="wb-page-content"
+                  id={`wb-run-tab-${index}`}
+                  tabIndex={
+                    selected || (index === 0 && !tabs.some((candidate) => runKey(candidate) === selectedKey)) ? 0 : -1
+                  }
+                  title={[runTitle(run), run.id, run.source_db].filter(Boolean).join('\n')}
+                  data-wb-focus={`run:${key}`}
+                  onClick={() => openRun(run, false)}
+                  onKeyDown={(event) => {
+                    if (temporary && event.key === 'Delete') {
+                      event.preventDefault();
+                      navigation.closeTemporaryRun();
+                      return;
+                    }
+                    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                    event.preventDefault();
+                    const next =
+                      event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? tabs.length - 1
+                          : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                    openRun(tabs[next], false);
+                    document.getElementById(`wb-run-tab-${next}`)?.focus({ preventScroll: true });
+                  }}
+                >
+                  <span className="wb-run-tab-title">
+                    <span className="wb-tab-dot" aria-hidden="true" />
+                    <span>{runTitle(run)}</span>
+                    {temporary && <Icon name="lock" />}
+                  </span>
+                  <span className="wb-run-tab-meta">
+                    {run.slug && run.slug !== 'active' ? run.slug : run.id?.slice(0, 8)}
+                  </span>
+                </button>
+                {temporary && (
+                  <button
+                    type="button"
+                    className="wb-run-tab-close"
+                    aria-label={t('wbCloseRunTab')}
+                    data-wb-focus={`close-run:${key}`}
+                    onClick={navigation.closeTemporaryRun}
+                  >
+                    <Icon name="close" />
+                  </button>
+                )}
+              </div>
             );
           })}
         </nav>

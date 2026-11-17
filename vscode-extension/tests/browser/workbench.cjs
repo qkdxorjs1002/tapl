@@ -716,6 +716,172 @@ test('large rail counts retain their full names and captions stay on one line th
   } finally {await page.close();}
 });
 
+test('closing a temporary read-only RUN restores records and memory without changing the RUN', { timeout: 45000 }, async () => {
+  const { page, errors } = await openPage();
+  const commands = [], originals = [];
+  await page.route('**/api/message', async route => {
+    commands.push(route.request().postDataJSON().command);
+    const response = await route.fetch(), payload = await response.json();
+    if (payload.view?.type === 'run' && payload.view.snapshot.readonly) originals.push(payload.view.snapshot);
+    await route.fulfill({ response, json: payload });
+  });
+  try {
+    assert.equal(await page.locator('.wb-run-tab-close').count(), 0, 'active RUN tabs have no close control');
+    await page.locator('[data-wb-focus="nav:records"]').click();
+    await page.locator('[data-wb-focus="record-query"]').fill('Archived');
+    await page.locator('[data-wb-focus="record-submit"]').click();
+    const archive = page.locator('.wb-search-group').filter({ hasText: 'Archived design' });
+    await archive.locator('.wb-search-group-header').click();
+    const originRun = await page.locator('.wb-run-tab[aria-selected="true"]').getAttribute('title');
+    await archive.locator('.wb-source-run-link').click();
+    await page.locator('.wb-run-tab-close').waitFor();
+    await page.locator('[data-wb-focus="explore:FINDING"]').click();
+    await page.locator('.wb-fold-list button').first().click();
+    await page.locator('.wb-record-page').waitFor();
+    await page.getByRole('button', { name: '읽기 전용 RUN 탭 닫기', exact: true }).click();
+    await archive.locator('.wb-source-run-link').waitFor();
+    assert.equal(await page.locator('.wb-run-tab-temporary').count(), 0);
+    assert.equal(await page.locator('.wb-run-tab[aria-selected="true"]').getAttribute('title'), originRun);
+    assert.equal(await page.locator('[data-wb-focus="record-query"]').inputValue(), 'Archived');
+    assert.equal(await archive.locator('.wb-search-group-header').getAttribute('aria-expanded'), 'true');
+    assert.equal(await archive.locator('.wb-source-run-link').evaluate(el => el === document.activeElement), true);
+    assert.equal(await page.locator('.wb-back').count(), 0, 'closed RUN details are removed from the return trail');
+
+    const reopened = page.waitForResponse(response => response.url().endsWith('/api/message') && response.request().postDataJSON().command === 'openRun');
+    await archive.locator('.wb-source-run-link').click();
+    await reopened;
+    await page.locator('.wb-run-tab-close').waitFor();
+    assert.deepEqual(originals[1], originals[0], 'reopening reads the same unchanged RUN and records');
+    await page.locator('[data-wb-focus="nav:tasks"]').click();
+    await page.locator('.wb-run-tab-close').click();
+    await archive.locator('.wb-source-run-link').waitFor();
+    assert.equal(await page.locator('[data-wb-focus="record-query"]').inputValue(), 'Archived', 'origin survives sidebar navigation within the read-only RUN');
+
+    await page.locator('[data-wb-focus="nav:memories"]').click();
+    await page.mouse.move(1400, 100);
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench').dataset.sidebarExpanded === 'false');
+    const memory = page.locator('.wb-memory-mindmap [data-kind=memory]').filter({ hasText: 'original contrast finding' }).locator('button');
+    await memory.focus(); await page.keyboard.press('Enter');
+    await page.locator('.wb-memory-source-preview').waitFor();
+    const memoryTitle = await page.locator('.wb-page-heading h1').innerText();
+    await page.locator('.wb-memory-origin button').click();
+    await page.locator('.wb-record-page').waitFor();
+    await page.locator('.wb-run-tab-close').focus();
+    await page.keyboard.press('Enter');
+    await page.locator('.wb-memory-source-preview').waitFor();
+    assert.equal(await page.locator('.wb-page-heading h1').innerText(), memoryTitle);
+    assert.equal(await page.locator('.wb-run-tab-temporary').count(), 0);
+    assert.ok(commands.every(command => ['records', 'openRun', 'openSearchResult', 'memories', 'openMemory', 'openMemorySource'].includes(command)), `only reading commands are sent: ${commands}`);
+    assert.deepEqual(errors, []);
+  } finally { await page.unrouteAll({ behavior: 'wait' }); await page.close(); }
+});
+
+test('temporary RUN close controls remain separate and keyboard reachable at every screen size', { timeout: 60000 }, async () => {
+  for (const locale of ['ko', 'en']) {
+    const page = await isolatedPage({ viewport: { width: 1440, height: 900 }, locale });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.route('**/api/message', async route => {
+      const response = await route.fetch(), payload = await response.json();
+      if (payload.view?.type === 'run' && payload.view.snapshot.readonly) {
+        payload.view.snapshot.run.request_summary = 'Long archived RUN title '.repeat(12);
+        payload.view.snapshot.run.slug = 'long-archive-slug-'.repeat(12);
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    try {
+      await page.goto(origin);
+      await page.locator('.wb-run-mindmap').waitFor();
+      await setLanguage(page, locale);
+      await page.locator('[data-wb-focus="nav:records"]').click();
+      const archive = page.locator('.wb-search-group').filter({ hasText: 'Archived design' });
+      await archive.locator('.wb-search-group-header').click();
+      for (const width of [320, 390, 768, 1024, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        const opened = page.waitForResponse(response => response.url().endsWith('/api/message') && response.request().postDataJSON().command === 'openRun');
+        await archive.locator('.wb-source-run-link').click();
+        await opened;
+        const tab = page.locator('.wb-run-tab-temporary'), close = page.locator('.wb-run-tab-close');
+        await close.waitFor();
+        await tab.scrollIntoViewIfNeeded();
+        const layout = await close.evaluate(button => {
+          const tab = button.previousElementSibling;
+          return { button: button.getBoundingClientRect().toJSON(), tab: tab.getBoundingClientRect().toJSON(),
+            title: tab.querySelector('.wb-run-tab-title').getBoundingClientRect().toJSON(),
+            meta: tab.querySelector('.wb-run-tab-meta').getBoundingClientRect().toJSON(), nested: !!button.closest('[role=tab]') };
+        });
+        assert.equal(layout.nested, false, 'close button is a sibling of the tab button');
+        assert.ok(layout.title.bottom <= layout.meta.top, `${locale} ${width}: two-line layout retained`);
+        for (const line of [layout.title, layout.meta]) assert.ok(line.right <= layout.button.left && line.left >= layout.tab.left, `${locale} ${width}: labels do not overlap the X`);
+        assert.ok(layout.button.left >= layout.tab.left && layout.button.right <= layout.tab.right, `${locale} ${width}: X stays within the tab`);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        await shot(page, `temporary-run-close-${locale}-${width}`);
+        await tab.focus();
+        await page.keyboard.press('Tab');
+        assert.equal(await close.evaluate(el => el === document.activeElement), true);
+        assert.equal(await close.getAttribute('aria-label'), locale === 'ko' ? '읽기 전용 RUN 탭 닫기' : 'Close read-only RUN tab');
+        await page.keyboard.press('Enter');
+        await archive.locator('.wb-source-run-link').waitFor();
+        assert.equal(await page.locator('.wb-run-tab-temporary').count(), 0);
+      }
+      await archive.locator('.wb-source-run-link').click();
+      await page.locator('.wb-run-tab-temporary').focus();
+      await page.keyboard.press('Delete');
+      await archive.locator('.wb-source-run-link').waitFor();
+      assert.equal(await page.locator('.wb-run-tab-temporary').count(), 0);
+      assert.deepEqual(errors, []);
+    } finally { await page.unrouteAll({ behavior: 'wait' }); await page.close(); }
+  }
+});
+
+test('closing a directly restored read-only RUN falls back to active RUNs or all records', { timeout: 45000 }, async () => {
+  for (const active of [true, false]) {
+    const page = await isolatedPage({ viewport: { width: 1280, height: 900 }, locale: 'en' });
+    page.setDefaultTimeout(6000);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    if (!active) await page.route('**/api/message', async route => {
+      const response = await route.fetch(), payload = await response.json();
+      const view = payload.view;
+      if (view) {
+        view.active_runs = [];
+        const context = view.status ?? view.snapshot ?? view.context;
+        if (context) context.active_runs = [];
+        if (view.type === 'overview') Object.assign(view.status, { active_run: null, plans: [], tasks: [], findings: [], task_counts: {} });
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    try {
+      await page.goto(origin);
+      await page.locator('[data-wb-focus="nav:records"]').click();
+      const archive = page.locator('.wb-search-group').filter({ hasText: 'Archived design' });
+      await archive.locator('.wb-search-group-header').click();
+      const opened = page.waitForResponse(response => response.url().endsWith('/api/message') && response.request().postDataJSON().command === 'openRun');
+      await archive.locator('.wb-source-run-link').click();
+      await opened;
+      await page.waitForLoadState('networkidle');
+      await page.locator('.wb-run-tab-temporary').waitFor();
+      await page.reload();
+      await page.waitForLoadState('networkidle');
+      await page.locator('.wb-run-tab-close').waitFor();
+      assert.equal(await page.locator('.wb-back').count(), 0);
+      await page.locator('.wb-run-tab-close').click();
+      await page.locator('.wb-run-tab-temporary').waitFor({ state: 'detached' });
+      if (active) {
+        await page.locator('.wb-run-mindmap').waitFor();
+        assert.equal(await page.getByRole('tab').count(), 2);
+        assert.equal(await page.locator('.wb-run-tab[aria-selected=true]').count(), 1);
+      } else {
+        await page.locator('.wb-search-group').first().waitFor();
+        assert.equal(await page.getByRole('tab').count(), 0);
+        assert.equal(await page.locator('[data-wb-focus="record-scope"]').inputValue(), 'all');
+      }
+      assert.deepEqual(errors, []);
+    } finally { await page.unrouteAll({ behavior: 'wait' }); await page.close(); }
+  }
+});
+
 test('real Viewer keeps RUN context, record navigation, preferences and fixed shell', { timeout: 90000 }, async () => {
   const { page, errors } = await openPage();
   try {
@@ -1972,7 +2138,11 @@ test('page motion waits for route content, ignores polling/filter/locale updates
     await page.locator('#wb-page-content').evaluate(el => { el.__retained = true; });
     const initial = await count();
     await page.locator('[data-wb-focus="nav:tasks"]').click(); await page.locator('.wb-tasks-table').waitFor();
+    // Cached TASK rows can render before selectRun settles and permits page motion.
+    await page.waitForFunction(expected => window.__wbMotion.filter(entry => entry.id === 'wb-page-content').length === expected, initial + 1);
     assert.equal(await count(), initial + 1);
+    await page.mouse.move(1400, 30);
+    await page.waitForFunction(() => document.querySelector('.tapl-workbench')?.dataset.sidebarExpanded === 'false');
     await page.locator('[data-wb-focus="task-query"]').fill('task 1');
     await page.locator('[data-wb-focus="filter:In Progress"]').click();
     const afterFilter = await count();
@@ -1983,11 +2153,13 @@ test('page motion waits for route content, ignores polling/filter/locale updates
     await page.waitForTimeout(220);
     assert.equal(await count(), afterFilter, 'pending placeholder does not consume destination entry');
     releaseRecords(); await page.locator('.wb-search-group').first().waitFor();
+    await page.waitForFunction(expected => window.__wbMotion.filter(entry => entry.id === 'wb-page-content').length === expected, afterFilter + 1);
     assert.equal(await count(), afterFilter + 1, 'actual response enters once');
     await page.mouse.move(1400, 30);
     await page.waitForFunction(() => document.querySelector('.tapl-workbench')?.dataset.sidebarExpanded === 'false');
     await page.locator('.wb-search-group-header').first().click();
     await page.locator('.wb-search-result').first().click(); await page.locator('.wb-record-page').waitFor();
+    await page.waitForFunction(expected => window.__wbMotion.filter(entry => entry.id === 'wb-page-content').length === expected, afterFilter + 2);
     assert.equal(await count(), afterFilter + 2, 'a record detail has its own route entry');
     await page.locator('[data-wb-focus="nav:settings"]').click();
     const input = page.locator('[id="setting-search.max_results"]'); await input.waitFor();
@@ -1999,7 +2171,7 @@ test('page motion waits for route content, ignores polling/filter/locale updates
     assert.equal(await input.evaluate(el => el.__retainedDraft), true);
     assert.equal(await page.locator('#wb-page-content').evaluate(el => el.__retained), true);
     assert.deepEqual(errors, []);
-  } finally { releaseRecords(); await page.close(); }
+  } finally { releaseRecords(); await page.unrouteAll({ behavior: 'wait' }); await page.close(); }
 });
 
 test('surface exits are inert, reopen cancels cleanup, and reduced motion clears modal and mobile scrim immediately', { timeout: 45000 }, async () => {
