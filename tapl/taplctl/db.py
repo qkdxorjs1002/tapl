@@ -13,10 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from . import identity, memory_search, sessions
+from . import identity, memory_cues, memory_search, sessions
 
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
+READONLY_SCHEMA_VERSIONS = (14, 15)
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"  # Legacy filename only.
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_EMBEDDING_DIMENSION = 384
@@ -288,7 +289,7 @@ def connect_readonly(
             version = int(row["value"])
         except (TypeError, ValueError) as exc:
             raise ReadOnlySchemaError("Database schema_version is not a valid integer.") from exc
-        if version < SCHEMA_VERSION:
+        if version < min(READONLY_SCHEMA_VERSIONS):
             raise ReadOnlySchemaError(
                 f"Database schema version {version} requires migration to {SCHEMA_VERSION}. {guidance}"
             )
@@ -331,6 +332,8 @@ def migrate(conn: sqlite3.Connection) -> None:
             backup_before_memory_migration(conn, target_version=12)
         if stored_schema_version < 14:
             backup_before_memory_migration(conn, target_version=14)
+        if stored_schema_version < 15:
+            backup_before_memory_migration(conn, target_version=15)
 
     migrated_legacy_record_mode = migrate_legacy_workflow_mode(conn)
 
@@ -632,6 +635,7 @@ def migrate(conn: sqlite3.Connection) -> None:
             for row in conn.execute("SELECT id,cues_json,note FROM memories WHERE state!='deleted'"):
                 conn.execute("INSERT INTO memory_fts(rowid,cue,note) VALUES(?,?,?)",
                              (row["id"], memory_search.indexed_cues(json.loads(row["cues_json"])), row["note"]))
+        memory_cues.ensure_catalog(conn, backfill=current is None or int(current["value"]) < 15)
         set_schema_version(conn, SCHEMA_VERSION)
         set_meta(conn, "embedding_model", DEFAULT_EMBEDDING_MODEL)
         set_meta(conn, "embedding_dimension", str(DEFAULT_EMBEDDING_DIMENSION))

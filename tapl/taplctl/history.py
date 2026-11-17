@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
 
-from . import config, db, embeddings, recall as memory_store, sessions
+from . import config, db, embeddings, memory_cues, recall as memory_store, sessions
 
 
 class HistoryError(ValueError):
@@ -257,6 +257,12 @@ class HistoryReader:
 
     def recall(self, query: str = "", limit: int = 3, offset: int = 0) -> dict[str, Any]:
         return {"ok": True, **self._recall(query=query, limit=limit, offset=offset)}
+
+    def list_memory_cues(self, query: str = "", *, limit: int = 20, offset: int = 0,
+                         source_db: str | None = None) -> dict[str, Any]:
+        path, payload = self._detail(source_db, lambda conn: memory_cues.list_cues(
+            conn, query=query, limit=limit, offset=offset))
+        return {"ok": True, **payload, "source_db": path.name}
 
     def automatic_recall(self, *, local_conn: sqlite3.Connection, run_id: str, query: str, now: Any) -> dict[str, Any]:
         return memory_store.finalize_automatic_recall(self.collect_automatic_recall(

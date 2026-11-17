@@ -315,3 +315,20 @@ def test_independent_automatic_history_wrapper_finalizes_once(sources):
     assert finalize.call_count == 1
     assert len(result['memories']) == 3
     assert len(json.dumps(result, ensure_ascii=False).encode('utf-8')) <= recall.AUTOMATIC_RECALL_MAX_BYTES
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_cue_catalog_selects_exact_source_without_migration_or_evidence(sources, legacy):
+    root, local, peer, first, second, reader = sources
+    if legacy:
+        with closing(sqlite3.connect(peer)) as conn:
+            conn.executescript("DROP TABLE memory_cue_links; DROP TABLE memory_cues; UPDATE meta SET value='14' WHERE key='schema_version';")
+    before = fingerprint(peer)
+    with mock.patch.object(db, 'migrate', side_effect=AssertionError('must stay read only')):
+        result = reader.list_memory_cues(query='sqlitemigration', source_db=peer.name)
+    assert result['cues'] == [{'cue': 'sqlite migration', 'usage_count': 3}]
+    assert result['source_db'] == peer.name
+    assert reader.list_memory_cues()['source_db'] == local.name
+    assert fingerprint(peer) == before
+    with pytest.raises(history.HistoryError):
+        reader.list_memory_cues(source_db='../' + peer.name)

@@ -14,7 +14,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
 
-from . import clients, config, config_editor, context as tapl_context, db, history, memory_search, prompt, recall as memory_store, recommendations, run_references, sessions, validation
+from . import clients, config, config_editor, context as tapl_context, db, history, prompt, recall as memory_store, recommendations, run_references, sessions, validation
 from .prompt import authoring_policy_update
 
 
@@ -417,6 +417,16 @@ class WorkflowApplication:
     def recall(self, query: str = "", *, limit: int = 3, offset: int = 0) -> dict[str, Any]:
         return self._reference_read("recall", lambda: self._history().recall(query, limit=limit, offset=offset))
 
+    def list_memory_cues(self, query: str = "", *, limit: int = 20, offset: int = 0,
+                         source_db: str | None = None) -> dict[str, Any]:
+        return self._history().list_memory_cues(query, limit=limit, offset=offset, source_db=source_db)
+
+    def merge_memory_cues(self, target_cue: str, cues: list[str], *, source_db: str | None = None) -> dict[str, Any]:
+        self._require_local_memory_source(source_db)
+        with self._connection() as conn:
+            result = memory_store.merge_memory_cues(conn, target_cue=target_cue, cues=cues)
+        return {"ok": True, **result, "source_db": self.db_path.name}
+
     def get_memory(self, memory_id: str, *, source_db: str | None = None) -> dict[str, Any]:
         return self._reference_read("get_memory", lambda: self._history().get_memory(memory_id, source_db=source_db))
 
@@ -586,12 +596,9 @@ class WorkflowApplication:
             try:
                 if settings.recall.enabled:
                     has_explicit_query = bool(recall_query)
-                    selected_query = (recall_query if has_explicit_query else
-                                      memory_search.select_query(summary, from_summary=True))
                     payload["recall"] = memory_store.emit_recall_once(
-                        conn, run_id=str(run["id"]), query=selected_query,
+                        conn, run_id=str(run["id"]), query=recall_query or summary,
                         selection_mode="explicit" if has_explicit_query else "summary",
-                        query_truncated=not has_explicit_query and len(summary) > len(selected_query),
                         recall_reader=lambda **values: self._history().collect_automatic_recall(local_conn=conn, **values),
                     )
                 else:

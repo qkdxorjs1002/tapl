@@ -39,6 +39,8 @@ A busy database, unsupported/invalid source, existing destination, or destinatio
 
 Readonly viewers can inspect an existing legacy database before migration. They do not migrate it. Refresh the Viewer after migration because its source filename changes. An explicit administrative `--db PATH` continues to select that exact file.
 
+Read-only access accepts schemas 14 and 15 without migration. Schema 15 adds the reusable memory cue catalog, aliases, and memory links; writable upgrades back up to `.pre-v15.bak` and preserve existing memory content and indexes. Schema 14 catalogs are derived during reads. Catalog merges write only to the local database; peer catalogs remain read-only, and merging preserves existing memory content and search indexes. See [Memory configuration and upgrades](memory.md#configuration-and-upgrades).
+
 ## Querying multiple databases
 
 Only the selected working folder is scanned; parent folders and Git roots are not searched. Place peer `tapl-*.db` files in that folder's `.tapl` directory to make their history available. Symlink databases and directories are not followed.

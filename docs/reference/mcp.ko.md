@@ -2,7 +2,7 @@
 
 [문서 홈](../README.ko.md) · [English](mcp.md)
 
-`tapl-mcp`는 MCP stdio로 워크플로 애플리케이션을 제공합니다. 관리 명령은 [CLI](cli.ko.md)를 사용합니다. 이 페이지는 [`mcp_server.py`](../../tapl/taplctl/mcp_server.py)에 등록된 **공개 도구 34개 전체**를 다룹니다. 정확한 입력 검증은 연결된 서버의 JSON schema가 기준입니다.
+`tapl-mcp`는 MCP stdio로 워크플로 애플리케이션을 제공합니다. 관리 명령은 [CLI](cli.ko.md)를 사용합니다. 이 페이지는 [`mcp_server.py`](../../tapl/taplctl/mcp_server.py)에 등록된 **공개 도구 37개 전체**를 다룹니다. 정확한 입력 검증은 연결된 서버의 JSON schema가 기준입니다.
 
 Claude Code는 읽기를 포함해 모든 호출에 정확한 hook 소유자 `claude-code:<native-session-id>`가 필요합니다. 생략·원본 ID·다른 클라이언트 ID를 거부하며, 아래 legacy 생략 동작은 Codex에만 적용됩니다. 승인 source `request_user_input`은 Claude `AskUserQuestion` 응답을 포함한 도구 확인 이력의 기존 값으로 유지합니다. 호스트별 정책·모델 설정은 [Claude 가이드](../getting-started/claude-code.ko.md)를 참고하세요.
 
@@ -85,16 +85,27 @@ RUN 요약·분할·아카이브 등으로 모드나 유효 상세도가 바뀌�
 | `tapl_list_archives` | 없음 | `limit` (1–100). 최근 아카이브 목록. |
 | `tapl_get_archive` | `archive_id` | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 문자열 형태의 숫자 ID 또는 안정된 slug. 항목·이벤트를 반환합니다. |
 | `tapl_recall` | 없음 | `query=""` (최대 500자), `limit=3` (1–50), `offset=0` (0 이상). 빈 쿼리는 목록 조회이며 캡처·강화하지 않습니다. |
+| `tapl_list_memory_cues` | 없음 | `query=""` (최대 200자), `limit=20` (1–50), `offset=0` (0 이상), 선택적 정확한 `source_db`. 읽기 전용 표현·사용 건수 목록이며 기본값은 로컬 쓰기 DB입니다. 저장·키워드 수정 전에 같은 의미의 표현을 재사용합니다. |
+| `tapl_merge_memory_cues` | `target_cue` (기존 표현, 1–80자), `cues` (흡수할 기존 표현 1–20개, 각 1–80자) | 선택적 정확한 `source_db` (생략 시 로컬). 로컬 쓰기 DB에서만 목록 정의·연결을 병합하고 기존 표현은 별칭으로 보존합니다. 별칭 입력은 대표 표현으로 해석하며 다른 DB는 거절합니다. 기억 내용·색인은 그대로 유지하고 반복 호출은 중복되지 않습니다. |
 | `tapl_get_memory` | `memory_id` | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 메모리와 원본을 반환하며 없거나 삭제된 메모리는 null입니다. |
 | `tapl_use_references` | `expected_run_id`, `references`, `session_id` | 같은 대화 세션에서 이미 원문을 확인한 자료의 현재 RUN 사용을 기록합니다. 배치 1–50개이며 각 항목은 출처별 정확한 식별자와 공백 제거 후 1–500자의 `usage`를 가집니다. 전체 검증 후 반영하며 반복 호출은 중복되지 않고 기억 강화와 별개입니다. |
 | `tapl_update_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). `note` (1–240자), `cue` (3–5개), `state` (`active` 또는 `superseded`). 명시적 사용자 요청이 필요합니다. |
 | `tapl_delete_memory` | `memory_id`, `expected_revision` (양의 정수) | 선택적 `source_db` (정확한 원본 파일명, 생략 시 로컬). 명시적 사용자 요청이 필요하며 tombstone 처리해 회상·강화에서 제외합니다. |
 
+목록 조회는 별칭도 검색하지만 대표 표현과 `usage_count`만 반환하며 별칭 배열은
+포함하지 않습니다. 사용 건수는 대표 표현별로 삭제되지 않은 기억을 한 번씩 셉니다.
+에이전트는 조회한 개념이 같음을 확인하면 저장·키워드 선택 작업 중 별도 재확인 없이
+`tapl_merge_memory_cues`를 사용할 수 있습니다. 유사도 자동 병합은 하지 않습니다.
+응답은 `target_cue`, `merged_cues`, `affected_memories`,
+`status="merged"|"unchanged"`입니다. 이후 저장·키워드 수정은 별칭을 대표 표현으로
+해석하고 중복되거나 고유 키워드가 3개 미만이면 거절합니다. 병합 범위와 예시는
+[저장할 때 키워드 재사용](../guides/memory.ko.md#저장할-때-키워드-재사용)을 참고하세요.
+
 `tapl_summarize_run`의 자동 회상은 상태·진단·원본 오류를 포함한 전체 `recall`
 객체에 최종 3,600 UTF-8 바이트 상한을 한 번 적용합니다. 짧은 힌트도 노트 전체와
 정확한 원본 포인터를 보존하며, 예산이나 적격성에 따라 3개보다 적게 반환할 수
 있습니다. 수동 회상·상세 필드, 페이지네이션, Viewer 응답은 그대로 유지합니다.
-질의 별칭·후보 상한·진단은 [회상 기준과 한계](../guides/memory.ko.md#회상-기준과-한계)를 참고하세요.
+질의 범위·후보 상한·진단은 [회상 기준과 한계](../guides/memory.ko.md#회상-기준과-한계)를 참고하세요.
 
 Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 DB에 간결한 포인터를 기록할 수 있습니다. 기억을 캡처·강화하거나 다른 DB에 쓰지 않으며 Viewer 조회는 기록하지 않습니다. [Agent 조회 기록](../guides/memory.ko.md#agent-조회-기록)을 참고하세요.
 
@@ -133,7 +144,7 @@ Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 
 
 | 도구 | 필수 인자 | 선택 인자와 동작 |
 | --- | --- | --- |
-| `tapl_summarize_run` | `summary` (1–2000자), `work_type`, `workflow_mode` | `recall_query` (최대 500자, 핵심 용어 3–8개 권장). 생략하면 요약의 핵심 토큰을 최대 8개 선택합니다. RUN당 한 번 관련 자동 힌트를 최대 3개 제공합니다. |
+| `tapl_summarize_run` | `summary` (1–2000자), `work_type`, `workflow_mode` | `recall_query` (최대 500자, 핵심 용어 3–8개 권장). 생략하거나 비어 있으면 요약의 앞 토큰을 최대 8개 사용합니다. RUN당 한 번 관련 자동 힌트를 최대 3개 제공합니다. |
 | `tapl_split_run` | `requests` (객체 2–20개) | 객체마다 `key`, `summary`, `work_type`, `workflow_mode`, 선택 `depends_on=[]`가 있으며 앞선 키만 참조합니다. 계획 전 명시적으로 분리한 RUN 수명주기에 사용합니다. |
 | `tapl_apply_plan` | schema상 없음 | `plan_id="PLAN-001"`, `title`, `summary`, `objective`, `requirements_trace`, `selected_approach`, `affected_files`, `execution_order`, `risks`, `validation`, `approval_needs`, `notes`, `custom_fields`, `status`. 워크플로 검증에는 충분한 계획이 필요합니다. |
 | `tapl_add_finding` | `title` | `source=""`, `finding=""`, `impact=""`, `related_ids=""`. 판단에 필요한 근거와 출처를 기록합니다. |

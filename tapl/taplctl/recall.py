@@ -12,7 +12,7 @@ import sqlite3
 import unicodedata
 import uuid
 
-from . import db, memory_search
+from . import db, memory_cues, memory_search
 
 
 AUTOMATIC_RECALL_LIMIT = 3
@@ -203,30 +203,10 @@ def _fts_queries(query, spacing_aliases):
     return list(dict.fromkeys(expanded))
 
 
-def _search_branches(query):
-    branches, seen = [], set()
-    for variant in memory_search.query_variants(query):
-        bounded = _query(variant)
-        if not bounded:
-            continue
-        aliases = memory_search.korean_aliases(variant)
-        phrases = memory_search.query_phrases(variant) if aliases else set()
-        identity = (bounded, frozenset(aliases), frozenset(phrases))
-        if identity in seen:
-            continue
-        seen.add(identity)
-        native = db.build_fts_queries(bounded)
-        exact_count = 2 if len(bounded.split()) > 1 else 1
-        exact = list(dict.fromkeys([*native[:exact_count], *(
-            [" OR ".join(f'"{alias}"' for alias in sorted(aliases))] if aliases else [])]))
-        fallbacks = [value for value in _fts_queries(bounded, aliases) if value not in exact]
-        branches.append((bounded, aliases, phrases, [*exact, *fallbacks], len(exact)))
-    return branches
-
-
 def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
-    """Collect ranked candidates; automatic response budgeting belongs to callers."""
     bounded_query = _query(query)
+    spacing_aliases = memory_search.korean_aliases(query)
+    spacing_phrases = memory_search.query_phrases(query) if spacing_aliases else set()
     if type(limit) is not int or not 1 <= limit <= 50 or type(offset) is not int or offset < 0 or offset > 1000000:
         raise MemoryError("limit must be 1–50 and offset must be 0–1000000")
     if automatic:
@@ -239,74 +219,36 @@ def _recall(conn, *, query, current_run_id, automatic, limit, offset, now):
         where.append("m.created_run_id!=?")
         params.append(current_run_id)
     clause = " AND ".join(where)
+    ranked = []
     total, scanned = 0, 0
     if bounded_query:
-        branches = _search_branches(query)
-        base_sql = "FROM memory_fts JOIN memories m ON m.id=memory_fts.rowid WHERE memory_fts MATCH ? AND " + clause
-        if automatic:
-            # Visit every original/alias exact phase before broad fallbacks.
-            # The cache counts unique rows, but rejection under one spelling
-            # never prevents independent approval under a later safe variant.
-            phases = [(index, exact, branch, fts_query) for exact in (True, False) for index, branch in enumerate(branches)
-                      for fts_query in (branch[3][:branch[4]] if exact else branch[3][branch[4]:])]
-            seen, accepted = {}, {}
-            exact_scanned = [0] * len(branches)
-            for index, exact, branch, fts_query in phases:
-                remaining = AUTOMATIC_RECALL_CANDIDATES - len(seen)
-                if exact:
-                    # Reserve a fair unique-row share for every independent
-                    # spelling. A rejected original singleton cannot consume
-                    # all 24 slots before a canonical exact cue is searched.
-                    share = AUTOMATIC_RECALL_CANDIDATES // len(branches) + (index < AUTOMATIC_RECALL_CANDIDATES % len(branches))
-                    remaining = min(remaining, share - exact_scanned[index])
-                if remaining:
-                    exclusions = " AND m.id NOT IN (" + ",".join("?" for _ in seen) + ")" if seen else ""
-                    rows = conn.execute("SELECT m.*,bm25(memory_fts) AS relevance " + base_sql + exclusions +
-                                        " ORDER BY relevance,m.id LIMIT ?",
-                                        [fts_query, *params, *seen, remaining]).fetchall()
-                    seen.update((row["id"], row) for row in rows)
-                    if exact:
-                        exact_scanned[index] += len(rows)
-            if seen:
-                included = " AND m.id IN (" + ",".join("?" for _ in seen) + ")"
-                # Rank the bounded pool against each phase independently. This
-                # also restores original-exact priority for rows discovered
-                # later using an unused alias share or a broad fallback.
-                for priority, (_, _, branch, fts_query) in enumerate(phases):
-                    scores = conn.execute("SELECT m.id,bm25(memory_fts) AS relevance " + base_sql + included,
-                                          [fts_query, *params, *seen]).fetchall()
-                    for score in scores:
-                        row_id = score["id"]
-                        if row_id in accepted:
-                            continue
-                        row = seen[row_id]
-                        matched, approved = _matches(row, branch[0], branch[1], branch[2])
-                        if approved:
-                            memory = _dto(conn, row, now, matched=matched)
-                            accepted[row_id] = (priority, score["relevance"], -memory["strength"], memory)
-            ranked = sorted(accepted.values(), key=lambda entry: entry[:3])
-            memories = [entry[3] for entry in ranked]
-            total, scanned = len(memories), len(seen)
-        else:
-            # One stable broad union supplies both count and pagination. Exact
-            # original matches retain preference over canonicalized variants.
-            union = " OR ".join(f"({branch[3][-1]})" for branch in branches)
-            sql = base_sql
-            total = conn.execute("SELECT count(*) " + sql, [union, *params]).fetchone()[0]
-            exact = db.build_fts_queries(bounded_query)[0]
-            rows = conn.execute("SELECT m.*,bm25(memory_fts) AS relevance " + sql +
-                                " ORDER BY CASE WHEN m.id IN (SELECT rowid FROM memory_fts WHERE memory_fts MATCH ?)"
-                                " THEN 0 ELSE 1 END,relevance,m.id LIMIT ? OFFSET ?",
-                                [union, *params, exact, limit, offset]).fetchall()
-            memories = []
+        # Each fallback is bounded before materialization; OR never scans Python-side history.
+        queries = _fts_queries(bounded_query, spacing_aliases)
+        seen = set()
+        for priority, fts_query in enumerate(queries):
+            sql = "FROM memory_fts JOIN memories m ON m.id=memory_fts.rowid WHERE memory_fts MATCH ? AND " + clause
+            if not automatic:
+                # Manual results use the broadest safe FTS query for stable count/pagination.
+                if priority != len(queries) - 1:
+                    continue
+                total = conn.execute("SELECT count(*) " + sql, [fts_query, *params]).fetchone()[0]
+            rows = conn.execute("SELECT m.*,bm25(memory_fts) AS relevance " + sql + " ORDER BY relevance,m.id LIMIT ? OFFSET ?",
+                                [fts_query, *params, AUTOMATIC_RECALL_CANDIDATES - len(seen) if automatic else limit, 0 if automatic else offset]).fetchall()
             for row in rows:
-                matched = []
-                for branch in branches:
-                    found, approved = _matches(row, branch[0], branch[1], branch[2])
-                    if found:
-                        matched = found
-                        break
-                memories.append(_dto(conn, row, now, matched=matched))
+                if row["id"] in seen:
+                    continue
+                seen.add(row["id"])
+                matched, accepted = _matches(row, bounded_query, spacing_aliases, spacing_phrases)
+                if automatic and not accepted:
+                    continue
+                memory = _dto(conn, row, now, matched=matched)
+                ranked.append((priority, row["relevance"], -memory["strength"], memory))
+            if automatic and len(seen) >= AUTOMATIC_RECALL_CANDIDATES:
+                break
+        ranked.sort(key=lambda entry: entry[:3])
+        memories = [entry[3] for entry in (ranked if automatic else ranked[:limit])]
+        if automatic:
+            total, scanned = len(ranked), len(seen)
     elif automatic:
         memories = []
     else:
@@ -498,19 +440,32 @@ def _index(conn, row_id, cue, note):
     conn.execute("INSERT INTO memory_fts(rowid,cue,note) VALUES(?,?,?)", (row_id, memory_search.indexed_cues(cue), note))
 
 
+def merge_memory_cues(conn, *, target_cue, cues):
+    with _transaction(conn, write=True):
+        try:
+            return memory_cues.merge_cues(conn, target_cue=target_cue, cues=cues)
+        except ValueError as exc:
+            raise MemoryError(str(exc)) from exc
+
+
 def update_memory(conn, memory_id, *, expected_revision, note=None, cue=None, state=None, now=None):
     now = _time(now)
+    cues_changed = cue is not None
     with _transaction(conn, write=True):
         row = _row(conn, memory_id)
         _revision(row, expected_revision)
         if state is not None and state not in ("active", "superseded"):
             raise MemoryError("state must be active or superseded; use delete_memory to delete")
         note, cue, fingerprint = _content(row["note"] if note is None else note, json.loads(row["cues_json"]) if cue is None else cue)
+        if cues_changed:
+            note, cue, fingerprint = _content(note, memory_cues.resolve_existing(conn, cue))
         if _fingerprint_exists(conn, fingerprint, exclude=memory_id):
             raise MemoryError("content duplicates an existing or deleted memory", "conflict")
         conn.execute("UPDATE memories SET note=?,cues_json=?,fingerprint=?,state=?,revision=revision+1,content_updated_at=?,half_life_days=7,last_reinforced_at=NULL WHERE id=?",
                      (note, json.dumps(cue, ensure_ascii=False), fingerprint, state or row["state"], _stamp(now), row["id"]))
         _index(conn, row["id"], cue, note)
+        if cues_changed:
+            memory_cues.bind_cues(conn, row["id"], cue)
         _event(conn, row["created_run_id"], "memory_updated", {"memory_id": memory_id, "fingerprint": fingerprint}, now)
         return _dto(conn, _row(conn, memory_id), now)
 
@@ -522,6 +477,7 @@ def delete_memory(conn, memory_id, *, expected_revision, now=None):
         _revision(row, expected_revision)
         conn.execute("UPDATE memories SET note='',cues_json='[]',state='deleted',revision=revision+1,content_updated_at=? WHERE id=?", (_stamp(now), row["id"]))
         conn.execute("DELETE FROM memory_fts WHERE rowid=?", (row["id"],))
+        memory_cues.bind_cues(conn, row["id"], [])
         _event(conn, row["created_run_id"], "memory_deleted", {"memory_id": memory_id, "fingerprint": row["fingerprint"]}, now)
         return {"id": memory_id, "state": "deleted", "revision": row["revision"] + 1}
 
@@ -531,17 +487,25 @@ def _capture(conn, run_id, candidate, now):
         raise MemoryError("candidate must be an object")
     if type(candidate.get("slot")) is not int or candidate["slot"] not in (1, 2):
         raise MemoryError("candidate slot must be 1 or 2")
-    note, cue, fingerprint = _content(candidate.get("note"), candidate.get("cue"))
+    note, cue, request_fingerprint = _content(candidate.get("note"), candidate.get("cue"))
     source_run_id, source_item_id = candidate.get("source_run_id"), candidate.get("source_item_id")
     replaces = candidate.get("replaces_memory_id")
     if replaces is not None and (not isinstance(replaces, str) or not replaces):
         raise MemoryError("replaces_memory_id must be a nonempty string")
-    payload_hash = _hash([fingerprint, source_run_id, source_item_id, replaces])
+    request_hash = _hash([request_fingerprint, source_run_id, source_item_id, replaces])
     with _transaction(conn, write=True):
         _current_run(conn, run_id)
         receipt = conn.execute("SELECT payload_json FROM events WHERE event_type='memory_capture' AND run_id=? AND json_extract(payload_json,'$.slot')=?", (run_id, candidate["slot"])).fetchone()
         if receipt:
             data = json.loads(receipt["payload_json"])
+            # An acknowledged request survives later catalog merges, including
+            # merges that collapse its historical cues. Older receipts stored
+            # only the request's then-canonical payload hash.
+            if data.get("request_hash", data["payload_hash"]) == request_hash:
+                return {"slot": candidate["slot"], "memory_id": data["memory_id"], "status": "already_captured"}
+        note, cue, fingerprint = _content(note, memory_cues.resolve_existing(conn, cue))
+        payload_hash = _hash([fingerprint, source_run_id, source_item_id, replaces])
+        if receipt:
             if data["payload_hash"] != payload_hash:
                 raise MemoryError("capture slot already has different content", "conflict")
             return {"slot": candidate["slot"], "memory_id": data["memory_id"], "status": "already_captured"}
@@ -555,9 +519,10 @@ def _capture(conn, run_id, candidate, now):
             cursor = conn.execute("INSERT INTO memories(memory_id,created_run_id,slot,source_run_id,source_item_id,cues_json,note,fingerprint,replaces_memory_id,created_at,content_updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                                  (memory_id, run_id, candidate["slot"], source_run_id, source_item_id, json.dumps(cue, ensure_ascii=False), note, fingerprint, replaces, _stamp(now), _stamp(now)))
             _index(conn, cursor.lastrowid, cue, note)
+            memory_cues.bind_cues(conn, cursor.lastrowid, cue)
             if previous is not None:
                 conn.execute("UPDATE memories SET state='superseded',revision=revision+1 WHERE id=?", (previous["id"],))
-        _event(conn, run_id, "memory_capture", {"created_run_id": run_id, "slot": candidate["slot"], "memory_id": memory_id, "fingerprint": fingerprint, "payload_hash": payload_hash}, now)
+        _event(conn, run_id, "memory_capture", {"created_run_id": run_id, "slot": candidate["slot"], "memory_id": memory_id, "fingerprint": fingerprint, "payload_hash": payload_hash, "request_hash": request_hash}, now)
         return {"slot": candidate["slot"], "memory_id": memory_id, "status": "deduplicated" if existing else "captured"}
 
 

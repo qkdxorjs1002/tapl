@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [한국어](mcp.ko.md)
 
-`tapl-mcp` exposes the workflow application over MCP stdio. Management commands belong to [the CLI](cli.md). This page covers all **34 public tools** registered by [`mcp_server.py`](../../tapl/taplctl/mcp_server.py); the connected server's JSON schema is the authority for exact validation.
+`tapl-mcp` exposes the workflow application over MCP stdio. Management commands belong to [the CLI](cli.md). This page covers all **37 public tools** registered by [`mcp_server.py`](../../tapl/taplctl/mcp_server.py); the connected server's JSON schema is the authority for exact validation.
 
 Claude Code requires the exact `claude-code:<native-session-id>` hook owner on every call, even reads. Its missing/raw/foreign-client IDs are rejected; the legacy omission behavior below applies only to Codex. Approval source `request_user_input` remains the stable tool-confirmed provenance value, including Claude `AskUserQuestion` answers. Host-specific policy and model setup are described in the [Claude guide](../getting-started/claude-code.md).
 
@@ -85,16 +85,29 @@ Search, lists, and recall read multiple databases in the working folder. Preserv
 | `tapl_list_archives` | None | `limit` (1–100). Lists recent archives. |
 | `tapl_get_archive` | `archive_id` | Optional `source_db` (exact source filename; omission selects local). Numeric ID as a string or stable slug; returns items and events. |
 | `tapl_recall` | None | `query=""` (at most 500 characters), `limit=3` (1–50), `offset=0` (nonnegative). Empty query lists memories. No capture/reinforcement. |
+| `tapl_list_memory_cues` | None | `query=""` (at most 200 characters), `limit=20` (1–50), `offset=0` (nonnegative), optional exact `source_db`. Read-only labels and usage counts; defaults to the local writing DB. Reuse matching labels before capture/cue edits. |
+| `tapl_merge_memory_cues` | `target_cue` (existing label, 1–80 characters), `cues` (1–20 existing labels to absorb, each 1–80 characters) | Optional exact `source_db` (omission selects local). Merges catalog definitions/links only in the local writing DB and retains old labels as aliases. Alias inputs resolve to representatives; foreign sources are rejected. Preserves memory content/indexes; repeated calls are idempotent. |
 | `tapl_get_memory` | `memory_id` | Optional `source_db` (exact source filename; omission selects local). Returns memory and original source; missing/deleted memory returns null. |
 | `tapl_use_references` | `expected_run_id`, `references`, `session_id` | Records actual use during this RUN from originals already opened in this exact conversation. Batch 1–50; each entry has source-qualified identity and trimmed `usage` (1–500 characters). Atomic, idempotent, and independent of memory reinforcement. |
 | `tapl_update_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). `note` (1–240 characters), `cue` (3–5 entries), `state` (`active` or `superseded`). Explicit user request only. |
 | `tapl_delete_memory` | `memory_id`, `expected_revision` (positive integer) | Optional `source_db` (exact source filename; omission selects local). Explicit user request only; tombstones the memory so recall/reinforcement cannot use it. |
 
+Catalog lookup also searches aliases but returns only representative labels and
+`usage_count`, without an aliases array. Counts include each nondeleted memory
+once per representative. After establishing equivalence from inspected labels,
+the agent may use `tapl_merge_memory_cues` during capture/cue selection without
+per-merge user confirmation. TAPL does not merge by fuzzy similarity. The response
+has `target_cue`, `merged_cues`, `affected_memories`, and
+`status="merged"|"unchanged"`. Later capture/cue edits resolve aliases to
+representatives and reject duplicates or fewer than three unique cues. See
+[Reuse cue labels when storing](../guides/memory.md#reuse-cue-labels-when-storing)
+for merge scope and an example.
+
 Automatic recall from `tapl_summarize_run` has one final 3,600 UTF-8 byte cap
 for its full `recall` object, including status, diagnostics, and source errors.
 Compact hints keep the full note and exact source pointers; fewer than three may
 fit or qualify. This does not change manual recall/detail fields, pagination, or
-Viewer responses. Query aliases, candidate limits, and diagnostics are described
+Viewer responses. Query boundaries, candidate limits, and diagnostics are described
 in [Recall criteria and limits](../guides/memory.md#recall-criteria-and-limits).
 
 Successful agent lookups may record compact pointers in the existing owned RUN for its mindmap. This does not capture/reinforce memory or write foreign history; Viewer reads are not tracked. See [Agent lookup traces](../guides/memory.md#agent-lookup-traces).
@@ -134,7 +147,7 @@ Check original evidence from `tapl_get_item` or `tapl_get_archive` before using 
 
 | Tool | Required arguments | Optional arguments and behavior |
 | --- | --- | --- |
-| `tapl_summarize_run` | `summary` (1–2000 characters), `work_type`, `workflow_mode` | `recall_query` (at most 500 characters; prefer 3–8 core terms). Omission selects up to eight core summary tokens. At most three relevant automatic hints once per RUN. |
+| `tapl_summarize_run` | `summary` (1–2000 characters), `work_type`, `workflow_mode` | `recall_query` (at most 500 characters; prefer 3–8 core terms). Omission or empty uses the first eight summary tokens. At most three relevant automatic hints once per RUN. |
 | `tapl_split_run` | `requests` (2–20 objects) | Each object has `key`, `summary`, `work_type`, `workflow_mode`, optional `depends_on=[]` referencing earlier keys. For explicitly separate RUN lifecycles before planning. |
 | `tapl_apply_plan` | None in schema | `plan_id="PLAN-001"`, `title`, `summary`, `objective`, `requirements_trace`, `selected_approach`, `affected_files`, `execution_order`, `risks`, `validation`, `approval_needs`, `notes`, `custom_fields`, `status`. Workflow validation still requires an adequate plan. |
 | `tapl_add_finding` | `title` | `source=""`, `finding=""`, `impact=""`, `related_ids=""`. Record decision-relevant evidence and source. |

@@ -68,7 +68,7 @@ class MemoryCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slot: int = Field(ge=1, le=2, strict=True)
-    cue: list[str] = Field(description="3–5 distinct, concrete cues likely to recur in future searches.", min_length=3, max_length=5)
+    cue: list[str] = Field(description="3–5 distinct concepts after alias resolution. Inspect/reuse tapl_list_memory_cues labels; agents may merge equivalent labels with tapl_merge_memory_cues. Add labels only for new concepts.", min_length=3, max_length=5)
     note: str = Field(description="Reusable verified lesson that reduces future source exploration; at most 240 characters, with no sentence-count rule.", min_length=1, max_length=240)
     source_run_id: str = Field(min_length=1)
     source_item_id: int | None = Field(default=None, ge=1, strict=True)
@@ -671,6 +671,31 @@ def _create_server(
         """Read associative hints without capture or reinforcement. Verify original sources before relying on a hint."""
         return await call_application(application.recall, query, session_id=session_id, limit=limit, offset=offset)
 
+    @server.tool(name="tapl_list_memory_cues", title="List reusable TAPL memory cues", annotations=READ_ONLY)
+    async def list_memory_cues(
+        query: Annotated[str, Field(description="Literal label fragment; spacing differences also return suggestions.", max_length=200)] = "",
+        limit: Annotated[int, Field(ge=1, le=50, strict=True)] = 20,
+        offset: Annotated[int, Field(ge=0, strict=True)] = 0,
+        source_db: SourceDb = None,
+        session_id: SessionId = None,
+    ) -> dict[str, Any]:
+        """Before capture or cue edits, inspect/reuse existing labels; agents may merge equivalent labels with tapl_merge_memory_cues. New concepts may use new labels. Reuse labels checked this session. Searches canonical labels and retained aliases; returns canonical labels and usage counts, not source evidence. Defaults to local; source_db reads another catalog. New labels register on successful storage; no model calls or synonym expansion."""
+        return await call_application(application.list_memory_cues, query, session_id=session_id,
+                                      limit=limit, offset=offset, **compact_payload(source_db=source_db))
+
+    @server.tool(name="tapl_merge_memory_cues", title="Merge equivalent TAPL memory cues", annotations=ToolAnnotations(
+        read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False,
+    ))
+    async def merge_memory_cues(
+        target_cue: Annotated[str, Field(description="Existing representative label or alias; retains its current canonical label.", min_length=1, max_length=80, strict=True)],
+        cues: Annotated[list[Annotated[str, Field(min_length=1, max_length=80, strict=True)]], Field(description="1–20 existing equivalent labels or aliases to absorb.", min_length=1, max_length=20)],
+        source_db: SourceDb = None,
+        session_id: SessionId = None,
+    ) -> dict[str, Any]:
+        """Agents may explicitly merge equivalent catalog concepts during storage after inspecting tapl_list_memory_cues; no per-merge approval needed. All labels must exist in the local database. Validates atomically, combines associations, and retains former labels as aliases. Preserves stored memories, revisions and search indexes; future storage resolves aliases and requires distinct cues. Never fuzzy auto-merge or query synonym expansion. Returns canonical target_cue, actual merged_cues, distinct affected_memories and merged/unchanged status."""
+        return await call_application(application.merge_memory_cues, target_cue, cues, session_id=session_id,
+                                      require_session=True, **compact_payload(source_db=source_db))
+
     @server.tool(name="tapl_get_memory", title="Read one TAPL memory", annotations=READ_ONLY)
     async def get_memory(
         memory_id: Annotated[str, Field(description="Memory id returned by tapl_recall.", min_length=1)],
@@ -699,7 +724,7 @@ def _create_server(
         memory_id: str,
         expected_revision: Annotated[int, Field(ge=1, strict=True)],
         note: Annotated[str | None, Field(min_length=1, max_length=240)] = None,
-        cue: Annotated[list[str] | None, Field(min_length=3, max_length=5)] = None,
+        cue: Annotated[list[str] | None, Field(description="Inspect/reuse tapl_list_memory_cues labels; agents may merge equivalent labels. Must remain distinct after alias resolution.", min_length=3, max_length=5)] = None,
         state: Literal["active", "superseded"] | None = None,
         source_db: SourceDb = None,
         session_id: SessionId = None,
@@ -760,7 +785,7 @@ def _create_server(
             WorkflowMode,
             Field(description=tapl_prompt.field_help("run", "workflow_mode")),
         ],
-        recall_query: Annotated[str | None, Field(description="Optional focused terms/identifiers (up to eight lexical tokens) for one recall per RUN; omitted or empty selects summary terms.", max_length=500)] = None,
+        recall_query: Annotated[str | None, Field(description="Optional focused terms/identifiers for one recall per RUN; uses the first eight lexical tokens. Omitted or empty uses the request summary with the same limit.", max_length=500)] = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
         """Summarize the request and explicitly classify its work type and workflow mode."""

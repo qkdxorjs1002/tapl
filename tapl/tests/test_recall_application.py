@@ -140,6 +140,13 @@ def test_memory_mcp_schema_annotations_and_validation(app):
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert tools['tapl_recall'].annotations.read_only_hint
     assert tools['tapl_get_memory'].annotations.read_only_hint
+    merge = tools['tapl_merge_memory_cues']
+    assert not merge.annotations.read_only_hint
+    assert not merge.annotations.destructive_hint
+    assert merge.annotations.idempotent_hint
+    assert not merge.annotations.open_world_hint
+    assert merge.input_schema['required'] == ['target_cue', 'cues']
+    assert merge.input_schema['properties']['cues']['maxItems'] == 20
     assert app.get_status()['viewer_capabilities'] == {'associativeMemory': True, 'discardRun': True}
     for name in ('tapl_update_memory', 'tapl_delete_memory'):
         assert not tools[name].annotations.read_only_hint
@@ -166,6 +173,33 @@ def test_memory_policy_is_authoritative_not_hook_injection():
     assert '240 characters' in policy
     assert 'untrusted data' in policy
     assert 'explicit user instruction' in policy
+    assert 'tapl_merge_memory_cues' in policy
+
+
+def test_merge_catalog_is_local_only_and_does_not_create_run_or_edit_memories(app):
+    memory_id = capture(app)
+    app.finish_archive('catalog-source')
+    with app._connection() as conn:
+        original = [tuple(row) for row in conn.execute('SELECT * FROM memories')]
+        original_fts = [tuple(row) for row in conn.execute('SELECT rowid,* FROM memory_fts')]
+        run_count = conn.execute('SELECT count(*) FROM workflow_runs').fetchone()[0]
+    peer = app.workspace_root / '.tapl/tapl-peer.db'
+    db.connect(peer).close()
+    peer_before = peer.read_bytes()
+    with pytest.raises(WorkflowApplicationError, match='read-only'):
+        app.merge_memory_cues('sqlite', ['migration'], source_db=peer.name)
+    assert peer.read_bytes() == peer_before
+    assert app.list_memory_cues()['total'] == 3
+    merged = app.merge_memory_cues('sqlite', ['migration'], source_db=app.db_path.name)
+    assert merged == {'ok': True, 'source_db': app.db_path.name, 'target_cue': 'sqlite',
+                      'merged_cues': ['migration'], 'affected_memories': 1, 'status': 'merged'}
+    assert app.list_memory_cues(query='migration')['cues'] == [{'cue': 'sqlite', 'usage_count': 1}]
+    assert app.get_memory(memory_id)['memory']['cue'] == ['sqlite', 'migration', 'transaction']
+    with app._connection() as conn:
+        assert [tuple(row) for row in conn.execute('SELECT * FROM memories')] == original
+        assert [tuple(row) for row in conn.execute('SELECT rowid,* FROM memory_fts')] == original_fts
+        assert conn.execute('SELECT count(*) FROM workflow_runs').fetchone()[0] == run_count
+    assert app.get_status()['active_run'] is None
 
 
 def test_summarize_receipt_preserves_real_memory_source(app):
@@ -219,17 +253,17 @@ def test_empty_recall_query_retains_summary_fallback_contract(app, explicit, exp
     assert emit.call_args.kwargs['query'] == ('   ' if expected_mode == 'explicit' else 'sqlite migration')
 
 
-def test_long_summary_fallback_recalls_late_core_terms_and_finalizes_once(app):
+def test_summary_fallback_keeps_first_eight_terms_and_finalizes_once(app):
     memory_id = capture(app)
     app.finish_archive('original')
-    summary = 'Please help me with this work and the context. ' * 500 + ' SQLite migration'
+    summary = 'Please help me with this work and the context. ' * 10 + ' SQLite migration'
     original = recall.finalize_automatic_recall
     with mock.patch.object(recall, 'finalize_automatic_recall', wraps=original) as finalize:
         result = app.summarize_run(summary)['recall']
     assert finalize.call_count == 1
-    assert result['status'] == 'recalled'
-    assert [entry['id'] for entry in result['memories']] == [memory_id]
-    assert len(result['query'].split()) <= 8
+    assert result['status'] == 'empty'
+    assert result['memories'] == []
+    assert result['query'] == 'please help me with this work and the'
     with app._connection() as conn:
         event = json.loads(conn.execute(
             "SELECT payload_json FROM events WHERE run_id=? AND event_type='memory_recall_attempted'",

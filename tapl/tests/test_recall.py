@@ -232,7 +232,7 @@ def test_korean_spacing_recall_preserves_original_and_read_only(conn, cue, query
     for automatic in (False, True):
         result = recall.recall_memories(conn, query=query, automatic=automatic, current_run_id="reader", now=T0)
         assert [m["id"] for m in result["memories"]] == [memory_id]
-        assert result["memories"][0].get("matched_cues", []) == ([] if cue.startswith("TAPL") else [cue])
+        assert result["memories"][0].get("matched_cues", []) == ([] if cue.startswith("TAPL") else [before["cue"][0]])
     assert conn.total_changes == changes
     assert recall.get_memory(conn, memory_id, now=T0) == before
 
@@ -564,98 +564,12 @@ def test_concurrent_reinforcement_only_once(conn, tmp_path):
 
 @pytest.mark.parametrize("cue,query", [("VS Code", "VSCode"), ("VSCode", "VS Code"),
                                        ("associative memory", "연상 기억"),
-                                       ("마인드맵 성능", "mindmap performance")])
-def test_safe_technical_alias_branches_match_independently(conn, cue, query):
-    memory_id = capture(conn, note="A verified technical lesson.", cue=[cue, "derived index", "finish_run"])
+                                       ("마인드맵 성능", "mindmap performance"),
+                                       ("한국어띄어쓰기", "한국어띄어쓰기를")])
+def test_query_does_not_apply_domain_aliases_or_particle_stemming(conn, cue, query):
+    capture(conn, note="A verified lesson.", cue=[cue, "derived index", "finish_run"])
     run(conn, "reader")
-    result = recall.recall_memories(conn, query=query, automatic=True)
-    assert [entry["id"] for entry in result["memories"]] == [memory_id]
-    assert result["memories"][0]["matched_cues"] == [cue]
-
-
-def test_original_rejection_can_be_approved_by_later_canonical_branch(conn):
-    memory_id = capture(conn, note="VSCode needs a verified original.", cue=["VS Code", "derived index", "finish_run"])
-    run(conn, "reader")
-    result = recall.emit_recall_once(conn, run_id="reader", query="VSCode")
-    assert [entry["id"] for entry in result["memories"]] == [memory_id]
-    event = json.loads(conn.execute("SELECT payload_json FROM events WHERE event_type='memory_recall_attempted'").fetchone()[0])
-    assert event["diagnostics"]["scanned_count"] == event["diagnostics"]["accepted_count"] == 1
-
-
-def test_aliases_cannot_combine_single_overlaps_to_bypass_gate(conn):
-    capture(conn, note="연상기억 memory", cue=["other hint", "guide path", "storage data"])
-    assert recall.recall_memories(conn, query="연상기억 banana")["memories"]
-    assert recall.recall_memories(conn, query="연상기억 banana", automatic=True)["memories"] == []
-
-
-def test_technical_alias_exact_phase_precedes_broad_unique_scan_cap(conn):
-    for index in range(26):
-        name = f"noise{index}"
-        run(conn, name)
-        capture(conn, current=name, source=name, note=f"VSCode unrelated noise {index}.",
-                cue=["unrelated words", "random cue", "noise note"])
-    run(conn, "target")
-    memory_id = capture(conn, current="target", source="target", note="A verified canonical package lesson.",
-                        cue=["VS Code package", "derived index", "finish_run"])
-    run(conn, "reader")
-    result = recall.emit_recall_once(conn, run_id="reader", query="VSCode package")
-    assert [entry["id"] for entry in result["memories"]] == [memory_id]
-    event = json.loads(conn.execute("SELECT payload_json FROM events WHERE event_type='memory_recall_attempted'").fetchone()[0])
-    assert event["diagnostics"]["scanned_count"] == recall.AUTOMATIC_RECALL_CANDIDATES
-    assert event["diagnostics"]["accepted_count"] == 1
-
-
-def test_manual_alias_union_keeps_exact_original_first_and_stable_pages(conn):
-    run(conn, "alias")
-    alias_id = capture(conn, current="alias", source="alias", note="A canonical editor lesson.",
-                       cue=["VS Code", "derived index", "finish_run"])
-    run(conn, "original")
-    original_id = capture(conn, current="original", source="original", note="An original editor lesson.",
-                          cue=["VSCode", "derived index", "finish_run"])
-    first = recall.recall_memories(conn, query="VSCode", limit=1)
-    second = recall.recall_memories(conn, query="VSCode", limit=1, offset=1)
-    assert first["total"] == second["total"] == 2
-    assert [first["memories"][0]["id"], second["memories"][0]["id"]] == [original_id, alias_id]
-    assert "source_record" in recall.get_memory(conn, original_id)
-
-
-def test_canonical_exact_branch_keeps_a_share_when_original_rejects_24_rows(conn):
-    for index in range(24):
-        name = f"original-noise-{index}"
-        run(conn, name)
-        capture(conn, current=name, source=name, note=f"mindmap unrelated case {index}.",
-                cue=["unrelated words", "random cue", "noise note"])
-    run(conn, "canonical")
-    memory_id = capture(conn, current="canonical", source="canonical", note="A verified canonical lesson.",
-                        cue=["마인드맵", "derived index", "finish_run"])
-    run(conn, "reader")
-    result = recall.emit_recall_once(conn, run_id="reader", query="mindmap")
-    assert [entry["id"] for entry in result["memories"]] == [memory_id]
-    event = json.loads(conn.execute("SELECT payload_json FROM events WHERE event_type='memory_recall_attempted'").fetchone()[0])
-    assert event["diagnostics"]["scanned_count"] == recall.AUTOMATIC_RECALL_CANDIDATES
-    assert event["diagnostics"]["accepted_count"] == 1
-
-
-def test_empty_alias_reservation_is_reused_for_original_candidates(conn):
-    for index in range(30):
-        name = f"original-only-{index}"
-        run(conn, name)
-        capture(conn, current=name, source=name, note=f"mindmap unrelated case {index}.",
-                cue=["unrelated words", "random cue", "noise note"])
-    result = recall.collect_automatic_recall(conn, query="mindmap")
-    assert result["memories"] == []
-    assert result["_recall_stats"]["scanned_count"] == recall.AUTOMATIC_RECALL_CANDIDATES
-
-
-def test_original_exact_retains_priority_over_canonical_automatic_match(conn):
-    run(conn, "alias")
-    alias_id = capture(conn, current="alias", source="alias", note="A canonical editor lesson.",
-                       cue=["VS Code", "derived index", "finish_run"])
-    run(conn, "original")
-    original_id = capture(conn, current="original", source="original", note="An original editor lesson.",
-                          cue=["VSCode", "derived index", "finish_run"])
-    result = recall.recall_memories(conn, query="VSCode", automatic=True)
-    assert [entry["id"] for entry in result["memories"]] == [original_id, alias_id]
+    assert recall.recall_memories(conn, query=query, automatic=True)["memories"] == []
 
 
 def test_independent_automatic_database_wrapper_finalizes_once(conn):
@@ -664,25 +578,3 @@ def test_independent_automatic_database_wrapper_finalizes_once(conn):
         result = recall.recall_memories(conn, query="SQLite transactions", automatic=True)
     assert finalize.call_count == 1
     assert [entry["id"] for entry in result["memories"]] == [memory_id]
-
-
-def test_original_exact_recovered_after_reserved_share_still_precedes_alias(conn):
-    for index in range(12):
-        name = f"short-original-{index}"
-        run(conn, name)
-        capture(conn, current=name, source=name, note=f"mindmap case{index}",
-                cue=["unrelated words", "random cue", "noise note"])
-    run(conn, "original-target")
-    original_id = capture(conn, current="original-target", source="original-target",
-                          note="Verified original boundary words " * 7,
-                          cue=["mindmap", "derived index", "finish_run"])
-    run(conn, "alias-target")
-    alias_id = capture(conn, current="alias-target", source="alias-target", note="A canonical match.",
-                       cue=["마인드맵", "derived index", "finish_run"])
-    original_order = [row[0] for row in conn.execute(
-        'SELECT m.memory_id FROM memory_fts JOIN memories m ON m.id=memory_fts.rowid '
-        'WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts),m.id', ('"mindmap"',))]
-    assert original_order.index(original_id) == 12
-    result = recall.collect_automatic_recall(conn, query="mindmap")
-    assert result['_recall_stats']['scanned_count'] == 14
-    assert [entry['id'] for entry in result['memories']] == [original_id, alias_id]

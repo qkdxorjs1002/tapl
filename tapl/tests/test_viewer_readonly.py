@@ -41,7 +41,7 @@ def test_readonly_connection_does_not_create_missing_database_or_directory(tmp_p
 
 @pytest.mark.parametrize("version,expected", [
     (None, "no TAPL schema version"),
-    (str(db.SCHEMA_VERSION - 1), "requires migration"),
+    ("13", "requires migration"),
     (str(db.SCHEMA_VERSION + 1), "Upgrade TAPL"),
     ("invalid", "not a valid integer"),
 ])
@@ -57,7 +57,7 @@ def test_viewer_schema_errors_leave_database_untouched(tmp_path, version, expect
     result = app.handle_message({"command": "ready"})
     assert result["type"] == "error"
     assert expected in result["message"]
-    if version in (None, str(db.SCHEMA_VERSION - 1)):
+    if version in (None, "13"):
         assert "taplctl --db <database-path> init" in result["message"]
     assert path.read_bytes() == before
     assert list(tmp_path.iterdir()) == [path]
