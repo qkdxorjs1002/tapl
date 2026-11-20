@@ -314,10 +314,17 @@ export interface WorkspaceDirectoryResult {
   message?: string;
 }
 
+export interface TourHistory {
+  intro?: 'completed' | 'dismissed';
+  releaseSeenThrough?: string;
+}
+
 export type HostMessage =
   | WorkspaceDirectoryResult
   | WorkspaceSelectionResult
   | SettingsResult
+  | { type: 'tour:history'; history: TourHistory }
+  | { type: 'tour:open' }
   | { type: 'hydrate'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; preferences?: ViewerPreferences; discardResult?: RunDiscardResult }
   | { type: 'view:update'; view: WebviewView; locale: SupportedLocale; layout: DisplayLayout; workspace?: string; capabilities?: HostCapabilities; preferences?: ViewerPreferences; discardResult?: RunDiscardResult }
   | { type: 'error'; message: string; locale: SupportedLocale; layout: DisplayLayout; discardResult?: RunDiscardResult };
@@ -340,6 +347,7 @@ export type WebviewCommand = (
   | { command: 'getSettings'; requestId: string; workspace?: string }
   | { command: 'saveSettings'; requestId: string; workspace: string; revision: string; values: Record<string, unknown> }
   | { command: 'resetSettings'; requestId: string; workspace: string; revision: string; confirmed: true }
+  | { command: 'saveTourHistory'; history: TourHistory }
   | { command: 'ready' }
   | { command: 'chooseWorkspace' }
   | { command: 'selectWorkspace'; workspace: string }
@@ -354,5 +362,5 @@ export type WebviewCommand = (
   | { command: 'search'; query: string }
   | { command: 'openSearchResult'; itemId: number }) & { source_db?: string };
 
-/** Browser-only request; the VS Code host deliberately never receives this command. */
-export type BrowserApiCommand = WebviewCommand | { command: 'revision'; workspace?: string };
+/** Requests supported by the standalone browser API. */
+export type BrowserApiCommand = Exclude<WebviewCommand, { command: 'saveTourHistory' }> | { command: 'revision'; workspace?: string };

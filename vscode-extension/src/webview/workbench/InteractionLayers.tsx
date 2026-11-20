@@ -141,6 +141,7 @@ export function WorkspaceDialog({
   message,
   result,
   directoryResult,
+  tourHint,
   browse,
   submit,
   close,
@@ -151,6 +152,7 @@ export function WorkspaceDialog({
   message?: string;
   result?: WorkspaceSelectionResult;
   directoryResult?: WorkspaceDirectoryResult;
+  tourHint?: string;
   browse: (requestId: string, path?: string) => void;
   submit: (workspace: string) => void;
   close: () => void;
@@ -265,6 +267,7 @@ export function WorkspaceDialog({
         }}
       >
         <p className="wb-workspace-hint">{t('workspaceBrowseHelp')}</p>
+        {tourHint && <p className="wb-workspace-hint">{tourHint}</p>}
         <div className="wb-folder-toolbar">
           <button ref={initialFocus} type="button" className="btn btn-sm btn-ghost" disabled={pending}
             onClick={() => loadDirectory('~')}><Icon name="folder" />{t('workspaceHome')}</button>

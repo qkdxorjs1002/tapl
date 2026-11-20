@@ -4,6 +4,7 @@
   "command.category": "tapl workflow",
   "command.refresh.title": "workflow 보기 새로고침",
   "command.openOverview.title": "tapl 대시보드 열기",
+  "command.showTour.title": "제품 둘러보기",
   "command.openArchive.title": "tapl 아카이브 열기",
   "command.search.title": "tapl workflow 검색",
   "view.active.name": "활성",

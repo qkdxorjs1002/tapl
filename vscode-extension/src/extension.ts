@@ -15,6 +15,7 @@ import {
   type TaplMcpWorkspace
 } from './taplMcpClient';
 import { defaultViewerPreferences, loadViewerConfig, viewerConfigRequiresTrust, type ViewerConfig } from './viewerConfig';
+import { mergeTourHistory, normalizeTourHistory, TOUR_HISTORY_KEY, type TourHistory } from './viewer/tourHistory';
 
 import type { ViewerPreferences, DisplayLayout, AssociativeMemory, MemoryDiagnostics, SettingsDocument, SettingsResult, HostCapabilities, RunDiscardResult, TaplRunSnapshot, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
 
@@ -74,7 +75,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const webviewManager = new WorkflowWebviewManager(context.extensionUri, () => {
     taplMcpClients?.invalidate();
     void refreshAll();
-  }, revisions, observeRead, () => refreshAll(), () => refreshTrees());
+  }, revisions, observeRead, () => refreshAll(), () => refreshTrees(), context.globalState);
 
   const refreshTrees = () => {
     activeProvider.refresh();
@@ -96,6 +97,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(`${COMMAND_PREFIX}.openOverview`, async () => {
       await webviewManager.openOverview();
     }),
+    vscode.commands.registerCommand(`${COMMAND_PREFIX}.showTour`, () => webviewManager.showTour()),
     vscode.commands.registerCommand(`${COMMAND_PREFIX}.openArchive`, async (node?: unknown) => {
       if (node instanceof WorkflowNode && node.archive) {
         await webviewManager.openArchive(node.archive);
@@ -302,6 +304,9 @@ class WorkflowWebviewManager {
   private settingsWorkspaceGeneration = 0;
   private settingsWritePending = false;
   private settingsRevision: { workspace: string; revision: string } | undefined;
+  private tourPanel = { historyReady: false, hydrated: false, openRequested: false, opening: false };
+  private tourHistory: TourHistory = {};
+  private tourHistoryWrite = Promise.resolve();
 
   private deferredConfigRefresh = false;
   private deferredPanelRefresh = false;
@@ -310,7 +315,8 @@ class WorkflowWebviewManager {
   constructor(private readonly extensionUri: vscode.Uri, private readonly refreshConfiguration: () => void,
     private readonly revisions: DatabaseRevisions,
     private readonly observeRead: (workspace: string | undefined, before: string | undefined, valid: () => boolean) => Promise<void>,
-    private readonly requestRefresh: () => Promise<void>, private readonly refreshTreeViews: () => void) {}
+    private readonly requestRefresh: () => Promise<void>, private readonly refreshTreeViews: () => void,
+    private readonly globalState: vscode.ExtensionContext['globalState']) {}
 
   hasPanel(): boolean { return this.panel !== undefined; }
 
@@ -319,7 +325,9 @@ class WorkflowWebviewManager {
   }
 
   resume(): boolean {
-    if (!this.deferredPanelRefresh || !this.panelVisible()) { return false; }
+    if (!this.panelVisible()) { return false; }
+    void this.postTourOpen(this.panel);
+    if (!this.deferredPanelRefresh) { return false; }
     this.deferredPanelRefresh = false;
     void this.requestRefresh();
     return true;
@@ -337,6 +345,13 @@ class WorkflowWebviewManager {
   async openOverview(): Promise<void> {
     this.backStack.length = 0;
     await this.navigate({ type: 'overview' }, { reveal: true });
+  }
+
+  async showTour(): Promise<void> {
+    const panel = this.ensurePanel(true);
+    this.tourPanel.openRequested = true;
+    this.initializeShell(panel);
+    await this.postTourOpen(panel);
   }
 
   async openArchive(archive: TaplArchive): Promise<void> {
@@ -372,11 +387,15 @@ class WorkflowWebviewManager {
     this.currentView = view;
     const panel = this.ensurePanel(options.reveal ?? false);
     panel.title = workspaceTaplTitle();
+    this.initializeShell(panel);
+    await this.postCurrentView('view:update');
+  }
+
+  private initializeShell(panel: vscode.WebviewPanel): void {
     if (!this.shellReady) {
       panel.webview.html = this.renderShell(panel.webview);
       this.shellReady = true;
     }
-    await this.postCurrentView('view:update');
   }
 
   private ensurePanel(reveal: boolean): vscode.WebviewPanel {
@@ -389,7 +408,10 @@ class WorkflowWebviewManager {
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'webview-dist')]
     });
-    this.panel.webview.onDidReceiveMessage((message: unknown) => this.handleMessage(message));
+    const panel = this.panel;
+    panel.webview.onDidReceiveMessage((message: unknown) => {
+      if (this.panel === panel) return this.handleMessage(message);
+    });
     this.panel.onDidChangeViewState?.(() => { this.resume(); });
     this.panel.onDidDispose(() => {
       this.settingsWorkspaceGeneration += 1;
@@ -397,10 +419,59 @@ class WorkflowWebviewManager {
       this.generation += 1;
       this.panel = undefined;
       this.shellReady = false;
+      this.tourPanel = { historyReady: false, hydrated: false, openRequested: false, opening: false };
       this.deferredPanelRefresh = false;
       this.deferredDiscardResult = undefined;
     });
     return this.panel;
+  }
+
+  private readStoredTourHistory(): TourHistory {
+    try {
+      return normalizeTourHistory(this.globalState?.get(TOUR_HISTORY_KEY));
+    } catch {
+      return {};
+    }
+  }
+
+  private async saveTourHistory(value: unknown): Promise<void> {
+    const next = normalizeTourHistory(value);
+    if (!next.intro && !next.releaseSeenThrough) return;
+    this.tourHistory = mergeTourHistory(this.tourHistory, next);
+    // Serialize profile writes so a slower save cannot overwrite newer progress.
+    this.tourHistoryWrite = this.tourHistoryWrite.then(async () => {
+      const stored = this.readStoredTourHistory();
+      const history = mergeTourHistory(this.tourHistory, stored);
+      this.tourHistory = history;
+      if (stored.intro === history.intro && stored.releaseSeenThrough === history.releaseSeenThrough) return;
+      try {
+        await this.globalState?.update(TOUR_HISTORY_KEY, history);
+      } catch { /* Keep progress available in memory for this host. */ }
+    });
+    await this.tourHistoryWrite;
+  }
+
+  private async hydratePanel(): Promise<void> {
+    const panel = this.panel;
+    if (!panel) return;
+    const state = this.tourPanel;
+    state.historyReady = false;
+    state.hydrated = false;
+    this.tourHistory = mergeTourHistory(this.tourHistory, this.readStoredTourHistory());
+    try {
+      state.historyReady = await panel.webview.postMessage({ type: 'tour:history', history: this.tourHistory } satisfies HostWebviewMessage);
+    } catch { /* The panel can close before the message is delivered. */ }
+    if (panel === this.panel) await this.postCurrentView('hydrate');
+  }
+
+  private async postTourOpen(panel: vscode.WebviewPanel | undefined): Promise<void> {
+    const state = this.tourPanel;
+    if (!panel || panel !== this.panel || !this.panelVisible() || !state.hydrated || !state.openRequested || state.opening) return;
+    state.opening = true;
+    try {
+      if (await panel.webview.postMessage({ type: 'tour:open' } satisfies HostWebviewMessage)) state.openRequested = false;
+    } catch { /* Keep the request pending if the webview could not receive it. */ }
+    finally { state.opening = false; }
   }
 
   private renderShell(webview: vscode.Webview): string {
@@ -452,6 +523,10 @@ class WorkflowWebviewManager {
     };
     const delivered = await panel.webview.postMessage(message);
     if (delivered && pendingDiscard === this.deferredDiscardResult) { this.deferredDiscardResult = undefined; }
+    if (delivered && panel === this.panel && this.tourPanel.historyReady) {
+      this.tourPanel.hydrated = true;
+      void this.postTourOpen(panel);
+    }
     await this.observeRead(workspace, before, () => delivered && view.type !== 'error'
       && generation === this.generation && panel === this.panel && this.panelVisible() && root === getWorkspaceRoot());
   }
@@ -538,7 +613,8 @@ class WorkflowWebviewManager {
   private async handleMessage(message: unknown): Promise<void> {
     if (!isRecord(message) || typeof message.command !== 'string') { return; }
     switch (message.command) {
-      case 'ready': await this.postCurrentView('hydrate'); return;
+      case 'ready': await this.hydratePanel(); return;
+      case 'saveTourHistory': await this.saveTourHistory(message.history); return;
       case 'refresh': await this.requestRefresh(); return;
       case 'discardRun': await this.discardRun(message); return;
       case 'getSettings':

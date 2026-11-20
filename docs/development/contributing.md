@@ -35,10 +35,13 @@ pnpm --dir vscode-extension run compile
 
 The shared Viewer uses DaisyUI 5.7.50 and Tailwind CSS 4.3.5. CSS-first configuration in `styles.css` and `@tailwindcss/vite` generate the assets. Maintain `pnpm-lock.yaml` with dependency changes. Release CI's npm path remains documented in [Releases](releases.md).
 
+Add user-visible release steps in [`tour/content.ts`](../../vscode-extension/src/webview/tour/content.ts). Give each feature a stable ID, its first shipped version, matching Korean and English copy, and any host or capability limits. Anchor steps to a visible control and supply fallback copy when a workspace may lack the target. Pick changes users can try in the Viewer and keep each release to two or three steps.
+
 To check browser behavior with real Chrome and an isolated database, prepare the Python test environment and Chrome, then run from the repository root. Python defaults to `tapl/.venv/bin/python`; override with `TAPL_PYTHON`, or set `CHROME_PATH` for a different Chrome executable. The test starts and stops a local current-code server without modifying existing workspaces.
 
 ```sh
 node --test vscode-extension/tests/browser/workbench.cjs
+node --test vscode-extension/tests/browser/product-tour.cjs
 ```
 
 `test_workbench_reads.py` covers exact RUNs, the federated library, pagination totals, provenance and read-only boundaries. Browser checks cover RUN switching, all record kinds, semantic fields, memory/source pages, Back, temporary tabs, language/theme, responsive Explore, workspace validation/cancellation, icon tooltips, distinct status colors, continuous event connectors and compatibility/error/loading screens. Record-detail and secondary-view SSR suites preserve arbitrary nested field values and source-qualified links. These do not replace actual VS Code GUI, high-contrast or screen-reader checks.

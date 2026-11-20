@@ -35,10 +35,13 @@ pnpm --dir vscode-extension run compile
 
 공유 Viewer는 DaisyUI 5.7.50·Tailwind CSS 4.3.5를 사용합니다. `styles.css`의 CSS 우선 설정과 `@tailwindcss/vite`가 자산을 생성합니다. `pnpm-lock.yaml`을 함께 유지하세요. 릴리스 CI의 npm 경로는 [릴리스](releases.ko.md)를 따릅니다.
 
+사용자에게 보여 줄 새 기능은 [`tour/content.ts`](../../vscode-extension/src/webview/tour/content.ts)에 추가합니다. 기능별로 고정 ID, 첫 배포 버전, 의미가 같은 한영 문구, 필요한 호스트·지원 기능 조건을 지정하세요. 화면에 보이는 조작에 단계를 연결하고 워크스페이스에 대상이 없을 수 있으면 대체 문구를 작성합니다. Viewer에서 직접 해 볼 수 있는 변경을 릴리스마다 두세 개 고릅니다.
+
 실제 Chrome과 격리 DB로 브라우저 동작을 검사하려면 Python 테스트 환경과 Chrome을 준비하고 저장소 루트에서 실행합니다. 기본 Python 경로는 `tapl/.venv/bin/python`이며 `TAPL_PYTHON`으로, Chrome 경로는 `CHROME_PATH`로 바꿀 수 있습니다. 이 검사는 현재 코드의 로컬 서버를 시작하고 종료하며 기존 워크스페이스를 수정하지 않습니다.
 
 ```sh
 node --test vscode-extension/tests/browser/workbench.cjs
+node --test vscode-extension/tests/browser/product-tour.cjs
 ```
 
 `test_workbench_reads.py`는 정확한 RUN·통합 기록·페이지 건수·원본 격리·읽기 전용 경계를 검사합니다. 브라우저 검사는 RUN 전환·전체 기록 종류·의미 필드·기억/원본·돌아가기·임시 탭·언어/테마·반응형 탐색·폴더 검증/취소·아이콘 툴팁·상태색·연속 이벤트선·호환/오류/로딩 화면을 다룹니다. 기록 상세·보조 화면 SSR은 임의 중첩 필드 값과 원본을 포함한 링크를 보존하는지 확인합니다. 실제 VS Code GUI·고대비·스크린리더 검사를 대신하지 않습니다.

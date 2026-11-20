@@ -143,7 +143,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
     {document && <><form id="wb-runtime-settings-form" onSubmit={(event) => { event.preventDefault(); if (!pending && dirty && !invalid && !error?.stale) issue('save'); }}>
       <fieldset disabled={!!pending} className="wb-settings-fields">
         {groups.map((section) => <section className="wb-settings-card" key={section} aria-labelledby={`settings-section-${section}`}>
-          <div className="wb-settings-section-title"><Icon name={section.includes('subagents') ? 'plan' : section === 'search' ? 'search' : section === 'recall' ? 'book' : 'settings'} /><h2 id={`settings-section-${section}`}>{sectionLabel(section)}</h2></div>
+          <div className="wb-settings-section-title" data-tapl-tour={section === 'viewer' ? 'display-settings' : undefined}><Icon name={section.includes('subagents') ? 'plan' : section === 'search' ? 'search' : section === 'recall' ? 'book' : 'settings'} /><h2 id={`settings-section-${section}`}>{sectionLabel(section)}</h2></div>
           {document.fields.filter((field) => field.section === section).map((field) => {
             const copy = settingsFieldText(locale, field.key, field.description), id = `setting-${field.key}`;
             return <div className={`wb-settings-field ${['models', 'profiles', 'string-list'].includes(field.type) ? 'wb-settings-field-wide' : ''}`} key={field.key}>

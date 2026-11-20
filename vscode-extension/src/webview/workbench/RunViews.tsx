@@ -76,6 +76,7 @@ export function TaskStatus({
               aria-pressed={prefs.taskFilter === value}
               onClick={() => update({ taskFilter: value })}
               data-wb-focus={`filter:${value}`}
+              data-tapl-tour={value === 'Blocked' ? 'task-filter' : undefined}
             >
               {value === 'all' ? t('wbAll') : status(value)}
             </button>
@@ -124,6 +125,7 @@ export function TaskStatus({
                       className="wb-task-title"
                       onClick={() => open(item, snapshot?.run)}
                       data-wb-focus={`task:${item.id ?? item.stable_id}`}
+                      data-tapl-tour={item.status === 'Blocked' ? 'blocked-task' : undefined}
                       disabled={item.id == null}
                     >
                       <strong>{item.title}</strong>

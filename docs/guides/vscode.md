@@ -32,8 +32,11 @@ language = "auto"
 | `taplWorkflow.openOverview` | Open TAPL Dashboard | Open the workspace dashboard. |
 | `taplWorkflow.openArchive` | Open TAPL Archive | Open the selected archive tree entry. |
 | `taplWorkflow.search` | Search TAPL Workflow | Search earlier workspace records. |
+| `taplWorkflow.showTour` | Show Product Tour | Open the Viewer and its help menu. |
 
 Labels above are the English labels under **TAPL Workflow**; the UI also supports Korean.
+
+**Show Product Tour** opens the same help menu as the Viewer’s question mark. Tour choices are remembered in the current VS Code profile across workspaces. See [Product tours](viewer.md#product-tours).
 
 | Setting | Accepted values | Default |
 | --- | --- | --- |

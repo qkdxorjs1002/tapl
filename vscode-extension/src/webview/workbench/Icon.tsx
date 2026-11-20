@@ -27,6 +27,7 @@ const icons: Record<string, ReactNode> = {
   languages: <path d="M3 5h12M9 3v2M5 5c0 6 5 9 8 10M13 5c0 6-5 9-8 10M14 21l4-10 4 10M15.5 18h5" />,
   refresh: <path d="M20 7v5h-5M4 17v-5h5M5.5 8a7 7 0 0 1 11.6-3L20 8M4 16l2.9 3A7 7 0 0 0 18.5 16" />,
   debug: <path d="M3 12h4l3-8 4 16 3-8h4" />,
+  help: <><circle cx="12" cy="12" r="9" /><path d="M9.4 9.1a2.7 2.7 0 1 1 4.7 1.8c-1.1.9-2.1 1.2-2.1 2.8m0 2.4h.01" /></>,
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   close: <path d="m6 6 12 12M6 18 18 6" />,
   sun: (

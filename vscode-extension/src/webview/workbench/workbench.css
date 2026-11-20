@@ -270,7 +270,7 @@ body:has(.tapl-workbench) {
   align-items: center;
   gap: 4px;
 }
-.wb-brand-actions .btn {
+.wb-brand-actions > .btn {
   width: 30px;
   height: 30px;
   min-width: 30px;
@@ -1595,7 +1595,7 @@ body:has(.tapl-workbench) {
     padding-inline: 10px !important;
     gap: 8px !important;
   }
-  .wb-brand-actions .btn {
+  .wb-brand-actions > .btn {
     width: 26px;
     min-width: 26px;
   }
@@ -1735,7 +1735,7 @@ body:has(.tapl-workbench) {
   .wb-fold-list button {
     min-height: 40px;
   }
-  .wb-brand-actions .btn {
+  .wb-brand-actions > .btn {
     min-height: 32px;
   }
   .wb-language-options button {

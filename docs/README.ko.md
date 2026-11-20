@@ -34,7 +34,7 @@ TAPL은 Codex와 Claude Code의 계획·승인·실행·검증과 작업 이력�
 | [SubAgent](guides/subagents.ko.md) | 모델 선호를 설정하고 독립 작업을 병렬로 실행합니다. |
 | [연상 기억](guides/memory.ko.md) | 작업 간 유용한 교훈을 회상·검증·관리합니다. |
 | [검색](guides/search.ko.md) | 기록 검색과 전문·시맨틱 검색을 설정합니다. |
-| [Viewer와 서비스](guides/viewer.ko.md) | 작업을 살펴보고 서비스를 관리하며 RUN 폐기를 확인합니다. |
+| [Viewer와 서비스](guides/viewer.ko.md) | 작업을 살펴보고 [제품 둘러보기](guides/viewer.ko.md#제품-둘러보기)를 이용하며 서비스를 관리하고 RUN 폐기를 확인합니다. |
 | [VS Code 확장](guides/vscode.ko.md) | VS Code에서 작업 공간 보기·검색·공유 Viewer를 사용합니다. |
 | [문제 해결](guides/troubleshooting.ko.md) | 설치·연결·서비스·워크플로 문제를 진단합니다. |
 

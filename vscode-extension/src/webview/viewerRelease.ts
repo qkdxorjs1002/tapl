@@ -1,44 +1,27 @@
+import { compareTourVersions, isStableTourVersion } from '../viewer/tourHistory';
+
 export const RELEASE_API = 'https://api.github.com/repos/qkdxorjs1002/tapl/releases/latest';
 const RELEASE_BASE = 'https://github.com/qkdxorjs1002/tapl/releases';
 export const RELEASE_CACHE_KEY = 'tapl.viewer.latest-release.v1';
 export const RELEASE_CACHE_MS = 60 * 60 * 1000;
 export const RELEASE_RETRY_MS = 5 * 60 * 1000;
 
-interface Version {
-  core: bigint[];
-  prerelease: string[];
-}
 export interface ViewerRelease { tag: string; version: string }
 
-function parseVersion(value: string): Version | undefined {
-  if (value.length > 128) return;
-  const match = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);
-  if (!match) return;
-  const prerelease = match[4]?.split('.') ?? [];
-  if (prerelease.some(part => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0'))) return;
-  return { core: match.slice(1, 4).map(BigInt), prerelease };
-}
-
 export function isNewerRelease(candidate: string, current: string): boolean {
-  const next = parseVersion(candidate), installed = parseVersion(current);
   // Only stable releases are advertised, even if a cached/API response is malformed.
-  if (!next || !installed || next.prerelease.length) return false;
-  for (let index = 0; index < 3; index++) {
-    if (next.core[index] !== installed.core[index]) return next.core[index] > installed.core[index];
-  }
-  return installed.prerelease.length > 0;
+  return isStableTourVersion(candidate) && compareTourVersions(candidate, current) === 1;
 }
 
 export function releaseUrl(tag: string): string {
-  return parseVersion(tag) ? `${RELEASE_BASE}/tag/${encodeURIComponent(tag)}` : RELEASE_BASE;
+  return compareTourVersions(tag, tag) === 0 ? `${RELEASE_BASE}/tag/${encodeURIComponent(tag)}` : RELEASE_BASE;
 }
 
 export function stableRelease(value: unknown): ViewerRelease | undefined {
   if (!value || typeof value !== 'object') return;
   const release = value as Record<string, unknown>;
   if (release.draft !== false || release.prerelease !== false || typeof release.tag_name !== 'string') return;
-  const parsed = parseVersion(release.tag_name);
-  if (!parsed || parsed.prerelease.length) return;
+  if (!isStableTourVersion(release.tag_name)) return;
   return { tag: release.tag_name, version: release.tag_name.replace(/^v/, '') };
 }
 

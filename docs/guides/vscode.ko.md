@@ -32,8 +32,11 @@ language = "auto"
 | `taplWorkflow.openOverview` | Open TAPL Dashboard | 워크스페이스 대시보드 열기. |
 | `taplWorkflow.openArchive` | Open TAPL Archive | 아카이브 트리에서 선택한 항목 열기. |
 | `taplWorkflow.search` | Search TAPL Workflow | 워크스페이스의 이전 기록 검색. |
+| `taplWorkflow.showTour` | Show Product Tour | Viewer와 도움말 메뉴 열기. |
 
 위 이름은 **TAPL Workflow** 범주의 영문 표기이며 UI는 한국어도 지원합니다.
+
+**제품 둘러보기**는 Viewer의 물음표와 같은 도움말 메뉴를 엽니다. 워크스페이스를 바꿔도 현재 VS Code 프로필에 저장된 안내 선택을 유지합니다. [제품 둘러보기](viewer.ko.md#제품-둘러보기)를 참고하세요.
 
 | 설정 | 허용 값 | 기본값 |
 | --- | --- | --- |

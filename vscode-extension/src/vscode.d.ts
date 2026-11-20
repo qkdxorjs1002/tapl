@@ -70,6 +70,7 @@ declare module 'vscode' {
   export interface ExtensionContext {
     subscriptions: Disposable[];
     extensionUri: Uri;
+    globalState?: { get(key: string): unknown; update(key: string, value: unknown): Thenable<void> };
   }
 
   export interface WorkspaceFolder {

@@ -39,7 +39,8 @@
     "onCommand:taplWorkflow.refresh",
     "onCommand:taplWorkflow.openOverview",
     "onCommand:taplWorkflow.openArchive",
-    "onCommand:taplWorkflow.search"
+    "onCommand:taplWorkflow.search",
+    "onCommand:taplWorkflow.showTour"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -62,6 +63,7 @@
     "@vitejs/plugin-react": "4.3.4",
     "@vscode/vsce": "^4.1.0",
     "daisyui": "5.7.50",
+    "driver.js": "1.14.0",
     "esbuild": "0.21.5",
     "github-markdown-css": "^5.9.0",
     "react": "18.3.1",
@@ -95,6 +97,11 @@
         "title": "%command.search.title%",
         "category": "%command.category%",
         "icon": "$(search)"
+      },
+      {
+        "command": "taplWorkflow.showTour",
+        "title": "%command.showTour.title%",
+        "category": "%command.category%"
       }
     ],
     "viewsContainers": {

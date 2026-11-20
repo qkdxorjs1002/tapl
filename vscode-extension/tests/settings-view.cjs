@@ -165,6 +165,11 @@ test('App applies saved/reset metadata immediately, ignores device overrides and
     workbench: { version: 1, theme: 'dark', route: { page: 'settings' } }, workbenchWorkspace: '/workspace' };
   const api = { getState: () => state, setState: value => { state = value; }, postMessage() {} };
   const react = { ...React,
+    useCallback: (callback, deps) => {
+      const i = cursor++, previous = slots[i];
+      if (!previous || deps.some((value, n) => !Object.is(value, previous.deps[n]))) slots[i] = { callback, deps };
+      return slots[i].callback;
+    },
     useRef: value => { const i = cursor++; return slots[i] ??= { current: value }; },
     useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
       return [slots[i], value => { const next = typeof value === 'function' ? value(slots[i]) : value;

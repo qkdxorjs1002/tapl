@@ -28,6 +28,8 @@ import { RecordsView } from './RecordsView';
 import { commandForRun, useWorkbench } from './useWorkbench';
 import { runReferenceCommand } from './runReferences';
 import { recordRunKey, routeIdentity, runKey, runTitle, tabRuns, taskCounts, type WorkbenchPage } from './model';
+import { TourEntry, type TourEntryState } from '../tour/TourEntry';
+import { tourCopy } from '../tour/content';
 
 export interface WorkbenchProps {
   view: WebviewView;
@@ -47,6 +49,7 @@ export interface WorkbenchProps {
   onStateChange?: (state: unknown) => void;
   browser?: boolean;
   workspace?: string;
+  tour?: TourEntryState;
 }
 export function Workbench(props: WorkbenchProps): JSX.Element {
   const [backLayer, setBackLayer] = useState<HTMLDivElement | null>(null);
@@ -321,6 +324,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
       data-menu-open={menuOpen}
       data-sidebar-pinned={sidebarPinned}
       data-sidebar-expanded={sidebarExpanded}
+      data-tour-page={page}
     >
       <a
         className="wb-skip-link"
@@ -357,6 +361,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
               className="btn btn-ghost btn-sm btn-square"
               aria-label={t(props.browser ? (darkTheme ? 'wbLight' : 'wbDark') : (darkTheme ? 'wbLocalLight' : 'wbLocalDark'))}
               data-wb-focus="theme-toggle"
+              data-tapl-tour="theme"
               onClick={() => {
                 setTheme(darkTheme ? 'light' : 'dark');
               }}
@@ -374,6 +379,20 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
             >
               <Icon name={sidebarPinned ? 'panel-collapse' : 'panel-expand'} />
             </button>
+            {props.tour && <TourEntry
+              state={props.tour}
+              locale={props.locale}
+              context={{
+                browser: !!props.browser,
+                connected: !!props.workspace && props.view.type !== 'error' && props.view.type !== 'workspace',
+                canFollow: snapshot?.run.status === 'active',
+                memorySupported: props.memorySupported
+              }}
+              selectPage={selectPage}
+              closeNavigation={closeMenu}
+              blockedByDialog={workspaceOpen}
+              canInvite={page === 'current' && !menuOpen}
+            />}
           </div>
         </div>
         <nav className="wb-run-tabs tabs" role="tablist" aria-label="RUN">
@@ -395,6 +414,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
                   }
                   title={[runTitle(run), run.id, run.source_db].filter(Boolean).join('\n')}
                   data-wb-focus={`run:${key}`}
+                  data-tapl-tour={selected || index === 0 && !selectedKey ? 'run-tabs' : undefined}
                   onClick={() => openRun(run, false)}
                   onKeyDown={(event) => {
                     if (temporary && event.key === 'Delete') {
@@ -644,6 +664,8 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
           message={props.view.type === 'workspace' ? props.view.message : undefined}
           result={props.workspaceResult}
           directoryResult={props.directoryResult}
+          tourHint={props.view.type === 'workspace' && props.tour && !props.tour.history?.intro
+            ? tourCopy[props.locale].selectWorkspace : undefined}
           browse={(requestId, path) => props.send({ command: 'browseWorkspace', requestId, path })}
           submit={(workspace) => props.send({ command: 'selectWorkspace', workspace })}
           close={() => setWorkspaceOpen(false)}

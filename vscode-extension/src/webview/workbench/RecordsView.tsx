@@ -82,6 +82,7 @@ export function RecordsView({
       <PageHeading title={t('wbRecords')} back={back} />
       <form
         className="wb-search-box"
+        data-tapl-tour="record-search"
         onSubmit={(event) => {
           event.preventDefault();
           update({ expanded: [] });

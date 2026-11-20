@@ -23,6 +23,7 @@ function harness(restored, browser = false) {
   const react = { ...React,
     useRef: value => { const index = cursor++; return slots[index] ??= { current: value }; },
     useState: value => { const index = cursor++; if (!slots[index]) slots[index] = { value: typeof value === 'function' ? value() : value }; return [slots[index].value, next => { slots[index].value = typeof next === 'function' ? next(slots[index].value) : next; }]; },
+    useCallback: (callback, deps) => memo(() => callback, deps),
     useEffect: (callback, deps) => memo(() => { effects.push(callback); }, deps)
   };
   const compiled = { exports: {} };

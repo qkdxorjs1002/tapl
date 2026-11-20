@@ -80,7 +80,7 @@ function MemoryList({
   const limit = Math.max(1, view.limit || 20);
   return (
     <div className="wb-memory-list">
-      <div className="wb-memory-intro">
+      <div className="wb-memory-intro" data-tapl-tour={view.memories.length ? 'memory-list' : undefined}>
         <div className="wb-memory-scope">
           <span>{t('wbMemoryScope')}</span>
           <ReadOnlyBadge />

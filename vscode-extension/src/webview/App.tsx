@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { resolveLocale, type SupportedLocale } from '../i18n';
+import { mergeTourHistory, normalizeTourHistory, TOUR_HISTORY_KEY, type TourHistory } from '../viewer/tourHistory';
 import type {
   DisplayLayout,
   HostMessage,
@@ -52,8 +53,49 @@ function savedTheme(state: unknown): unknown {
     theme: theme === 'light' || theme === 'dark' ? theme : undefined
   };
 }
+
+function readBrowserTourHistory(): TourHistory {
+  try {
+    return normalizeTourHistory(JSON.parse(window.localStorage.getItem(TOUR_HISTORY_KEY) ?? 'null'));
+  } catch {
+    return {};
+  }
+}
+
 export function App(): JSX.Element {
   const api = vscodeApi();
+  const browser = !!api.setPollingActive;
+  const [tourReady, setTourReady] = useState(false);
+  const [tourHistory, setTourHistory] = useState<TourHistory | undefined>(() => browser ? readBrowserTourHistory() : undefined);
+  const [tourSnoozed, setTourSnoozed] = useState(false);
+  const [tourHelpRequested, setTourHelpRequested] = useState(false);
+  const tourHistoryRef = useRef(tourHistory);
+  const consumeTourHelpRequest = useCallback(() => setTourHelpRequested(false), []);
+  const snoozeTour = useCallback(() => setTourSnoozed(true), []);
+  const receiveTourHistory = useCallback((value: unknown) => {
+    const current = tourHistoryRef.current;
+    const next = mergeTourHistory(current ?? {}, normalizeTourHistory(value));
+    if (current && current.intro === next.intro && current.releaseSeenThrough === next.releaseSeenThrough) return;
+    tourHistoryRef.current = next;
+    setTourHistory(next);
+  }, []);
+  const saveTourHistory = useCallback((patch: TourHistory) => {
+    const current = tourHistoryRef.current ?? {};
+    const history = mergeTourHistory(browser ? mergeTourHistory(current, readBrowserTourHistory()) : current, patch);
+    if (history.intro === current.intro && history.releaseSeenThrough === current.releaseSeenThrough) return;
+    receiveTourHistory(history);
+    if (browser) {
+      try { window.localStorage.setItem(TOUR_HISTORY_KEY, JSON.stringify(history)); } catch { /* Keep this page's progress. */ }
+    } else api.postMessage({ command: 'saveTourHistory', history });
+  }, [api, browser, receiveTourHistory]);
+  useEffect(() => {
+    if (!browser) return;
+    const syncHistory = (event: StorageEvent) => {
+      if (event.key === TOUR_HISTORY_KEY && event.newValue) receiveTourHistory(readBrowserTourHistory());
+    };
+    window.addEventListener('storage', syncHistory);
+    return () => window.removeEventListener('storage', syncHistory);
+  }, [browser, receiveTourHistory]);
   const [restored] = useState(() => api.getState() as PersistedAppState | undefined);
   const persistedRef = useRef(restored);
   const [memorySupported, setMemorySupported] = useState(restored?.capabilities?.associativeMemory === true);
@@ -90,6 +132,14 @@ export function App(): JSX.Element {
     const listener = (event: MessageEvent<HostMessage>) => {
       const message = event.data;
       if (!message || typeof message.type !== 'string') return;
+      if (message.type === 'tour:history') {
+        if (!browser) receiveTourHistory(message.history);
+        return;
+      }
+      if (message.type === 'tour:open') {
+        if (!browser) setTourHelpRequested(true);
+        return;
+      }
       if (message.type === 'workspace:directory') {
         setDirectoryResult(message);
         return;
@@ -114,6 +164,7 @@ export function App(): JSX.Element {
         return;
       }
       if (message.type === 'hydrate' || message.type === 'view:update') {
+        setTourReady(true);
         const nextLocale = resolveLocale(message.locale ?? systemLanguage());
         const nextLayout = resolveDisplayLayout(message.layout);
         const nextWorkspace =
@@ -155,6 +206,7 @@ export function App(): JSX.Element {
           return;
         }
         const nextLocale = resolveLocale(message.locale ?? systemLanguage());
+        setTourReady(true);
         const nextLayout = resolveDisplayLayout(message.layout);
         const errorView: WebviewView = {
           type: 'error',
@@ -173,7 +225,7 @@ export function App(): JSX.Element {
       window.removeEventListener('message', listener);
       api.setPollingActive?.(false);
     };
-  }, [api]);
+  }, [api, browser, receiveTourHistory]);
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
@@ -195,7 +247,16 @@ export function App(): JSX.Element {
           discardResult={discardResult}
           send={(message) => api.postMessage(message)}
           locale={locale}
-          browser={!!api.setPollingActive}
+          browser={browser}
+          tour={{
+            history: tourHistory,
+            ready: tourReady,
+            helpRequested: tourHelpRequested,
+            consumeHelpRequest: consumeTourHelpRequest,
+            save: saveTourHistory,
+            snoozed: tourSnoozed,
+            snooze: snoozeTour
+          }}
           initialState={workbenchSeed}
           onStateChange={(workbench) => persist({ workbench, workbenchWorkspace: workspaceRef.current })}
           renderPage={(page, send, back) => (

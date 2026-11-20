@@ -34,7 +34,7 @@ TAPL connects planning, approval, execution and verification in Codex and Claude
 | [SubAgents](guides/subagents.md) | Configure model preferences and run independent work in parallel. |
 | [Associative memory](guides/memory.md) | Recall, verify and maintain useful lessons across workflows. |
 | [Search](guides/search.md) | Search records and configure full-text or semantic retrieval. |
-| [Viewer and services](guides/viewer.md) | Inspect work, manage services and confirm RUN discard. |
+| [Viewer and services](guides/viewer.md) | Inspect work, try the [product tours](guides/viewer.md#product-tours), manage services and confirm RUN discard. |
 | [VS Code extension](guides/vscode.md) | Use workspace views, search and the shared Viewer in VS Code. |
 | [Troubleshooting](guides/troubleshooting.md) | Diagnose installation, connection, service and workflow problems. |
 

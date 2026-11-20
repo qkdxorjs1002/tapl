@@ -30,6 +30,14 @@ RUN tabs select the session whose records you inspect. Archives and history let 
 
 ## Navigate the Viewer
 
+### Product tours
+
+On first use, an invitation appears on Current RUN after a TAPL workspace is ready. It closes when you click elsewhere in the Viewer. **Quick start** shows how to choose a RUN, read its PLAN and TASK cards, use automatic following, search records, and open the source of a saved memory. Steps adapt to the workspace and the features the server supports. Use **Next** or **Previous** to move through the guide and **Esc** to close it. You can try the highlighted controls after closing the guide.
+
+Use the **TAPL Help** question mark next to the theme button to replay Quick start, view recent changes, or open guides for blocked tasks, references, and display settings. **Later** hides the invitation until the next page load. Completing it or choosing **Don’t show again** records that choice. The browser remembers choices for the current address and port. VS Code keeps its own choices in your profile.
+
+After loading a newer Viewer build, the invitation shows up to three applicable features introduced since the last recorded build. The **What’s new** entry displays the version covered by the guide. The release link at the bottom can announce a version before you install it.
+
 The current **Viewer build version** stays small at the bottom center on every page in the browser and VS Code. When a newer stable release is available, the footer shows `vCURRENT → vLATEST` with a soft ambient glow. Each version links to its own GitHub release. System reduced-motion preferences keep the glow static.
 
 The Viewer checks the public [GitHub latest-release API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) without authentication while the document is visible, including when another window has focus. Successful checks are cached for one hour; failed checks retry no sooner than five minutes later. Hidden pages defer checks until visible. Offline or blocked requests keep the current version link and any previously confirmed update. The displayed version belongs to the built Viewer assets, so update the package and reload the page or reopen the VS Code Viewer to load a newer build.

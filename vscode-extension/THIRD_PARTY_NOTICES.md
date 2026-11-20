@@ -12,6 +12,7 @@ components below. The project itself is licensed separately under `LICENSE.md`.
 | `ajv-formats` | 3.0.1 | MIT | Copyright (c) 2020 Evgeny Poberezkin |
 | `cross-spawn` | 7.0.6 | MIT | Copyright (c) 2018 Made With MOXY Lda <hello@moxy.studio> |
 | `daisyui` | 5.7.50 | MIT | Copyright (c) 2020 Pouya Saadeghi |
+| `driver.js` | 1.14.0 | MIT | Copyright (c) Kamran Ahmed |
 | `fast-deep-equal` | 3.1.3 | MIT | Copyright (c) 2017 Evgeny Poberezkin |
 | `fast-uri` | 3.1.5 | BSD-3-Clause | Copyright (c) 2011-2021 Gary Court; Copyright (c) 2021-present The Fastify team |
 | `github-markdown-css` | 5.9.0 | MIT | Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> |

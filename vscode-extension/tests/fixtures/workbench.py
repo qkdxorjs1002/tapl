@@ -52,7 +52,8 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=8768)
     parser.add_argument('--seed-only', action='store_true')
     parser.add_argument('--without-default', action='store_true')
+    parser.add_argument('--asset-root', type=Path)
     args = parser.parse_args()
     seed(args.workspace)
     if not args.seed_only:
-        viewer.serve(default_workspace=None if args.without_default else args.workspace, port=args.port)
+        viewer.serve(default_workspace=None if args.without_default else args.workspace, port=args.port, asset_root=args.asset_root)

@@ -111,6 +111,7 @@ export function RunMindmap({
             className="wb-mm-icon-button wb-mm-follow"
             type="button"
             data-wb-focus="mindmap-follow"
+            data-tapl-tour="follow"
             data-wb-tooltip-text={followAction}
             aria-label={t('wbMindmapFollow')}
             aria-pressed={following}
@@ -145,6 +146,7 @@ export function RunMindmap({
         ))}
         {referenceGroups.map(({kind, nodes}) => <button key={kind} type="button"
           className="wb-mm-reference-kind wb-mm-reference-jump" data-reference-kind={kind}
+          data-tapl-tour="run-references"
           aria-label={t(kind === 'memory' ? 'wbRunReferenceShowMemory' : 'wbRunReferenceShowHistory')}
           title={t(kind === 'memory' ? 'wbRunReferenceShowMemory' : 'wbRunReferenceShowHistory')}
           onClick={() => controlsRef.current?.focus(nodes[0].key)}>
@@ -214,7 +216,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
           <Icon name={node.reference.kind === 'memory' ? 'book' : 'history'} />
           {t(node.reference.kind === 'memory' ? 'wbRunReferenceMemory' : 'wbRunReferenceHistory')}
         </span> : node.kind === 'run' ? 'RUN' : node.item?.stable_id}</span>
-        {node.reference && <span className="wb-mm-reference-stage" data-stage={node.reference.stage}>
+        {node.reference && <span className="wb-mm-reference-stage" data-stage={node.reference.stage} data-tapl-tour="reference-stage">
           <Icon name={node.reference.stage === 'retrieved' ? 'search' : 'check'} />
           {t(node.reference.stage === 'used' ? 'wbRunReferenceUsed' : node.reference.stage === 'opened' ? 'wbRunReferenceOpened' : 'wbRunReferenceRetrieved')}
         </span>}
@@ -271,6 +273,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
     <div
       className={`wb-mm-node${emphasis ? ` wb-mm-${emphasis}` : ''}`}
       data-kind={node.kind}
+      data-tapl-tour={node.kind === 'run' ? 'run-map' : undefined}
       data-reference-stage={node.reference?.stage}
       data-mindmap-node={node.key}
       style={

@@ -80,6 +80,7 @@ class BrowserApi implements VsCodeApi {
   };
 
   postMessage(message: WebviewCommand): void {
+    if (message.command === 'saveTourHistory') return;
     if (message.command === 'browseWorkspace') { void this.browseWorkspace(message); return; }
     if (message.command === 'getSettings' || message.command === 'saveSettings' || message.command === 'resetSettings') {
       void this.settingsRequest(message); return;
