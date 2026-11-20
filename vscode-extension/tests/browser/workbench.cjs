@@ -776,6 +776,80 @@ test('closing a temporary read-only RUN restores records and memory without chan
   } finally { await page.unrouteAll({ behavior: 'wait' }); await page.close(); }
 });
 
+test('a live archive moves the selected RUN to the last read-only tab until switching RUNs', { timeout: 45000 }, async () => {
+  const folder = path.join(workspace, 'live-archive');
+  const started = await startServer(['--workspace', folder]);
+  const page = await isolatedPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US' });
+  page.setDefaultTimeout(10000);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const mutate = (source, ...args) => {
+    const result = spawnSync(python, ['-c', source, path.join(folder, '.tapl', 'tapl.db'), ...args], {
+      encoding: 'utf8', env: { ...process.env, PYTHONPATH: path.resolve(__dirname, '../../../tapl') }
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  const archive = (owner, slug) => mutate(`
+import sys
+from contextlib import closing
+from pathlib import Path
+from taplctl import db
+with closing(db.connect(Path(sys.argv[1]), session_id=sys.argv[2])) as conn:
+    db.upsert_task(conn, task_id='TASK-001', title='Final archived task', status='Completed',
+                   execution_mode='sequential', executor_kind='main')
+    db.archive_active_run(conn, slug=sys.argv[3], memory_review_enabled=False)
+`, owner, slug);
+  const selected = page.locator('.wb-run-tab[aria-selected="true"]');
+  const temporary = page.locator('.wb-run-tab-temporary');
+  try {
+    await page.goto(started.url);
+    await page.getByRole('tab', { name: /Viewer redesign/ }).click();
+    await selected.filter({ hasText: 'Viewer redesign' }).waitFor();
+    const source = (await selected.getAttribute('title')).split('\n').at(-1);
+    const exact = page.waitForRequest(request => request.url().endsWith('/api/message') &&
+      request.postDataJSON()?.command === 'openRun');
+    const id = (await selected.getAttribute('title')).split('\n')[1];
+    archive('', 'retained-archive');
+    const request = (await exact).postDataJSON();
+    assert.equal(request.runId, id);
+    assert.equal(request.source_db, source);
+    const archived = page.locator('.wb-run-tabs [role="tab"]').last();
+    await temporary.filter({ hasText: 'Viewer redesign' }).waitFor();
+    assert.equal(await archived.getAttribute('aria-selected'), 'true');
+    assert.match(await archived.getAttribute('class'), /wb-run-tab-temporary/);
+    assert.equal(await page.getByRole('tab', { name: /Second active RUN/ }).getAttribute('aria-selected'), 'false');
+    await page.locator('[data-kind="task"]').filter({ hasText: 'Final archived task' }).waitFor({ state: 'attached' });
+    assert.equal(await page.locator('[data-wb-focus="mindmap-follow"]').count(), 0);
+    assert.equal(await page.locator('.wb-run-tab-close').count(), 1);
+    await shot(page, 'run-live-archive-right-tab');
+
+    mutate(`
+import sys
+from contextlib import closing
+from pathlib import Path
+from taplctl import db
+with closing(db.connect(Path(sys.argv[1]), session_id='')) as conn:
+    db.ensure_active_run(conn, request_summary='Same owner next RUN')
+`);
+    await selected.filter({ hasText: 'Same owner next RUN' }).waitFor();
+    assert.equal(await temporary.count(), 0);
+    await page.getByRole('tab', { name: /Second active RUN/ }).click();
+    await selected.filter({ hasText: 'Second active RUN' }).waitFor();
+    archive('second-owner', 'second-retained-archive');
+    await temporary.filter({ hasText: 'Second active RUN' }).waitFor();
+    await page.getByRole('tab', { name: /Same owner next RUN/ }).click();
+    await selected.filter({ hasText: 'Same owner next RUN' }).waitFor();
+    assert.equal(await temporary.count(), 0);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+    const exited = new Promise(resolve => started.process.once('exit', resolve));
+    started.process.kill();
+    await exited;
+  }
+});
+
 test('temporary RUN close controls remain separate and keyboard reachable at every screen size', { timeout: 60000 }, async () => {
   for (const locale of ['ko', 'en']) {
     const page = await isolatedPage({ viewport: { width: 1440, height: 900 }, locale });

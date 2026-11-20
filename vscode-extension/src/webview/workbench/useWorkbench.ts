@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { useBrowserLayoutEffect } from './effects';
-import type { TaplRunSnapshot, TaplWorkflowRun, WebviewCommand, WebviewView } from '../types';
+import type { RunDiscardResult, TaplRunSnapshot, TaplWorkflowRun, WebviewCommand, WebviewView } from '../types';
 import {
   createNavigation,
   navigate,
@@ -61,13 +61,22 @@ export function expectedForCommand(command: WebviewCommand, targetRun?: TaplWork
 }
 export function commandForRun(run: TaplWorkflowRun, active: TaplWorkflowRun[]): WebviewCommand | undefined {
   if (!run.id) return undefined;
-  return run.session_id && active.some((candidate) => runKey(candidate) === runKey(run))
+  return typeof run.session_id === 'string' && active.some((candidate) => runKey(candidate) === runKey(run))
     ? {
         command: 'selectRun',
         sessionId: run.session_id,
         source_db: run.source_db
       }
     : { command: 'openRun', runId: run.id, source_db: run.source_db };
+}
+
+function reportsArchive(view: WebviewView, snapshot: TaplRunSnapshot | undefined, key: string): boolean {
+  if (!key) return false;
+  if (snapshot?.run.status === 'archived' && runKey(snapshot.run) === key) return true;
+  if (view.type === 'overview') {
+    return view.archives.some(archive => runKey({ id: archive.run_id, source_db: archive.source_db }) === key);
+  }
+  return view.type === 'records' && view.runs.some(run => run.status === 'archived' && runKey(run) === key);
 }
 function positionForPage(page: HTMLElement | null): PagePosition {
   const focused = document.activeElement as HTMLElement | null;
@@ -92,6 +101,7 @@ function positionForPage(page: HTMLElement | null): PagePosition {
 export function useWorkbench({
   view,
   send,
+  discardResult,
   initialState,
   onStateChange,
   pageRef,
@@ -99,6 +109,7 @@ export function useWorkbench({
 }: {
   view: WebviewView;
   send: (command: WebviewCommand) => void;
+  discardResult?: RunDiscardResult;
   initialState?: unknown;
   onStateChange?: (state: unknown) => void;
   pageRef: RefObject<HTMLElement>;
@@ -117,6 +128,7 @@ export function useWorkbench({
   const [restore, setRestore] = useState(0);
   const visited = useRef(new Map<string, WorkbenchRoute>());
   const returnRoute = useRef<WorkbenchRoute>();
+  const retainedArchive = useRef<TaplWorkflowRun>();
   const afterRun = useRef<{
     expected: string;
     route: WorkbenchRoute;
@@ -147,9 +159,66 @@ export function useWorkbench({
         ...(view.type === 'memorySource' ? [view.run] : [])
       ])
     );
-    update((current) => receiveView(current, view));
+    const current = stateRef.current;
+    const identity = viewIdentity(view);
+    const key = current.route.runKey;
+    const former = snapshots[key]?.run ?? activeRuns.find(run => runKey(run) === key);
+    const discarded = discardResult?.ok && discardResult.runId === former?.id;
+    // A delayed response for another route must not take over navigation.
+    const mayRetain = !current.pending ||
+      [identity, `run:${key}`].includes(current.pending.expected);
+    const justArchived = mayRetain && former?.status === 'active' && !discarded && reportsArchive(view, snapshot, key);
+    if (runKey(retainedArchive.current) !== key) retainedArchive.current = undefined;
+    if (justArchived) retainedArchive.current = former;
+    const retained = retainedArchive.current;
+    if (retained?.id && mayRetain) {
+      if (inventory?.some(run => runKey(run) === key)) {
+        setActiveRuns(inventory.filter(run => runKey(run) !== key));
+      }
+      const successor = typeof retained.session_id === 'string' && inventory?.find(run =>
+        run.status === 'active' && run.session_id === retained.session_id &&
+        run.source_db === retained.source_db && runKey(run) !== key
+      );
+      if (successor) {
+        retainedArchive.current = undefined;
+        afterRun.current = undefined;
+        const route = { page: 'current' as const, runKey: runKey(successor) };
+        if (snapshot && runKey(snapshot.run) === route.runKey) {
+          update(state => ({ ...navigate(state, route, false), hostIdentity: identity }));
+        } else {
+          const command = commandForRun(successor, inventory ?? []);
+          update(state => navigate(state, route, false, command && expectedForCommand(command, successor)));
+          if (command) send(command);
+        }
+        setRestore(value => value + 1);
+        return;
+      }
+      if (justArchived) {
+        afterRun.current = undefined;
+        const route = { page: 'current' as const, runKey: key };
+        if (snapshot?.run.status === 'archived' && runKey(snapshot.run) === key) {
+          update(state => ({ ...navigate(state, route, false), hostIdentity: identity }));
+        } else {
+          const archived = { ...retained, status: 'archived', writable: false };
+          setKnownRuns(runs => uniqueRuns([...runs, archived]));
+          setSnapshots(snapshots => {
+            const previous = snapshots[key];
+            return previous ? { ...snapshots, [key]: { ...previous, readonly: true, run: archived } } : snapshots;
+          });
+          const command = { command: 'openRun' as const, runId: retained.id, source_db: retained.source_db };
+          update(state => navigate(state, route, false, expectedForCommand(command)));
+          send(command);
+        }
+        setRestore(value => value + 1);
+        return;
+      }
+      // An overview may pick a different concurrently active owner when the
+      // selected owner has no RUN. Keep the archive until an actual switch.
+      if (!current.pending && view.type === 'overview') return;
+    }
+    update((state) => receiveView(state, view));
     const followUp = afterRun.current;
-    if (followUp && viewIdentity(view) === followUp.expected) {
+    if (followUp && identity === followUp.expected) {
       afterRun.current = undefined;
       update((current) => navigate(current, followUp.route, 'replace', expectedForCommand(followUp.command)));
       send(followUp.command);
@@ -180,6 +249,7 @@ export function useWorkbench({
     targetRun?: TaplWorkflowRun
   ) => {
     afterRun.current = undefined;
+    if (runKey(retainedArchive.current) !== route.runKey) retainedArchive.current = undefined;
     capture();
     update((current) => navigate(current, route, internal, command && expectedForCommand(command, targetRun)));
     setRestore((value) => value + 1);
@@ -254,6 +324,7 @@ export function useWorkbench({
   };
   const restoreRoute = (route: WorkbenchRoute, trail: WorkbenchRoute[]) => {
     afterRun.current = undefined;
+    if (runKey(retainedArchive.current) !== route.runKey) retainedArchive.current = undefined;
     capture();
     const command: WebviewCommand | undefined = requestForRoute(route) ??
       (route.page === 'records' ? { command: 'records', scope: 'all' } : undefined);
