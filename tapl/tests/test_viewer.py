@@ -7,6 +7,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
@@ -234,6 +235,31 @@ allowed_origins = [
             selected_child = app.handle_message({"command": "selectWorkspace", "workspace": str(child)})
             self.assertEqual(selected_child["view"]["type"], "overview")
             self.assertEqual(selected_child["workspace"], str(child.resolve()))
+
+    def test_ready_opens_the_linked_workspace_and_exact_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            default = self.initialized_workspace(root)
+            linked = root / "linked 한글 #workspace"
+            tapl_db.initialize_workspace(linked)
+            database = tapl_db.default_db_path(linked)
+            with closing(tapl_db.connect(database, session_id="link-owner")) as conn:
+                run = tapl_db.ensure_active_run(conn, request_summary="Linked RUN")
+            app = viewer.ViewerApplication(default_workspace=default)
+            request = {"command": "ready", "workspace": str(linked), "runId": run["id"], "source_db": database.name}
+            response = app.handle_message(request)
+            self.assertEqual(response["type"], "hydrate")
+            self.assertEqual(response["workspace"], str(linked.resolve()))
+            self.assertEqual(response["view"]["type"], "run")
+            self.assertEqual(response["view"]["snapshot"]["run"]["id"], run["id"])
+            self.assertTrue(response["view"]["snapshot"]["readonly"])
+            for update in ({"runId": "missing"}, {"source_db": "../tapl.db"}):
+                fallback = app.handle_message({**request, **update})
+                self.assertEqual(fallback["workspace"], str(linked.resolve()))
+                self.assertEqual(fallback["view"]["type"], "overview")
+            denied = app.handle_message({**request, "workspace": str(root / "missing")})
+            self.assertEqual(denied["view"]["type"], "workspace")
+            self.assertEqual(app.handle_message({"command": "ready"})["workspace"], str(default.resolve()))
 
     def test_database_revision_tracks_database_and_sqlite_sidecars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

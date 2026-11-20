@@ -1144,6 +1144,68 @@ test('theme control reflects automatic dark mode and follows system changes unti
   } finally { await page.close(); }
 });
 
+test('Viewer classification links open an exact RUN in a tab without replacing the remembered workspace', { timeout: 30000 }, async () => {
+  const folder = path.join(workspace, '링크 workspace & (review) #1');
+  const seed = spawnSync(python, [fixture, '--workspace', folder, '--seed-only'], { encoding: 'utf8' });
+  assert.equal(seed.status, 0, seed.stderr);
+  const link = spawnSync(python, ['-c', `
+import sqlite3, sys
+from contextlib import closing
+from pathlib import Path
+from taplctl.viewer import workspace_run_url
+folder = Path(sys.argv[1])
+db_path = folder / '.tapl' / 'tapl.db'
+with closing(sqlite3.connect(db_path)) as conn:
+    run_id, = conn.execute("SELECT id FROM workflow_runs WHERE session_id='second-owner'").fetchone()
+print(workspace_run_url(folder, run_id, db_path.name))
+`, folder], { encoding: 'utf8', env: { ...process.env, PYTHONPATH: path.resolve(__dirname, '../../../tapl') } });
+  assert.equal(link.status, 0, link.stderr);
+  const target = new URL(origin);
+  target.hash = new URL(link.stdout.trim()).hash;
+  const baseline = 'tapl.viewer.workspace.v1';
+  const page = await isolatedPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US' });
+  page.setDefaultTimeout(8000);
+  await page.addInitScript(({ key, workspace }) => {
+    if (localStorage.getItem(key) === null) localStorage.setItem(key, JSON.stringify(workspace));
+  }, { key: baseline, workspace });
+  const send = [];
+  const errors = [];
+  page.on('request', request => {
+    if (request.url().endsWith('/api/message')) send.push(request.postDataJSON());
+  });
+  page.on('pageerror', error => errors.push(error.message));
+  const remembered = () => page.evaluate(key => JSON.parse(localStorage.getItem(key)), baseline);
+  const selected = page.locator('.wb-run-tab[aria-selected="true"]');
+  const picker = page.locator('[data-wb-focus="workspace-picker"]');
+  try {
+    await page.goto(target.toString());
+    await selected.filter({ hasText: 'Second active RUN' }).waitFor();
+    await page.locator('.wb-run-mindmap').waitFor();
+    assert.ok((await picker.getAttribute('title')).endsWith(folder));
+    const values = new URLSearchParams(target.hash.slice(1));
+    const ready = send.find(message => message.command === 'ready');
+    assert.equal(ready.workspace, folder);
+    assert.equal(ready.runId, values.get('run'));
+    assert.equal(ready.source_db, 'tapl.db');
+    assert.equal(await remembered(), workspace);
+    await page.reload();
+    await selected.filter({ hasText: 'Second active RUN' }).waitFor();
+    assert.equal(await remembered(), workspace);
+
+    values.set('run', 'missing-run');
+    await page.evaluate(search => { window.location.hash = search; }, values.toString());
+    await page.waitForFunction(() => document.querySelector('.wb-run-tab[aria-selected="true"]')?.textContent.includes('Viewer redesign'));
+    assert.ok((await picker.getAttribute('title')).endsWith(folder));
+    assert.equal(await remembered(), workspace);
+
+    values.set('workspace', path.join(workspace, 'missing-linked-folder'));
+    await page.evaluate(search => { window.location.hash = search; }, values.toString());
+    await page.locator('.wb-workspace-dialog[open]').waitFor();
+    assert.equal(await remembered(), workspace);
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
+});
+
 test('workspace browsing recovers from errors and ignores stale replies after cancel and reopen', { timeout: 30000 }, async () => {
   const { page, errors } = await openPage();
   try {

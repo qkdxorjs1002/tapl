@@ -35,6 +35,23 @@ const SESSION_STATE_KEY = 'tapl.viewer.state.v1';
 const SESSION_HISTORY_KEY = 'tapl.viewer.history.v1';
 const WORKSPACE_KEY = 'tapl.viewer.workspace.v1';
 
+type ViewerStartupLink = { workspace: string; runId?: string; source_db?: string };
+
+function readViewerStartupLink(location: Location | undefined): ViewerStartupLink | undefined {
+  if (!location || !/^https?:$/.test(location.protocol) ||
+      !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) || !location.hash) return;
+  const values = new URLSearchParams(location.hash.slice(1));
+  const workspace = values.get('workspace');
+  const control = /[\x00-\x1f\x7f]/;
+  if (!workspace || values.getAll('workspace').length !== 1 || control.test(workspace) ||
+      !/^(?:\/(?![\\/])|[a-z]:[\\/](?![\\/]))/i.test(workspace)) return;
+  const runId = values.get('run');
+  const source = values.get('source_db');
+  return runId && runId.length <= 256 && !control.test(runId) && source && /^tapl(?:-[^/\\]+)?\.db$/.test(source) && !control.test(source)
+    ? { workspace, runId, source_db: source }
+    : { workspace };
+}
+
 let api: VsCodeApi | undefined;
 
 export function vscodeApi(): VsCodeApi {
@@ -50,8 +67,10 @@ class BrowserApi implements VsCodeApi {
   private pendingNavigation = false;
   private requestGeneration = 0;
   private workspaceGeneration = 0;
-  private state = readStorage<PersistedState>(sessionStorage, SESSION_STATE_KEY) ?? {};
-  private history = readStorage<WebviewView[]>(sessionStorage, SESSION_HISTORY_KEY) ?? [];
+  private startupLink = readViewerStartupLink(window.location);
+  private rememberWorkspace = !this.startupLink;
+  private state: PersistedState = this.startupLink ? {} : readStorage<PersistedState>(sessionStorage, SESSION_STATE_KEY) ?? {};
+  private history = this.startupLink ? [] : readStorage<WebviewView[]>(sessionStorage, SESSION_HISTORY_KEY) ?? [];
   private activeWorkspace: string | undefined;
   private revisionBaseline: string | undefined;
   private revisionWorkspace: string | undefined;
@@ -77,6 +96,18 @@ class BrowserApi implements VsCodeApi {
     } else {
       this.clearRevisionTimer();
     }
+  };
+
+  private readonly onHashChange = (): void => {
+    const link = readViewerStartupLink(window.location);
+    if (!link) return;
+    this.startupLink = link;
+    this.rememberWorkspace = false;
+    this.state.selectedSessionId = undefined;
+    this.state.selectedSourceDb = undefined;
+    this.history = [];
+    this.persistHistory();
+    this.postMessage({ command: 'ready' });
   };
 
   postMessage(message: WebviewCommand): void {
@@ -225,7 +256,13 @@ class BrowserApi implements VsCodeApi {
         throw new Error('Workspace response was invalid.');
       }
       this.rememberPreferences(payload);
+      if (!this.rememberWorkspace) {
+        this.rememberWorkspace = true;
+        this.startupLink = undefined;
+        window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+      }
       if (payload.workspace === current && this.state.view?.type !== 'workspace') {
+        this.setActiveWorkspace(payload.workspace);
         dispatchHostMessage({ type: 'workspace:result', ok: true, workspace: payload.workspace });
         return;
       }
@@ -277,10 +314,12 @@ class BrowserApi implements VsCodeApi {
     this.pollingActive = active;
     if (active) {
       document.addEventListener('visibilitychange', this.onVisibilityChange);
+      window.addEventListener('hashchange', this.onHashChange);
       this.scheduleRevisionCheck();
       return;
     }
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    window.removeEventListener('hashchange', this.onHashChange);
     this.clearRevisionTimer();
   }
 
@@ -294,10 +333,11 @@ class BrowserApi implements VsCodeApi {
     const workspaceGeneration = this.workspaceGeneration;
     const activeWorkspace = this.activeWorkspace;
     const recentWorkspace = readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
+    const link = message.command === 'ready' ? this.startupLink : undefined;
     const requestWorkspace = message.command === 'discardRun'
       ? message.workspace
       : message.command === 'ready'
-      ? ''
+      ? link?.workspace ?? (this.rememberWorkspace ? '' : this.activeWorkspace ?? '')
       : message.command === 'selectWorkspace'
         ? message.workspace.trim()
         : this.activeWorkspace ?? recentWorkspace;
@@ -306,6 +346,7 @@ class BrowserApi implements VsCodeApi {
         ? { source_db: this.state.selectedSourceDb } : {}),
       ...message,
       ...(this.state.selectedSessionId !== undefined ? { sessionId: this.state.selectedSessionId } : {}),
+      ...(link?.runId ? { runId: link.runId, source_db: link.source_db } : {}),
       workspace: requestWorkspace,
       locale: navigator.language,
       ...refreshContext(message, previous)
@@ -347,6 +388,7 @@ class BrowserApi implements VsCodeApi {
         return false;
       }
       if (payload.type === 'hydrate' || payload.type === 'view:update') this.rememberPreferences(payload);
+      if (link) this.startupLink = undefined;
       if ((payload.type === 'hydrate' || payload.type === 'view:update') && 'workspace' in payload) {
         if ((this.activeWorkspace ?? this.state.workspace) !== payload.workspace) {
           this.history = [];
@@ -355,7 +397,7 @@ class BrowserApi implements VsCodeApi {
         this.setActiveWorkspace(payload.workspace);
       }
       if (
-        message.command === 'ready'
+        message.command === 'ready' && !link && this.rememberWorkspace
         && (payload.type === 'hydrate' || payload.type === 'view:update')
         && payload.view.type === 'workspace'
         && recentWorkspace
@@ -363,7 +405,7 @@ class BrowserApi implements VsCodeApi {
         await this.send({ command: 'selectWorkspace', workspace: recentWorkspace });
         return true;
       }
-      if ((message.command === 'ready' || message.command === 'selectWorkspace')
+      if (!link && (message.command === 'ready' || message.command === 'selectWorkspace')
         && (isMemoryView(previous) || isExactView(previous))
         && (payload.type === 'hydrate' || payload.type === 'view:update')
         && (!isMemoryView(previous) || payload.capabilities?.associativeMemory === true)
@@ -587,7 +629,7 @@ class BrowserApi implements VsCodeApi {
       this.activeWorkspace = nextWorkspace;
       this.resetRevisionBaseline();
     }
-    if (nextWorkspace) {
+    if (nextWorkspace && this.rememberWorkspace) {
       writeStorage(localStorage, WORKSPACE_KEY, nextWorkspace);
     }
   }
@@ -623,7 +665,7 @@ class BrowserApi implements VsCodeApi {
       type: 'view:update',
       view: {
         type: 'workspace',
-        workspace: readStorage<string>(localStorage, WORKSPACE_KEY) ?? '',
+        workspace: this.activeWorkspace || readStorage<string>(localStorage, WORKSPACE_KEY) || '',
         message: ''
       },
       locale: this.state.locale ?? resolveBrowserLocale(),

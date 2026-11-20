@@ -145,6 +145,8 @@ Check original evidence from `tapl_get_item` or `tapl_get_archive` before using 
 
 ## RUNs, plans, findings, and approval
 
+A successful `tapl_summarize_run` returns `viewer_url` for the classification notice. Use that URL unchanged for the [local Viewer link](../guides/viewer.md#open-a-workspace).
+
 | Tool | Required arguments | Optional arguments and behavior |
 | --- | --- | --- |
 | `tapl_summarize_run` | `summary` (1–2000 characters), `work_type`, `workflow_mode` | `recall_query` (at most 500 characters; prefer 3–8 core terms). Omission or empty uses the first eight summary tokens. At most three relevant automatic hints once per RUN. |

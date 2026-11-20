@@ -7,6 +7,7 @@ import tempfile
 import pytest
 from pathlib import Path
 from unittest import mock
+from urllib.parse import parse_qs, urlsplit
 
 from mcp import Client
 
@@ -34,7 +35,7 @@ def test_mcp_module_has_no_cli_subprocess_data_plane() -> None:
 def test_mcp_pins_starting_cwd_and_explicit_root_to_distinct_databases() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         parent = Path(tmp) / "parent"
-        child = parent / "child"
+        child = parent / "한글 child # (branch)"
         sibling = parent / "sibling"
         child.mkdir(parents=True)
         sibling.mkdir()
@@ -49,14 +50,25 @@ def test_mcp_pins_starting_cwd_and_explicit_root_to_distinct_databases() -> None
             explicit = mcp_server.create_server(workspace_root=sibling)
 
         async def exercise() -> None:
-            for server, summary in ((implicit, "child session"), (explicit, "sibling session")):
+            for server, summary, workspace in ((implicit, "child session", child), (explicit, "sibling session", sibling)):
                 async with Client(server) as client:
                     result = await client.call_tool(
                         "tapl_summarize_run",
                         {"summary": summary, "work_type": "analysis", "workflow_mode": "standard"},
                     )
                     assert not result.is_error
-                    assert result.structured_content["operation"] == "run_summarize"
+                    receipt = result.structured_content
+                    assert receipt["operation"] == "run_summarize"
+                    address = urlsplit(receipt["viewer_url"])
+                    assert (address.scheme, address.hostname, address.port, address.path, address.query) == (
+                        "http", "127.0.0.1", 8000, "/", ""
+                    )
+                    assert parse_qs(address.fragment) == {
+                        "workspace": [str(workspace.resolve())],
+                        "run": [receipt["active_run"]["id"]],
+                        "source_db": [db.default_db_path(workspace).name],
+                    }
+                    assert not any(character in str(receipt["viewer_url"]) for character in " ()")
 
         asyncio.run(exercise())
 

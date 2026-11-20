@@ -142,6 +142,8 @@ Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 
 
 ## RUN·계획·발견 사항·승인
 
+`tapl_summarize_run`이 성공하면 RUN 분류 안내에 쓸 `viewer_url`을 반환합니다. 반환된 주소 그대로 [로컬 Viewer 링크](../guides/viewer.ko.md#워크스페이스-열기)에 사용합니다.
+
 | 도구 | 필수 인자 | 선택 인자와 동작 |
 | --- | --- | --- |
 | `tapl_summarize_run` | `summary` (1–2000자), `work_type`, `workflow_mode` | `recall_query` (최대 500자, 핵심 용어 3–8개 권장). 생략하거나 비어 있으면 요약의 앞 토큰을 최대 8개 사용합니다. RUN당 한 번 관련 자동 힌트를 최대 3개 제공합니다. |

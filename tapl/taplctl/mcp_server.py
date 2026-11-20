@@ -16,6 +16,7 @@ from . import __version__, db, install as tapl_install, prompt as tapl_prompt, r
 from .application import WorkflowApplication
 from .command_runtime import configure_stdio
 from .clients import client_scope, resolve_client, validate_session_key
+from .viewer import workspace_run_url
 
 
 SERVER_NAME = "tapl_mcp"
@@ -788,9 +789,9 @@ def _create_server(
         recall_query: Annotated[str | None, Field(description="Optional focused terms/identifiers for one recall per RUN; uses the first eight lexical tokens. Omitted or empty uses the request summary with the same limit.", max_length=500)] = None,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
-        """Summarize the request and explicitly classify its work type and workflow mode."""
+        """Classify the RUN. Append the returned viewer_url verbatim as a localized Markdown link to the classification notice."""
 
-        return await call_application_write(
+        receipt = await call_application_write(
             application,
             application.summarize_run,
             summary, session_id=session_id,
@@ -799,6 +800,10 @@ def _create_server(
             recall_query=recall_query,
             operation="run_summarize",
         )
+        run = receipt.get("active_run")
+        if receipt.get("ok") and isinstance(run, dict) and run.get("id"):
+            receipt["viewer_url"] = workspace_run_url(application.workspace_root, run["id"], application.db_path.name)
+        return receipt
 
     @server.tool(name="tapl_discard_run", title="Discard confirmed TAPL run", annotations=ToolAnnotations(
         read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False,

@@ -28,6 +28,8 @@ The workspace picker lists subfolders, including hidden folders. Click a folder 
 
 RUN tabs select the session whose records you inspect. Archives and history let you revisit earlier work; the memory view links a reusable cue back to its original evidence. Changing the selected RUN does not transfer its ownership.
 
+Use **Open Viewer** in an agent’s RUN classification notice to open its workspace and RUN in the local browser Viewer. The link uses the default port 8000 and requires the Viewer to be running on the same machine. If the RUN is gone, the link opens the workspace overview. The link applies to the current tab and keeps the browser’s remembered workspace selection.
+
 ## Navigate the Viewer
 
 ### Product tours

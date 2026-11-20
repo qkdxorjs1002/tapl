@@ -1196,7 +1196,7 @@ def mcp_tool_result_display_guidance() -> str:
         "clause, at most 60 characters, progressive, current activity only. Never echo tool data or report each call: "
         "omit completed results, counts, rationale, lists, sequences, next steps, receipts, tables, IDs, statuses, "
         "payloads and summaries. Exception: after `tapl_summarize_run`, report only returned work_type, workflow_mode "
-        "and derived record_mode once, e.g. `🔎 **RUN** · 분류: Implementation · Standard · Planned`; repeat only on "
+        "and derived record_mode once, with ` · [Viewer 보기](viewer_url)` if available; repeat only on "
         "classification change. Errors/blockers/approvals/input requests may include reason and next action. "
         "Icons: 🔎 inspect, 📝 plan, 🛠️ execute, 🧪 verify. Final reports use prose."
     )

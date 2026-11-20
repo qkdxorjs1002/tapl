@@ -16,7 +16,7 @@ function harness(restored = {}, language = 'en') {
   const context = vm.createContext({ module: { exports: {} }, Error, localStorage, sessionStorage, navigator: { language },
     document: { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} },
     MessageEvent: class { constructor(_type, options) { this.data = options.data; } },
-    window: { setTimeout(fn) { const key = timers.size + 1; timers.set(key, fn); return key; }, clearTimeout(id) { timers.delete(id); },
+    window: { addEventListener() {}, removeEventListener() {}, setTimeout(fn) { const key = timers.size + 1; timers.set(key, fn); return key; }, clearTimeout(id) { timers.delete(id); },
       dispatchEvent(event) { messages.push(event.data); } },
     fetch(_url, options) { calls.push(JSON.parse(options.body)); return new Promise((resolve, reject) => pending.push({ resolve, reject })); }
   });

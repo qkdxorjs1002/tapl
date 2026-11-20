@@ -23,7 +23,7 @@ function harness(initial) {
   const context = vm.createContext({ module: { exports: {} }, Error, localStorage, sessionStorage, navigator: { language: 'en' },
     document: { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} },
     MessageEvent: class { constructor(type, options) { this.type = type; this.data = options.data; } },
-    window: { setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); }, dispatchEvent(event) {
+    window: { addEventListener() {}, removeEventListener() {}, setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); }, dispatchEvent(event) {
       messages.push(event.data);
       if (event.data.view) api.setState({ view: event.data.view, workspace: event.data.workspace, capabilities: event.data.capabilities, locale: 'en', layout: 'auto' });
     } },

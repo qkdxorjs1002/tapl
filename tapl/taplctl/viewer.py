@@ -10,7 +10,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Iterable
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from . import config, db, embeddings, recall, sessions, settings, validation
 from .application import WorkflowApplication, WorkflowApplicationError
@@ -33,6 +33,12 @@ DEFAULT_STATUS: dict[str, Any] = {
     "recent_events": [],
     "schema": {},
 }
+
+
+def workspace_run_url(workspace: Path, run_id: str, source_db: str) -> str:
+    """Create a loopback link whose initial HTTP request omits local paths."""
+    target = urlencode({"workspace": str(workspace), "run": run_id, "source_db": source_db}, quote_via=quote)
+    return f"http://{DEFAULT_HOST}:{DEFAULT_PORT}/#{target}"
 
 
 class ViewerError(RuntimeError):
@@ -429,8 +435,10 @@ class ViewerApplication:
 
     def resolve_database(self, raw_workspace: object) -> tuple[Path | None, Path]:
         if isinstance(raw_workspace, str) and raw_workspace.strip():
-            workspace, db_path = workspace_database(raw_workspace.strip())
-            return workspace, db_path
+            # Browser links carry an exact absolute folder, including any
+            # whitespace at the end of its name.
+            path = Path(raw_workspace)
+            return workspace_database(path if path.is_absolute() else raw_workspace.strip())
         if self.default_db is not None:
             if not self.default_db.is_file():
                 raise WorkspaceRequired(f"tapl database does not exist: {self.default_db}")
@@ -760,6 +768,13 @@ class ViewerApplication:
                 view["runId"] = run_id
                 view.update(self._run_context(db_path, run_id, result.get("source_db", payload.get("source_db"))))
             return view
+        if command == "ready" and payload.get("workspace") and payload.get("runId"):
+            try:
+                return self._build_view({**payload, "command": "openRun"}, db_path)
+            except ViewerError:
+                # A bookmark can outlive its RUN. Keep the workspace and avoid
+                # looking for that ID in another source.
+                return self._overview(db_path, search_query="")
         if command in {"ready", "selectWorkspace", "selectRun"}:
             return self._overview(db_path, search_query="", source_db=payload.get("source_db"))
         if command == "refresh":
