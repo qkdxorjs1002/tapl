@@ -2,6 +2,11 @@
 
 All notable changes to TAPL Workflow Viewer are documented in this file.
 
+## 2.24.1 - 2026-11-20
+
+- Return to Current RUN when the automatically opened archive tab is closed and no RUN is active.
+- Automatically select a newly started RUN when Current RUN is empty, including after returning from Record search.
+
 ## 2.24.0 - 2026-11-20
 
 - Add a guided Quick start for the browser Viewer and VS Code. Open the Help menu to replay it or see what changed in the installed version.
