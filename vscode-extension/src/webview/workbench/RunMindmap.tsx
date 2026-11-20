@@ -262,7 +262,8 @@ const RunMindmapNode = memo(function RunMindmapNode({
         {node.title || (node.kind === 'run' ? runTitle : '')}
       </span>
       {delegatedModel && modelLabel && (
-        <span className="wb-mm-agent-model" title={t('wbSubagentModel', { model: model === 'inherit' ? modelLabel : delegatedModel })}>
+        <span className="wb-mm-agent-model" data-tapl-tour="delegated-task-model"
+          title={t('wbSubagentModel', { model: model === 'inherit' ? modelLabel : delegatedModel })}>
           <Icon name="agent" />
           <span>{modelLabel}</span>
         </span>

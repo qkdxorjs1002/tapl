@@ -2,6 +2,13 @@
 
 All notable changes to TAPL Workflow Viewer are documented in this file.
 
+## 2.24.0 - 2026-11-20
+
+- Add a guided Quick start for the browser Viewer and VS Code. Open the Help menu to replay it or see what changed in the installed version.
+- Keep the RUN you are viewing in a read-only tab on the right when it is archived. The tab closes when you switch RUNs or the same agent session starts its next RUN.
+- Show an agent icon and the recorded model on delegated TASK cards. Hover over the model to see its full name and recorded reasoning effort.
+- Add an Open Viewer link to RUN classification notices. It opens the exact workspace and RUN in the local browser Viewer.
+
 ## 2.23.0 - 2026-11-17
 
 - Close temporary read-only RUN tabs with the X button or Delete key and return to the previous view without changing source history.

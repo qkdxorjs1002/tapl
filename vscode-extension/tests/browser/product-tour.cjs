@@ -12,15 +12,15 @@ const temp = mkdtempSync(path.join(tmpdir(), 'tapl-product-tour-'));
 const version = '2.23.0';
 const historyKey = 'tapl.viewer.product-tour.v1';
 const servers = [];
-let browser, origin, unconnectedOrigin;
+let browser, origin, unconnectedOrigin, currentReleaseOrigin;
 
-function buildFixtureAssets() {
-  const staging = path.join(temp, 'extension');
+function buildFixtureAssets(buildVersion = version) {
+  const staging = path.join(temp, `extension-${buildVersion}`);
   mkdirSync(staging);
   cpSync(path.join(extension, 'src'), path.join(staging, 'src'), { recursive: true });
   cpSync(path.join(extension, 'vite.config.ts'), path.join(staging, 'vite.config.ts'));
   symlinkSync(path.join(extension, 'node_modules'), path.join(staging, 'node_modules'), 'dir');
-  writeFileSync(path.join(staging, 'package.json'), JSON.stringify({ ...require('../../package.json'), version }));
+  writeFileSync(path.join(staging, 'package.json'), JSON.stringify({ ...require('../../package.json'), version: buildVersion }));
   const build = spawnSync(process.execPath, [path.join(extension, 'node_modules/vite/bin/vite.js'), 'build'], { cwd: staging, encoding: 'utf8' });
   assert.equal(build.status, 0, build.stdout + build.stderr);
   return path.join(staging, 'webview-dist');
@@ -48,6 +48,7 @@ before(async () => {
   const assets = buildFixtureAssets();
   origin = await serve(assets);
   unconnectedOrigin = await serve(assets, ['--without-default']);
+  currentReleaseOrigin = await serve(buildFixtureAssets('2.24.0'));
   browser = await chromium.launch({
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
     headless: process.env.TAPL_TOUR_HEADED !== '1'
@@ -250,6 +251,23 @@ test('workspace setup takes precedence, and unavailable persistence still permit
     await blocked.page.keyboard.press('Escape');
     assert.deepEqual(blocked.errors, []);
   } finally { await blocked.page.close(); }
+});
+
+test('2.24.0 introduces the archive tab, delegated model and Viewer link in order', async () => {
+  const { page, errors } = await open({
+    url: currentReleaseOrigin, history: { intro: 'completed', releaseSeenThrough: version }, locale: 'ko-KR'
+  });
+  try {
+    const offer = card(page);
+    await expect(offer).toContainText('v2.24.0');
+    await offer.getByRole('button', { name: '새 기능 보기' }).click();
+    await (await step(page, 'keep-archived-run', '다음', 'run-tabs')).click();
+    await (await step(page, 'delegated-task-model', '다음')).click();
+    await (await step(page, 'open-viewer-link', '마치기')).click();
+    await expect(dialog(page)).toHaveCount(0);
+    assert.deepEqual(await readHistory(page), { intro: 'completed', releaseSeenThrough: '2.24.0' });
+    assert.deepEqual(errors, []);
+  } finally { await page.close(); }
 });
 
 test('a workspace without an active RUN or memory support has centered explanations and usable navigation', async () => {

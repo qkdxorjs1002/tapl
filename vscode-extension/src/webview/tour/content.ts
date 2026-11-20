@@ -185,6 +185,27 @@ const setup = (browser: boolean): StepDefinition => ({
 
 const releaseCards: (StepDefinition & { version: string; requiresMemory?: boolean; nativeOnly?: boolean })[] = [
   {
+    version: '2.24.0',
+    id: 'keep-archived-run', page: 'current', target: 'run-tabs', copy: {
+      ko: { title: '아카이브한 RUN 계속 보기', description: '보고 있던 RUN이 아카이브되면 오른쪽 읽기 전용 탭에서 최종 상태를 볼 수 있어요. 다른 RUN을 선택하거나 같은 세션에서 다음 RUN이 시작되면 임시 탭이 닫힙니다.' },
+      en: { title: 'Keep an archived RUN in view', description: 'When the RUN you are viewing is archived, its final state stays in a read-only tab on the right. The tab closes when you switch RUNs or the same session starts its next RUN.' }
+    }
+  },
+  {
+    version: '2.24.0',
+    id: 'delegated-task-model', page: 'current', target: 'delegated-task-model', copy: {
+      ko: { title: '위임 TASK의 모델 확인하기', description: '모델이 기록된 위임 TASK에는 제목 아래에 에이전트 아이콘과 모델명이 표시됩니다. 모델명에 마우스를 올리면 전체 이름과 기록된 추론 강도를 볼 수 있어요.' },
+      en: { title: 'See which model a delegated task used', description: 'When a delegated task has a recorded model, an agent icon and the model name appear under its title. Hover over the name to see the full value and recorded reasoning effort.' }
+    }
+  },
+  {
+    version: '2.24.0',
+    id: 'open-viewer-link', page: 'current', copy: {
+      ko: { title: '대화에서 Viewer 바로 열기', description: '에이전트의 RUN 분류 안내에 있는 Viewer 보기를 누르면 해당 워크스페이스와 RUN이 열립니다. 로컬 Viewer가 기본 포트 8000에서 실행 중이어야 합니다.' },
+      en: { title: 'Open the Viewer from your conversation', description: 'Click Open Viewer in the agent’s RUN classification notice to open that workspace and RUN. The local Viewer needs to be running on its default port 8000.' }
+    }
+  },
+  {
     version: '2.23.0',
     id: 'close-read-only-run', page: 'records', target: 'record-search', copy: {
       ko: { title: '과거 RUN 탭에서 바로 돌아가기', description: '기록 검색에서 과거 RUN을 열면 읽기 전용 탭이 나타납니다. 탭의 X를 누르거나 탭에 포커스를 두고 Delete를 누르면 원래 화면으로 돌아갑니다. 원본 기록은 그대로 유지됩니다.' },
