@@ -381,6 +381,29 @@ html:not([data-tapl-theme]) > body:is(.vscode-high-contrast, .vscode-high-contra
 .wb-mm-node[data-kind='plan'] .wb-mm-title {
   font-size: 14px;
 }
+.wb-run-mindmap .wb-mm-node-button[data-delegated-model] {
+  gap: 4px;
+  padding-block: 6px;
+}
+.wb-mm-agent-model {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--mm-muted);
+  font-size: 10px;
+  line-height: 1.1;
+}
+.wb-mm-agent-model .wb-icon {
+  width: 11px;
+  height: 11px;
+}
+.wb-mm-agent-model span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .wb-mm-node[data-kind='run'] .wb-mm-title {
   font-size: 19px;
   font-weight: 600;

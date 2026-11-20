@@ -17,6 +17,7 @@ const icons: Record<string, ReactNode> = {
       <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 14l2 2 4-5" />
     </>
   ),
+  agent: <><rect x="4" y="7" width="16" height="13" rx="3" /><path d="M12 4v3M2 13h2m16 0h2M9 12h.01m5.99 0h.01M9 16h6" /></>,
   finding: (
     <>
       <circle cx="10" cy="10" r="6" />

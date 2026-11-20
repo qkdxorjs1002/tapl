@@ -776,6 +776,73 @@ test('closing a temporary read-only RUN restores records and memory without chan
   } finally { await page.unrouteAll({ behavior: 'wait' }); await page.close(); }
 });
 
+test('delegated TASK models update without shifting RUN cards and fit at narrow widths', { timeout: 30000 }, async () => {
+  const page = await isolatedPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US', reducedMotion: 'reduce' });
+  page.setDefaultTimeout(6500);
+  await page.addInitScript(() => localStorage.setItem('tapl.viewer.product-tour.v1', JSON.stringify({ intro: 'completed' })));
+  let overview;
+  await page.route('**/api/message', async route => {
+    const response = await route.fetch(), payload = await response.json();
+    if (payload.view?.type === 'overview' && payload.view.status.tasks.some(task => task.stable_id === 'TASK-009')) {
+      const tasks = payload.view.status.tasks.filter(task => [1, 4, 5, 6, 9, 10].includes(Number(task.stable_id.slice(5))));
+      for (const task of tasks) {
+        if (task.stable_id === 'TASK-001') Object.assign(task, {
+          executor_kind: 'subagent', active_execution: { executor_kind: 'subagent', model: 'gpt-6.2-sol', reasoning_effort: 'high' },
+          custom_fields: { 'SubAgent Model': 'old-model (high)' }
+        });
+        if (task.stable_id === 'TASK-004') Object.assign(task, {
+          custom_fields: { 'SubAgent Model': 'claude-sonnet-4-6 (high)' }, executor_kind: 'subagent', status: 'Completed'
+        });
+        if (task.stable_id === 'TASK-005') Object.assign(task, { custom_fields: { 'SubAgent Model': 'stale-model (high)' }, executor_kind: 'main' });
+        if (task.stable_id === 'TASK-006') Object.assign(task, { custom_fields: { 'SubAgent Model': 'planned-model (high)' }, executor_kind: 'subagent', status: 'Pending' });
+        if (task.stable_id === 'TASK-009') Object.assign(task, { custom_fields: { 'SubAgent Model': 'inherit (model/effort inherited)' }, executor_kind: 'subagent' });
+        if (task.stable_id === 'TASK-010') task.executor_kind = 'subagent';
+      }
+      payload.view.status.tasks = tasks;
+      overview = structuredClone(payload);
+    }
+    await route.fulfill({ response, json: payload });
+  });
+  const card = id => page.locator('[data-kind="task"]').filter({ has: page.getByText(id, { exact: true }) });
+  const badge = '.wb-mm-agent-model';
+  try {
+    await page.goto(origin);
+    const running = card('TASK-001');
+    await running.getByText('gpt-6.2-sol', { exact: true }).waitFor();
+    assert.equal(await running.locator(badge).getAttribute('title'), 'Subagent model: gpt-6.2-sol (high)');
+    assert.equal(await running.locator(badge + ' svg').getAttribute('aria-hidden'), 'true');
+    assert.equal(await card('TASK-004').locator(badge).innerText(), 'claude-sonnet-4-6');
+    assert.equal(await card('TASK-009').locator(badge).innerText(), 'Inherited model');
+    for (const id of ['TASK-005', 'TASK-006', 'TASK-010']) assert.equal(await card(id).locator(badge).count(), 0);
+    const geometry = () => running.evaluate(el => [el.style.transform, el.offsetWidth, el.offsetHeight]);
+    const before = await geometry();
+    await shot(page, 'run-subagent-model-light');
+
+    const model = 'provider/' + 'long-model-name-'.repeat(5) + 'v2';
+    const updated = structuredClone(overview);
+    updated.view.status.tasks.find(task => task.stable_id === 'TASK-001').active_execution.model = model;
+    await page.evaluate(payload => window.postMessage({ ...payload, type: 'view:update', locale: 'ko' }, '*'), updated);
+    await running.getByText(model, { exact: true }).waitFor();
+    assert.deepEqual(await geometry(), before);
+    assert.equal(await running.locator(badge).getAttribute('title'), `서브에이전트 모델: ${model} (high)`);
+    assert.equal(await card('TASK-009').locator(badge).innerText(), '모델 상속');
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 320, height: 540 });
+    const layout = await running.evaluate(el => {
+      const button = el.querySelector('button'), model = el.querySelector('.wb-mm-agent-model');
+      const text = model.querySelector('span');
+      return { ellipsis: text.scrollWidth > text.clientWidth && getComputedStyle(text).textOverflow === 'ellipsis',
+        fits: model.getBoundingClientRect().bottom <= button.getBoundingClientRect().bottom &&
+              model.getBoundingClientRect().right <= button.getBoundingClientRect().right };
+    });
+    assert.deepEqual(layout, { ellipsis: true, fits: true });
+    await shot(page, 'run-subagent-model-narrow-dark');
+  } finally {
+    await page.unrouteAll({ behavior: 'wait' });
+    await page.close();
+  }
+});
+
 test('a live archive moves the selected RUN to the last read-only tab until switching RUNs', { timeout: 45000 }, async () => {
   const folder = path.join(workspace, 'live-archive');
   const started = await startServer(['--workspace', folder]);

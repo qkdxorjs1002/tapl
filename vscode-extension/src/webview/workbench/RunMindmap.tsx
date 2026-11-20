@@ -23,6 +23,30 @@ const stateKind = (value?: string) =>
         ? 'blocked'
         : 'pending';
 
+function recordedText(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.trim() || undefined : undefined;
+}
+
+function delegatedTaskModels(snapshot: TaplRunSnapshot): Map<string, string> {
+  const models = new Map<string, string>();
+  for (const task of snapshot.tasks) {
+    if (task.executor_kind === 'main' ||
+        (task.run_id !== undefined && task.run_id !== snapshot.run.id) ||
+        (task.source_db !== undefined && task.source_db !== snapshot.run.source_db)) continue;
+    const execution = task.active_execution;
+    const model = recordedText(execution?.model);
+    const effort = recordedText(execution?.reasoning_effort);
+    if (model && (execution?.executor_kind === 'subagent' || task.executor_kind === 'subagent')) {
+      models.set(task.stable_id, effort ? `${model} (${effort})` : model);
+      continue;
+    }
+    if (task.status !== 'In Progress' && task.status !== 'Completed' && task.status !== 'Blocked') continue;
+    const saved = recordedText(task.custom_fields?.['SubAgent Model']);
+    if (saved) models.set(task.stable_id, saved);
+  }
+  return models;
+}
+
 /** A RUN-owned camera survives record details and source-safe RUN navigation. */
 export function RunMindmap({
   snapshot: incomingSnapshot,
@@ -47,6 +71,8 @@ export function RunMindmap({
     if (latest) incomingOpenReference?.(latest);
   });
   const graph = useMemo(() => buildRunMindmap(snapshot), [projection]);
+  // Model-only changes repaint the badge without rebuilding the map geometry.
+  const models = useMemo(() => delegatedTaskModels(snapshot), [snapshot]);
   const runKey = JSON.stringify([snapshot.run.source_db ?? '', snapshot.run.id]);
   const follow = useMemo(() => mindmapRunFollowKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
   const [active, setActive] = useState<string>();
@@ -95,6 +121,7 @@ export function RunMindmap({
           <RunMindmapNode
             key={node.key}
             node={node}
+            delegatedModel={node.kind === 'task' && node.item ? models.get(node.item.stable_id) : undefined}
             index={index}
             emphasis={related ? (related.has(node.key) ? 'emphasis' : 'dim') : undefined}
             runTitle={snapshot.run.slug || snapshot.run.id || ''}
@@ -191,6 +218,7 @@ export function RunMindmap({
 /** Hover only rerenders cards whose emphasis changes; locale updates still flow through context. */
 const RunMindmapNode = memo(function RunMindmapNode({
   node,
+  delegatedModel,
   index,
   emphasis,
   runTitle,
@@ -200,6 +228,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
   setActive
 }: {
   node: MindmapNode;
+  delegatedModel?: string;
   index: number;
   emphasis?: 'emphasis' | 'dim';
   runTitle: string;
@@ -209,6 +238,8 @@ const RunMindmapNode = memo(function RunMindmapNode({
   setActive: (key?: string) => void;
 }): JSX.Element {
   const { t, status } = useI18n();
+  const model = delegatedModel?.replace(/\s+\([^()]+\)$/, '');
+  const modelLabel = model === 'inherit' ? t('wbSubagentModelInherited') : model;
   const nodeContent = (node: MindmapNode) => (
     <>
       <span className="wb-mm-meta">
@@ -230,6 +261,12 @@ const RunMindmapNode = memo(function RunMindmapNode({
       <span className="wb-mm-title" title={node.title}>
         {node.title || (node.kind === 'run' ? runTitle : '')}
       </span>
+      {delegatedModel && modelLabel && (
+        <span className="wb-mm-agent-model" title={t('wbSubagentModel', { model: model === 'inherit' ? modelLabel : delegatedModel })}>
+          <Icon name="agent" />
+          <span>{modelLabel}</span>
+        </span>
+      )}
       {node.reference && <span className="wb-mm-reference-origin" title={node.reference.source_db}>
         {node.reference.stable_id || node.reference.memory_id || 'RUN'} · {node.reference.source_db.split(/[\\/]/).filter(Boolean).pop()}
       </span>}
@@ -304,6 +341,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
           title={node.reference ? node.reference.source_db : !openable(node.item) ? t('wbRecordUnavailable') : undefined}
           data-wb-focus={`${node.kind}:${node.item?.id ?? node.key}`}
           data-status={node.status}
+          data-delegated-model={modelLabel ? 'true' : undefined}
           onClick={() => {
             if (node.reference) openReference?.(node.reference);
             else if (openable(node.item)) open(node.item!);
