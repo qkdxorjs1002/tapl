@@ -25,7 +25,7 @@ import {
 export function expectedForCommand(command: WebviewCommand, targetRun?: TaplWorkflowRun): string | undefined {
   switch (command.command) {
     case 'selectRun':
-      return targetRun ? `run:${runKey(targetRun)}` : undefined;
+      return targetRun ? `run:${runKey(targetRun)}` : 'overview';
     case 'openRun':
       return `run:${runKey({ id: command.runId, source_db: command.source_db })}`;
     case 'records':
@@ -338,12 +338,19 @@ export function useWorkbench({
     const previous = trail[trail.length - 1];
     if (previous) restoreRoute(previous, trail.slice(0, -1));
   };
+  const openCurrentRun = (selection?: TaplWorkflowRun) => go({ page: 'current', runKey: '' }, {
+    command: 'selectRun', sessionId: selection?.session_id ?? '', source_db: selection?.source_db
+  });
   const closeTemporaryRun = () => {
     const current = stateRef.current;
     const regularRuns = tabRuns(activeRuns, undefined);
     const regularRoute = (route: WorkbenchRoute) =>
       !route.runKey || regularRuns.some((run) => runKey(run) === route.runKey);
     if (!current.route.runKey || regularRoute(current.route)) return;
+    if (!regularRuns.length && runKey(retainedArchive.current) === current.route.runKey) {
+      openCurrentRun(retainedArchive.current);
+      return;
+    }
     // Skip details belonging to the temporary RUN so closing cannot reopen it.
     let index = current.trail.length - 1;
     while (index >= 0 && !regularRoute(current.trail[index])) index--;
@@ -381,6 +388,7 @@ export function useWorkbench({
         command
       );
     } else if (page === 'memories') go({ page, runKey: key }, { command: 'memories' });
+    else if (page === 'current' && !selectedRun && current.route.page !== 'current') openCurrentRun(activeRuns[0]);
     else go({ page, runKey: key }, selectedRun && commandForRun(selectedRun, activeRuns), false, selectedRun);
   };
   const wrappedSend = (command: WebviewCommand) => {

@@ -843,7 +843,7 @@ test('delegated TASK models update without shifting RUN cards and fit at narrow 
   }
 });
 
-test('a live archive moves the selected RUN to the last read-only tab until switching RUNs', { timeout: 45000 }, async () => {
+test('a live archive preserves the final view and the next RUN opens after closing it', { timeout: 60000 }, async () => {
   const folder = path.join(workspace, 'live-archive');
   const started = await startServer(['--workspace', folder]);
   const page = await isolatedPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US' });
@@ -867,6 +867,14 @@ with closing(db.connect(Path(sys.argv[1]), session_id=sys.argv[2])) as conn:
                    execution_mode='sequential', executor_kind='main')
     db.archive_active_run(conn, slug=sys.argv[3], memory_review_enabled=False)
 `, owner, slug);
+  const startRun = summary => mutate(`
+import sys
+from contextlib import closing
+from pathlib import Path
+from taplctl import db
+with closing(db.connect(Path(sys.argv[1]), session_id='')) as conn:
+    db.ensure_active_run(conn, request_summary=sys.argv[2])
+`, summary);
   const selected = page.locator('.wb-run-tab[aria-selected="true"]');
   const temporary = page.locator('.wb-run-tab-temporary');
   try {
@@ -891,14 +899,7 @@ with closing(db.connect(Path(sys.argv[1]), session_id=sys.argv[2])) as conn:
     assert.equal(await page.locator('.wb-run-tab-close').count(), 1);
     await shot(page, 'run-live-archive-right-tab');
 
-    mutate(`
-import sys
-from contextlib import closing
-from pathlib import Path
-from taplctl import db
-with closing(db.connect(Path(sys.argv[1]), session_id='')) as conn:
-    db.ensure_active_run(conn, request_summary='Same owner next RUN')
-`);
+    startRun('Same owner next RUN');
     await selected.filter({ hasText: 'Same owner next RUN' }).waitFor();
     assert.equal(await temporary.count(), 0);
     await page.getByRole('tab', { name: /Second active RUN/ }).click();
@@ -908,6 +909,31 @@ with closing(db.connect(Path(sys.argv[1]), session_id='')) as conn:
     await page.getByRole('tab', { name: /Same owner next RUN/ }).click();
     await selected.filter({ hasText: 'Same owner next RUN' }).waitFor();
     assert.equal(await temporary.count(), 0);
+
+    const current = page.locator('[data-wb-focus="nav:current"]');
+    const records = page.locator('[data-wb-focus="nav:records"]');
+    for (const [slug, nextTitle, throughRecords] of [
+      ['closed-live-archive', 'RUN after close', false],
+      ['closed-before-records', 'RUN after returning from records', true]
+    ]) {
+      archive('', slug);
+      await temporary.waitFor();
+      // Wait for the host to load the final archive before closing it.
+      await page.locator('[data-kind="task"]').filter({ hasText: 'Final archived task' }).waitFor({ state: 'attached' });
+      await page.locator('.wb-run-tab-close').click();
+      await temporary.waitFor({ state: 'detached' });
+      assert.equal(await current.getAttribute('aria-current'), 'page');
+      assert.equal(await selected.count(), 0);
+      if (throughRecords) {
+        await records.click();
+        await page.locator('.wb-search-group').first().waitFor();
+        await current.click();
+      }
+      startRun(nextTitle);
+      await selected.filter({ hasText: nextTitle }).waitFor();
+      assert.equal(await current.getAttribute('aria-current'), 'page');
+      assert.equal(await temporary.count(), 0);
+    }
     assert.deepEqual(errors, []);
   } finally {
     await page.close();

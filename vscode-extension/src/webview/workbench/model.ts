@@ -245,9 +245,10 @@ export function receiveView(state: NavigationState, view: WebviewView): Navigati
       hostIdentity: identity,
       pending: undefined
     };
-  const memoryItemSource = state.pending && matchesMemoryItemSource(state.pending.expected, view);
-  if (state.pending && state.pending.expected !== identity && !memoryItemSource && view.type !== 'error') return state;
-  if (state.pending && (state.pending.expected === identity || memoryItemSource)) {
+  if (state.pending) {
+    const { expected } = state.pending;
+    if (expected !== identity && !(expected === 'overview' && view.type === 'overview') &&
+        !matchesMemoryItemSource(expected, view)) return state;
     const desired = state.pending.route;
     const incoming = routeForView(view, desired.runKey);
     const page = (view.type === 'memorySource' || view.type === 'archive') && view.context ? 'current' : desired.page;
