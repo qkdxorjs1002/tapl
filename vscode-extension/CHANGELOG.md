@@ -2,6 +2,11 @@
 
 All notable changes to TAPL Workflow Viewer are documented in this file.
 
+## 2.24.2 - 2026-11-23
+
+- Fit the entire mindmap when an archived RUN opens in Current RUN. The view adjusts to the available space, and **Fit all** restores it after zooming or panning.
+- Keep empty **New request** RUNs out of automatic archives so the session can reuse them for its next request.
+
 ## 2.24.1 - 2026-11-20
 
 - Return to Current RUN when the automatically opened archive tab is closed and no RUN is active.
