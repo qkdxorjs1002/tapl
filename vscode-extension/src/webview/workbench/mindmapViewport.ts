@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapFollowDrag, mindmapSpringCamera } from './mindmapCamera';
+import { constrainMindmapCamera, mindmapFitCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapFollowDrag, mindmapSpringCamera } from './mindmapCamera';
 import type { MindmapBounds, MindmapCamera } from './mindmapCamera';
 import {
   mindmapFollowPan, mindmapFollowZoom, mindmapFollowWheel, mindmapFollowTrackpad, mindmapFollowWheelResponse, mindmapWheelDelta,
@@ -43,7 +43,7 @@ type ViewportInteraction = {
   lastWheelTime: number;
   anchor?: Point; pinch?: { distance: number; center: Point };
 };
-const cameras = new Map<string, Camera>();
+const cameras = new Map<string, { target: Camera; fitting: boolean }>();
 // Preferences survive record navigation, but a webview reload starts active RUNs following again.
 const followPreferences = new Map<string, boolean>();
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
@@ -53,12 +53,14 @@ export function useMindmapViewport({
   graph: incomingGraph,
   cameraKey,
   follow: incomingFollow,
+  fitEntireGraph = false,
   setActive
 }: {
   graph: MindmapViewportGraph;
   cameraKey: string;
   /** Present only for active RUNs; an empty list follows the default RUN view. */
   follow?: string[];
+  fitEntireGraph?: boolean;
   setActive: (key?: string) => void;
 }) {
   // Labels, bodies and navigation payloads can change without invalidating geometry or gestures.
@@ -104,13 +106,22 @@ export function useMindmapViewport({
       canvas = worldRef.current;
     if (!host || !canvas) return;
     let bounds = host.getBoundingClientRect();
+    const bottomControls = fitEntireGraph ? [...host.querySelectorAll('[data-mm-fit-bottom]')] : [];
+    const fitCamera = () => {
+      const bottom = bottomControls.reduce((edge, control) => Math.min(edge, control.getBoundingClientRect().top), bounds.bottom);
+      return mindmapFitCamera(graph.bounds, bounds, bounds.bottom - bottom);
+    };
+    let overview = fitEntireGraph ? fitCamera() : undefined;
+    const minimumZoom = () => Math.min(mindmapMinimumZoom(graph.bounds, bounds), overview?.zoom ?? Infinity);
+    const savedCamera = cameras.get(cameraKey);
+    let fitting = fitEntireGraph && (savedCamera?.fitting ?? true);
     let tracking = follow !== undefined && (followPreferences.get(cameraKey) ?? true);
     const saved = interactionRef.current;
     // Data refreshes rebuild graph caches, not the user's ongoing interaction.
     const resume = follow !== undefined && saved?.key === cameraKey && saved.tracking === tracking ? saved : undefined;
-    let target: Camera = { ...(resume?.target ?? cameras.get(cameraKey) ?? { x: 0, y: 0, zoom: 1 }) };
-    if (!tracking && !(resume?.pointers.size || resume?.gestureActive || (resume && performance.now() - resume.lastWheelTime < MINDMAP_FOLLOW_WHEEL_IDLE)))
-      target = constrainMindmapCamera(target, graph.bounds, bounds);
+    let target: Camera = { ...(resume?.target ?? savedCamera?.target ?? { x: 0, y: 0, zoom: 1 }) };
+    if (!tracking && !fitting && !(resume?.pointers.size || resume?.gestureActive || (resume && performance.now() - resume.lastWheelTime < MINDMAP_FOLLOW_WHEEL_IDLE)))
+      target = constrainMindmapCamera(target, graph.bounds, bounds, minimumZoom());
     let camera = { ...(resume?.camera ?? target) };
     let cameraVelocity: Camera = { ...(resume?.velocity ?? { x: 0, y: 0, zoom: 0 }) }, previousFrameTime = resume?.frameTime;
     let returnMotion: ReturnMotion | undefined = resume?.returnMotion;
@@ -178,7 +189,7 @@ export function useMindmapViewport({
     let renderedCamera: Camera | undefined;
     const remember = () => {
       cameras.delete(cameraKey);
-      cameras.set(cameraKey, { ...target });
+      cameras.set(cameraKey, { target: { ...target }, fitting });
       if (cameras.size > 24) cameras.delete(cameras.keys().next().value!);
     };
     const visible = () => !disposed && onScreenRef.current && !document.hidden;
@@ -306,9 +317,10 @@ export function useMindmapViewport({
       if (!raf && visible()) raf = requestAnimationFrame(tick);
     };
     const setTarget = (next: Camera, panning = false) => {
+      fitting = false;
       returnMotion = undefined;
-      const constrained = constrainMindmapCamera(next, graph.bounds, bounds,
-        panning ? Math.min(target.zoom, mindmapMinimumZoom(graph.bounds, bounds)) : undefined);
+      const minimum = minimumZoom();
+      const constrained = constrainMindmapCamera(next, graph.bounds, bounds, panning ? Math.min(target.zoom, minimum) : minimum);
       // An outer followed TASK can start beyond the normal pan limits. Move back toward
       // those limits continuously, retaining the current zoom and avoiding a release jump.
       target = panning ? {
@@ -376,11 +388,18 @@ export function useMindmapViewport({
     };
     const manual = () => setFollowing(false);
     const fit = () => {
+      if (overview) {
+        fitting = true;
+        target = { ...overview };
+        remember();
+        wake();
+        return;
+      }
       const zoom = clamp(Math.min((bounds.width - 72) / 1440, (bounds.height - 160) / 600), 0.72, 1);
       setTarget({ x: 0, y: 0, zoom });
     };
     const zoomAt = (factor: number, point: Point) => {
-      const minimum = mindmapMinimumZoom(graph.bounds, bounds);
+      const minimum = minimumZoom();
       const zoom = clamp(target.zoom * factor, follow === undefined ? minimum : Math.min(target.zoom, minimum), 2.8),
         ratio = zoom / target.zoom;
       setTarget({ x: point.x - (point.x - target.x) * ratio, y: point.y - (point.y - target.y) * ratio, zoom },
@@ -432,7 +451,7 @@ export function useMindmapViewport({
       }
       if (wheelIntent) scheduleWheelReturn();
     }
-    else if (!cameras.has(cameraKey)) {
+    else if (fitting || !savedCamera) {
       fit();
       camera = { ...target };
     }
@@ -632,8 +651,8 @@ export function useMindmapViewport({
       const node = element && byKey.get(element.dataset.mindmapNode!);
       if (!node) return;
       setActive(node.key);
-      // Pointer clicks and hover never move or release the following camera.
-      if (tracking && host.dataset.inputMode !== 'keyboard') return;
+      // Pointer clicks preserve both automatic following and the full view.
+      if ((tracking || fitting) && host.dataset.inputMode !== 'keyboard') return;
       if (tracking) manual();
       const x = node.x * target.zoom + target.x,
         y = node.y * target.zoom + target.y;
@@ -733,21 +752,28 @@ export function useMindmapViewport({
       wake();
     };
     host.dataset.reducedMotion = String(reduced);
-    const resize = new ResizeObserver(() => {
+    const resize = new ResizeObserver(entries => {
       if (disposed) return;
       const next = host.getBoundingClientRect();
       const changed = Math.abs(next.width - bounds.width) > .1 || Math.abs(next.height - bounds.height) > .1;
       bounds = next;
-      if (!changed) return;
+      if (!changed && !entries.some(entry => entry.target !== host)) return;
+      if (fitEntireGraph) overview = fitCamera();
       viewDirty = true;
       decorationDirty = true;
-      if (tracking && !interacting()) {
+      if (fitting) {
+        fit();
+        camera = { ...target };
+        if (visible()) transform();
+      }
+      else if (tracking && !interacting()) {
         if (returnMotion) { target = followTarget(); remember(); wake(); }
         else track();
       } else if (!interacting()) setTarget(target);
       else wake();
     });
     resize.observe(host);
+    for (const control of bottomControls) resize.observe(control);
     const intersection =
       typeof IntersectionObserver === 'undefined'
         ? undefined
@@ -816,7 +842,7 @@ export function useMindmapViewport({
       window.removeEventListener('focus', focusWindow);
       motion.removeEventListener('change', motionChange);
     };
-  }, [cameraKey, graph, byKey, edges, follow, setActive]);
+  }, [cameraKey, graph, byKey, edges, follow, fitEntireGraph, setActive]);
 
   const suppressClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (Date.now() < suppressClickRef.current && !(event.target as Element).closest('[data-mm-controls]')) {

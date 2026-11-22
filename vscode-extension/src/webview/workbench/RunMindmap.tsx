@@ -74,13 +74,15 @@ export function RunMindmap({
   // Model-only changes repaint the badge without rebuilding the map geometry.
   const models = useMemo(() => delegatedTaskModels(snapshot), [snapshot]);
   const runKey = JSON.stringify([snapshot.run.source_db ?? '', snapshot.run.id]);
+  const archived = snapshot.run.status === 'archived';
   const follow = useMemo(() => mindmapRunFollowKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
   const [active, setActive] = useState<string>();
   const relations = useMemo(() => buildMindmapRelationIndex(graph), [graph]);
   const { hostRef, worldRef, controlsRef, edges, suppressClickCapture, following } = useMindmapViewport({
     graph,
-    cameraKey: runKey,
+    cameraKey: archived ? `archive:${runKey}` : runKey,
     follow,
+    fitEntireGraph: archived,
     setActive
   });
   const followAction = t(following ? 'wbMindmapFollowOff' : 'wbMindmapFollowOn');
@@ -100,7 +102,7 @@ export function RunMindmap({
       role="region"
       tabIndex={0}
       aria-label={t('wbMindmap')}
-      aria-description={t('wbMindmapHelp')}
+      aria-description={t(archived ? 'wbMindmapArchivedHelp' : 'wbMindmapHelp')}
       data-wb-page-heading
       data-run-key={runKey}
       onClickCapture={suppressClickCapture}
@@ -164,7 +166,7 @@ export function RunMindmap({
           </button>
         )}
       </div>
-      <div className="wb-mm-legend" aria-label={t('status')} data-mm-controls>
+      <div className="wb-mm-legend" aria-label={t('status')} data-mm-controls data-mm-fit-bottom>
         {['In Progress', 'Completed', 'Blocked', 'Pending'].map((value) => (
           <span className="wb-mm-state" data-status={stateKind(value)} key={value}>
             <i />
@@ -181,7 +183,7 @@ export function RunMindmap({
           {t(kind === 'memory' ? 'wbRunReferenceMemory' : 'wbRunReferenceHistory')} <span>{nodes.length}</span>
         </button>)}
       </div>
-      <div className="wb-mm-camera-controls" data-mm-controls>
+      <div className="wb-mm-camera-controls" data-mm-controls data-mm-fit-bottom>
         <button
           className="wb-mm-icon-button"
           type="button"
@@ -195,7 +197,7 @@ export function RunMindmap({
         <button
           className="wb-mm-icon-button"
           type="button"
-          aria-label={t('wbMindmapFit')}
+          aria-label={t(archived ? 'wbMindmapFitAll' : 'wbMindmapFit')}
           onClick={() => controlsRef.current?.fit()}
         >
           <Icon name="focus" />

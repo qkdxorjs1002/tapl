@@ -735,6 +735,7 @@ test('closing a temporary read-only RUN restores records and memory without chan
     const originRun = await page.locator('.wb-run-tab[aria-selected="true"]').getAttribute('title');
     await archive.locator('.wb-source-run-link').click();
     await page.locator('.wb-run-tab-close').waitFor();
+    await page.getByRole('button', { name: '전체 맞춤', exact: true }).waitFor();
     await page.locator('[data-wb-focus="explore:FINDING"]').click();
     await page.locator('.wb-fold-list button').first().click();
     await page.locator('.wb-record-page').waitFor();
@@ -877,10 +878,27 @@ with closing(db.connect(Path(sys.argv[1]), session_id='')) as conn:
 `, summary);
   const selected = page.locator('.wb-run-tab[aria-selected="true"]');
   const temporary = page.locator('.wb-run-tab-temporary');
+  const map = page.locator('.wb-run-mindmap');
+  const zoom = () => map.locator('.wb-mm-world').evaluate(world => new DOMMatrix(getComputedStyle(world).transform).a);
+  const waitForFullView = (count) => page.waitForFunction(expected => {
+    const map = document.querySelector('.wb-run-mindmap');
+    const cards = Array.from(map?.querySelectorAll('[data-mindmap-node]') ?? []);
+    if (cards.length !== expected) return false;
+    const view = map.getBoundingClientRect();
+    const bottom = Math.min(view.bottom, ...Array.from(map.querySelectorAll('[data-mm-fit-bottom]'),
+      control => control.getBoundingClientRect().top));
+    return cards.every(card => {
+      const rect = card.getBoundingClientRect();
+      return rect.width > 0 && rect.left >= view.left + 2 && rect.right <= view.right - 2 &&
+        rect.top >= view.top + 2 && rect.bottom <= bottom - 2;
+    });
+  }, count);
   try {
     await page.goto(started.url);
     await page.getByRole('tab', { name: /Viewer redesign/ }).click();
     await selected.filter({ hasText: 'Viewer redesign' }).waitFor();
+    await map.locator('[data-kind="task"]').filter({ hasText: 'Interface task 24' }).waitFor({ state: 'attached' });
+    const cardCount = await map.locator('[data-mindmap-node]').count();
     const source = (await selected.getAttribute('title')).split('\n').at(-1);
     const exact = page.waitForRequest(request => request.url().endsWith('/api/message') &&
       request.postDataJSON()?.command === 'openRun');
@@ -897,7 +915,26 @@ with closing(db.connect(Path(sys.argv[1]), session_id='')) as conn:
     await page.locator('[data-kind="task"]').filter({ hasText: 'Final archived task' }).waitFor({ state: 'attached' });
     assert.equal(await page.locator('[data-wb-focus="mindmap-follow"]').count(), 0);
     assert.equal(await page.locator('.wb-run-tab-close').count(), 1);
+    await waitForFullView(cardCount);
     await shot(page, 'run-live-archive-right-tab');
+    const desktopZoom = await zoom();
+    await page.setViewportSize({ width: 390, height: 640 });
+    await waitForFullView(cardCount);
+    await shot(page, 'run-live-archive-fit-compact');
+    const compactZoom = await zoom();
+    assert.ok(compactZoom < desktopZoom);
+    await map.getByRole('button', { name: 'Zoom in' }).click();
+    await page.waitForFunction(previous => {
+      const world = document.querySelector('.wb-run-mindmap .wb-mm-world');
+      return new DOMMatrix(getComputedStyle(world).transform).a > previous * 1.15;
+    }, compactZoom);
+    await map.getByRole('button', { name: 'Fit all' }).click();
+    await page.waitForFunction(expected => {
+      const world = document.querySelector('.wb-run-mindmap .wb-mm-world');
+      return Math.abs(new DOMMatrix(getComputedStyle(world).transform).a - expected) < .0001;
+    }, compactZoom);
+    await waitForFullView(cardCount);
+    await page.setViewportSize({ width: 1280, height: 800 });
 
     startRun('Same owner next RUN');
     await selected.filter({ hasText: 'Same owner next RUN' }).waitFor();

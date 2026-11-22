@@ -41,6 +41,21 @@ export function mindmapMinimumZoom(bounds: MindmapBounds, viewport: Viewport): n
   );
 }
 
+/** Center all cards, including a graph whose branches extend mainly to one side. */
+export function mindmapFitCamera(bounds: MindmapBounds, viewport: Viewport, bottomInset = 0): MindmapCamera {
+  const height = Math.max(1, viewport.height - bottomInset);
+  const padX = Math.min(32, viewport.width * 0.1);
+  const padY = Math.min(32, height * 0.12);
+  const zoom = Math.min(1,
+    Math.max(1, viewport.width - 2 * padX) / Math.max(1, bounds.maxX - bounds.minX),
+    Math.max(1, height - 2 * padY) / Math.max(1, bounds.maxY - bounds.minY));
+  return {
+    x: -(bounds.minX + bounds.maxX) / 2 * zoom,
+    y: -(bounds.minY + bounds.maxY) / 2 * zoom + (height - viewport.height) / 2,
+    zoom
+  };
+}
+
 /** Keep the graph edges within a small overscroll margin; retain origin-centered views. */
 export function constrainMindmapCamera(
   camera: MindmapCamera, bounds: MindmapBounds, viewport: Viewport,

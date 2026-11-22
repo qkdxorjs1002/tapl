@@ -9,7 +9,7 @@ const output = buildSync({
 }).outputFiles[0].text;
 const compiled = { exports: {} };
 new Function('module', 'exports', output)(compiled, compiled.exports);
-const { buildRunMindmap, constrainMindmapCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapRunActiveKeys, mindmapRunFollowKeys, mindmapFollowDrag, mindmapSpringCamera, MINDMAP_FOLLOW_DRAG_THRESHOLD, MINDMAP_FOLLOW_DRAG_RESISTANCE } = compiled.exports;
+const { buildRunMindmap, constrainMindmapCamera, mindmapFitCamera, mindmapMinimumZoom, mindmapFollowCamera, mindmapRunActiveKeys, mindmapRunFollowKeys, mindmapFollowDrag, mindmapSpringCamera, MINDMAP_FOLLOW_DRAG_THRESHOLD, MINDMAP_FOLLOW_DRAG_RESISTANCE } = compiled.exports;
 const run = { id: 'run-1', source_db: 'main.sqlite3', request_summary: 'The actual user request', status: 'active' };
 const snapshot = (plans = [], tasks = [], selected = run) => ({
   run: selected, plans, tasks, findings: [], task_counts: { Completed: 900 },
@@ -199,6 +199,22 @@ test('camera stays near the graph at extreme pan and re-clamps after zoom or vie
   assert.ok(Math.abs(camera.x) <= 96 && Math.abs(camera.y) <= 96);
 });
 
+
+test('full view centers asymmetric bounds even below the regular zoom limit', () => {
+  const bounds = { minX: -260, minY: -90, maxX: 980, maxY: 18000 };
+  for (const viewport of [{ width: 390, height: 480 }, { width: 1368, height: 928 }]) {
+    const camera = mindmapFitCamera(bounds, viewport);
+    assert.ok(camera.zoom > 0 && camera.zoom < mindmapMinimumZoom(bounds, viewport));
+    const left = bounds.minX * camera.zoom + camera.x;
+    const right = bounds.maxX * camera.zoom + camera.x;
+    const top = bounds.minY * camera.zoom + camera.y;
+    const bottom = bounds.maxY * camera.zoom + camera.y;
+    assert.ok(Math.abs(left + right) < 1e-8 && Math.abs(top + bottom) < 1e-8);
+    assert.ok(left > -viewport.width / 2 && right < viewport.width / 2);
+    assert.ok(top > -viewport.height / 2 && bottom < viewport.height / 2);
+    assert.equal(constrainMindmapCamera(camera, bounds, viewport, camera.zoom).zoom, camera.zoom);
+  }
+});
 
 test('follow camera centers TASK boundaries including outer leaves and fits concurrent TASKs on resize', () => {
   const graph = buildRunMindmap(snapshot([plan(1)], Array.from({ length: 800 }, (_, i) => task(i, { spec_id: 'PLAN-1' }))));
