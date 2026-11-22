@@ -128,7 +128,7 @@ class TaplRuntimeTests(unittest.TestCase):
 
         answer_state = {
             **planning_state,
-            "active_run": {"work_type": "answer", "result_summary": ""},
+            "active_run": {"work_type": "answer", "request_summary": "A short question", "result_summary": ""},
         }
         self.assertTrue(
             tapl_hooks.should_auto_archive_on_stop(
@@ -138,6 +138,44 @@ class TaplRuntimeTests(unittest.TestCase):
                 {"assistant_response": "The requested answer was reported."},
             )
         )
+        referenced_state = {
+            **answer_state,
+            "active_run": {**answer_state["active_run"], "request_summary": tapl_db.DEFAULT_REQUEST_SUMMARY},
+            "references": [{"kind": "history", "stage": "opened"}],
+        }
+        self.assertTrue(tapl_hooks.should_auto_archive_on_stop(
+            referenced_state, check, False, {"assistant_response": "The referenced answer was reported."},
+        ))
+
+    def test_stop_keeps_untitled_empty_run_available_for_the_next_request(self) -> None:
+        session_id = "codex-stop-placeholder"
+        with tempfile.TemporaryDirectory() as directory, contextlib.closing(
+            tapl_db.connect(Path(directory) / "tapl.db", session_id=session_id)
+        ) as conn:
+            def hook(event: str, **payload: object) -> dict:
+                return tapl_hooks.handle_event(
+                    conn, event=event, mode="observe", tool=None,
+                    payload={"session_id": session_id, **payload}, client="codex",
+                )
+
+            hook("UserPromptSubmit", prompt="Thanks")
+            placeholder = tapl_db.active_run(conn)
+            self.assertEqual(placeholder["request_summary"], tapl_db.DEFAULT_REQUEST_SUMMARY)
+            stopped = hook("Stop", last_assistant_message="You're welcome.")
+            self.assertTrue(stopped["ok"])
+            self.assertNotIn("archive", stopped)
+            self.assertEqual(tapl_db.list_archives(conn), [])
+            self.assertEqual(tapl_db.active_run(conn)["id"], placeholder["id"])
+
+            hook("UserPromptSubmit", prompt="What is the workflow mode?")
+            self.assertEqual(tapl_db.active_run(conn)["id"], placeholder["id"])
+            tapl_db.update_active_run_summary(
+                conn, request_summary="Explain workflow modes", work_type="answer", workflow_mode="fast",
+            )
+            stopped = hook("Stop", last_assistant_message="Fast, Standard, and Strict are workflow modes.")
+            self.assertEqual(stopped["archive"]["run_id"], placeholder["id"])
+            self.assertIn("Fast, Standard, and Strict are workflow modes.", stopped["archive"]["summary"])
+            self.assertIsNone(tapl_db.active_run(conn))
 
     def test_mcp_tools_expose_typed_high_level_contracts(self) -> None:
         server = tapl_mcp.create_server(workspace_root=Path.cwd())

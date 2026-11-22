@@ -87,6 +87,8 @@ Agent는 계획의 검증 기준으로 Task 결과를 확인하고 `tapl_finish_
 
 대기·차단·생략·미검증 작업을 완료로 주장하지 말고 기록에 드러냅니다. 실행할 작업을 정리했거나 RUN이 대체·노후화되었거나 사용자가 아카이브·폐기를 명시적으로 선택하면 아카이브합니다. 계획만 요청한 경우 실행이나 종료를 선택할 때까지 활성 상태를 유지합니다.
 
+기본 제목이 **New request**이고 저장한 결과·PLAN·TASK·FINDING·참조 기록이 모두 없는 RUN은 Stop 훅에서 보관하지 않고 다음 요청에서 사용할 수 있도록 남겨 둡니다. 제목을 기록한 짧은 답변은 PLAN이나 TASK가 없어도 마지막 응답을 바탕으로 자동 아카이브할 수 있습니다.
+
 `observe` hook은 워크플로 문제를 안내하고 `enforce` hook은 필수 상태 누락·미완료 Task·활성 batch 때문에 영구 변경 도구나 Stop을 차단할 수 있습니다. Hook 설정은 Fast/Standard/Strict와 별개입니다. Viewer는 검증 상태를 표시하고 명시적 확인을 거친 RUN 폐기를 제공하지만 코드의 정확성을 검증하지는 않습니다. [에이전트 연결](../getting-started/integrations.ko.md), [Claude Code hook](../getting-started/claude-code.ko.md#hook과-세션-소유권), [Viewer](../guides/viewer.ko.md)를 참고하세요.
 
 첫 실행은 [빠른 시작](../getting-started/quickstart.ko.md), 정확한 수명주기 인자와 검증 도구는 [MCP 참조](../reference/mcp.ko.md)를 참고하세요.

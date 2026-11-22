@@ -256,15 +256,18 @@ def should_auto_archive_on_stop(
     if state.get("active_batches") or state.get("active_executions"):
         return False
 
-    result = run.get("result_summary")
-    has_simple_result = bool(str(result or "").strip() or stop_result_summary(payload or {}))
+    has_recorded_items = bool(state.get("plans") or state.get("tasks") or state.get("findings"))
+    if not has_recorded_items:
+        has_recorded_result = bool(str(run.get("result_summary") or "").strip())
+        request = str(run.get("request_summary") or "").strip()
+        # A final reply alone must not turn an unused prompt-hook placeholder into history.
+        if request in {"", db.DEFAULT_REQUEST_SUMMARY} and not (has_recorded_result or state.get("references")):
+            return False
+        if has_recorded_result or stop_result_summary(payload or {}):
+            return bool(not state.get("incomplete_tasks", 0) and not block)
+
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
     has_completed_task = any(task.get("status") == "Completed" for task in tasks)
-    has_recorded_items = bool(state.get("plans") or state.get("tasks") or state.get("findings"))
-    is_simple_result_run = has_simple_result and not has_recorded_items
-    if is_simple_result_run:
-        return bool(not state.get("incomplete_tasks", 0) and not block)
-
     return bool(
         not state.get("incomplete_tasks", 0)
         and not check.get("errors")

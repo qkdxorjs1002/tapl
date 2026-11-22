@@ -87,6 +87,8 @@ The agent checks task results against the plan's validation, records the final r
 
 Leave pending, blocked, skipped, or unverified work visible rather than claiming completion. Archive when actionable work is settled, the run is superseded/stale, or the user explicitly chooses archive/discard. A planning-only request remains active until the user chooses execution or closure.
 
+When a session's RUN still has the default **New request** title and has no saved result, PLAN, TASK, FINDING, or references, the Stop hook leaves it available for the next request. A titled short answer can still be archived automatically from the final reply, even without a PLAN or TASK.
+
 `observe` hooks report workflow issues; `enforce` hooks can block durable tool use or Stop for missing workflow prerequisites, incomplete tasks, or active batches. This hook setting is separate from Fast/Standard/Strict. The Viewer can show validation and provides an explicitly confirmed RUN discard action; it does not validate the correctness of your code. See [agent integration](../getting-started/integrations.md), [Claude Code hooks](../getting-started/claude-code.md#hooks-and-session-ownership), and [Viewer](../guides/viewer.md).
 
 For a practical first run, use [quick start](../getting-started/quickstart.md). For exact lifecycle arguments and validation tools, use the [MCP reference](../reference/mcp.md).
