@@ -66,6 +66,7 @@ taplctl config set viewer.allowed_origins '["https://viewer.example.invalid"]'
 | `workflow.authoring_detail` | `auto`, `precise`, `normal`, `minimal` | `auto` |
 | `recall.enabled` | Boolean | `true` |
 | `search.mode` | `semantic`, `bm25`, `word`, `hybrid` | `hybrid` |
+| `search.model` | `koen-e5-tiny-int8`, `multilingual-e5-small-int8` | `koen-e5-tiny-int8` |
 | `search.max_results` | 1 이상 정수 | `12` |
 | `search.hybrid_semantic_ratio` | 0.0–1.0 숫자 | `0.65` |
 | `search.semantic_provider` | `local`, `daemon`, `auto` | `auto` |

@@ -214,8 +214,7 @@ confirms the scope before connecting. See the [platform-specific commands](docs/
 
 | Platform / channel | Install option | Details |
 | --- | --- | --- |
-| Homebrew · stable | `taplctl` | [Full-text search](docs/getting-started/installation.md) |
-| Homebrew · stable + semantic | `taplctl-semantic` | [Embedding and vector dependencies](docs/getting-started/installation.md) |
+| Homebrew · stable | `taplctl` | [Full-text and semantic search on supported platforms](docs/getting-started/installation.md) |
 | Homebrew · newest published release | `taplctl-pre` | [Channel selection](docs/getting-started/installation.md) |
 | Linux | Standalone shell installer | [Setup and paths](docs/getting-started/installation.md) |
 | Windows 10 / 11 | PowerShell / CMD scripts | [Setup and paths](docs/getting-started/installation.md) |

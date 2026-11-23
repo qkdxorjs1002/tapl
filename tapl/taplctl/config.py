@@ -10,7 +10,7 @@ from typing import Any
 import tomllib
 from urllib.parse import urlsplit
 
-from . import clients, db
+from . import clients, db, embedding_model
 
 
 CONFIG_RELATIVE = Path(".tapl") / "config.toml"
@@ -35,6 +35,7 @@ def _logical_editable_key(key: str) -> str:
     return key
 
 DEFAULT_SEARCH_MODE = "hybrid"
+DEFAULT_SEARCH_MODEL = embedding_model.DEFAULT_MODEL
 DEFAULT_HYBRID_SEMANTIC_RATIO = 0.65
 DEFAULT_SEARCH_MAX_RESULTS = 12
 DEFAULT_SEMANTIC_PROVIDER = "auto"
@@ -98,6 +99,7 @@ DEFAULT_SUBAGENT_PROFILE_SPECS: tuple[
     ),
 )
 
+SEARCH_MODELS = tuple(embedding_model.MODELS)
 SEARCH_MODES = ("semantic", "bm25", "word", "hybrid")
 EFFECTIVE_AUTHORING_DETAILS = ("precise", "normal", "minimal")
 AUTHORING_DETAILS = ("auto", *EFFECTIVE_AUTHORING_DETAILS)
@@ -164,6 +166,11 @@ EDITABLE_CONFIG_KEYS = (
         "MODE",
         "Search backend.",
         allowed=SEARCH_MODES,
+    ),
+    EditableConfigKey(
+        "search.model", "MODEL",
+        "Embedding model used by semantic and hybrid search. Run taplctl reindex after switching.",
+        allowed=SEARCH_MODELS,
     ),
     EditableConfigKey(
         "search.max_results",
@@ -246,6 +253,7 @@ class SearchConfig:
     max_results: int = DEFAULT_SEARCH_MAX_RESULTS
     semantic_provider: str = DEFAULT_SEMANTIC_PROVIDER
     searchd_model_idle_timeout_seconds: int = DEFAULT_SEARCHD_MODEL_IDLE_TIMEOUT_SECONDS
+    model: str = DEFAULT_SEARCH_MODEL
 
     @property
     def searchd_idle_timeout_seconds(self) -> int:
@@ -258,6 +266,7 @@ class SearchConfig:
     def as_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
+            "model": self.model,
             "max_results": self.max_results,
             "hybrid_semantic_ratio": self.hybrid_semantic_ratio,
             "hybrid_bm25_ratio": self.hybrid_bm25_ratio,
@@ -517,6 +526,9 @@ def from_mapping(
             SEARCH_MODES,
             "search.mode",
         ),
+        model=choice(
+            setting(search_data, "model", default=DEFAULT_SEARCH_MODEL), SEARCH_MODELS, "search.model",
+        ),
         hybrid_semantic_ratio=ratio(
             setting(
                 search_data,
@@ -701,7 +713,7 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
     key = _logical_editable_key(key)
     value: Any
     normalized = raw_value.strip().lower().replace("-", "_")
-    if key not in {"recall.enabled", "subagents.enabled", "subagents.setup_complete"} and spec.allowed and normalized in spec.allowed:
+    if spec.value_name != "BOOLEAN" and (raw_value in spec.allowed or normalized in spec.allowed):
         value = raw_value
     else:
         try:
@@ -718,6 +730,8 @@ def parse_editable_value(key: str, raw_value: str) -> Any:
         return choice(value, AUTHORING_DETAILS, key)
     if key == "search.mode":
         return choice(value, SEARCH_MODES, key)
+    if key == "search.model":
+        return choice(value, SEARCH_MODELS, key)
     if key == "search.max_results":
         return positive_int(value, key)
     if key == "search.hybrid_semantic_ratio":
@@ -780,7 +794,7 @@ def setting(data: dict[str, Any], *keys: str, default: Any) -> Any:
 def choice(value: Any, allowed: tuple[str, ...], key: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{key} must be a string")
-    normalized = value.strip().lower().replace("-", "_")
+    normalized = value if value in allowed else value.strip().lower().replace("-", "_")
     if normalized not in allowed:
         joined = ", ".join(allowed)
         raise ValueError(f"{key} must be one of: {joined}")

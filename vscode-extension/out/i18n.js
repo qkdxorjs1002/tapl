@@ -959,6 +959,7 @@ function settingsFieldText(locale, key, description) {
         'workflow.authoring_detail': ['Writing detail', 'Plan and task writing detail and task decomposition granularity.', '작성 상세 수준', '계획과 작업의 작성 상세 수준 및 작업 분해 단위를 설정합니다.'],
         'recall.enabled': ['Automatic memory recall', 'Enable automatic memory capture, recall, and reinforcement.', '자동 메모리 회상', '메모리 자동 수집, 회상 및 강화를 활성화합니다.'],
         'search.mode': ['Search mode', 'Choose the search backend.', '검색 모드', '검색에 사용할 방식을 선택합니다.'],
+        'search.model': ['Search embedding model', 'Choose the model for semantic and hybrid search. After changing the model, run taplctl reindex in this workspace.', '검색 임베딩 모델', '의미 검색과 하이브리드 검색에 사용할 모델입니다. 모델을 변경한 뒤 이 워크스페이스에서 taplctl reindex를 실행하세요.'],
         'search.max_results': ['Maximum results', 'Default search result limit; at least 1.', '최대 결과 수', '기본 검색 결과 수입니다. 1 이상이어야 합니다.'],
         'search.hybrid_semantic_ratio': ['Semantic search weight', 'Semantic weight for hybrid search, from 0 to 1.', '의미 검색 가중치', '하이브리드 검색의 의미 검색 가중치입니다. 범위는 0~1입니다.'],
         'search.semantic_provider': ['Semantic model provider', 'Load the semantic model locally, through the daemon, or automatically.', '의미 검색 모델 제공 방식', '로컬, 데몬 또는 자동 선택으로 의미 검색 모델을 불러옵니다.'],
@@ -982,6 +983,8 @@ function settingsOptionText(locale, value) {
         auto: ['Automatic', '자동'], precise: ['Precise', '정밀'], normal: ['Normal', '보통'], minimal: ['Minimal', '최소'],
         conservative: ['Conservative', '보수적'], balanced: ['Balanced', '균형'], aggressive: ['Aggressive', '적극적'],
         semantic: ['Semantic', '의미 검색'], bm25: ['BM25', 'BM25'], word: ['Word', '단어 검색'], hybrid: ['Hybrid', '하이브리드'],
+        'koen-e5-tiny-int8': ['KoEn-E5-Tiny INT8', 'KoEn-E5-Tiny INT8'],
+        'multilingual-e5-small-int8': ['multilingual-e5-small INT8', 'multilingual-e5-small INT8'],
         local: ['Local', '로컬'], daemon: ['Daemon', '데몬'],
         ko: ['한국어', '한국어'], en: ['English', 'English'],
         small: ['Small', '작게'], medium: ['Medium', '중간'], large: ['Large', '크게']

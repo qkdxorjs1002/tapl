@@ -16,6 +16,9 @@ function load(react = React) {
   compiled.require = name => name === 'react' ? react : module.require(name);
   compiled._compile(output, filename); return compiled.exports;
 }
+const defaultSearchModel = 'koen-e5-tiny-int8';
+const multilingualSearchModel = 'multilingual-e5-small-int8';
+const searchModelField = { key: 'search.model', section: 'search', type: 'select', description: 'Search embedding model.', allowed: [defaultSearchModel, multilingualSearchModel] };
 const fields = [
   { key: 'recall.enabled', section: 'recall', type: 'boolean', description: 'Automatic memory.' },
   { key: 'search.max_results', section: 'search', type: 'integer', min: 1, description: 'Maximum results.' },
@@ -80,6 +83,24 @@ test('loading is lazy and Viewer preferences use the shared draft and save flow'
   h.render(); assert.equal(h.commands.length, 1); assert.equal(h.field('viewer.language').props.value, 'ko');
   h.render({ active: false }); h.render({ active: true }); assert.equal(h.commands.length, 1);
   submit(h); h.render(); assert.deepEqual(h.commands.at(-1).values, { 'viewer.language': 'ko', 'viewer.layout': 'large', 'viewer.mcp_path': '/custom/tapl-mcp' });
+}));
+test('search model uses the workspace settings save and default controls', () => withHarness({}, h => {
+  const key = searchModelField.key;
+  const modelSettings = { ...settings, fields: [...settings.fields, searchModelField],
+    values: { ...settings.values, [key]: defaultSearchModel }, defaults: { ...settings.defaults, [key]: defaultSearchModel } };
+  h.respond({ settings: modelSettings });
+  assert.equal(h.field(key).props.value, defaultSearchModel);
+  const row = () => nodes(h.find(node => node.key === key));
+  assert.ok(row().some(node => node.type === 'p' && node.props.children.includes('taplctl reindex in this workspace')));
+  assert.ok(row().some(node => node.props?.className === 'wb-settings-default-hint' && node.props.children === 'Default: KoEn-E5-Tiny INT8'));
+  h.field(key).props.onChange(multilingualSearchModel); h.render(); submit(h); h.render();
+  assert.deepEqual({ ...h.commands.at(-1), requestId: 'request' }, { command: 'saveSettings', requestId: 'request', workspace: '/workspace', revision: 'one', values: { [key]: multilingualSearchModel } });
+  h.respond({ settings: { ...modelSettings, revision: 'two', values: { ...modelSettings.values, [key]: multilingualSearchModel } } });
+  row().find(node => node.props?.className === 'wb-settings-default').props.onClick(); h.render();
+  assert.equal(h.field(key).props.value, defaultSearchModel);
+  submit(h); h.render();
+  assert.equal(h.commands.at(-1).revision, 'two');
+  assert.deepEqual(h.commands.at(-1).values, { [key]: defaultSearchModel });
 }));
 test('save locks synchronously, preserves failures and ignores unrelated results', () => withHarness({}, h => {
   h.respond(); h.field('search.max_results').props.onChange(30); h.render();
@@ -151,6 +172,16 @@ test('registry Viewer controls localize options and use a single executable path
     const language = editor(fields[5]); assert.match(language, /한국어/); assert.match(language, /English/); assert.match(language, locale === 'ko' ? /자동/ : /Automatic/);
     const layout = editor(fields[6]); assert.match(layout, locale === 'ko' ? /작게/ : /Small/);
     assert.match(editor(fields[7]), /type="text"/); assert.doesNotMatch(editor(fields[7]), /textarea/);
+  }
+});
+
+test('search model labels remain identifiable in English and Korean', () => {
+  const { SettingEditor, I18nProvider } = load();
+  for (const locale of ['en', 'ko']) {
+    const markup = renderToStaticMarkup(React.createElement(I18nProvider, { locale }, React.createElement(SettingEditor,
+      { field: searchModelField, id: searchModelField.key, value: defaultSearchModel, onChange() {}, onInvalid() {} })));
+    assert.match(markup, /<option value="koen-e5-tiny-int8" selected="">KoEn-E5-Tiny INT8<\/option>/);
+    assert.match(markup, /<option value="multilingual-e5-small-int8">multilingual-e5-small INT8<\/option>/);
   }
 });
 

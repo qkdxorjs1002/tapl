@@ -74,7 +74,7 @@ Hook payload와 응답은 각 클라이언트의 계약을 따릅니다. Claude�
 
 ## 검색과 메모리 경계
 
-BM25/전문 검색에는 선택적 의미 검색 의존성이 필요하지 않습니다. `embeddings.py`는 설정된 BM25·semantic·hybrid 검색을 지원하며 의미 검색을 사용할 수 없으면 fallback 사유와 함께 BM25를 반환할 수 있습니다. Semantic extra에는 NumPy, sentence-transformers, sqlite-vec가 있습니다. `searchd`는 Unix 소켓 뒤에 임베딩 모델을 유지하며 Windows에서는 사용할 수 없습니다. Windows도 로컬 의미 검색은 선택할 수 있습니다.
+BM25/전문 검색에는 선택적 의미 검색 의존성이 필요하지 않습니다. `embeddings.py`는 설정된 BM25·semantic·hybrid 검색을 지원하며 의미 검색을 사용할 수 없으면 fallback 사유와 함께 BM25를 반환할 수 있습니다. Semantic extra에는 ONNX Runtime, Tokenizers, NumPy, sqlite-vec가 있습니다. `searchd`는 Unix 소켓 뒤에 임베딩 모델을 유지하며 Windows에서는 사용할 수 없습니다. Windows도 로컬 의미 검색은 선택할 수 있습니다.
 
 연상 메모리는 짧은 검증된 교훈, 구체적 단서, 원본 기록 링크를 보관합니다. 자동 회상·캡처·검토 제어와 수동 조회는 구분합니다. 메모리 편집은 `expected_revision`, 종료 시 메모리 처리는 활성 `expected_run_id`를 확인합니다. 원본 근거 검증은 에이전트가 담당합니다. [검색](../guides/search.ko.md)과 [연상 메모리](../guides/memory.ko.md)를 보세요.
 

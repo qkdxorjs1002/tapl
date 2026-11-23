@@ -82,6 +82,15 @@ jobs:
       - name: Build actual TAPL wheel
         run: python -m pip wheel --no-deps --wheel-dir dist ./tapl
 
+      - name: Verify Windows x64 semantic wheel on CPU
+        if: matrix.python-version == '3.12'
+        shell: powershell
+        run: |
+          $wheel = (Get-ChildItem -LiteralPath dist -Filter 'taplctl-*.whl').FullName
+          python -m pip install "${wheel}[semantic]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python .github/scripts/semantic_runtime_smoke.py
+
       - name: Test actual wheel install, update, reinstall, uninstall and CLI/MCP runtime
         shell: powershell
         run: |
@@ -156,13 +165,24 @@ jobs:
             --platform "${RUNTIME_PLATFORM}" --python-version 3.12 --implementation cp \
             --dest "${RUNNER_TEMP}/wheelhouse" "${mcp_requirement}"
 
+      - name: Download locked semantic wheels
+        if: matrix.target == 'macos-arm64'
+        run: >-
+          python .github/scripts/build_semantic_wheelhouse.py macos-arm64
+          "${RUNNER_TEMP}/wheelhouse" "${RUNNER_TEMP}/semantic-wheelhouse"
+
       - name: Sign and verify macOS runtime wheels
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         shell: bash
-        run: bash .github/scripts/sign_macos_runtime.sh "${RUNNER_TEMP}/wheelhouse"
+        run: |
+          wheelhouses=("${RUNNER_TEMP}/wheelhouse")
+          if [[ "${{ matrix.target }}" == macos-arm64 ]]; then
+            wheelhouses+=("${RUNNER_TEMP}/semantic-wheelhouse")
+          fi
+          bash .github/scripts/sign_macos_runtime.sh "${wheelhouses[@]}"
 
       - name: Archive signed macOS runtime
         env:
@@ -177,20 +197,24 @@ jobs:
           from pathlib import Path
           import tarfile
 
-          wheelhouse = Path(os.environ["RUNNER_TEMP"]) / "wheelhouse"
-          archive = Path("release-dist") / (
-              f"taplctl-mcp-runtime-{os.environ['TAG_VERSION']}-{os.environ['RUNTIME_TARGET']}.tar.gz"
-          )
-          archive.parent.mkdir(exist_ok=True)
-          with archive.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as zipped:
-              with tarfile.open(fileobj=zipped, mode="w") as output:
-                  for wheel in sorted(wheelhouse.glob("*.whl")):
-                      info = output.gettarinfo(str(wheel), arcname=f"./{wheel.name}")
-                      info.uid = info.gid = info.mtime = 0
-                      info.uname = info.gname = ""
-                      info.mode = 0o644
-                      with wheel.open("rb") as data:
-                          output.addfile(info, data)
+          bundles = {"mcp": "wheelhouse"}
+          if os.environ["RUNTIME_TARGET"] == "macos-arm64":
+              bundles["semantic"] = "semantic-wheelhouse"
+          for kind, folder in bundles.items():
+              wheelhouse = Path(os.environ["RUNNER_TEMP"]) / folder
+              archive = Path("release-dist") / (
+                  f"taplctl-{kind}-runtime-{os.environ['TAG_VERSION']}-{os.environ['RUNTIME_TARGET']}.tar.gz"
+              )
+              archive.parent.mkdir(exist_ok=True)
+              with archive.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as zipped:
+                  with tarfile.open(fileobj=zipped, mode="w") as output:
+                      for wheel in sorted(wheelhouse.glob("*.whl")):
+                          info = output.gettarinfo(str(wheel), arcname=f"./{wheel.name}")
+                          info.uid = info.gid = info.mtime = 0
+                          info.uname = info.gname = ""
+                          info.mode = 0o644
+                          with wheel.open("rb") as data:
+                              output.addfile(info, data)
           PY
 
       - name: Build TAPL wheel for Homebrew verification
@@ -205,16 +229,18 @@ jobs:
         run: |
           set -euo pipefail
           wheels=("${RUNNER_TEMP}"/homebrew-app/*.whl)
-          python .github/scripts/verify_homebrew_macos.py \
-            --wheel "${wheels[0]}" \
-            --runtime "release-dist/taplctl-mcp-runtime-${TAG_VERSION}-${RUNTIME_TARGET}.tar.gz" \
-            --team-id "${APPLE_TEAM_ID}"
+          args=(--wheel "${wheels[0]}" --team-id "${APPLE_TEAM_ID}"
+                --runtime "release-dist/taplctl-mcp-runtime-${TAG_VERSION}-${RUNTIME_TARGET}.tar.gz")
+          if [[ "${RUNTIME_TARGET}" == macos-arm64 ]]; then
+            args+=(--semantic-runtime "release-dist/taplctl-semantic-runtime-${TAG_VERSION}-${RUNTIME_TARGET}.tar.gz")
+          fi
+          python .github/scripts/verify_homebrew_macos.py "${args[@]}"
 
       - name: Upload signed macOS runtime
         uses: actions/upload-artifact@v4
         with:
           name: signed-runtime-${{ matrix.target }}
-          path: release-dist/taplctl-mcp-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz
+          path: release-dist/taplctl-*-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz
           if-no-files-found: error
           retention-days: 1
 
@@ -332,15 +358,17 @@ jobs:
 
   linux-runtime:
     name: Build Linux runtime (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: linux-arm64
             platform: manylinux2014_aarch64
+            runner: ubuntu-24.04-arm
           - target: linux-x86_64
             platform: manylinux2014_x86_64
+            runner: ubuntu-24.04
 
     steps:
       - name: Checkout source
@@ -425,11 +453,30 @@ jobs:
             -czf "${archive}" \
             .
 
+      - name: Build and exercise the native semantic wheelhouse
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          RUNTIME_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mcp="${RUNNER_TEMP}/taplctl-mcp-runtime-${RUNTIME_TARGET}"
+          extra="${RUNNER_TEMP}/semantic-wheelhouse"
+          python .github/scripts/build_semantic_wheelhouse.py "${RUNTIME_TARGET}" "${mcp}" "${extra}"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -C "${extra}" -czf "release-dist/taplctl-semantic-runtime-${TAG_VERSION}-${RUNTIME_TARGET}.tar.gz" .
+          python -m pip wheel --no-deps --wheel-dir "${RUNNER_TEMP}/app" ./tapl
+          python -m venv "${RUNNER_TEMP}/semantic-test"
+          py="${RUNNER_TEMP}/semantic-test/bin/python"
+          app=("${RUNNER_TEMP}"/app/*.whl)
+          "${py}" -m pip install --no-index --find-links "${mcp}" --find-links "${extra}" "${app[0]}[semantic]"
+          "${py}" .github/scripts/semantic_runtime_smoke.py
+
       - name: Upload Linux runtime
         uses: actions/upload-artifact@v4
         with:
           name: runtime-${{ matrix.target }}
-          path: release-dist/taplctl-mcp-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz
+          path: release-dist/taplctl-*-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz
           if-no-files-found: error
           retention-days: 1
 
@@ -443,13 +490,19 @@ jobs:
       wheel_url: ${{ steps.assets.outputs.wheel_url }}
       wheel_sha256: ${{ steps.assets.outputs.wheel_sha256 }}
       mcp_runtime_macos_arm64_url: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
+      semantic_runtime_macos_arm64_url: ${{ steps.assets.outputs.semantic_runtime_macos_arm64_url }}
       mcp_runtime_macos_arm64_sha256: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_sha256 }}
+      semantic_runtime_macos_arm64_sha256: ${{ steps.assets.outputs.semantic_runtime_macos_arm64_sha256 }}
       mcp_runtime_macos_x86_64_url: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_url }}
       mcp_runtime_macos_x86_64_sha256: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_sha256 }}
       mcp_runtime_linux_arm64_url: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_url }}
+      semantic_runtime_linux_arm64_url: ${{ steps.assets.outputs.semantic_runtime_linux_arm64_url }}
       mcp_runtime_linux_arm64_sha256: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_sha256 }}
+      semantic_runtime_linux_arm64_sha256: ${{ steps.assets.outputs.semantic_runtime_linux_arm64_sha256 }}
       mcp_runtime_linux_x86_64_url: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_url }}
+      semantic_runtime_linux_x86_64_url: ${{ steps.assets.outputs.semantic_runtime_linux_x86_64_url }}
       mcp_runtime_linux_x86_64_sha256: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_sha256 }}
+      semantic_runtime_linux_x86_64_sha256: ${{ steps.assets.outputs.semantic_runtime_linux_x86_64_sha256 }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -555,17 +608,19 @@ jobs:
           echo "wheel_sha256=${wheel_sha256}" >> "${GITHUB_OUTPUT}"
           echo "wheel_url=${wheel_url}" >> "${GITHUB_OUTPUT}"
 
-          for target in macos-arm64 macos-x86_64 linux-arm64 linux-x86_64; do
-            runtime_name="taplctl-mcp-runtime-${TAG_VERSION}-${target}.tar.gz"
-            runtime_path="release-dist/${runtime_name}"
-            runtime_sha256="$(sha256sum "${runtime_path}" | awk '{print $1}')"
-            runtime_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${runtime_name}"
-            output_key="${target//-/_}"
-
-            test -f "${runtime_path}"
-            echo "mcp_runtime_${output_key}_name=${runtime_name}" >> "${GITHUB_OUTPUT}"
-            echo "mcp_runtime_${output_key}_sha256=${runtime_sha256}" >> "${GITHUB_OUTPUT}"
-            echo "mcp_runtime_${output_key}_url=${runtime_url}" >> "${GITHUB_OUTPUT}"
+          for kind in mcp semantic; do
+            targets=(macos-arm64 linux-arm64 linux-x86_64)
+            if [[ "${kind}" == mcp ]]; then targets+=(macos-x86_64); fi
+            for target in "${targets[@]}"; do
+              runtime_name="taplctl-${kind}-runtime-${TAG_VERSION}-${target}.tar.gz"
+              runtime_path="release-dist/${runtime_name}"
+              test -f "${runtime_path}"
+              runtime_sha256="$(sha256sum "${runtime_path}" | awk '{print $1}')"
+              runtime_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${runtime_name}"
+              key="${kind}_runtime_${target//-/_}"
+              echo "${key}_sha256=${runtime_sha256}" >> "${GITHUB_OUTPUT}"
+              echo "${key}_url=${runtime_url}" >> "${GITHUB_OUTPUT}"
+            done
           done
 
           ls -lh release-dist
@@ -578,13 +633,19 @@ jobs:
           WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
           WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
           MCP_RUNTIME_MACOS_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
+          SEMANTIC_RUNTIME_MACOS_ARM64_URL: ${{ steps.assets.outputs.semantic_runtime_macos_arm64_url }}
           MCP_RUNTIME_MACOS_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_sha256 }}
+          SEMANTIC_RUNTIME_MACOS_ARM64_SHA256: ${{ steps.assets.outputs.semantic_runtime_macos_arm64_sha256 }}
           MCP_RUNTIME_MACOS_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_url }}
           MCP_RUNTIME_MACOS_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_sha256 }}
           MCP_RUNTIME_LINUX_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_url }}
+          SEMANTIC_RUNTIME_LINUX_ARM64_URL: ${{ steps.assets.outputs.semantic_runtime_linux_arm64_url }}
           MCP_RUNTIME_LINUX_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_sha256 }}
+          SEMANTIC_RUNTIME_LINUX_ARM64_SHA256: ${{ steps.assets.outputs.semantic_runtime_linux_arm64_sha256 }}
           MCP_RUNTIME_LINUX_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_url }}
+          SEMANTIC_RUNTIME_LINUX_X86_64_URL: ${{ steps.assets.outputs.semantic_runtime_linux_x86_64_url }}
           MCP_RUNTIME_LINUX_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_sha256 }}
+          SEMANTIC_RUNTIME_LINUX_X86_64_SHA256: ${{ steps.assets.outputs.semantic_runtime_linux_x86_64_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -646,6 +707,10 @@ jobs:
                   f"wheel SHA-256 mismatch: expected {wheel_sha256}, got {actual_sha256}"
               )
 
+          runtime_targets = {
+              "mcp": ("macos-arm64", "macos-x86_64", "linux-arm64", "linux-x86_64"),
+              "semantic": ("macos-arm64", "linux-arm64", "linux-x86_64"),
+          }
           expected_assets = {
               expected_wheel_name,
               f"tapl-workflow-viewer-{os.environ['TAG_VERSION']}.vsix",
@@ -653,8 +718,8 @@ jobs:
               "install.cmd",
               "taplctl-install-manifest.json",
               *(
-                  f"taplctl-mcp-runtime-{os.environ['TAG_VERSION']}-{target}.tar.gz"
-                  for target in ("macos-arm64", "macos-x86_64", "linux-arm64", "linux-x86_64")
+                  f"taplctl-{kind}-runtime-{os.environ['TAG_VERSION']}-{target}.tar.gz"
+                  for kind, targets in runtime_targets.items() for target in targets
               ),
           }
           actual_assets = {path.name for path in Path("release-dist").iterdir() if path.is_file()}
@@ -667,47 +732,28 @@ jobs:
               )
 
           required_runtime_distributions = {
-              "mcp",
-              "mcp_types",
-              "pydantic",
-              "pydantic_core",
-              "cryptography",
+              "mcp": {"mcp", "mcp_types", "pydantic", "pydantic_core", "cryptography"},
+              "semantic": {"numpy", "onnxruntime", "tokenizers", "sqlite_vec"},
           }
-          runtime_targets = {
-              "macos_arm64": "macos-arm64",
-              "macos_x86_64": "macos-x86_64",
-              "linux_arm64": "linux-arm64",
-              "linux_x86_64": "linux-x86_64",
-          }
-          for target, asset_target in runtime_targets.items():
-              archive_name = (
-                  f"taplctl-mcp-runtime-{os.environ['TAG_VERSION']}-{asset_target}.tar.gz"
-              )
-              archive_path = Path("release-dist") / archive_name
-              expected_url = (
-                  f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/"
-                  f"{os.environ['GITHUB_REF_NAME']}/{archive_name}"
-              )
-              runtime_url = os.environ[f"MCP_RUNTIME_{target.upper()}_URL"]
-              runtime_sha256 = os.environ[f"MCP_RUNTIME_{target.upper()}_SHA256"]
-              if runtime_url != expected_url:
-                  raise SystemExit(f"unexpected MCP runtime URL for {target}: {runtime_url}")
-              if re.fullmatch(r"[0-9a-f]{64}", runtime_sha256) is None:
-                  raise SystemExit(f"invalid MCP runtime SHA-256 for {target}")
-              actual_runtime_sha256 = hashlib.sha256(archive_path.read_bytes()).hexdigest()
-              if actual_runtime_sha256 != runtime_sha256:
-                  raise SystemExit(
-                      f"MCP runtime SHA-256 mismatch for {target}: "
-                      f"expected {runtime_sha256}, got {actual_runtime_sha256}"
+          for kind, targets in runtime_targets.items():
+              for target in targets:
+                  name = f"taplctl-{kind}-runtime-{os.environ['TAG_VERSION']}-{target}.tar.gz"
+                  path = Path("release-dist") / name
+                  expected_url = (
+                      f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/"
+                      f"{os.environ['GITHUB_REF_NAME']}/{name}"
                   )
-              with tarfile.open(archive_path, "r:gz") as archive:
-                  wheels = [Path(member.name).name for member in archive.getmembers() if member.isfile()]
-              distributions = {name.split("-", 1)[0].lower() for name in wheels if name.endswith(".whl")}
-              missing = sorted(required_runtime_distributions - distributions)
-              if missing:
-                  raise SystemExit(
-                      f"MCP runtime archive {target} is missing: {', '.join(missing)}"
-                  )
+                  key = f"{kind}_runtime_{target}".replace("-", "_").upper()
+                  if os.environ[key + "_URL"] != expected_url:
+                      raise SystemExit(f"unexpected {kind.upper()} runtime URL for {target}")
+                  if hashlib.sha256(path.read_bytes()).hexdigest() != os.environ[key + "_SHA256"]:
+                      raise SystemExit(f"{kind.upper()} runtime SHA-256 mismatch for {target}")
+                  with tarfile.open(path, "r:gz") as archive:
+                      wheels = [Path(member.name).name for member in archive if member.isfile()]
+                  distributions = {n.split("-", 1)[0].lower() for n in wheels if n.endswith(".whl")}
+                  missing = required_runtime_distributions[kind] - distributions
+                  if missing:
+                      raise SystemExit(f"{name} is missing: {', '.join(sorted(missing))}")
           PY
 
       - name: Smoke-test isolated MCP runtime
@@ -826,13 +872,19 @@ jobs:
           WHEEL_SHA256: ${{ needs.release.outputs.wheel_sha256 }}
           WHEEL_URL: ${{ needs.release.outputs.wheel_url }}
           MCP_RUNTIME_MACOS_ARM64_URL: ${{ needs.release.outputs.mcp_runtime_macos_arm64_url }}
+          SEMANTIC_RUNTIME_MACOS_ARM64_URL: ${{ needs.release.outputs.semantic_runtime_macos_arm64_url }}
           MCP_RUNTIME_MACOS_ARM64_SHA256: ${{ needs.release.outputs.mcp_runtime_macos_arm64_sha256 }}
+          SEMANTIC_RUNTIME_MACOS_ARM64_SHA256: ${{ needs.release.outputs.semantic_runtime_macos_arm64_sha256 }}
           MCP_RUNTIME_MACOS_X86_64_URL: ${{ needs.release.outputs.mcp_runtime_macos_x86_64_url }}
           MCP_RUNTIME_MACOS_X86_64_SHA256: ${{ needs.release.outputs.mcp_runtime_macos_x86_64_sha256 }}
           MCP_RUNTIME_LINUX_ARM64_URL: ${{ needs.release.outputs.mcp_runtime_linux_arm64_url }}
+          SEMANTIC_RUNTIME_LINUX_ARM64_URL: ${{ needs.release.outputs.semantic_runtime_linux_arm64_url }}
           MCP_RUNTIME_LINUX_ARM64_SHA256: ${{ needs.release.outputs.mcp_runtime_linux_arm64_sha256 }}
+          SEMANTIC_RUNTIME_LINUX_ARM64_SHA256: ${{ needs.release.outputs.semantic_runtime_linux_arm64_sha256 }}
           MCP_RUNTIME_LINUX_X86_64_URL: ${{ needs.release.outputs.mcp_runtime_linux_x86_64_url }}
+          SEMANTIC_RUNTIME_LINUX_X86_64_URL: ${{ needs.release.outputs.semantic_runtime_linux_x86_64_url }}
           MCP_RUNTIME_LINUX_X86_64_SHA256: ${{ needs.release.outputs.mcp_runtime_linux_x86_64_sha256 }}
+          SEMANTIC_RUNTIME_LINUX_X86_64_SHA256: ${{ needs.release.outputs.semantic_runtime_linux_x86_64_sha256 }}
         shell: bash
         run: |
           set -euo pipefail

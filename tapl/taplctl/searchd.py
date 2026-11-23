@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import config as tapl_config, db
+from . import config as tapl_config, embedding_model
 
 
 MAX_LINE_BYTES = 1024 * 1024
@@ -62,7 +62,7 @@ def status(
     try:
         response = request(
             path,
-            {"op": "ping", "model": db.DEFAULT_EMBEDDING_MODEL},
+            {"op": "ping", "model": settings.model},
             timeout_ms=timeout_ms or DEFAULT_CONNECT_TIMEOUT_MS,
         )
     except SearchdError as exc:
@@ -80,6 +80,7 @@ def status(
 def start(
     settings: tapl_config.SearchConfig,
     *,
+    config_path: str | Path | None = None,
     socket_path: str | Path | None = None,
     model_idle_timeout_seconds: int | None = None,
     timeout_ms: int | None = None,
@@ -108,6 +109,7 @@ def start(
         sys.executable,
         "-m",
         "taplctl",
+        *(["--config", str(config_path)] if config_path is not None else []),
         "searchd",
         "run",
         "--socket",
@@ -187,7 +189,7 @@ def stop(
     try:
         response = request(
             path,
-            {"op": "shutdown", "model": db.DEFAULT_EMBEDDING_MODEL},
+            {"op": "shutdown", "model": settings.model},
             timeout_ms=timeout_ms or DEFAULT_CONNECT_TIMEOUT_MS,
         )
     except SearchdUnavailable:
@@ -201,31 +203,33 @@ def stop(
 
 
 def embed_query(query: str, settings: tapl_config.SearchConfig) -> bytes:
-    path = configured_socket_path()
+    model = settings.model
+    fingerprint = embedding_model.MODELS[model].fingerprint
     response = request(
-        path,
-        {
-            "op": "embed",
-            "model": db.DEFAULT_EMBEDDING_MODEL,
-            "dimension": db.DEFAULT_EMBEDDING_DIMENSION,
-            "text": query,
-        },
+        configured_socket_path(),
+        {"op": "embed", "model": model, "fingerprint": fingerprint,
+         "dimension": embedding_model.DIMENSION, "text": query},
         timeout_ms=DEFAULT_EMBED_TIMEOUT_MS,
     )
     if not response.get("ok"):
-        raise SearchdError(str(response.get("error") or "searchd embedding failed"))
-    dimension = int(response.get("dimension") or 0)
-    if dimension != db.DEFAULT_EMBEDDING_DIMENSION:
-        raise SearchdError(
-            f"searchd dimension mismatch: expected {db.DEFAULT_EMBEDDING_DIMENSION}, got {dimension}"
-        )
+        detail = str(response.get("error") or "searchd embedding failed")
+        if "model mismatch" in detail:  # Response from a pre-ONNX daemon.
+            detail += "; restart searchd after upgrading TAPL"
+        raise SearchdError(detail)
+    if response.get("model") != model or response.get("fingerprint") != fingerprint:
+        raise SearchdError("incompatible searchd model or encoder; restart searchd")
+    if response.get("dimension") != embedding_model.DIMENSION:
+        raise SearchdError("searchd dimension mismatch")
     encoded = response.get("embedding_b64")
     if not isinstance(encoded, str):
         raise SearchdError("searchd response did not include embedding_b64")
     try:
-        return base64.b64decode(encoded)
-    except Exception as exc:
+        vector = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
         raise SearchdError("searchd response embedding_b64 is invalid") from exc
+    if len(vector) != embedding_model.DIMENSION * 4:
+        raise SearchdError("invalid searchd embedding byte length")
+    return vector
 
 
 def request(socket_path: Path, payload: dict[str, Any], *, timeout_ms: int) -> dict[str, Any]:
@@ -281,19 +285,17 @@ class ModelState:
         self,
         *,
         model_idle_timeout_seconds: int,
+        model: str = embedding_model.DEFAULT_MODEL,
         now: Any | None = None,
         model_loader: Any | None = None,
-        numpy_loader: Any | None = None,
     ) -> None:
         self.model_idle_timeout_seconds = model_idle_timeout_seconds
-        self.model: Any | None = None
-        self.np: Any | None = None
-        self.dimension = db.DEFAULT_EMBEDDING_DIMENSION
+        self.model_name = model
+        self.model: embedding_model.Encoder | None = None
         self.loaded_at: float | None = None
         self.last_embed_at: float | None = None
         self._now = now or time.monotonic
-        self._model_loader = model_loader or self._default_model_loader
-        self._numpy_loader = numpy_loader or self._default_numpy_loader
+        self._model_loader = model_loader or embedding_model.Encoder
 
     @property
     def model_loaded(self) -> bool:
@@ -304,8 +306,9 @@ class ModelState:
         payload: dict[str, Any] = {
             "ok": True,
             "pid": os.getpid(),
-            "model": db.DEFAULT_EMBEDDING_MODEL,
-            "dimension": self.dimension,
+            "model": self.model_name,
+            "fingerprint": embedding_model.MODELS[self.model_name].fingerprint,
+            "dimension": embedding_model.DIMENSION,
             "uptime_seconds": round(self._now() - started_at, 3),
             "model_loaded": self.model_loaded,
             "model_idle_timeout_seconds": self.model_idle_timeout_seconds,
@@ -331,44 +334,27 @@ class ModelState:
         if not self.model_loaded:
             return False
         self.model = None
-        self.np = None
-        self.dimension = db.DEFAULT_EMBEDDING_DIMENSION
+        self.last_embed_at = None
         self.loaded_at = None
         gc.collect()
         return True
 
-    def embed(self, text: str) -> dict[str, Any]:
+    def embed(self, text: str, model: str) -> dict[str, Any]:
         self.unload_if_idle()
-        self.load()
-        vector = self.model.encode([text], normalize_embeddings=True)[0]
-        array = self.np.asarray(vector, dtype=self.np.float32)
+        if model != self.model_name:
+            self.unload()
+            self.model_name = model
+        if self.model is None:
+            self.model = self._model_loader(model, embedding_model.cache_root())
+            self.loaded_at = self._now()
+        self.last_embed_at = self._now()
+        vector = self.model.encode([text], query=True)[0]
         self.last_embed_at = self._now()
         return {
-            "dimension": int(array.shape[0]),
-            "embedding_b64": base64.b64encode(array.tobytes()).decode("ascii"),
+            "model": model, "fingerprint": embedding_model.MODELS[model].fingerprint,
+            "dimension": embedding_model.DIMENSION,
+            "embedding_b64": base64.b64encode(vector).decode("ascii"),
         }
-
-    def load(self) -> None:
-        if self.model_loaded:
-            return
-        self.np = self._numpy_loader()
-        self.model = self._model_loader()
-        reported_dimension = getattr(self.model, "get_sentence_embedding_dimension", lambda: None)()
-        self.dimension = int(reported_dimension or db.DEFAULT_EMBEDDING_DIMENSION)
-        self.loaded_at = self._now()
-
-    def _default_numpy_loader(self) -> Any:
-        import numpy as np
-
-        return np
-
-    def _default_model_loader(self) -> Any:
-        from sentence_transformers import SentenceTransformer
-
-        from .embeddings import suppress_model_load_progress
-
-        with suppress_model_load_progress():
-            return SentenceTransformer(db.DEFAULT_EMBEDDING_MODEL, local_files_only=True)
 
 
 def run_server(
@@ -391,7 +377,7 @@ def run_server(
         if model_idle_timeout_seconds is None
         else model_idle_timeout_seconds
     )
-    model_state = ModelState(model_idle_timeout_seconds=model_idle_timeout)
+    model_state = ModelState(model_idle_timeout_seconds=model_idle_timeout, model=settings.model)
     started_at = time.monotonic()
 
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
@@ -463,26 +449,18 @@ def handle_request(
     if op != "embed":
         return ({"ok": False, "error": f"unknown op: {op}"}, False)
 
-    expected_model = request_payload.get("model")
-    if expected_model and expected_model != db.DEFAULT_EMBEDDING_MODEL:
-        return (
-            {
-                "ok": False,
-                "error": f"model mismatch: expected {db.DEFAULT_EMBEDDING_MODEL}, got {expected_model}",
-            },
-            False,
-        )
+    model = request_payload.get("model")
+    if not isinstance(model, str) or model not in embedding_model.MODELS:
+        return ({"ok": False, "error": "unsupported searchd model; upgrade the client and daemon"}, False)
+    if (request_payload.get("fingerprint") != embedding_model.MODELS[model].fingerprint
+            or request_payload.get("dimension") != embedding_model.DIMENSION):
+        return ({"ok": False, "error": "incompatible searchd encoder; restart searchd"}, False)
     text = request_payload.get("text")
     if not isinstance(text, str):
         return ({"ok": False, "error": "embed request text must be a string"}, False)
-    embedding = model_state.embed(text)
     return (
         {
-            "ok": True,
-            "pid": os.getpid(),
-            "model": db.DEFAULT_EMBEDDING_MODEL,
-            "dimension": embedding["dimension"],
-            "embedding_b64": embedding["embedding_b64"],
+            "ok": True, "pid": os.getpid(), **model_state.embed(text, model),
             "model_loaded": model_state.model_loaded,
             "model_idle_timeout_seconds": model_state.model_idle_timeout_seconds,
         },

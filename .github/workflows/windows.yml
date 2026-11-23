@@ -63,6 +63,15 @@ jobs:
       - name: Build actual TAPL wheel
         run: python -m pip wheel --no-deps --wheel-dir dist ./tapl
 
+      - name: Verify Windows x64 semantic wheel on CPU
+        if: matrix.python-version == '3.12'
+        shell: powershell
+        run: |
+          $wheel = (Get-ChildItem -LiteralPath dist -Filter 'taplctl-*.whl').FullName
+          python -m pip install "${wheel}[semantic]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python .github/scripts/semantic_runtime_smoke.py
+
       - name: Test actual wheel install, update, reinstall, uninstall and CLI/MCP runtime
         shell: powershell
         run: |

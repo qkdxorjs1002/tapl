@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/scripts/*homebrew*'
       - '.github/scripts/sign_macos*'
+      - '.github/scripts/semantic_runtime_smoke.py'
       - '.github/workflows/macos-homebrew.yml'
       - '.github/workflows/release.yml'
       - 'tapl/pyproject.toml'
@@ -14,6 +15,7 @@ on:
     paths:
       - '.github/scripts/*homebrew*'
       - '.github/scripts/sign_macos*'
+      - '.github/scripts/semantic_runtime_smoke.py'
       - '.github/workflows/macos-homebrew.yml'
       - '.github/workflows/release.yml'
       - 'tapl/pyproject.toml'
@@ -44,21 +46,51 @@ jobs:
           python-version: '3.12'
       - name: Build TAPL wheel for installation check
         run: python -m pip wheel --no-deps --wheel-dir "${RUNNER_TEMP}/homebrew-app" ./tapl
-      - name: Download published signed runtime
+      - name: Download published signed runtimes for one release
+        id: assets
         env:
           GH_TOKEN: ${{ github.token }}
           RUNTIME_TARGET: ${{ matrix.target }}
-        run: >-
-          gh release download --repo qkdxorjs1002/tapl
-          --pattern "taplctl-mcp-runtime-*-${RUNTIME_TARGET}.tar.gz"
-          --dir "${RUNNER_TEMP}/homebrew-runtime"
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo qkdxorjs1002/tapl --json tagName --jq '.tagName')"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          names=(--pattern "taplctl-mcp-runtime-${tag}-${RUNTIME_TARGET}.tar.gz")
+          if [[ "${RUNTIME_TARGET}" == macos-arm64 ]]; then
+            if [[ "${tag}" == 2.24.2 ]]; then
+              # This is the final stable tag published with an MCP-only wheelhouse.
+              echo "legacy=true" >> "${GITHUB_OUTPUT}"
+            else
+              names+=(--pattern "taplctl-semantic-runtime-${tag}-${RUNTIME_TARGET}.tar.gz")
+            fi
+          fi
+          gh release download "${tag}" --repo qkdxorjs1002/tapl "${names[@]}" --dir "${RUNNER_TEMP}/homebrew-runtime"
+
+      - name: Check out the MCP-only release verifier
+        if: steps.assets.outputs.legacy == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.assets.outputs.tag }}
+          path: published
+
       - name: Verify signatures after Homebrew install and reinstall
         env:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          TAG: ${{ steps.assets.outputs.tag }}
+          LEGACY: ${{ steps.assets.outputs.legacy }}
+          RUNTIME_TARGET: ${{ matrix.target }}
         shell: bash
         run: |
           set -euo pipefail
           wheels=("${RUNNER_TEMP}"/homebrew-app/*.whl)
-          runtimes=("${RUNNER_TEMP}"/homebrew-runtime/*.tar.gz)
-          python .github/scripts/verify_homebrew_macos.py \
-            --wheel "${wheels[0]}" --runtime "${runtimes[0]}" --team-id "${APPLE_TEAM_ID}"
+          assets="${RUNNER_TEMP}/homebrew-runtime"
+          args=(--wheel "${wheels[0]}" --runtime "${assets}/taplctl-mcp-runtime-${TAG}-${RUNTIME_TARGET}.tar.gz"
+                --team-id "${APPLE_TEAM_ID}")
+          verifier=.github/scripts/verify_homebrew_macos.py
+          if [[ "${LEGACY}" == true ]]; then
+            verifier="published/${verifier}"
+          elif [[ "${RUNTIME_TARGET}" == macos-arm64 ]]; then
+            args+=(--semantic-runtime "${assets}/taplctl-semantic-runtime-${TAG}-${RUNTIME_TARGET}.tar.gz")
+          fi
+          python "${verifier}" "${args[@]}"

@@ -16,29 +16,31 @@
 
 TAPL wheel은 플랫폼 독립적이지만 의존성에는 호환 wheel이 필요합니다. 드문 아키텍처, 아주 새로운 Python 버전, Alpine 같은 musl 기반 Linux는 로컬 빌드 도구가 필요할 수 있습니다. 소스 개발은 `uv`를 사용합니다. [기여 안내](../development/contributing.ko.md)를 참고하세요.
 
-## macOS와 Homebrew
+<a id="macos와-homebrew"></a>
+
+## macOS·Linux에서 Homebrew 사용
 
 Tap을 추가한 뒤 formula **하나만** 선택합니다.
 
 ```sh
 brew tap qkdxorjs1002/tap
 
-# 전문 검색을 포함한 안정 버전
+# 안정판
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
-
-# 또는 시맨틱·벡터 의존성을 포함한 안정 버전
-brew trust --formula qkdxorjs1002/tap/taplctl-semantic
-brew install taplctl-semantic
 
 # 또는 프리릴리즈를 포함한 가장 최근 공개 릴리스
 brew trust --formula qkdxorjs1002/tap/taplctl-pre
 brew install taplctl-pre
 ```
 
-`taplctl`과 `taplctl-semantic`은 안정 릴리스를 따릅니다. `taplctl-pre`는 가장 최근 공개된 릴리스를 선택하므로 안정 버전이나 프리릴리즈일 수 있습니다. `taplctl@pre`는 별칭입니다. Trust와 prefix 조회에는 위의 정식 formula 이름을 사용하세요.
+`taplctl`은 안정 릴리스를 따릅니다. `taplctl-pre`는 가장 최근 공개된 릴리스를 선택하므로 안정 버전이나 프리릴리즈일 수 있습니다. `taplctl@pre`는 별칭입니다. Trust와 prefix 조회에는 위의 정식 formula 이름을 사용하세요.
 
 세 formula 모두 `taplctl`, `tapl-mcp`, `tapl-hook`을 제공하므로 함께 설치할 수 없습니다. 전환 전에는 `brew uninstall taplctl`처럼 현재 formula를 제거하세요. Formula는 설치 시 PyPI에서 패키지를 해석하지 않고 릴리스에 고정된 wheel 묶음을 사용합니다.
+
+`taplctl`과 `taplctl-pre`는 macOS 14 이상 Apple Silicon과 glibc 2.28 이상 Linux x64·ARM64에 의미 검색 의존성을 기본 설치합니다. Intel Mac과 그보다 오래된 Linux에서는 전문 검색을 사용합니다. 기록의 첫 색인과 모델 선택은 [검색 안내](../guides/search.ko.md)를 참고하세요.
+
+기존 `taplctl-semantic` 사용자는 같은 구성을 받는 호환 formula를 계속 업그레이드할 수 있습니다. `taplctl`로 전환하면 [클라이언트 연결](integrations.ko.md)의 실행 경로도 새 formula에 맞춰 갱신하세요.
 
 ## Linux
 
@@ -46,7 +48,13 @@ brew install taplctl-pre
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
 ```
 
-독립 설치 스크립트는 기본적으로 최신 안정 릴리스를 선택합니다. 공개된 Claude Code 런타임을 설치하려면 해당 릴리스 manifest를 지정합니다.
+독립 설치 스크립트는 기본적으로 최신 안정 릴리스를 선택합니다. Linux 독립 설치에서 의미 검색을 사용하려면 아래와 같이 설치하세요. 업데이트 시 선택이 유지됩니다.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | TAPL_INSTALL_SEMANTIC=1 sh
+```
+
+공개된 Claude Code 런타임을 설치하려면 해당 릴리스 manifest를 지정합니다.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh -o /tmp/tapl-install.sh
@@ -106,7 +114,7 @@ install.cmd -Pre -Semantic
 install.cmd -Version TAG
 ```
 
-Windows는 선택 의존성을 설치하면 로컬 시맨틱 검색을 지원합니다. Unix 소켓을 쓰는 `searchd` 데몬은 Windows에서 사용할 수 없으며, 전문 검색에는 필요하지 않습니다. [검색 안내](../guides/search.ko.md)를 참고하세요.
+Windows x64에서는 설치 시 `-Semantic`을 선택해 로컬 의미 검색을 사용할 수 있습니다. Windows ARM64용 네이티브 `sqlite-vec` wheel은 아직 제공되지 않습니다. Unix 소켓을 쓰는 `searchd` 데몬은 Windows에서 사용할 수 없으며, 전문 검색에는 필요하지 않습니다. [검색 안내](../guides/search.ko.md)를 참고하세요.
 
 ### Windows 실행 파일 재설치·제거
 

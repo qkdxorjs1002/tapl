@@ -2,6 +2,11 @@
 
 All notable changes to TAPL Workflow Viewer are documented in this file.
 
+## 2.25.0 - 2026-11-23
+
+- Choose KoEn-E5-Tiny INT8 or multilingual-e5-small INT8 in Search settings. KoEn-E5-Tiny INT8 is the default.
+- Show the Korean Viewer shortcut as **Viewer 바로가기** in RUN classification notices and the product tour.
+
 ## 2.24.2 - 2026-11-23
 
 - Fit the entire mindmap when an archived RUN opens in Current RUN. The view adjusts to the available space, and **Fit all** restores it after zooming or panning.

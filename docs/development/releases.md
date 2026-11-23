@@ -35,7 +35,7 @@ The workflow runs these independent checks and artifact producers concurrently:
 - `build-packages` uses Python 3.12 and Node.js 22, injects tag/Python versions, runs extension host tests and compiles the shared Viewer, then builds the application wheel and VSIX.
 - Linux runtime jobs build arm64/x86_64 wheelhouses in a matrix. The macOS arm64/x86_64 matrix signs runtime wheelhouses and verifies real Homebrew install/reinstall before uploading signed artifacts.
 
-The Ubuntu `release` job waits for every check and producer to succeed. It downloads the exact versioned wheel, VSIX, and runtime archives, prepares installers/manifest, and validates asset bytes, versions, exact URLs, SHA-256 values, required runtime distributions, and rendered Windows installer contents. An isolated Linux x86_64 venv smoke verifies the installed version and native MCP tool inventory/status. The Homebrew token guard must also pass before GitHub Release publication.
+The Ubuntu `release` job waits for every check and producer to succeed. It downloads the exact versioned wheel, VSIX, and runtime archives, prepares installers/manifest, and validates asset bytes, versions, exact URLs, SHA-256 values, required runtime distributions, and rendered Windows installer contents. An isolated Linux x86_64 venv smoke verifies the installed version and native MCP tool inventory/status. The Homebrew token guard must also pass before GitHub Release publication. The three additional wheelhouses for Homebrew use dependencies verified against the lockfile. Both models must pass indexing and search checks on Windows x64, Linux x64 and ARM64, and macOS ARM64 before publication.
 
 | Asset | Purpose |
 | --- | --- |
@@ -44,6 +44,8 @@ The Ubuntu `release` job waits for every check and producer to succeed. It downl
 | `taplctl-mcp-runtime-TAG-macos-x86_64.tar.gz` | Signed macOS x86_64 MCP dependency wheelhouse. |
 | `taplctl-mcp-runtime-TAG-linux-arm64.tar.gz` | Linux arm64 MCP dependency wheelhouse. |
 | `taplctl-mcp-runtime-TAG-linux-x86_64.tar.gz` | Linux x86_64 MCP dependency wheelhouse. |
+| `taplctl-semantic-runtime-TAG-macos-arm64.tar.gz` | Signed Apple Silicon semantic dependency wheelhouse. |
+| `taplctl-semantic-runtime-TAG-linux-arm64.tar.gz`, `taplctl-semantic-runtime-TAG-linux-x86_64.tar.gz` | Linux semantic dependency wheelhouses. |
 | `tapl-workflow-viewer-TAG.vsix` | Validated VS Code extension. Prerelease tags also publish this through GitHub Releases. |
 | `taplctl-install-manifest.json` | Schema version 1, Python version, wheel URL, and wheel SHA-256. |
 | `install.ps1`, `install.cmd` | Windows release assets; the PowerShell installer is stamped for that release. |
@@ -56,7 +58,7 @@ The workflow creates or updates the tagged GitHub Release and uploads the valida
 
 `HOMEBREW_TAP_TOKEN` is required with write access to `qkdxorjs1002/homebrew-tap` and is checked before GitHub publication. The downstream `homebrew` job depends on `release`, then checks out the tap, updates formulas, and commits/pushes changes. It uses the existing `Formula/taplctl.rb` as the template and updates `Formula/taplctl-pre.rb` plus `Aliases/taplctl@pre` on releases. Stable releases also update the stable formula and `taplctl-semantic.rb` when present. Prereleases leave the stable formulas unchanged. The updater skips a version older than the formula's current version and validates generated Ruby syntax before committing/pushing the tap.
 
-The three formulas conflict because they provide the same commands. Runtime wheelhouse URLs and checksums select the matching macOS/Linux architecture. Viewer services use port 8000; the semantic formula does not automatically start `searchd`. See [Viewer services](../guides/viewer.md#run-as-a-homebrew-service).
+The three formulas conflict because they provide the same commands. Runtime wheelhouse URLs and checksums select the matching macOS/Linux architecture. Viewer services use port 8000; the Homebrew formulas do not automatically start `searchd`. See [Viewer services](../guides/viewer.md#run-as-a-homebrew-service).
 
 ## Windows entry scripts and release installers
 
@@ -75,7 +77,7 @@ The bootstrap validates options and downloaded PowerShell syntax/declared parame
 
 ## macOS signing
 
-The release jobs sign Mach-O files inside **both macOS MCP runtime wheelhouses** using **Developer ID Application**. Native dependencies such as `pydantic_core` and `cryptography` are included. The pure-Python TAPL wheel and generated console scripts are not Mach-O executables.
+The release jobs sign Mach-O files in both macOS MCP wheelhouses and the macOS ARM64 semantic wheelhouse with **Developer ID Application**. The pure-Python TAPL wheel and generated console scripts contain no Mach-O executables.
 
 ### One-time setup
 

@@ -35,7 +35,7 @@ Workflow는 다음 독립 검사와 자산 생성 job을 병렬 실행합니다.
 - `build-packages`는 Python 3.12·Node.js 22를 사용해 태그·Python 버전을 주입하고 확장 호스트 테스트와 공유 Viewer 컴파일을 수행한 뒤 애플리케이션 wheel과 VSIX를 빌드합니다.
 - Linux 런타임 job은 arm64/x86_64 matrix로 wheelhouse를 빌드합니다. macOS arm64/x86_64 matrix는 런타임 wheelhouse에 서명하고 실제 Homebrew 설치·재설치를 검증한 뒤 서명 artifact를 올립니다.
 
-Ubuntu `release` job은 모든 검사와 생성 job의 성공을 기다립니다. 정확한 버전별 wheel·VSIX·런타임 아카이브를 내려받아 설치기·manifest를 준비하고 자산 바이트·버전·정확한 URL·SHA-256·필수 런타임 distribution·렌더링된 Windows 설치기를 검증합니다. 격리 Linux x86_64 venv smoke는 설치 버전과 native MCP 도구 목록·상태를 검증합니다. GitHub Release 게시 전에 Homebrew 토큰 검사도 통과해야 합니다.
+Ubuntu `release` job은 모든 검사와 생성 job의 성공을 기다립니다. 정확한 버전별 wheel·VSIX·런타임 아카이브를 내려받아 설치기·manifest를 준비하고 자산 바이트·버전·정확한 URL·SHA-256·필수 런타임 distribution·렌더링된 Windows 설치기를 검증합니다. 격리 Linux x86_64 venv smoke는 설치 버전과 native MCP 도구 목록·상태를 검증합니다. GitHub Release 게시 전에 Homebrew 토큰 검사도 통과해야 합니다. Homebrew용 세 의미 검색 wheelhouse에는 잠금 파일의 해시를 검증한 의존성이 들어갑니다. GitHub 게시 전에 Windows x64·Linux x64 및 ARM64·macOS ARM64에서 두 모델을 색인하고 검색합니다.
 
 | 자산 | 용도 |
 | --- | --- |
@@ -44,6 +44,8 @@ Ubuntu `release` job은 모든 검사와 생성 job의 성공을 기다립니다
 | `taplctl-mcp-runtime-TAG-macos-x86_64.tar.gz` | 서명된 macOS x86_64 MCP 의존성 wheelhouse. |
 | `taplctl-mcp-runtime-TAG-linux-arm64.tar.gz` | Linux arm64 MCP 의존성 wheelhouse. |
 | `taplctl-mcp-runtime-TAG-linux-x86_64.tar.gz` | Linux x86_64 MCP 의존성 wheelhouse. |
+| `taplctl-semantic-runtime-TAG-macos-arm64.tar.gz` | 서명된 Apple Silicon 의미 검색 의존성 wheelhouse. |
+| `taplctl-semantic-runtime-TAG-linux-arm64.tar.gz`, `taplctl-semantic-runtime-TAG-linux-x86_64.tar.gz` | Linux 의미 검색 의존성 wheelhouse. |
 | `tapl-workflow-viewer-TAG.vsix` | 검증된 VS Code 확장. Prerelease 태그도 GitHub Releases에 이 자산을 게시합니다. |
 | `taplctl-install-manifest.json` | Schema version 1, Python 버전, wheel URL·SHA-256. |
 | `install.ps1`, `install.cmd` | Windows 릴리스 자산. PowerShell 설치기에 해당 릴리스 버전을 주입합니다. |
@@ -56,7 +58,7 @@ Workflow는 태그의 GitHub Release를 만들거나 갱신하고 검증한 자�
 
 `qkdxorjs1002/homebrew-tap` 쓰기 권한을 가진 `HOMEBREW_TAP_TOKEN`이 필요하며 GitHub 게시 전에 확인합니다. 후속 `homebrew` job은 `release`에 의존하며 tap을 checkout한 뒤 formula를 갱신하고 변경을 commit·push합니다. 기존 `Formula/taplctl.rb`를 템플릿으로 사용하고 릴리스 시 `Formula/taplctl-pre.rb`와 `Aliases/taplctl@pre`를 갱신합니다. 정식 릴리스는 stable formula와 존재하는 `taplctl-semantic.rb`도 갱신하고 prerelease는 stable formula를 유지합니다. Updater는 현재 formula보다 오래된 버전을 건너뛰며 생성 Ruby 구문을 검사한 뒤 tap에 commit·push합니다.
 
-세 formula는 같은 명령을 제공하므로 서로 충돌합니다. 런타임 wheelhouse URL·체크섬은 macOS·Linux 아키텍처에 맞게 선택합니다. Viewer 서비스는 8000 포트를 사용하며 semantic formula도 `searchd`를 자동 시작하지 않습니다. [Viewer 서비스](../guides/viewer.ko.md#homebrew-서비스로-실행)를 보세요.
+세 formula는 같은 명령을 제공하므로 서로 충돌합니다. 런타임 wheelhouse URL·체크섬은 macOS·Linux 아키텍처에 맞게 선택합니다. Viewer 서비스는 8000 포트를 사용하며 Homebrew formula도 `searchd`를 자동 시작하지 않습니다. [Viewer 서비스](../guides/viewer.ko.md#homebrew-서비스로-실행)를 보세요.
 
 ## Windows 진입 스크립트와 릴리스 설치기
 
@@ -75,7 +77,7 @@ Bootstrap은 옵션, 내려받은 PowerShell 구문과 선언된 인자 지원�
 
 ## macOS 서명
 
-릴리스 job은 **두 macOS MCP 런타임 wheelhouse** 내부의 Mach-O 파일에 **Developer ID Application**으로 서명합니다. `pydantic_core`·`cryptography` 등의 native 의존성을 포함합니다. 순수 Python TAPL wheel과 생성 console script는 Mach-O 실행 파일이 아닙니다.
+릴리스 job은 두 macOS MCP wheelhouse와 macOS ARM64 의미 검색 wheelhouse의 Mach-O 파일을 **Developer ID Application**으로 서명합니다. 순수 Python TAPL wheel과 생성된 콘솔 스크립트에는 Mach-O 실행 파일이 없습니다.
 
 ### 최초 설정
 

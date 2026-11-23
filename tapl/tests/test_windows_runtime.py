@@ -69,7 +69,7 @@ def test_windows_daemon_is_explicitly_unavailable_and_uses_local_fallback(tmp_pa
     assert not searchd.status(settings, socket_path=socket)["running"]
     with pytest.raises(searchd.SearchdUnavailable, match="Windows"):
         searchd.run_server(settings, socket_path=socket)
-    monkeypatch.setattr(embeddings, "local_query_embedding_blob", lambda query: b"portable-local-result")
+    monkeypatch.setattr(embeddings, "local_query_embedding_blob", lambda query, model: b"portable-local-result")
     assert embeddings.query_embedding_blob("query", settings) == b"portable-local-result"
     assert socket.read_text(encoding="utf-8") == "preserve unrelated file"
 

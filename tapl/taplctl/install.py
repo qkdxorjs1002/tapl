@@ -801,6 +801,10 @@ allowed_origins = []
 # - "hybrid": blend semantic and BM25 rankings.
 mode = "{config.DEFAULT_SEARCH_MODE}"
 
+# Embedding model for semantic and hybrid search. Run taplctl reindex after switching.
+# Choices: koen-e5-tiny-int8 (Korean/English), multilingual-e5-small-int8.
+model = "{config.DEFAULT_SEARCH_MODEL}"
+
 # Default maximum number of workflow search results.
 # Type: integer greater than or equal to 1.
 max_results = {config.DEFAULT_SEARCH_MAX_RESULTS}
@@ -813,7 +817,7 @@ hybrid_semantic_ratio = {config.DEFAULT_HYBRID_SEMANTIC_RATIO}
 
 # Semantic model provider. Allowed values:
 # - "auto": use searchd when it is running, otherwise load the model locally.
-# - "daemon": require the separately running searchd process.
+# - "daemon": prefer searchd, use local if unavailable, or BM25 after a daemon error.
 # - "local": load the model in the current taplctl process.
 semantic_provider = "{config.DEFAULT_SEMANTIC_PROVIDER}"
 

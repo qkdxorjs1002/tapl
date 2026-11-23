@@ -49,7 +49,11 @@ def test_registry_defaults_and_read_never_create_files(workspace: Path) -> None:
             expected.add("clients.claude-code." + key)
     assert set(document["values"]) == expected == {field["key"] for field in document["fields"]}
     assert document["values"] == document["defaults"]
-    assert len(document["fields"]) == 23
+    assert len(document["fields"]) == 24
+    model = next(field for field in document["fields"] if field["key"] == "search.model")
+    assert model["type"] == "select"
+    assert model["allowed"] == ["koen-e5-tiny-int8", "multilingual-e5-small-int8"]
+    assert document["defaults"]["search.model"] == "koen-e5-tiny-int8"
     assert {key: document["values"]["viewer." + key] for key in ("language", "layout", "mcp_path")} == {
         "language": "auto", "layout": "auto", "mcp_path": "",
     }
@@ -107,6 +111,7 @@ def test_atomic_model_profile_change_and_independent_client_scopes(workspace: Pa
     {"search.max_results": True}, {"search.max_results": 0}, {"recall.enabled": "false"},
     {"search.hybrid_semantic_ratio": float("nan")}, {"search.hybrid_semantic_ratio": 1.1},
     {"viewer.allowed_origins": ["https://example.com/path"]},
+    {"search.model": "legacy"}, {"search.model": "koen_e5_tiny_int8"},
     {"viewer.language": "ja"}, {"viewer.language": True},
     {"viewer.layout": "wide"}, {"viewer.layout": 1},
     {"viewer.mcp_path": ["tapl-mcp"]}, {"viewer.mcp_path": "tapl-mcp\n--flag"},

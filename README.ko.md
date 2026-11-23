@@ -215,9 +215,8 @@ Codex 또는 Claude Code 연결과 검증까지 Agent에게 맡길 수 있습니
 
 | 플랫폼·채널 | 설치 방법 | 안내 |
 | --- | --- | --- |
-| macOS · 안정판 | Homebrew `taplctl` | [전문 검색 포함](docs/getting-started/installation.ko.md) |
-| macOS · 안정판 + 시맨틱 검색 | Homebrew `taplctl-semantic` | [선택 의존성 포함](docs/getting-started/installation.ko.md) |
-| macOS · 최신 게시 채널 | Homebrew `taplctl-pre` | [채널 선택](docs/getting-started/installation.ko.md) |
+| Homebrew · 안정판 | `taplctl` | [지원 플랫폼에서 전문·의미 검색 포함](docs/getting-started/installation.ko.md) |
+| Homebrew · 최신 게시 채널 | `taplctl-pre` | [채널 선택](docs/getting-started/installation.ko.md) |
 | Linux · 안정판 기본 | 독립형 셸 설치 스크립트 | [설치 및 경로 설정](docs/getting-started/installation.ko.md) |
 | Windows 10/11 · 안정판 기본 | PowerShell / CMD 스크립트 | [설치 및 경로 설정](docs/getting-started/installation.ko.md) |
 

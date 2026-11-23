@@ -3,8 +3,8 @@
 set +x
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 WHEELHOUSE" >&2
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 WHEELHOUSE [WHEELHOUSE ...]" >&2
   exit 1
 fi
 for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_TEAM_ID; do
@@ -87,4 +87,6 @@ unset MACOS_CERTIFICATE_PASSWORD keychain_password
 rm -f "${certificate_path}"
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
-python "${script_dir}/sign_macos_wheels.py" "$1" --keychain "${keychain_path}"
+for wheelhouse in "$@"; do
+  python "${script_dir}/sign_macos_wheels.py" "${wheelhouse}" --keychain "${keychain_path}"
+done

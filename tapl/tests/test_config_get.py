@@ -41,6 +41,7 @@ class ConfigGetTests(unittest.TestCase):
             self.assertIsNone(payload["key"])
             self.assertEqual(set(payload["value"]), {"search", "viewer", "recall", "subagents", "workflow"})
             self.assertEqual(payload["value"]["search"]["mode"], config.DEFAULT_SEARCH_MODE)
+            self.assertEqual(payload["value"]["search"]["model"], "koen-e5-tiny-int8")
             self.assertIsNone(payload["value"]["subagents"]["available_models"])
             self.assertEqual(list(root.iterdir()), [])
             install.assert_not_called()
@@ -101,6 +102,23 @@ class ConfigGetTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertAlmostEqual(json.loads(output)["value"]["hybrid_bm25_ratio"], 0.2)
             self.assertEqual(path.read_text(), original)
+
+    def test_reindex_inspects_configured_model_without_fetching_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "config.toml"
+            args = ["--config", str(path)]
+            model = "multilingual-e5-small-int8"
+            code, _, _ = self.run_cli([*args, "config", "set", "search.model", model, "--json"])
+            self.assertEqual(code, 0)
+            self.assertEqual(self.get(path, "search.model", output=""), (0, model + "\n", ""))
+            with mock.patch("urllib.request.urlopen") as download:
+                code, output, _ = self.run_cli([*args, "--db", str(root / "test.db"), "reindex", "--dry-run", "--json"])
+            self.assertEqual(code, 0, output)
+            result = json.loads(output)
+            self.assertEqual(result["embedding_model"], model)
+            self.assertTrue(result["needs_reindex"])
+            download.assert_not_called()
 
     def test_get_catalog_model_ids_with_dots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

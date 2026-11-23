@@ -134,6 +134,11 @@ else
 fi
 
 manifest_url=${TAPL_INSTALL_MANIFEST_URL:-$DEFAULT_MANIFEST_URL}
+semantic=${TAPL_INSTALL_SEMANTIC-}
+case "$semantic" in
+    ""|0|1) ;;
+    *) die "TAPL_INSTALL_SEMANTIC must be 0 or 1." ;;
+esac
 
 normalize_path() {
     "$python_bin" - "$1" <<'PY'
@@ -178,6 +183,8 @@ try:
         or metadata.get("schema_version") != 1
         or isinstance(metadata.get("schema_version"), bool)
     ):
+        raise ValueError
+    if type(metadata.get("semantic", False)) is not bool:
         raise ValueError
     if metadata.get("method") != "curl-sh":
         raise ValueError
@@ -375,9 +382,17 @@ PY
     fi
 fi
 
+if [ -z "$semantic" ]; then
+    if [ "$managed_install" -eq 1 ]; then
+        semantic=$("$python_bin" -c 'import json, sys; print(int(json.load(open(sys.argv[1], encoding="utf-8")).get("semantic", False)))' "$install_json")
+    else
+        semantic=0
+    fi
+fi
+
 current_venv=
 if [ "$managed_install" -eq 1 ]; then
-    if current_venv=$("$python_bin" - "$install_json" "$manifest_version" "$wheel_sha256" "$versions_dir" <<'PY'
+    if current_venv=$("$python_bin" - "$install_json" "$manifest_version" "$wheel_sha256" "$versions_dir" "$semantic" <<'PY'
 import json
 import os
 import sys
@@ -386,6 +401,8 @@ from pathlib import Path
 try:
     metadata = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     expected_version = sys.argv[2]
+    if metadata.get("semantic", False) != (sys.argv[5] == "1"):
+        raise ValueError
     expected_sha256 = sys.argv[3]
     versions_dir = os.path.abspath(sys.argv[4])
     venv = metadata["venv"]
@@ -461,7 +478,11 @@ PY
     fi
 
     note "installing taplctl $manifest_version"
-    if ! "$candidate_venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$wheel_path"; then
+    wheel_requirement=$wheel_path
+    if [ "$semantic" -eq 1 ]; then
+        wheel_requirement="${wheel_path}[semantic]"
+    fi
+    if ! "$candidate_venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$wheel_requirement"; then
         die "pip could not install taplctl; the previous installation was left unchanged."
     fi
 
@@ -475,7 +496,7 @@ PY
 fi
 
 install_json_tmp=$(mktemp "$install_root/.install.json.XXXXXX") || die "could not prepare install metadata."
-if ! "$python_bin" - "$install_json_tmp" "$manifest_url" "$manifest_version" "$wheel_url" "$wheel_sha256" "$install_root" "$bin_dir" "$current_venv" "$link_path" <<'PY'
+if ! "$python_bin" - "$install_json_tmp" "$manifest_url" "$manifest_version" "$wheel_url" "$wheel_sha256" "$install_root" "$bin_dir" "$current_venv" "$link_path" "$semantic" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -492,6 +513,7 @@ metadata = {
     "bin_dir": sys.argv[7],
     "venv": sys.argv[8],
     "executable": sys.argv[9],
+    "semantic": sys.argv[10] == "1",
     "installed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
 }
 Path(sys.argv[1]).write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")

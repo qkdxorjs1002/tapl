@@ -136,6 +136,12 @@ class HomebrewPrereleaseFormulaUpdaterTests(unittest.TestCase):
                 "MCP_RUNTIME_LINUX_ARM64_SHA256": "4" * 64,
                 "MCP_RUNTIME_LINUX_X86_64_URL": "https://example.invalid/linux-x86_64.tar.gz",
                 "MCP_RUNTIME_LINUX_X86_64_SHA256": "5" * 64,
+                "SEMANTIC_RUNTIME_MACOS_ARM64_URL": "https://example.invalid/semantic-macos-arm64.tar.gz",
+                "SEMANTIC_RUNTIME_MACOS_ARM64_SHA256": "6" * 64,
+                "SEMANTIC_RUNTIME_LINUX_ARM64_URL": "https://example.invalid/semantic-linux-arm64.tar.gz",
+                "SEMANTIC_RUNTIME_LINUX_ARM64_SHA256": "7" * 64,
+                "SEMANTIC_RUNTIME_LINUX_X86_64_URL": "https://example.invalid/semantic-linux-x86_64.tar.gz",
+                "SEMANTIC_RUNTIME_LINUX_X86_64_SHA256": "8" * 64,
             }
         )
         return subprocess.run(

@@ -8,7 +8,6 @@
 /tapl/tests/test_authoring_detail_boxes.py
 /tapl/tests/test_authoring_detail_experiment.py
 /tapl/tests/test_authoring_detail_summary.py
-tapl/uv.lock
 /.tapl/*
 !/.tapl/config.toml
 /tapl/.tapl/*

@@ -46,14 +46,23 @@ Hybrid weighting defaults to semantic `0.65` and BM25 `0.35`; BM25's weight is d
 
 ## Semantic dependencies and index
 
-Install the semantic extra or `taplctl-semantic` formula as described in [Installation](../getting-started/installation.md). It supplies `numpy`, `sentence-transformers` and `sqlite-vec`. The current embedding model is `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, with 384 dimensions. The model is fixed by the implementation; there is no public `search.model` setting. SubAgent model preferences control delegation and do not select an embedding model.
+Homebrew `taplctl` and `taplctl-pre` include semantic dependencies on supported platforms. See [Installation](../getting-started/installation.md) for standalone installs. ONNX Runtime runs the model on the local CPU.
+
+Select a model under **Settings → Search → Search embedding model**, or use `taplctl config set search.model MODEL`.
+
+| Model | Setting | Use |
+| --- | --- | --- |
+| KoEn-E5-Tiny INT8 | `koen-e5-tiny-int8` | Default for Korean and English |
+| multilingual-e5-small INT8 | `multilingual-e5-small-int8` | Searching records across more languages |
+
+Both models use a 128-token limit and 384-dimensional vectors. Run these commands in the current workspace on initial setup or after switching models.
 
 ```sh
 taplctl reindex --dry-run --json
 taplctl reindex --json
 ```
 
-Dry-run reports item count, optional dependency availability, model and dimension. Actual reindex rebuilds the optional vector index for existing items, including searchable custom fields. It needs the optional dependencies and may load/download model weights if they are not cached. An empty/missing vector index or unavailable semantic dependencies results in text-search fallback. Rebuild an existing workspace when its semantic index needs refreshing; full-text search does not require a vector rebuild.
+`--dry-run` reports the current index and whether it needs rebuilding without downloading a model. Actual indexing downloads the pinned model and tokenizer, verifies SHA-256, and caches them under `~/.cache/tapl/models`. Set `TAPL_MODEL_CACHE` to use another cache. Existing MiniLM indexes are preserved. TAPL uses BM25 until an index for the selected model is ready.
 
 ## Embedding provider and searchd
 
@@ -72,7 +81,7 @@ taplctl searchd status --json
 taplctl searchd stop
 ```
 
-Search does not start the daemon automatically. The semantic Homebrew formula also does not start a preloaded search process. `searchd` can retain the model between queries and unloads it after 1,800 idle seconds by default; `search.searchd_model_idle_timeout_seconds = 0` disables idle unloading. Unloading the model does not stop the daemon. `searchd start --idle-timeout SECONDS` overrides the setting for that process.
+Search does not start the daemon automatically. The Homebrew formulas also does not start a preloaded search process. `searchd` can retain the model between queries and unloads it after 1,800 idle seconds by default; `search.searchd_model_idle_timeout_seconds = 0` disables idle unloading. Unloading the model does not stop the daemon. `searchd start --idle-timeout SECONDS` overrides the setting for that process.
 
 The default socket is `~/.tapl/searchd.sock`; `TAPL_SEARCHD_SOCKET` selects another path. Management commands also accept `--socket PATH`. A custom management socket must match the environment used by search callers. The daemon uses Unix domain sockets and is unavailable on Windows, where semantic search uses the local path when dependencies are installed and BM25 otherwise. No provider API credential is required for this local embedding model.
 

@@ -74,7 +74,7 @@ Hook payloads and responses follow each client's contract. Claude uses event-spe
 
 ## Search and memory boundaries
 
-BM25/full-text search works without optional semantic dependencies. `embeddings.py` supports configured BM25, semantic, and hybrid retrieval; semantic unavailability can return BM25 with a fallback reason. Semantic extras include NumPy, sentence-transformers, and sqlite-vec. `searchd` can hold the embedding model behind a Unix socket and is unavailable on Windows; local semantic search remains an option there.
+BM25/full-text search works without optional semantic dependencies. `embeddings.py` supports configured BM25, semantic, and hybrid retrieval; semantic unavailability can return BM25 with a fallback reason. Semantic extras include ONNX Runtime, Tokenizers, NumPy, and sqlite-vec. `searchd` can hold the embedding model behind a Unix socket and is unavailable on Windows; local semantic search remains an option there.
 
 Associative memory stores short verified lessons with concrete cues and links to original records. Automatic recall/capture/review is controlled separately from manual inspection. A memory edit checks `expected_revision`; finish-time memory processing checks the active `expected_run_id`. Original-source verification belongs to the agent. See [Search](../guides/search.md) and [Associative memory](../guides/memory.md).
 

@@ -46,14 +46,23 @@ Hybrid 가중치는 시맨틱 `0.65`, BM25 `0.35`가 기본입니다. BM25 가�
 
 ## 시맨틱 의존성과 색인
 
-[설치](../getting-started/installation.ko.md)의 semantic extra나 `taplctl-semantic` formula를 사용하면 `numpy`, `sentence-transformers`, `sqlite-vec`를 설치합니다. 현재 임베딩 모델은 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`이며 차원은 384입니다. 모델은 구현에서 고정하며 공개 `search.model` 설정은 없습니다. SubAgent 모델 선호는 위임용이며 임베딩 모델을 선택하지 않습니다.
+지원 플랫폼의 Homebrew `taplctl`·`taplctl-pre`에는 의미 검색 의존성이 포함됩니다. 독립 설치의 사용 방법은 [설치](../getting-started/installation.ko.md)를 참고하세요. ONNX Runtime은 로컬 CPU에서 모델을 실행합니다.
+
+Viewer **설정 → 검색 → 검색 임베딩 모델**에서 선택하거나 `taplctl config set search.model MODEL`을 사용하세요.
+
+| 모델 | 설정값 | 용도 |
+| --- | --- | --- |
+| KoEn-E5-Tiny INT8 | `koen-e5-tiny-int8` | 한국어·영어 중심 기본값 |
+| multilingual-e5-small INT8 | `multilingual-e5-small-int8` | 여러 언어의 기록을 검색할 때 |
+
+두 모델 모두 128토큰과 384차원 벡터를 사용합니다. 현재 작업 공간에서 첫 색인 또는 모델 변경 후에 다음 명령을 실행하세요.
 
 ```sh
 taplctl reindex --dry-run --json
 taplctl reindex --json
 ```
 
-Dry-run은 item 수, 선택 의존성 설치 여부, 모델과 차원을 표시합니다. 실제 reindex는 검색 가능한 custom field를 포함해 기존 item의 벡터 색인을 재구축합니다. 선택 의존성이 필요하며 모델 가중치가 캐시에 없으면 로드·다운로드할 수 있습니다. 벡터 색인이 비었거나 없거나 시맨틱 의존성을 사용할 수 없으면 텍스트 검색으로 대체합니다. 기존 공간의 시맨틱 색인을 갱신할 때 재구축하며, 전문 검색에는 벡터 재구축이 필요하지 않습니다.
+`--dry-run`은 모델을 다운로드하지 않고 기존 인덱스와 재색인 필요 여부를 보여 줍니다. 실제 재색인은 모델과 토크나이저를 지정된 리비전에서 받아 SHA-256을 확인하고 `~/.cache/tapl/models`에 저장합니다. `TAPL_MODEL_CACHE`로 캐시 위치를 지정할 수 있습니다. 기존 MiniLM 인덱스는 보존되며, 현재 모델에 맞는 색인이 준비될 때까지 BM25로 검색합니다.
 
 ## 임베딩 provider와 searchd
 
@@ -72,7 +81,7 @@ taplctl searchd status --json
 taplctl searchd stop
 ```
 
-검색이 daemon을 자동 시작하지는 않습니다. Semantic Homebrew formula도 미리 로드한 검색 프로세스를 자동 시작하지 않습니다. `searchd`는 질의 사이에 모델을 유지하고 기본 1,800초 유휴 후 모델을 해제합니다. `search.searchd_model_idle_timeout_seconds = 0`은 유휴 해제를 끕니다. 모델 해제는 daemon 종료와 다릅니다. `searchd start --idle-timeout SECONDS`로 해당 프로세스 값을 덮어쓸 수 있습니다.
+검색이 daemon을 자동 시작하지는 않습니다. Homebrew formula도 미리 로드한 검색 프로세스를 자동 시작하지 않습니다. `searchd`는 질의 사이에 모델을 유지하고 기본 1,800초 유휴 후 모델을 해제합니다. `search.searchd_model_idle_timeout_seconds = 0`은 유휴 해제를 끕니다. 모델 해제는 daemon 종료와 다릅니다. `searchd start --idle-timeout SECONDS`로 해당 프로세스 값을 덮어쓸 수 있습니다.
 
 기본 socket은 `~/.tapl/searchd.sock`이며 `TAPL_SEARCHD_SOCKET`으로 다른 경로를 선택합니다. 관리 명령은 `--socket PATH`도 받습니다. 별도 관리 socket은 검색 호출자 환경과 경로를 맞춰야 합니다. Daemon은 Unix domain socket을 사용하므로 Windows에서 지원하지 않습니다. Windows는 의존성이 있으면 로컬 시맨틱 검색을, 없으면 BM25를 사용합니다. 이 로컬 임베딩 모델에 provider API 자격 증명은 필요하지 않습니다.
 

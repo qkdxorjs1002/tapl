@@ -26,28 +26,18 @@ version = ENV.fetch("RELEASE_VERSION")
 wheel_url = ENV.fetch("WHEEL_URL")
 wheel_sha256 = ENV.fetch("WHEEL_SHA256")
 
-runtime_assets = {
-  "macos" => {
-    "arm" => [
-      ENV.fetch("MCP_RUNTIME_MACOS_ARM64_URL"),
-      ENV.fetch("MCP_RUNTIME_MACOS_ARM64_SHA256"),
-    ],
-    "intel" => [
-      ENV.fetch("MCP_RUNTIME_MACOS_X86_64_URL"),
-      ENV.fetch("MCP_RUNTIME_MACOS_X86_64_SHA256"),
-    ],
-  },
-  "linux" => {
-    "arm" => [
-      ENV.fetch("MCP_RUNTIME_LINUX_ARM64_URL"),
-      ENV.fetch("MCP_RUNTIME_LINUX_ARM64_SHA256"),
-    ],
-    "intel" => [
-      ENV.fetch("MCP_RUNTIME_LINUX_X86_64_URL"),
-      ENV.fetch("MCP_RUNTIME_LINUX_X86_64_SHA256"),
-    ],
-  },
-}.freeze
+runtime_assets = {}
+{ "macos" => %w[arm intel], "linux" => %w[arm intel] }.each do |os, architectures|
+  runtime_assets[os] = {}
+  architectures.each do |arch|
+    target = "#{os.upcase}_#{arch == 'arm' ? 'ARM64' : 'X86_64'}"
+    resources = { "mcp-runtime" => "MCP_RUNTIME" }
+    resources["semantic-runtime"] = "SEMANTIC_RUNTIME" unless target == "MACOS_X86_64"
+    runtime_assets[os][arch] = resources.transform_values do |prefix|
+      [ENV.fetch("#{prefix}_#{target}_URL"), ENV.fetch("#{prefix}_#{target}_SHA256")]
+    end
+  end
+end
 
 RUNTIME_BEGIN = "# taplctl-mcp-runtime-begin"
 RUNTIME_END = "# taplctl-mcp-runtime-end"
@@ -157,20 +147,26 @@ def runtime_resource_block(indent, assets)
   { "macos" => "on_macos", "linux" => "on_linux" }.each do |os, os_dsl|
     lines << "#{indent}#{os_dsl} do\n"
     { "arm" => "on_arm", "intel" => "on_intel" }.each do |arch, arch_dsl|
-      url, sha256 = assets.fetch(os).fetch(arch)
-      lines.concat(
-        [
-          "#{indent}  #{arch_dsl} do\n",
-          "#{indent}    resource \"mcp-runtime\" do\n",
-          "#{indent}      url \"#{url}\"\n",
-          "#{indent}      sha256 \"#{sha256}\"\n",
-          "#{indent}    end\n",
-          "#{indent}  end\n",
-        ],
-      )
+      lines << "#{indent}  #{arch_dsl} do\n"
+      assets.fetch(os).fetch(arch).each do |name, (url, sha256)|
+        lines << "#{indent}    resource \"#{name}\" do\n"
+        lines << "#{indent}      url \"#{url}\"\n"
+        lines << "#{indent}      sha256 \"#{sha256}\"\n"
+        lines << "#{indent}    end\n"
+      end
+      lines << "#{indent}  end\n"
     end
     lines << "#{indent}end\n"
   end
+  lines.concat([
+    "\n",
+    "#{indent}def semantic_supported?\n",
+    "#{indent}  return Hardware::CPU.arm? && MacOS.version >= :sonoma if OS.mac?\n",
+    "\n",
+    "#{indent}  quiet_system Formula[\"python@3.12\"].opt_bin/\"python3.12\", \"-c\",\n",
+    "#{indent}               \"import os, sys; v = os.confstr('CS_GNU_LIBC_VERSION').split()[1]; sys.exit(tuple(map(int, v.split('.'))) < (2, 28))\"\n",
+    "#{indent}end\n",
+  ])
   lines << "#{indent}#{RUNTIME_END}\n"
   lines
 end
@@ -196,14 +192,8 @@ def install_block(indent)
     "#{indent}  wheelhouse = buildpath/\"wheelhouse\"\n",
     "#{indent}  wheelhouse.mkpath\n",
     "#{indent}  resource(\"mcp-runtime\").stage { wheelhouse.install Dir[\"*.whl\"] }\n",
-    "#{indent}  runtime_packages = wheelhouse.glob(\"*.whl\").map do |runtime_wheel|\n",
-    "#{indent}    runtime_wheel.basename.to_s.split(\"-\", 2).first.tr(\"_\", \"-\").downcase\n",
-    "#{indent}  end\n",
-    "#{indent}  resources.each do |resource|\n",
-    "#{indent}    next if resource.name == \"mcp-runtime\"\n",
-    "#{indent}    next if runtime_packages.include?(resource.name.tr(\"_\", \"-\").downcase)\n",
-    "\n",
-    "#{indent}    resource.stage { wheelhouse.install Dir[\"*.whl\"] }\n",
+    "#{indent}  if semantic_supported?\n",
+    "#{indent}    resource(\"semantic-runtime\").stage { wheelhouse.install Dir[\"*.whl\"] }\n",
     "#{indent}  end\n",
     "\n",
     "#{indent}  dependency_wheels = wheelhouse.glob(\"*.whl\")\n",
@@ -227,6 +217,9 @@ def smoke_test_block(indent)
     "#{indent}  assert_path_exists bin/\"tapl-hook\"\n",
     "#{indent}  system libexec/\"bin/python\", \"-c\",\n",
     "#{indent}         \"from mcp.server import MCPServer; from taplctl.mcp_server import create_server; assert create_server()\"\n",
+    "#{indent}  if semantic_supported?\n",
+    "#{indent}    system libexec/\"bin/python\", \"-c\", \"import numpy, onnxruntime, sqlite_vec, tokenizers\"\n",
+    "#{indent}  end\n",
     "#{indent}  #{SMOKE_END}\n",
   ]
 end
@@ -280,17 +273,31 @@ end
 def update_formula(file, version, wheel_url, wheel_sha256, runtime_assets, formula_name: nil, class_name: nil)
   lines = File.readlines(file)
 
-  normalize_formula_class(lines, class_name, file) if class_name
-  normalize_formula_conflicts(lines, formula_name) if formula_name
-  normalize_version_test(lines)
-
   incoming_version = Gem::Version.new(version)
   current_version = formula_version(lines, file)
   if incoming_version < current_version
     warn "Skipping #{file}: #{version} is older than #{current_version}"
-    File.write(file, lines.join)
     return false
   end
+
+  # Rebuild the legacy formula from the stable template. Its old platform-specific
+  # PyPI resources, extra dependencies and Torch installation tests are obsolete.
+  if formula_name == "taplctl-semantic"
+    lines = File.readlines(PRE_FORMULA_TEMPLATE || File.join(File.dirname(file), "taplctl.rb"))
+    class_name = "TaplctlSemantic"
+  end
+  caveats = lines.index { |line| line.match?(/^  def caveats\s*$/) }
+  if caveats
+    finish = find_block_end(lines, caveats, "  ")
+    raise "Unterminated caveats in #{file}" unless finish
+    if lines[caveats..finish].any? { |line| line.include?("Semantic search dependencies are not installed") }
+      lines.slice!(caveats..finish)
+      lines.delete_at(caveats) if lines[caveats]&.strip == ""
+    end
+  end
+  normalize_formula_class(lines, class_name, file) if class_name
+  normalize_formula_conflicts(lines, formula_name) if formula_name
+  normalize_version_test(lines)
 
   version_index = lines.index { |line| line.match?(/^(\s*)version\s+[\"'][^\"']+[\"'](.*)$/) }
   raise "Could not update version in #{file}" unless version_index

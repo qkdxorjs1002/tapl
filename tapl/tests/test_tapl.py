@@ -6,6 +6,7 @@ import hashlib
 import io
 import argparse
 import asyncio
+import base64
 import json
 import os
 import shlex
@@ -1411,6 +1412,7 @@ class TaplRuntimeTests(unittest.TestCase):
                 "workflow.authoring_detail",
                 "recall.enabled",
                 "search.mode",
+                "search.model",
                 "search.max_results",
                 "search.hybrid_semantic_ratio",
                 "search.semantic_provider",
@@ -1429,6 +1431,7 @@ class TaplRuntimeTests(unittest.TestCase):
         )
         cases = (
             ("search.mode", "bm25", "bm25"),
+            ("search.model", "multilingual-e5-small-int8", "multilingual-e5-small-int8"),
             ("search.mode", '"word"', "word"),
             ("search.max_results", "24", 24),
             ("search.hybrid_semantic_ratio", "0.4", 0.4),
@@ -2169,7 +2172,7 @@ searchd_start_timeout_ms = 1
                 raise embeddings.searchd.SearchdUnavailable("down")
 
             embeddings.searchd.embed_query = fake_embed
-            embeddings.local_query_embedding_blob = lambda query: b"local"
+            embeddings.local_query_embedding_blob = lambda query, model: b"local"
 
             auto = tapl_config.SearchConfig(semantic_provider="auto")
             self.assertEqual(embeddings.query_embedding_blob("query", auto), b"local")
@@ -2182,7 +2185,8 @@ searchd_start_timeout_ms = 1
 
             embeddings.searchd.embed_query = fake_error
             self.assertEqual(embeddings.query_embedding_blob("query", auto), b"local")
-            self.assertIsNone(embeddings.query_embedding_blob("query", daemon))
+            with self.assertRaises(embeddings.searchd.SearchdError):
+                embeddings.query_embedding_blob("query", daemon)
         finally:
             embeddings.searchd.embed_query = original_embed
             embeddings.local_query_embedding_blob = original_local
@@ -2208,10 +2212,10 @@ searchd_start_timeout_ms = 1
                     "model_idle_timeout_seconds": self.model_idle_timeout_seconds,
                 }
 
-            def embed(self, text: str) -> dict[str, object]:
+            def embed(self, text: str, model: str) -> dict[str, object]:
                 self.text = text
                 self.model_loaded = True
-                return {"dimension": 3, "embedding_b64": "YWJj"}
+                return {"model": model, "dimension": 384, "embedding_b64": "YWJj"}
 
         model_state = FakeModelState()
 
@@ -2226,13 +2230,14 @@ searchd_start_timeout_ms = 1
         self.assertEqual(ping["model_idle_timeout_seconds"], 30)
 
         embed, stop = searchd.handle_request(
-            {"op": "embed", "text": "hello"},
+            {"op": "embed", "text": "hello", "model": tapl_config.DEFAULT_SEARCH_MODEL, "dimension": 384,
+             "fingerprint": searchd.embedding_model.MODELS[tapl_config.DEFAULT_SEARCH_MODEL].fingerprint},
             model_state=model_state,
             started_at=0.0,
         )
         self.assertTrue(embed["ok"])
         self.assertFalse(stop)
-        self.assertEqual(embed["dimension"], 3)
+        self.assertEqual(embed["dimension"], 384)
         self.assertEqual(embed["embedding_b64"], "YWJj")
         self.assertTrue(embed["model_loaded"])
 
@@ -2250,13 +2255,13 @@ searchd_start_timeout_ms = 1
             ) -> dict[str, object]:
                 captured["payload"] = payload
                 captured["timeout_ms"] = timeout_ms
-                return {"ok": True, "dimension": 384, "embedding_b64": "YWJj"}
+                return {"ok": True, **payload, "embedding_b64": base64.b64encode(bytes(384 * 4)).decode("ascii")}
 
             searchd.request = fake_request
 
             embedded = searchd.embed_query("hello", tapl_config.SearchConfig())
 
-            self.assertEqual(embedded, b"abc")
+            self.assertEqual(embedded, bytes(384 * 4))
             self.assertEqual(captured["payload"]["op"], "embed")
             self.assertEqual(captured["timeout_ms"], searchd.DEFAULT_EMBED_TIMEOUT_MS)
         finally:
@@ -2287,31 +2292,15 @@ searchd_start_timeout_ms = 1
         current_time = 0.0
         loaded = 0
 
-        class FakeArray:
-            shape = (3,)
-
-            def tobytes(self) -> bytes:
-                return b"abc"
-
-        class FakeNumpy:
-            float32 = object()
-
-            def asarray(self, vector: object, dtype: object) -> FakeArray:
-                return FakeArray()
-
         class FakeModel:
-            def get_sentence_embedding_dimension(self) -> int:
-                return 3
-
-            def encode(self, texts: list[str], *, normalize_embeddings: bool) -> list[list[float]]:
-                self.texts = texts
-                self.normalize_embeddings = normalize_embeddings
-                return [[1.0, 2.0, 3.0]]
+            def encode(self, texts: list[str], *, query: bool) -> list[bytes]:
+                assert query
+                return [bytes(384 * 4) for text in texts]
 
         def now() -> float:
             return current_time
 
-        def load_model() -> FakeModel:
+        def load_model(model: str, root: Path) -> FakeModel:
             nonlocal loaded
             loaded += 1
             return FakeModel()
@@ -2320,14 +2309,13 @@ searchd_start_timeout_ms = 1
             model_idle_timeout_seconds=10,
             now=now,
             model_loader=load_model,
-            numpy_loader=FakeNumpy,
         )
 
         self.assertFalse(state.status_payload(started_at=0.0)["model_loaded"])
         self.assertEqual(loaded, 0)
 
-        first = state.embed("hello")
-        self.assertEqual(first["dimension"], 3)
+        first = state.embed("hello", tapl_config.DEFAULT_SEARCH_MODEL)
+        self.assertEqual(first["dimension"], 384)
         self.assertEqual(loaded, 1)
         self.assertTrue(state.model_loaded)
 

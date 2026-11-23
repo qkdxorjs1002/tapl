@@ -257,7 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     viewer_cmd.set_defaults(handler=cmd_viewer)
 
-    reindex = sub.add_parser("reindex", help="Build the optional semantic index.")
+    reindex = sub.add_parser("reindex", help="Build the optional semantic index for the configured search.model.")
     add_dry_run_arg(reindex)
     add_agent_output_args(reindex)
     reindex.set_defaults(handler=cmd_reindex)
@@ -654,7 +654,7 @@ def cmd_config_unset(args: argparse.Namespace) -> int:
 def cmd_reindex(args: argparse.Namespace) -> int:
     conn = open_conn(args)
     try:
-        payload = embeddings.reindex(conn, dry_run=args.dry_run)
+        payload = embeddings.reindex(conn, model=load_config(args).search.model, dry_run=args.dry_run)
     finally:
         conn.close()
     emit(payload, args.json, args.agent)
@@ -665,6 +665,7 @@ def cmd_searchd_start(args: argparse.Namespace) -> int:
     settings = load_config(args)
     payload = searchd.start(
         settings.search,
+        config_path=settings.path,
         socket_path=args.socket,
         model_idle_timeout_seconds=args.idle_timeout,
         timeout_ms=args.timeout_ms,

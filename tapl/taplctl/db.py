@@ -13,14 +13,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from . import identity, memory_cues, memory_search, sessions
+from . import embedding_model, identity, memory_cues, memory_search, sessions
 
 
 SCHEMA_VERSION = 15
 READONLY_SCHEMA_VERSIONS = (14, 15)
 DEFAULT_DB_RELATIVE = Path(".tapl") / "tapl.db"  # Legacy filename only.
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-DEFAULT_EMBEDDING_DIMENSION = 384
+DEFAULT_EMBEDDING_MODEL = embedding_model.DEFAULT_MODEL
+DEFAULT_EMBEDDING_DIMENSION = embedding_model.DIMENSION
 TASK_STATUSES = ("Pending", "In Progress", "Completed", "Blocked", "Skipped")
 EXECUTION_MODES = ("sequential", "parallel")
 EXECUTOR_KINDS = ("main", "subagent")
@@ -637,8 +637,6 @@ def migrate(conn: sqlite3.Connection) -> None:
                              (row["id"], memory_search.indexed_cues(json.loads(row["cues_json"])), row["note"]))
         memory_cues.ensure_catalog(conn, backfill=current is None or int(current["value"]) < 15)
         set_schema_version(conn, SCHEMA_VERSION)
-        set_meta(conn, "embedding_model", DEFAULT_EMBEDDING_MODEL)
-        set_meta(conn, "embedding_dimension", str(DEFAULT_EMBEDDING_DIMENSION))
         conn.commit()
     except BaseException:
         conn.rollback()

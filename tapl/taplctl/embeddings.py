@@ -1,112 +1,142 @@
-"""Optional semantic search support for tapl."""
+"""Optional semantic search support for TAPL."""
 
 from __future__ import annotations
 
-import contextlib
-import importlib.util
-import os
-import sqlite3
-import sys
 from collections.abc import Iterator
+from contextlib import contextmanager
+from functools import lru_cache
+import importlib.util
+from itertools import zip_longest
+from pathlib import Path
+import sqlite3
 from typing import Any
 
-from . import config as tapl_config, db, searchd
-
-_MODEL_LOAD_PROGRESS_MARKERS = ("Loading weights:",)
+from . import config as tapl_config, db, embedding_model, searchd
 
 
-def dependency_status() -> dict[str, Any]:
-    return {
-        "sqlite_vec": importlib.util.find_spec("sqlite_vec") is not None,
-        "sentence_transformers": importlib.util.find_spec("sentence_transformers") is not None,
-        "numpy": importlib.util.find_spec("numpy") is not None,
-    }
+# Pre-ONNX clients issue unguarded KNN queries against item_embeddings.
+# Keep their vectors and metadata isolated, including when both clients run.
+_INDEX_TABLE = "item_embeddings_onnx"
+_ITEMS_SQL = """
+    SELECT id, stable_id, kind, title, body, raw_text, custom_fields_json, run_id
+    FROM items ORDER BY id
+"""
+_BATCH_SIZE = 32
 
 
-def reindex(conn: sqlite3.Connection, *, dry_run: bool = False) -> dict[str, Any]:
-    items = conn.execute(
-        """
-        SELECT id, stable_id, kind, title, body, raw_text, custom_fields_json, run_id
-        FROM items
-        ORDER BY id
-        """
-    ).fetchall()
+def dependency_status() -> dict[str, bool]:
+    return {name: importlib.util.find_spec(name) is not None
+            for name in ("sqlite_vec", "numpy", "onnxruntime", "tokenizers")}
 
-    status = dependency_status()
-    payload: dict[str, Any] = {
-        "dry_run": dry_run,
-        "items": len(items),
-        "dependencies": status,
-        "embedding_model": db.DEFAULT_EMBEDDING_MODEL,
-        "embedding_dimension": db.DEFAULT_EMBEDDING_DIMENSION,
-    }
-    if dry_run:
-        payload["ok"] = True
-        return payload
 
-    missing = [name for name, available in status.items() if not available]
-    if missing:
-        payload["ok"] = False
-        payload["error"] = f"missing optional dependencies: {', '.join(missing)}"
-        return payload
+@lru_cache(maxsize=1)
+def _local_model(model: str, cache_root: Path) -> embedding_model.Encoder:
+    return embedding_model.Encoder(model, cache_root)
 
-    import numpy as np
+
+def _load_vec(conn: sqlite3.Connection) -> None:
     import sqlite_vec
 
     conn.enable_load_extension(True)
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
-    conn.execute(
-        f"""
-        CREATE VIRTUAL TABLE IF NOT EXISTS item_embeddings
-        USING vec0(embedding float[{db.DEFAULT_EMBEDDING_DIMENSION}], kind text, run_id text)
-        """
-    )
-    conn.execute("DELETE FROM item_embeddings")
+    try:
+        sqlite_vec.load(conn)
+    finally:
+        conn.enable_load_extension(False)
 
-    if not items:
-        conn.commit()
-        payload["ok"] = True
-        payload["indexed"] = 0
-        return payload
 
-    model = load_model(prefer_local=True)
-    texts = [item_text(item) for item in items]
-    vectors = model.encode(texts, normalize_embeddings=True)
+@contextmanager
+def _index_transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    # A savepoint also works inside the reader's existing read-only snapshot.
+    conn.execute("SAVEPOINT tapl_semantic_index")
+    try:
+        yield
+        conn.execute("RELEASE tapl_semantic_index")
+    except BaseException:
+        conn.execute("ROLLBACK TO tapl_semantic_index")
+        conn.execute("RELEASE tapl_semantic_index")
+        raise
 
-    for item, vector in zip(items, vectors, strict=True):
-        blob = np.asarray(vector, dtype=np.float32).tobytes()
-        conn.execute(
-            "INSERT INTO item_embeddings(rowid, embedding, kind, run_id) VALUES(?, ?, ?, ?)",
-            (item["id"], blob, item["kind"], item["run_id"]),
+
+def _index_identity(conn: sqlite3.Connection) -> tuple[str | None, str | None]:
+    tables = {row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN (?, 'item_embeddings')",
+        (_INDEX_TABLE,),
+    )}
+    meta = db.get_meta(conn)
+    if _INDEX_TABLE in tables:
+        return meta.get("onnx_embedding_model"), meta.get("onnx_embedding_fingerprint")
+    if "item_embeddings" in tables:
+        return meta.get("embedding_model") or "legacy", None
+    return None, None
+
+
+def reindex(
+    conn: sqlite3.Connection, *, model: str = embedding_model.DEFAULT_MODEL, dry_run: bool = False,
+) -> dict[str, Any]:
+    spec = embedding_model.MODELS[model]
+    status = dependency_status()
+    with _index_transaction(conn):
+        indexed_model, indexed_fingerprint = _index_identity(conn)
+        items = conn.execute(_ITEMS_SQL).fetchall()
+        source_hash = db.content_hash(
+            db.content_hash((str(item["id"]), item["run_id"], item_text(item))) for item in items
         )
-        conn.execute(
-            """
-            INSERT INTO embedding_jobs(item_id, content_hash, state, updated_at)
-            VALUES(?, ?, 'indexed', ?)
-            ON CONFLICT(item_id) DO UPDATE SET
-              content_hash = excluded.content_hash,
-              state = excluded.state,
-              updated_at = excluded.updated_at
-            """,
-            (
-                item["id"],
-                db.content_hash(
-                    [
-                        item["stable_id"],
-                        item["title"],
-                        item["body"],
-                        item["raw_text"],
-                        db.custom_fields_search_text(item["custom_fields_json"]),
-                    ]
-                ),
-                db.utc_now(),
-            ),
-        )
-    conn.commit()
-    payload["ok"] = True
-    payload["indexed"] = len(items)
-    return payload
+        stored_hash = conn.execute("SELECT value FROM meta WHERE key='onnx_embedding_source_hash'").fetchone()
+    payload = {
+        "dry_run": dry_run, "items": len(items), "dependencies": status,
+        "embedding_model": model, "embedding_dimension": embedding_model.DIMENSION,
+        "embedding_fingerprint": spec.fingerprint,
+        "indexed_model": indexed_model, "indexed_fingerprint": indexed_fingerprint,
+        "needs_reindex": ((indexed_model, indexed_fingerprint) != (model, spec.fingerprint)
+                          or stored_hash is None or stored_hash[0] != source_hash),
+    }
+    if dry_run:
+        return {**payload, "ok": True}
+    missing = [name for name, available in status.items() if not available]
+    if missing:
+        return {**payload, "ok": False, "error": f"missing optional dependencies: {', '.join(missing)}"}
+
+    try:
+        _load_vec(conn)
+        vectors = []
+        if items:
+            encoder = _local_model(model, embedding_model.cache_root())
+            for offset in range(0, len(items), _BATCH_SIZE):
+                batch = items[offset:offset + _BATCH_SIZE]
+                vectors.extend(encoder.encode([item_text(item) for item in batch], query=False))
+
+        with _index_transaction(conn):
+            # Take the write lock only after downloads and inference. Confirm
+            # exactly the inputs used above before publishing this generation.
+            db.set_meta(conn, "onnx_embedding_model", model)
+            if any(before != after for before, after in zip_longest(items, conn.execute(_ITEMS_SQL))):
+                raise ValueError("indexed items changed during the rebuild; retry taplctl reindex")
+            conn.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS {_INDEX_TABLE}
+                USING vec0(embedding float[{embedding_model.DIMENSION}], kind text, run_id text)
+            """)
+            conn.execute(f"DELETE FROM {_INDEX_TABLE}")
+            conn.executemany(
+                f"INSERT INTO {_INDEX_TABLE}(rowid, embedding, kind, run_id) VALUES(?, ?, ?, ?)",
+                ((item["id"], vector, item["kind"], item["run_id"])
+                 for item, vector in zip(items, vectors, strict=True)),
+            )
+            now = db.utc_now()
+            conn.executemany(
+                """INSERT INTO embedding_jobs(item_id, content_hash, state, updated_at)
+                   VALUES(?, ?, 'indexed', ?)
+                   ON CONFLICT(item_id) DO UPDATE SET content_hash=excluded.content_hash,
+                     state=excluded.state, updated_at=excluded.updated_at""",
+                ((item["id"], db.content_hash([item["stable_id"], item["title"], item["body"],
+                                               item["raw_text"], db.custom_fields_search_text(item["custom_fields_json"])]),
+                  now) for item in items),
+            )
+            db.set_meta(conn, "onnx_embedding_fingerprint", spec.fingerprint)
+            db.set_meta(conn, "onnx_embedding_source_hash", source_hash)
+    except Exception as exc:
+        return {**payload, "ok": False, "error": f"semantic reindex failed: {exc}"}
+    return {**payload, "ok": True, "items": len(items), "indexed": len(items), "needs_reindex": False,
+            "indexed_model": model, "indexed_fingerprint": spec.fingerprint}
 
 
 def search(
@@ -117,59 +147,25 @@ def search(
     search_config: tapl_config.SearchConfig | None = None,
 ) -> dict[str, Any]:
     settings = search_config or tapl_config.SearchConfig()
-    payload: dict[str, Any] = {
-        "query": query,
-        "limit": limit,
-        "configured_mode": settings.mode,
-        "search_config": settings.as_dict(),
-    }
-
-    if settings.mode == "semantic":
-        semantic = semantic_search(conn, query, limit=limit, search_config=settings)
-        if semantic is not None:
-            payload.update({"mode": "semantic", "results": semantic})
-            return payload
-        payload.update(
-            {
-                "mode": "bm25",
-                "fallback_reason": "semantic search unavailable; used bm25",
-                "results": db.search_bm25(conn, query, limit=limit),
-            }
-        )
-        return payload
-
+    payload = {"query": query, "limit": limit, "configured_mode": settings.mode,
+               "search_config": settings.as_dict()}
     if settings.mode == "bm25":
-        payload.update({"mode": "bm25", "results": db.search_bm25(conn, query, limit=limit)})
-        return payload
-
+        return {**payload, "mode": "bm25", "results": db.search_bm25(conn, query, limit=limit)}
     if settings.mode == "word":
-        payload.update({"mode": "word", "results": db.search_word(conn, query, limit=limit)})
-        return payload
+        return {**payload, "mode": "word", "results": db.search_word(conn, query, limit=limit)}
 
-    semantic = semantic_search(conn, query, limit=max(limit * 2, limit), search_config=settings)
-    bm25 = db.search_bm25(conn, query, limit=max(limit * 2, limit))
-    if semantic is None:
-        payload.update(
-            {
-                "mode": "hybrid",
-                "fallback_reason": "semantic search unavailable; hybrid used bm25 only",
-                "results": bm25[:limit],
-            }
-        )
-        return payload
-
-    payload.update(
-        {
-            "mode": "hybrid",
-            "results": hybrid_results(
-                semantic,
-                bm25,
-                limit=limit,
-                semantic_ratio=settings.hybrid_semantic_ratio,
-            ),
-        }
-    )
-    return payload
+    hybrid = settings.mode == "hybrid"
+    pool_size = limit * 2 if hybrid else limit
+    try:
+        semantic = semantic_search(conn, query, limit=pool_size, search_config=settings)
+    except Exception as exc:
+        return {**payload, "mode": "hybrid" if hybrid else "bm25",
+                "fallback_reason": f"Semantic search unavailable: {exc}. Used BM25.",
+                "results": db.search_bm25(conn, query, limit=limit)}
+    if hybrid:
+        semantic = hybrid_results(semantic, db.search_bm25(conn, query, limit=pool_size),
+                                  limit=limit, semantic_ratio=settings.hybrid_semantic_ratio)
+    return {**payload, "mode": settings.mode, "results": semantic}
 
 
 def semantic_search(
@@ -178,71 +174,43 @@ def semantic_search(
     *,
     limit: int,
     search_config: tapl_config.SearchConfig | None = None,
-) -> list[dict[str, Any]] | None:
+) -> list[dict[str, Any]]:
     settings = search_config or tapl_config.SearchConfig()
-    if importlib.util.find_spec("sqlite_vec") is None:
-        return None
-
-    try:
-        import sqlite_vec
-
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
-
-        has_table = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'item_embeddings'"
-        ).fetchone()
-        if not has_table:
-            return None
-
-        count = conn.execute("SELECT COUNT(*) AS count FROM item_embeddings").fetchone()["count"]
-        if not count:
-            return None
+    model = settings.model
+    with _index_transaction(conn):
+        indexed_model, fingerprint = _index_identity(conn)
+        if indexed_model is None:
+            raise ValueError(f"no semantic index for {model}; run taplctl reindex")
+        if (indexed_model, fingerprint) != (model, embedding_model.MODELS[model].fingerprint):
+            raise ValueError(f"index for {indexed_model} is incompatible with {model}; run taplctl reindex")
+        _load_vec(conn)
+        if not conn.execute(f"SELECT 1 FROM {_INDEX_TABLE} LIMIT 1").fetchone():
+            raise ValueError("semantic index is empty; run taplctl reindex after adding items")
 
         blob = query_embedding_blob(query, settings)
-        if blob is None:
-            return None
         rows = conn.execute(
-            """
-            SELECT i.*, item_embeddings.distance AS score
-            FROM item_embeddings
-            JOIN items i ON i.id = item_embeddings.rowid
-            WHERE item_embeddings.embedding MATCH ? AND k = ?
-            ORDER BY item_embeddings.distance
-            """,
+            f"""SELECT i.*, v.distance AS score FROM {_INDEX_TABLE} v
+                JOIN items i ON i.id = v.rowid
+                WHERE v.embedding MATCH ? AND k = ? ORDER BY v.distance""",
             (blob, limit),
         ).fetchall()
-        return [db.search_row(row, "semantic") for row in rows]
-    except Exception:
-        return None
+    return [db.search_row(row, "semantic") for row in rows]
 
 
-def query_embedding_blob(query: str, settings: tapl_config.SearchConfig) -> bytes | None:
-    if settings.semantic_provider == "local":
-        return local_query_embedding_blob(query)
-
-    try:
-        return searchd.embed_query(query, settings)
-    except searchd.SearchdUnavailable:
-        return local_query_embedding_blob(query)
-    except searchd.SearchdError:
-        if settings.semantic_provider == "daemon":
-            return None
-
-    return local_query_embedding_blob(query)
+def query_embedding_blob(query: str, settings: tapl_config.SearchConfig) -> bytes:
+    if settings.semantic_provider != "local":
+        try:
+            return searchd.embed_query(query, settings)
+        except searchd.SearchdUnavailable:
+            pass
+        except searchd.SearchdError:
+            if settings.semantic_provider == "daemon":
+                raise
+    return local_query_embedding_blob(query, settings.model)
 
 
-def local_query_embedding_blob(query: str) -> bytes | None:
-    status = dependency_status()
-    if not status["sentence_transformers"] or not status["numpy"]:
-        return None
-
-    import numpy as np
-
-    model = load_model(prefer_local=True)
-    vector = model.encode([query], normalize_embeddings=True)[0]
-    return np.asarray(vector, dtype=np.float32).tobytes()
+def local_query_embedding_blob(query: str, model: str) -> bytes:
+    return _local_model(model, embedding_model.cache_root()).encode([query], query=True)[0]
 
 
 def hybrid_results(
@@ -332,70 +300,3 @@ def item_text(row: sqlite3.Row) -> str:
         ]
         if part
     )
-
-
-def load_model(*, prefer_local: bool):
-    from sentence_transformers import SentenceTransformer
-
-    if prefer_local:
-        try:
-            with suppress_model_load_progress():
-                return SentenceTransformer(db.DEFAULT_EMBEDDING_MODEL, local_files_only=True)
-        except Exception:
-            pass
-    with suppress_model_load_progress():
-        return SentenceTransformer(db.DEFAULT_EMBEDDING_MODEL)
-
-
-@contextlib.contextmanager
-def suppress_model_load_progress() -> Iterator[None]:
-    stdout = sys.stdout
-    stderr = sys.stderr
-    stdout_filter = _ModelLoadProgressFilter(stdout)
-    stderr_filter = _ModelLoadProgressFilter(stderr)
-    with contextlib.ExitStack() as stack:
-        stack.enter_context(_suppress_stream_fd(stdout))
-        stack.enter_context(_suppress_stream_fd(stderr))
-        stack.enter_context(contextlib.redirect_stdout(stdout_filter))
-        stack.enter_context(contextlib.redirect_stderr(stderr_filter))
-        yield
-
-
-@contextlib.contextmanager
-def _suppress_stream_fd(stream: Any) -> Iterator[None]:
-    try:
-        fd = stream.fileno()
-    except (AttributeError, OSError, ValueError):
-        yield
-        return
-
-    stream.flush()
-    saved_fd = os.dup(fd)
-    try:
-        with open(os.devnull, "w", encoding="utf-8") as devnull:
-            os.dup2(devnull.fileno(), fd)
-            yield
-    finally:
-        stream.flush()
-        os.dup2(saved_fd, fd)
-        os.close(saved_fd)
-
-
-class _ModelLoadProgressFilter:
-    def __init__(self, stream: Any) -> None:
-        self.stream = stream
-        self._suppress_until_newline = False
-
-    def write(self, text: str) -> int:
-        should_suppress = self._suppress_until_newline or any(
-            marker in text for marker in _MODEL_LOAD_PROGRESS_MARKERS
-        )
-        if should_suppress:
-            self._suppress_until_newline = "\n" not in text
-            return len(text)
-
-        self.stream.write(text)
-        return len(text)
-
-    def flush(self) -> None:
-        self.stream.flush()

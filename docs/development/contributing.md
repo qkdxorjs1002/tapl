@@ -6,7 +6,7 @@ Use this guide to prepare a source checkout, choose checks for the changed bound
 
 ## Development environment
 
-The Python package requires **Python 3.11+**. Its runtime dependency is pinned to `mcp==2.0.0`. The `test` extra declares pytest, PyYAML, and wheel; the `semantic` extra declares NumPy, sentence-transformers, and sqlite-vec. Use `uv.lock` for the package's resolved environment.
+The Python package requires **Python 3.11+**. Its runtime dependency is pinned to `mcp==2.0.0`. The `test` extra declares pytest, PyYAML, and wheel; the `semantic` extra declares ONNX Runtime, Tokenizers, NumPy, and sqlite-vec. Use `uv.lock` for the package's resolved environment.
 
 From the repository root:
 

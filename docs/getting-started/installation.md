@@ -16,29 +16,31 @@ For the currently published Claude Code runtime, select `taplctl-pre` on Homebre
 
 The TAPL wheel is platform-independent, but dependencies still need compatible wheels. Uncommon architectures, very new Python versions, and musl-based Linux distributions such as Alpine may need local build tools. Source development uses `uv`; see [contributing](../development/contributing.md).
 
-## macOS with Homebrew
+<a id="macos-with-homebrew"></a>
+
+## Homebrew on macOS and Linux
 
 Add the tap and choose **one** formula:
 
 ```sh
 brew tap qkdxorjs1002/tap
 
-# Stable, with full-text search
+# Stable
 brew trust --formula qkdxorjs1002/tap/taplctl
 brew install taplctl
-
-# Or: stable, with semantic/vector dependencies
-brew trust --formula qkdxorjs1002/tap/taplctl-semantic
-brew install taplctl-semantic
 
 # Or: newest published release, including prereleases
 brew trust --formula qkdxorjs1002/tap/taplctl-pre
 brew install taplctl-pre
 ```
 
-`taplctl` and `taplctl-semantic` follow stable releases. `taplctl-pre` selects the newest published release, which can be stable or prerelease; `taplctl@pre` is an alias. Use the canonical formula name for trust and prefix lookup.
+`taplctl` follows stable releases. `taplctl-pre` selects the newest published release, which can be stable or prerelease; `taplctl@pre` is an alias. Use the canonical formula name for trust and prefix lookup.
 
 All three provide `taplctl`, `tapl-mcp`, and `tapl-hook` and cannot coexist. Uninstall the current formula before switching, for example `brew uninstall taplctl`. Formulae use pinned release-hosted wheel bundles without resolving packages from PyPI at installation time.
+
+`taplctl` and `taplctl-pre` include semantic dependencies on Apple Silicon with macOS 14+, and Linux x64 or ARM64 with glibc 2.28+. Full-text search is available on Intel Macs and older Linux systems. See [Search](../guides/search.md) for model selection and indexing.
+
+Existing `taplctl-semantic` users can upgrade the compatibility formula and receive the same runtime. When switching to `taplctl`, refresh [client integrations](integrations.md) with the new executable path.
 
 ## Linux
 
@@ -46,7 +48,13 @@ All three provide `taplctl`, `tapl-mcp`, and `tapl-hook` and cannot coexist. Uni
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | sh
 ```
 
-The standalone installer selects the latest stable release by default. To install the published Claude Code runtime, select its release manifest:
+The standalone installer selects the latest stable release by default. To enable semantic search on a Linux standalone install, use the following command. Updates retain this choice.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh | TAPL_INSTALL_SEMANTIC=1 sh
+```
+
+To install the published Claude Code runtime, select its release manifest:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/qkdxorjs1002/tapl/main/install.sh -o /tmp/tapl-install.sh
@@ -106,7 +114,7 @@ install.cmd -Pre -Semantic
 install.cmd -Version TAG
 ```
 
-Windows supports local semantic search with its optional dependencies. The Unix-socket `searchd` daemon is unavailable on Windows; full-text search works without it. See [search](../guides/search.md).
+The Windows x64 installer option `-Semantic` enables local semantic search. Windows ARM64 currently lacks a native `sqlite-vec` wheel. The Unix-socket `searchd` daemon is unavailable on Windows; full-text search works without it. See [search](../guides/search.md).
 
 ### Reinstall or remove Windows executables
 

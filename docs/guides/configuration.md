@@ -66,6 +66,7 @@ These canonical keys are accepted by `config set` and `config unset`. Runtime de
 | `workflow.authoring_detail` | `auto`, `precise`, `normal`, `minimal` | `auto` |
 | `recall.enabled` | Boolean | `true` |
 | `search.mode` | `semantic`, `bm25`, `word`, `hybrid` | `hybrid` |
+| `search.model` | `koen-e5-tiny-int8`, `multilingual-e5-small-int8` | `koen-e5-tiny-int8` |
 | `search.max_results` | Integer ≥ 1 | `12` |
 | `search.hybrid_semantic_ratio` | Number 0.0–1.0 | `0.65` |
 | `search.semantic_provider` | `local`, `daemon`, `auto` | `auto` |

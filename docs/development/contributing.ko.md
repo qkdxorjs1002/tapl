@@ -6,7 +6,7 @@
 
 ## 개발 환경
 
-Python 패키지는 **Python 3.11+**가 필요하며 런타임 의존성은 `mcp==2.0.0`으로 고정되어 있습니다. `test` extra는 pytest·PyYAML·wheel, `semantic` extra는 NumPy·sentence-transformers·sqlite-vec를 선언합니다. 패키지의 해석된 환경은 `uv.lock`을 사용합니다.
+Python 패키지는 **Python 3.11+**가 필요하며 런타임 의존성은 `mcp==2.0.0`으로 고정되어 있습니다. `test` extra는 pytest·PyYAML·wheel, `semantic` extra는 ONNX Runtime·Tokenizers·NumPy·sqlite-vec를 선언합니다. 패키지의 해석된 환경은 `uv.lock`을 사용합니다.
 
 저장소 루트에서 실행합니다.
 

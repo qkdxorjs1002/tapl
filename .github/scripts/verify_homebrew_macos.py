@@ -8,6 +8,7 @@ from email.parser import BytesParser
 import hashlib
 import io
 import os
+import platform
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -94,11 +95,14 @@ def wheel_version(wheel: Path) -> str:
     return parsed["Version"]
 
 
-def install_and_verify(runtime: Path, wheel: Path, expected: dict[str, str], team_id: str) -> None:
+def install_and_verify(runtime: Path, wheel: Path, expected: dict[str, str], team_id: str,
+                       semantic_runtime: Path | None = None) -> None:
     # This mode intentionally creates/removes a Homebrew formula. Limit it to
     # disposable CI runners; --verify-prefix is a read-only local check.
     if os.environ.get("GITHUB_ACTIONS") != "true":
         raise ValueError("Homebrew installation checks must run in GitHub Actions")
+    if platform.machine() == "arm64" and semantic_runtime is None:
+        raise ValueError("macOS ARM64 Homebrew verification requires --semantic-runtime")
     env = dict(os.environ, HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_INSTALL_CLEANUP="1",
                HOMEBREW_NO_ENV_HINTS="1")
     # Intel runner images also contain python.org framework symlinks under
@@ -128,9 +132,15 @@ end
 ''')
         env.update(RELEASE_VERSION=wheel_version(wheel), WHEEL_URL=wheel.as_uri(),
                    WHEEL_SHA256=hashlib.sha256(wheel.read_bytes()).hexdigest())
-        for target in ("MACOS_ARM64", "MACOS_X86_64", "LINUX_ARM64", "LINUX_X86_64"):
-            env[f"MCP_RUNTIME_{target}_URL"] = runtime.as_uri()
-            env[f"MCP_RUNTIME_{target}_SHA256"] = hashlib.sha256(runtime.read_bytes()).hexdigest()
+        for kind, archive, targets in (
+            ("MCP_RUNTIME", runtime, ("MACOS_ARM64", "MACOS_X86_64", "LINUX_ARM64", "LINUX_X86_64")),
+            # The local fixture runs on one host. Other architectures have inactive resources.
+            ("SEMANTIC_RUNTIME", semantic_runtime or runtime, ("MACOS_ARM64", "LINUX_ARM64", "LINUX_X86_64")),
+        ):
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            for target in targets:
+                env[f"{kind}_{target}_URL"] = archive.as_uri()
+                env[f"{kind}_{target}_SHA256"] = digest
         updater = Path(__file__).with_name("update_homebrew_formula.rb")
         subprocess.run(["ruby", str(updater), str(formula)], check=True, env=env)
         for command in ("install", "reinstall"):
@@ -141,6 +151,9 @@ end
             prefix = Path(subprocess.check_output(["brew", "--prefix", FORMULA], text=True, env=env).strip())
             print(f"Checking completed brew {command}", flush=True)
             verify_prefix(prefix, expected, team_id)
+            if semantic_runtime:
+                subprocess.run([str(prefix / "libexec/bin/python"),
+                                str(Path(__file__).resolve().with_name("semantic_runtime_smoke.py"))], check=True)
     finally:
         subprocess.run(["brew", "uninstall", "--force", FORMULA], env=env, check=False)
         subprocess.run(["brew", "untap", TAP], env=env, check=False)
@@ -149,6 +162,7 @@ end
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", type=Path, required=True)
+    parser.add_argument("--semantic-runtime", type=Path)
     parser.add_argument("--wheel", type=Path)
     parser.add_argument("--team-id", required=True)
     parser.add_argument("--verify-prefix", type=Path)
@@ -156,10 +170,16 @@ def main() -> None:
     if sys.platform != "darwin":
         parser.error("Actual Homebrew signature verification requires macOS")
     expected = native_hashes(args.runtime)
+    semantic_runtime = args.semantic_runtime.resolve() if args.semantic_runtime else None
+    if semantic_runtime:
+        extra = native_hashes(semantic_runtime)
+        if expected.keys() & extra.keys():
+            raise ValueError("Overlapping native paths in MCP and semantic archives")
+        expected.update(extra)
     if args.verify_prefix:
         verify_prefix(args.verify_prefix, expected, args.team_id)
     elif args.wheel:
-        install_and_verify(args.runtime.resolve(), args.wheel.resolve(), expected, args.team_id)
+        install_and_verify(args.runtime.resolve(), args.wheel.resolve(), expected, args.team_id, semantic_runtime)
     else:
         parser.error("Provide --wheel for CI installation or --verify-prefix for an existing installation")
 

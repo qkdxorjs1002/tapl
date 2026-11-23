@@ -38,7 +38,8 @@ class PythonPackagingContractTests(unittest.TestCase):
         self.assertEqual(project["dependencies"], ["mcp==2.0.0"])
         self.assertEqual(
             project["optional-dependencies"]["semantic"],
-            ["numpy>=1.26", "sentence-transformers>=5.0.0", "sqlite-vec>=0.1.6"],
+            ["numpy>=2,<3; python_version < '3.12'", "numpy>=2.5.5,<3; python_version >= '3.12'",
+             "onnxruntime>=1.32,<1.33", "sqlite-vec>=0.1.9,<0.2", "tokenizers>=0.23.3,<0.24"],
         )
 
     def test_management_cli_entrypoint_reports_its_version(self) -> None:
@@ -163,6 +164,12 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
             keep_alive true
           end
 
+          def caveats
+            <<~EOS
+              Semantic search dependencies are not installed by this formula.
+            EOS
+          end
+
           test do
             assert_match(/taplctl/, shell_output("#{bin}/taplctl --version"))
           end
@@ -230,7 +237,14 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
                 'conflicts_with "taplctl-pre", because: "both install the taplctl executable"',
             ],
         )
-        self.assertIn('resource "numpy" do', semantic_after_first)
+        for formula in (base_after_first, semantic_after_first):
+            self.assertEqual(formula.count('resource "semantic-runtime" do'), 3)
+            self.assertNotIn('resource "numpy" do', formula)
+            self.assertNotIn("Semantic search dependencies are not installed", formula)
+            self.assertIn('resource("semantic-runtime").stage', formula)
+            self.assertIn('MacOS.version >= :sonoma', formula)
+            self.assertIn('CS_GNU_LIBC_VERSION', formula)
+
         for path in (self.base_formula, self.semantic_formula):
             syntax = subprocess.run(
                 ["ruby", "-c", str(path)],
@@ -295,6 +309,12 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
                 "RELEASE_VERSION": "1.5.1",
                 "WHEEL_URL": "https://example.invalid/taplctl-1.5.1.whl",
                 "WHEEL_SHA256": "1" * 64,
+                **{
+                    f"SEMANTIC_RUNTIME_{target}_{field}": ("a" * 64 if field == "SHA256" else
+                                                            f"https://example.invalid/semantic-{target}.tar.gz")
+                    for target in ("MACOS_ARM64", "LINUX_ARM64", "LINUX_X86_64")
+                    for field in ("URL", "SHA256")
+                },
                 "MCP_RUNTIME_MACOS_ARM64_URL": "https://example.invalid/macos-arm64.tar.gz",
                 "MCP_RUNTIME_MACOS_ARM64_SHA256": "2" * 64,
                 "MCP_RUNTIME_MACOS_X86_64_URL": "https://example.invalid/macos-x86_64.tar.gz",
@@ -470,7 +490,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             upload = next(step for step in jobs[job_name]['steps'] if step['name'] == upload_name)
             self.assertEqual(upload['with']['name'], artifact_name)
             self.assertEqual(upload['with']['path'],
-                             'release-dist/taplctl-mcp-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz')
+                             'release-dist/taplctl-*-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz')
             self.assertEqual(upload['with']['if-no-files-found'], 'error')
         downloads = [step['with'] for step in jobs['release']['steps']
                      if step.get('uses') == 'actions/download-artifact@v4']
@@ -490,6 +510,9 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             for target in ('macos_arm64', 'macos_x86_64', 'linux_arm64', 'linux_x86_64')
             for field in ('url', 'sha256')
         ]
+        asset_keys.extend(f'semantic_runtime_{target}_{field}'
+                          for target in ('macos_arm64', 'linux_arm64', 'linux_x86_64')
+                          for field in ('url', 'sha256'))
         expected_outputs.update({key: '${{ steps.assets.outputs.' + key + ' }}' for key in asset_keys})
         self.assertEqual(jobs['release']['outputs'], expected_outputs)
         homebrew = jobs['homebrew']
@@ -541,19 +564,25 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
                 for name in (f'tapl-workflow-viewer-{tag}.vsix', 'install.ps1', 'install.cmd'):
                     (assets / name).write_bytes(b'fixture')
                 env = dict(os.environ, GITHUB_REPOSITORY='example/tapl', GITHUB_REF_NAME=tag, TAG_VERSION=tag)
-                for target in ('macos-arm64', 'macos-x86_64', 'linux-arm64', 'linux-x86_64'):
-                    name = f'taplctl-mcp-runtime-{tag}-{target}.tar.gz'
-                    archive = assets / name
-                    with tarfile.open(archive, 'w:gz') as output:
-                        for distribution in ('mcp', 'mcp_types', 'pydantic', 'pydantic_core', 'cryptography'):
-                            content = b'runtime fixture'
-                            info = tarfile.TarInfo(f'./{distribution}-1.0-py3-none-any.whl')
-                            info.size = len(content)
-                            output.addfile(info, io.BytesIO(content))
-                    key = target.upper().replace('-', '_')
-                    env[f'MCP_RUNTIME_{key}_URL'] = base_url + name
-                    env[f'MCP_RUNTIME_{key}_SHA256'] = hashlib.sha256(archive.read_bytes()).hexdigest()
-                self.assertEqual(len(list(assets.iterdir())), 9)
+                for kind, targets, distributions in (
+                    ("mcp", ("macos-arm64", "macos-x86_64", "linux-arm64", "linux-x86_64"),
+                     ("mcp", "mcp_types", "pydantic", "pydantic_core", "cryptography")),
+                    ("semantic", ("macos-arm64", "linux-arm64", "linux-x86_64"),
+                     ("numpy", "onnxruntime", "sqlite_vec", "tokenizers")),
+                ):
+                    for target in targets:
+                        name = f'taplctl-{kind}-runtime-{tag}-{target}.tar.gz'
+                        archive = assets / name
+                        with tarfile.open(archive, 'w:gz') as output:
+                            for distribution in distributions:
+                                content = b'runtime fixture'
+                                info = tarfile.TarInfo(f'./{distribution}-1.0-py3-none-any.whl')
+                                info.size = len(content)
+                                output.addfile(info, io.BytesIO(content))
+                        key = f'{kind}_runtime_{target}'.upper().replace('-', '_')
+                        env[f'{key}_URL'] = base_url + name
+                        env[f'{key}_SHA256'] = hashlib.sha256(archive.read_bytes()).hexdigest()
+                self.assertEqual(len(list(assets.iterdir())), 12)
 
                 def validate() -> subprocess.CompletedProcess[str]:
                     return subprocess.run(
@@ -671,9 +700,17 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         linux_steps = {step['name']: step for step in linux_job['steps']}
         runtime_step = linux_steps["Build MCP runtime wheelhouses"]["run"]
         self.assertEqual(linux_job['strategy']['matrix']['include'], [
-            {'target': 'linux-arm64', 'platform': 'manylinux2014_aarch64'},
-            {'target': 'linux-x86_64', 'platform': 'manylinux2014_x86_64'},
+            {'target': 'linux-arm64', 'platform': 'manylinux2014_aarch64', 'runner': 'ubuntu-24.04-arm'},
+            {'target': 'linux-x86_64', 'platform': 'manylinux2014_x86_64', 'runner': 'ubuntu-24.04'},
         ])
+        self.assertEqual(linux_job["runs-on"], "${{ matrix.runner }}")
+        semantic_step = linux_steps["Build and exercise the native semantic wheelhouse"]["run"]
+        self.assertIn("--no-index", semantic_step)
+        self.assertIn("build_semantic_wheelhouse.py", semantic_step)
+        self.assertIn("semantic_runtime_smoke.py", semantic_step)
+        self.assertIn("semantic_runtime_smoke.py", next(step["run"] for step in
+                      workflow["jobs"]["windows-installer-preflight"]["steps"]
+                      if step["name"] == "Verify Windows x64 semantic wheel on CPU"))
         self.assertIn('--platform "${platform}"', runtime_step)
         self.assertIn('--python-version 3.12', runtime_step)
         self.assertIn('--implementation cp', runtime_step)

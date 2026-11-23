@@ -146,6 +146,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
           <div className="wb-settings-section-title" data-tapl-tour={section === 'viewer' ? 'display-settings' : undefined}><Icon name={section.includes('subagents') ? 'plan' : section === 'search' ? 'search' : section === 'recall' ? 'book' : 'settings'} /><h2 id={`settings-section-${section}`}>{sectionLabel(section)}</h2></div>
           {document.fields.filter((field) => field.section === section).map((field) => {
             const copy = settingsFieldText(locale, field.key, field.description), id = `setting-${field.key}`;
+            const defaultValue = String(document.defaults[field.key] ?? '');
             return <div className={`wb-settings-field ${['models', 'profiles', 'string-list'].includes(field.type) ? 'wb-settings-field-wide' : ''}`} key={field.key}>
               <div className="wb-settings-field-copy"><label htmlFor={id} id={`${id}-label`}>{copy.label}</label><code>{field.key}</code><p id={`${id}-help`}>{copy.help}</p>
                 <div className="wb-settings-field-meta"><span className="wb-settings-badge">{t(document.overrides.includes(field.key) ? 'settingsOverride' : 'settingsDefault')}</span>
@@ -155,7 +156,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element {
               <div className="wb-settings-control">
                 <SettingEditor key={`${field.key}:${generation}:${fieldGenerations[field.key] ?? 0}`} field={field} value={draft[field.key]} id={id} invalid={!!errors[field.key]} onChange={(value) => update(field.key, value)} onInvalid={(invalid) => setEditorErrors((current) => current[field.key] === invalid ? current : { ...current, [field.key]: invalid })} />
                 {errors[field.key] && <p id={`${id}-error`} className="wb-settings-input-error">{t(errors[field.key]!)}</p>}
-                {!['models', 'profiles', 'string-list'].includes(field.type) && <small className="wb-settings-default-hint">{t('settingsDefaultValue', { value: String(document.defaults[field.key] ?? '') })}</small>}
+                {!['models', 'profiles', 'string-list'].includes(field.type) && <small className="wb-settings-default-hint">{t('settingsDefaultValue', { value: field.type === 'select' ? settingsOptionText(locale, defaultValue) : defaultValue })}</small>}
               </div>
             </div>;
           })}

@@ -126,6 +126,14 @@ class HistoryReader:
                 if payloads else {"query": query, "limit": limit, "mode": self.settings.search.mode,
                                   "configured_mode": self.settings.search.mode,
                                   "search_config": self.settings.search.as_dict()})
+        if len(payloads) > 1:
+            fallbacks = {name: payload["fallback_reason"] for name, payload in payloads
+                         if "fallback_reason" in payload}
+            if fallbacks:
+                base["source_fallbacks"] = fallbacks
+                base["fallback_reason"] = " ".join(f"{name}: {reason}" for name, reason in fallbacks.items())
+                if len(fallbacks) < len(payloads):
+                    base["mode"] = self.settings.search.mode
         ranked = [(name, payload["results"]) for name, payload in payloads]
         results = embeddings.federated_results(ranked, limit=limit)
         return {"ok": True, **base, "results": results, "source_errors": errors}
