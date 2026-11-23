@@ -180,8 +180,10 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.base = Path(self.temporary_directory.name)
-        self.base_formula = self.base / "taplctl.rb"
-        self.semantic_formula = self.base / "taplctl-semantic.rb"
+        formula_dir = self.base / "Formula"
+        formula_dir.mkdir()
+        self.base_formula = formula_dir / "taplctl.rb"
+        self.semantic_formula = formula_dir / "taplctl-semantic.rb"
         self.base_formula.write_text(self.BASE_FORMULA, encoding="utf-8")
         self.semantic_formula.write_text(
             self.BASE_FORMULA.replace("class Taplctl <", "class TaplctlSemantic <").replace(
@@ -199,60 +201,54 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_updater_adds_runtime_offline_install_and_smoke_test_idempotently(self) -> None:
+        renames = self.base / "formula_renames.json"
+        renames.write_text('{"older-tool":"current-tool"}', encoding="utf-8")
         first = self._run_updater()
         self.assertEqual(first.returncode, 0, first.stderr)
         base_after_first = self.base_formula.read_text(encoding="utf-8")
-        semantic_after_first = self.semantic_formula.read_text(encoding="utf-8")
+        self.assertFalse(self.semantic_formula.exists())
+        self.assertEqual(json.loads(renames.read_text()), {"older-tool": "current-tool", "taplctl-semantic": "taplctl"})
+        rename_text = renames.read_text()
 
         second = self._run_updater()
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(self.base_formula.read_text(encoding="utf-8"), base_after_first)
-        self.assertEqual(self.semantic_formula.read_text(encoding="utf-8"), semantic_after_first)
+        self.assertFalse(self.semantic_formula.exists())
+        self.assertEqual(renames.read_text(), rename_text)
 
-        for formula in (base_after_first, semantic_after_first):
-            self.assertIn('version "1.5.1"', formula)
-            self.assertEqual(formula.count("  preserve_rpath\n"), 1)
-            self.assertEqual(formula.count('resource "mcp-runtime" do'), 4)
-            self.assertEqual(formula.count("# taplctl-mcp-runtime-begin"), 1)
-            self.assertIn('resource("mcp-runtime").stage', formula)
-            self.assertIn('"--no-index", "--no-deps", "--no-compile"', formula)
-            self.assertIn('bin.install_symlink libexec/"bin/tapl-mcp"', formula)
-            self.assertIn('bin.install_symlink libexec/"bin/tapl-hook"', formula)
-            self.assertIn('assert_path_exists bin/"tapl-hook"', formula)
-            self.assertIn('from taplctl.mcp_server import create_server', formula)
-            self.assertIn('run [opt_bin/"taplctl", "viewer"]', formula)
-            self._assert_running_service_restart_contract(formula)
+        self.assertIn('version "1.5.1"', base_after_first)
+        self.assertEqual(base_after_first.count("  preserve_rpath\n"), 1)
+        self.assertEqual(base_after_first.count('resource "mcp-runtime" do'), 4)
+        self.assertEqual(base_after_first.count("# taplctl-mcp-runtime-begin"), 1)
+        self.assertIn('resource("mcp-runtime").stage', base_after_first)
+        self.assertIn('"--no-index", "--no-deps", "--no-compile"', base_after_first)
+        self.assertIn('bin.install_symlink libexec/"bin/tapl-mcp"', base_after_first)
+        self.assertIn('bin.install_symlink libexec/"bin/tapl-hook"', base_after_first)
+        self.assertIn('assert_path_exists bin/"tapl-hook"', base_after_first)
+        self.assertIn('from taplctl.mcp_server import create_server', base_after_first)
+        self.assertIn('run [opt_bin/"taplctl", "viewer"]', base_after_first)
+        self._assert_running_service_restart_contract(base_after_first)
 
         self.assertEqual(
             self._conflict_lines(base_after_first),
             [
-                'conflicts_with "taplctl-semantic", because: "both install the taplctl executable"',
                 'conflicts_with "taplctl-pre", because: "both install the taplctl executable"',
             ],
         )
-        self.assertEqual(
-            self._conflict_lines(semantic_after_first),
-            [
-                'conflicts_with "taplctl", because: "both install the taplctl executable"',
-                'conflicts_with "taplctl-pre", because: "both install the taplctl executable"',
-            ],
-        )
-        for formula in (base_after_first, semantic_after_first):
-            self.assertEqual(formula.count('resource "semantic-runtime" do'), 3)
-            self.assertNotIn('resource "numpy" do', formula)
-            self.assertNotIn("Semantic search dependencies are not installed", formula)
-            self.assertIn('resource("semantic-runtime").stage', formula)
-            self.assertIn('MacOS.version >= :sonoma', formula)
-            self.assertIn('CS_GNU_LIBC_VERSION', formula)
+        self.assertEqual(base_after_first.count('resource "semantic-runtime" do'), 3)
+        self.assertNotIn('resource "numpy" do', base_after_first)
+        self.assertNotIn("Semantic search dependencies are not installed", base_after_first)
+        self.assertIn('resource("semantic-runtime").stage', base_after_first)
+        self.assertIn('MacOS.version >= :sonoma', base_after_first)
+        self.assertIn('CS_GNU_LIBC_VERSION', base_after_first)
 
-        for path in (self.base_formula, self.semantic_formula):
-            syntax = subprocess.run(
-                ["ruby", "-c", str(path)],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(syntax.returncode, 0, syntax.stderr)
+        syntax = subprocess.run(
+            ["ruby", "-c", str(self.base_formula)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(syntax.returncode, 0, syntax.stderr)
 
     @staticmethod
     def _conflict_lines(formula: str) -> list[str]:
@@ -302,11 +298,18 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Refusing to overwrite unmanaged post_install block", result.stderr)
 
-    def _run_updater(self) -> subprocess.CompletedProcess[str]:
+    def test_older_releases_do_not_retire_the_installed_formula(self) -> None:
+        before = self.semantic_formula.read_bytes()
+        result = self._run_updater(version="1.0.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.semantic_formula.read_bytes(), before)
+        self.assertFalse((self.base / "formula_renames.json").exists())
+
+    def _run_updater(self, version="1.5.1") -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env.update(
             {
-                "RELEASE_VERSION": "1.5.1",
+                "RELEASE_VERSION": version,
                 "WHEEL_URL": "https://example.invalid/taplctl-1.5.1.whl",
                 "WHEEL_SHA256": "1" * 64,
                 **{
@@ -326,7 +329,7 @@ class HomebrewFormulaUpdaterTests(unittest.TestCase):
             }
         )
         return subprocess.run(
-            ["ruby", str(FORMULA_UPDATER), str(self.base_formula), str(self.semantic_formula)],
+            ["ruby", str(FORMULA_UPDATER), "--retire-semantic", str(self.base), str(self.base_formula)],
             cwd=REPOSITORY_ROOT,
             env=env,
             text=True,
@@ -431,9 +434,14 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         jobs = workflow['jobs']
         producers = {'windows-installer-fixtures', 'windows-installer-preflight',
                      'build-packages', 'linux-runtime', 'macos-runtime'}
-        self.assertEqual(set(jobs), producers | {'release', 'homebrew', 'marketplace'})
+        self.assertEqual(set(jobs), producers | {'semantic-model-files', 'release', 'homebrew', 'marketplace'})
         self.assertEqual(set(jobs['release']['needs']), producers)
-        for name in producers:
+        model_consumers = {'windows-installer-preflight', 'linux-runtime', 'macos-runtime'}
+        for name in model_consumers:
+            self.assertEqual(jobs[name]['needs'], 'semantic-model-files')
+            download = next(step for step in jobs[name]['steps'] if step['name'] == 'Download verified semantic model files')
+            self.assertEqual(download['with']['name'], 'verified-semantic-model-files')
+        for name in (producers - model_consumers) | {'semantic-model-files'}:
             self.assertNotIn('needs', jobs[name], f'{name} must start independently')
         for name, job in jobs.items():
             self.assertNotIn('continue-on-error', job)
@@ -530,7 +538,8 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
                       'ruby -c homebrew-tap/Formula/taplctl-pre.rb', 'git -C homebrew-tap diff --cached --quiet'):
             self.assertIn(check, update['run'])
         stable_branch = update['run'].split('if [[ "${RELEASE_PRERELEASE}" == "false" ]]; then', 1)[1].split('\nfi', 1)[0]
-        self.assertIn('taplctl-semantic.rb', stable_branch)
+        self.assertIn('--retire-semantic homebrew-tap', stable_branch)
+        self.assertIn('tap_paths+=(formula_renames.json)', update['run'])
         self.assertIn('stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")', stable_branch)
         self.assertIn('--pre-alias homebrew-tap/Aliases/taplctl@pre', update['run'])
         marketplace = jobs['marketplace']
@@ -619,10 +628,12 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         ci_job = windows['jobs']['windows-installer-tests']
         preflight = release['jobs']['windows-installer-preflight']
         fixtures = release['jobs']['windows-installer-fixtures']
-        setup_names = {'Checkout source', 'Set up Python'}
+        setup_names = {'Checkout source', 'Set up Python', 'Download verified semantic model files'}
         ci_checks = {step['name']: step for step in ci_job['steps'] if step['name'] not in setup_names}
-        release_checks = [step for job in (fixtures, preflight) for step in job['steps']
+        release_checks = [dict(step) for job in (fixtures, preflight) for step in job['steps']
                           if step['name'] not in setup_names]
+        semantic = next(step for step in release_checks if step['name'] == 'Verify Windows x64 semantic wheel on CPU')
+        self.assertEqual(semantic.pop('env'), {'TAPL_MODEL_CACHE': '${{ runner.temp }}/tapl-semantic-models'})
         self.assertEqual(len(release_checks), len(ci_checks), 'Every CI check must run exactly once')
         self.assertEqual({step['name']: step for step in release_checks}, ci_checks)
         for job in (ci_job, fixtures, preflight):

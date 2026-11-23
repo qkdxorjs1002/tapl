@@ -13,6 +13,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  semantic-model-files:
+    name: Prepare verified semantic model files
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch pinned model and tokenizer bytes
+        env:
+          PYTHONPATH: tapl
+          TAPL_MODEL_CACHE: ${{ runner.temp }}/tapl-semantic-models
+        shell: bash
+        run: |
+          python - <<'PY'
+          from taplctl import embedding_model
+
+          for model in embedding_model.MODELS:
+              embedding_model.model_files(model, embedding_model.cache_root())
+              print(f"Verified {model}", flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-semantic-model-files
+          path: ${{ runner.temp }}/tapl-semantic-models
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 1
+
   windows-installer-fixtures:
     name: Windows installer fixtures (Python ${{ matrix.python-version }})
     runs-on: windows-latest
@@ -53,6 +83,7 @@ jobs:
 
   windows-installer-preflight:
     name: Windows release preflight (Python ${{ matrix.python-version }})
+    needs: semantic-model-files
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -82,8 +113,17 @@ jobs:
       - name: Build actual TAPL wheel
         run: python -m pip wheel --no-deps --wheel-dir dist ./tapl
 
+      - name: Download verified semantic model files
+        if: matrix.python-version == '3.12'
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-semantic-model-files
+          path: ${{ runner.temp }}/tapl-semantic-models
+
       - name: Verify Windows x64 semantic wheel on CPU
         if: matrix.python-version == '3.12'
+        env:
+          TAPL_MODEL_CACHE: ${{ runner.temp }}/tapl-semantic-models
         shell: powershell
         run: |
           $wheel = (Get-ChildItem -LiteralPath dist -Filter 'taplctl-*.whl').FullName
@@ -99,6 +139,7 @@ jobs:
 
   macos-runtime:
     name: Sign macOS runtime (${{ matrix.target }})
+    needs: semantic-model-files
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -220,8 +261,16 @@ jobs:
       - name: Build TAPL wheel for Homebrew verification
         run: python -m pip wheel --no-deps --wheel-dir "${RUNNER_TEMP}/homebrew-app" ./tapl
 
+      - name: Download verified semantic model files
+        if: matrix.target == 'macos-arm64'
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-semantic-model-files
+          path: ${{ runner.temp }}/tapl-semantic-models
+
       - name: Verify signatures after Homebrew install and reinstall
         env:
+          TAPL_MODEL_CACHE: ${{ runner.temp }}/tapl-semantic-models
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           TAG_VERSION: ${{ steps.version.outputs.version }}
           RUNTIME_TARGET: ${{ matrix.target }}
@@ -358,6 +407,7 @@ jobs:
 
   linux-runtime:
     name: Build Linux runtime (${{ matrix.target }})
+    needs: semantic-model-files
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -453,8 +503,15 @@ jobs:
             -czf "${archive}" \
             .
 
+      - name: Download verified semantic model files
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-semantic-model-files
+          path: ${{ runner.temp }}/tapl-semantic-models
+
       - name: Build and exercise the native semantic wheelhouse
         env:
+          TAPL_MODEL_CACHE: ${{ runner.temp }}/tapl-semantic-models
           TAG_VERSION: ${{ steps.version.outputs.version }}
           RUNTIME_TARGET: ${{ matrix.target }}
         shell: bash
@@ -895,17 +952,17 @@ jobs:
           fi
 
           stable_brew_files=()
+          stable_options=()
           if [[ "${RELEASE_PRERELEASE}" == "false" ]]; then
             stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")
-            if [[ -f "homebrew-tap/Formula/taplctl-semantic.rb" ]]; then
-              stable_brew_files+=("homebrew-tap/Formula/taplctl-semantic.rb")
-            fi
+            stable_options+=(--retire-semantic homebrew-tap)
           fi
 
           ruby -c .github/scripts/update_homebrew_formula.rb
           ruby .github/scripts/update_homebrew_formula.rb \
             --pre-formula homebrew-tap/Formula/taplctl-pre.rb \
             --pre-alias homebrew-tap/Aliases/taplctl@pre \
+            "${stable_options[@]}" \
             "${stable_brew_files[@]}"
           ruby -c homebrew-tap/Formula/taplctl-pre.rb
           for brew_file in "${stable_brew_files[@]}"; do
@@ -919,6 +976,14 @@ jobs:
           for brew_file in "${stable_brew_files[@]}"; do
             tap_paths+=("${brew_file#homebrew-tap/}")
           done
+          if [[ "${RELEASE_PRERELEASE}" == "false" ]]; then
+            if [[ -f homebrew-tap/formula_renames.json ]]; then
+              tap_paths+=(formula_renames.json)
+            fi
+            if [[ -n "$(git -C homebrew-tap ls-files -- Formula/taplctl-semantic.rb)" ]]; then
+              tap_paths+=(Formula/taplctl-semantic.rb)
+            fi
+          fi
 
           git -C homebrew-tap config user.name "github-actions[bot]"
           git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"

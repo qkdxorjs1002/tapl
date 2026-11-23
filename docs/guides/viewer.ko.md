@@ -132,7 +132,7 @@ RUN 탭을 선택한 뒤 왼쪽 패널의 **관리 → RUN 삭제**를 누르고
 
 ```sh
 brew services start taplctl
-# 다른 선택: taplctl-semantic 또는 taplctl-pre
+# 다른 채널: taplctl-pre
 brew services restart taplctl
 brew services stop taplctl
 ```

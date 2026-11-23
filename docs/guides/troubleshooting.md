@@ -21,7 +21,7 @@ taplctl config get
 | The host cannot see TAPL tools | Run `taplctl doctor`, repeat the connect command for your installation method, client and scope in [Agent integration](../getting-started/integrations.md) or [Claude Code](../getting-started/claude-code.md#connect-and-remove), then restart that host. |
 | `taplctl` is missing after standalone installation | Apply the installer's printed `PATH` export and persist it in your shell profile; reopen the terminal. On Windows, reopen the shell after PATH updates. |
 | Installed version or channel seems wrong | Compare `taplctl --version` with the installer channel and installation metadata. Use Homebrew for Homebrew installs and `taplctl update` for installer-managed installs; see [Installation](../getting-started/installation.md). |
-| Homebrew formula conflicts | Uninstall the installed TAPL formula before choosing `taplctl`, `taplctl-semantic`, or `taplctl-pre`. They provide the same commands. |
+| Homebrew formula conflicts | Uninstall the installed formula before switching channels. Use the [migration commands](../getting-started/installation.md#macos-with-homebrew) to move from `taplctl-semantic` to `taplctl`. |
 | Configuration changes have no effect | Inspect `taplctl config get` and the reported path. An explicit config or repository configuration can select a different file from the user configuration. See [Configuration](configuration.md). |
 
 ## Viewer and VS Code

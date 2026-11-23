@@ -733,8 +733,9 @@ def humanize_update_error(error: updater.UpdateError) -> str:
     if error.code == "unsupported_installation":
         return (
             "taplctl update is available only for installations made with the official "
-            "curl | sh or PowerShell installer. For Homebrew, run `brew upgrade taplctl` "
-            "(or `brew upgrade taplctl-semantic`); otherwise use the original install method."
+            "curl | sh or PowerShell installer. For Homebrew, run `brew update` and `brew upgrade taplctl` "
+            "(or `brew upgrade taplctl-pre` if installed). To move an existing semantic installation, "
+            "run `brew migrate taplctl-semantic`. For other installations, use the original install method."
         )
     return f"taplctl update failed ({error.code}): {error}"
 

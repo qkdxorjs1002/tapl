@@ -132,7 +132,7 @@ Start the formula you installed; all three serve port 8000, so run only one View
 
 ```sh
 brew services start taplctl
-# Alternatives: taplctl-semantic or taplctl-pre
+# Rolling channel: taplctl-pre
 brew services restart taplctl
 brew services stop taplctl
 ```

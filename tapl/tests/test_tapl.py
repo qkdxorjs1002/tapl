@@ -3623,7 +3623,8 @@ class TaplUpdaterTests(unittest.TestCase):
                 else:
                     self.assertEqual(stdout.getvalue(), "")
                     self.assertIn("brew upgrade taplctl", stderr.getvalue())
-                    self.assertIn("brew upgrade taplctl-semantic", stderr.getvalue())
+                    self.assertIn("brew migrate taplctl-semantic", stderr.getvalue())
+                    self.assertNotIn("brew upgrade taplctl-semantic", stderr.getvalue())
 
     def test_update_cli_json_and_agent_outputs_keep_tokenized_urls_redacted(self) -> None:
         payload = {

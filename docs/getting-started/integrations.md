@@ -60,7 +60,7 @@ Restart the selected client. In Codex, trust the installed hook when prompted. I
 
 Normal Homebrew installation needs no path override. The installer discovers `taplctl` on `PATH` and locates its sibling `tapl-mcp` and `tapl-hook` executables.
 
-Use `--taplctl-command` if discovery selects a different installation. These examples select user scope; replace `install user` with `install repo` for repository scope. Use the formula you installed (`taplctl`, `taplctl-semantic`, or `taplctl-pre`):
+Use `--taplctl-command` if discovery selects a different installation. These examples select user scope; replace `install user` with `install repo` for repository scope. Use the formula you installed (`taplctl` or `taplctl-pre`):
 
 ```sh
 # Codex, with the taplctl formula:

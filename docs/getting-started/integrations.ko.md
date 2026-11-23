@@ -60,7 +60,7 @@ Codex MCP 설정은 TOML이며 Claude MCP 설정과 두 클라이언트의 hook 
 
 일반적인 Homebrew 설치에는 경로 재정의가 필요 없습니다. 설치 명령은 `PATH`에서 `taplctl`을 찾아 같은 위치의 `tapl-mcp`, `tapl-hook` 실행 파일을 사용합니다.
 
-다른 설치가 선택되는 경우 `--taplctl-command`를 사용하세요. 아래 예제는 사용자 범위이며 저장소 범위는 `install user`를 `install repo`로 바꿉니다. 설치한 formula(`taplctl`, `taplctl-semantic`, `taplctl-pre`)를 사용합니다.
+다른 설치가 선택되는 경우 `--taplctl-command`를 사용하세요. 아래 예제는 사용자 범위이며 저장소 범위는 `install user`를 `install repo`로 바꿉니다. 설치한 formula(`taplctl`, `taplctl-pre`)를 사용합니다.
 
 ```sh
 # taplctl formula의 Codex:

@@ -64,10 +64,7 @@ class HomebrewPrereleaseFormulaUpdaterTests(unittest.TestCase):
             'conflicts_with "taplctl", because: "both install the taplctl executable"',
             formula_after_first,
         )
-        self.assertIn(
-            'conflicts_with "taplctl-semantic", because: "both install the taplctl executable"',
-            formula_after_first,
-        )
+        self.assertNotIn('conflicts_with "taplctl-semantic"', formula_after_first)
         self.assertIn(
             r"assert_match(/taplctl \d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?\z/",
             formula_after_first,

@@ -21,7 +21,7 @@ taplctl config get
 | 호스트에 TAPL 도구가 보이지 않음 | `taplctl doctor`를 실행하고 [에이전트 연결](../getting-started/integrations.ko.md) 또는 [Claude Code](../getting-started/claude-code.ko.md#연결과-제거)에서 설치 방식·클라이언트·범위에 맞는 연결 명령을 다시 실행한 뒤 해당 호스트를 재시작합니다. |
 | 독립 설치 후 `taplctl`을 찾지 못함 | 설치기가 출력한 `PATH` export를 적용하고 셸 프로필에 저장한 뒤 터미널을 다시 엽니다. Windows도 PATH 갱신 후 셸을 다시 엽니다. |
 | 설치 버전이나 채널이 예상과 다름 | `taplctl --version`을 설치 채널·메타데이터와 비교합니다. Homebrew 설치는 Homebrew로, 설치기 관리 설치는 `taplctl update`로 갱신합니다. [설치](../getting-started/installation.ko.md)를 참고하세요. |
-| Homebrew formula 충돌 | 기존 TAPL formula를 제거한 뒤 `taplctl`, `taplctl-semantic`, `taplctl-pre` 중 하나를 고릅니다. 같은 명령을 제공합니다. |
+| Homebrew formula 충돌 | 채널 전환 전에 현재 formula를 제거합니다. 기존 `taplctl-semantic`은 [이전 명령](../getting-started/installation.ko.md#macos와-homebrew)으로 `taplctl`로 이동하세요. |
 | 설정 변경이 적용되지 않음 | `taplctl config get`의 적용 값과 경로를 확인합니다. 명시적 설정이나 저장소 설정이 사용자 설정과 다른 파일을 선택할 수 있습니다. [설정](configuration.ko.md)을 보세요. |
 
 ## Viewer와 VS Code

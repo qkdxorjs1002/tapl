@@ -106,17 +106,21 @@ def _download_file(path: Path, url: str, expected_sha256: str) -> Path:
     return path
 
 
+def model_files(model: str, root: Path) -> tuple[Path, Path]:
+    spec = MODELS[model]
+    directory = root / model / spec.revision
+    base = f"https://huggingface.co/{spec.repository}/resolve/{spec.revision}/"
+    tokenizer = _verified_file(directory / "tokenizer.json", base + "tokenizer.json", spec.tokenizer_sha256)
+    graph = _verified_file(directory / "model.onnx", base + spec.onnx_path + "?download=true", spec.onnx_sha256)
+    return graph, tokenizer
+
+
 class Encoder:
     def __init__(self, model: str, root: Path) -> None:
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
-        spec = MODELS[model]
-        directory = root / model / spec.revision
-        base = f"https://huggingface.co/{spec.repository}/resolve/{spec.revision}/"
-        tokenizer = _verified_file(directory / "tokenizer.json", base + "tokenizer.json", spec.tokenizer_sha256)
-        graph = _verified_file(directory / "model.onnx", base + spec.onnx_path, spec.onnx_sha256)
-
+        graph, tokenizer = model_files(model, root)
         self.tokenizer = Tokenizer.from_file(str(tokenizer))
         pad_id = self.tokenizer.token_to_id("<pad>")
         if pad_id is None:

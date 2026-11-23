@@ -4,6 +4,7 @@
 # Homebrew formulas checked out by the release workflow.
 
 require "fileutils"
+require "json"
 require "optparse"
 require "pathname"
 require "rubygems/version"
@@ -16,6 +17,9 @@ parser = OptionParser.new do |opts|
   opts.on("--pre-alias PATH", "Create the taplctl@pre alias for the prerelease formula") do |path|
     options[:pre_alias] = path
   end
+  opts.on("--retire-semantic TAP", "Migrate the legacy semantic formula to the stable formula") do |path|
+    options[:retire_semantic] = path
+  end
 end
 
 files = parser.parse(ARGV)
@@ -23,6 +27,12 @@ raise "Pass a Homebrew formula path or --pre-formula PATH" if files.empty? && !o
 raise "--pre-alias requires --pre-formula" if options[:pre_alias] && !options[:pre_formula]
 
 version = ENV.fetch("RELEASE_VERSION")
+if options[:retire_semantic] && Gem::Version.new(version).prerelease?
+  raise "Formula retirement requires a stable release"
+end
+if files.any? { |file| File.basename(file) == "taplctl-semantic.rb" }
+  raise "taplctl-semantic has moved to taplctl"
+end
 wheel_url = ENV.fetch("WHEEL_URL")
 wheel_sha256 = ENV.fetch("WHEEL_SHA256")
 
@@ -48,9 +58,8 @@ SERVICE_RESTART_END = "# taplctl-service-restart-end"
 PRE_FORMULA_TEMPLATE = ENV["PRE_FORMULA_TEMPLATE"]
 PEP_440_VERSION_PATTERN = '\\d+\\.\\d+\\.\\d+(?:(?:a|b|rc)\\d+)?'
 FORMULA_CONFLICTS = {
-  "taplctl" => %w[taplctl-semantic taplctl-pre],
-  "taplctl-semantic" => %w[taplctl taplctl-pre],
-  "taplctl-pre" => %w[taplctl taplctl-semantic],
+  "taplctl" => %w[taplctl-pre],
+  "taplctl-pre" => %w[taplctl],
 }.freeze
 
 def replacement_line(line, content)
@@ -244,7 +253,7 @@ def normalize_formula_conflicts(lines, formula_name)
   conflicts = FORMULA_CONFLICTS[formula_name]
   return unless conflicts
 
-  known_formula_names = FORMULA_CONFLICTS.keys
+  known_formula_names = FORMULA_CONFLICTS.keys + ["taplctl-semantic"]
   lines.reject! do |line|
     match = line.match(/^\s*conflicts_with\s+["']([^"']+)["']/)
     match && known_formula_names.include?(match[1])
@@ -280,12 +289,6 @@ def update_formula(file, version, wheel_url, wheel_sha256, runtime_assets, formu
     return false
   end
 
-  # Rebuild the legacy formula from the stable template. Its old platform-specific
-  # PyPI resources, extra dependencies and Torch installation tests are obsolete.
-  if formula_name == "taplctl-semantic"
-    lines = File.readlines(PRE_FORMULA_TEMPLATE || File.join(File.dirname(file), "taplctl.rb"))
-    class_name = "TaplctlSemantic"
-  end
   caveats = lines.index { |line| line.match?(/^  def caveats\s*$/) }
   if caveats
     finish = find_block_end(lines, caveats, "  ")
@@ -355,6 +358,21 @@ def update_formula(file, version, wheel_url, wheel_sha256, runtime_assets, formu
   true
 end
 
+def retire_semantic_formula(tap, version)
+  stable = File.join(tap, "Formula", "taplctl.rb")
+  installed_formula_version = formula_version(File.readlines(stable), stable)
+  return unless installed_formula_version == Gem::Version.new(version)
+
+  renames_path = File.join(tap, "formula_renames.json")
+  renames = File.exist?(renames_path) ? JSON.parse(File.read(renames_path)) : {}
+  unless renames.is_a?(Hash) && renames.fetch("taplctl-semantic", "taplctl") == "taplctl"
+    raise "Unexpected Homebrew rename metadata: #{renames_path}"
+  end
+  renames["taplctl-semantic"] = "taplctl"
+  File.write(renames_path, JSON.pretty_generate(renames.sort.to_h) + "\n")
+  FileUtils.rm_f(File.join(tap, "Formula", "taplctl-semantic.rb"))
+end
+
 files.each do |file|
   update_formula(
     file,
@@ -365,6 +383,8 @@ files.each do |file|
     formula_name: File.basename(file, ".rb"),
   )
 end
+
+retire_semantic_formula(options[:retire_semantic], version) if options[:retire_semantic]
 
 if options[:pre_formula]
   pre_formula = options[:pre_formula]

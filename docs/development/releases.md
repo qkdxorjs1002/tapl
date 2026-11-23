@@ -35,7 +35,7 @@ The workflow runs these independent checks and artifact producers concurrently:
 - `build-packages` uses Python 3.12 and Node.js 22, injects tag/Python versions, runs extension host tests and compiles the shared Viewer, then builds the application wheel and VSIX.
 - Linux runtime jobs build arm64/x86_64 wheelhouses in a matrix. The macOS arm64/x86_64 matrix signs runtime wheelhouses and verifies real Homebrew install/reinstall before uploading signed artifacts.
 
-The Ubuntu `release` job waits for every check and producer to succeed. It downloads the exact versioned wheel, VSIX, and runtime archives, prepares installers/manifest, and validates asset bytes, versions, exact URLs, SHA-256 values, required runtime distributions, and rendered Windows installer contents. An isolated Linux x86_64 venv smoke verifies the installed version and native MCP tool inventory/status. The Homebrew token guard must also pass before GitHub Release publication. The three additional wheelhouses for Homebrew use dependencies verified against the lockfile. Both models must pass indexing and search checks on Windows x64, Linux x64 and ARM64, and macOS ARM64 before publication.
+The Ubuntu `release` job waits for every check and producer to succeed. It downloads the exact versioned wheel, VSIX, and runtime archives, prepares installers/manifest, and validates asset bytes, versions, exact URLs, SHA-256 values, required runtime distributions, and rendered Windows installer contents. An isolated Linux x86_64 venv smoke verifies the installed version and native MCP tool inventory/status. The Homebrew token guard must also pass before GitHub Release publication. The three additional wheelhouses for Homebrew use dependencies verified against the lockfile. Release CI verifies the pinned model files and shares them with each check. Both models must pass indexing and search checks on Windows x64, Linux x64 and ARM64, and macOS ARM64 before publication.
 
 | Asset | Purpose |
 | --- | --- |
@@ -56,9 +56,9 @@ The workflow creates or updates the tagged GitHub Release and uploads the valida
 
 ## Homebrew channels
 
-`HOMEBREW_TAP_TOKEN` is required with write access to `qkdxorjs1002/homebrew-tap` and is checked before GitHub publication. The downstream `homebrew` job depends on `release`, then checks out the tap, updates formulas, and commits/pushes changes. It uses the existing `Formula/taplctl.rb` as the template and updates `Formula/taplctl-pre.rb` plus `Aliases/taplctl@pre` on releases. Stable releases also update the stable formula and `taplctl-semantic.rb` when present. Prereleases leave the stable formulas unchanged. The updater skips a version older than the formula's current version and validates generated Ruby syntax before committing/pushing the tap.
+`HOMEBREW_TAP_TOKEN` is required with write access to `qkdxorjs1002/homebrew-tap` and is checked before GitHub publication. The downstream `homebrew` job depends on `release`, then checks out the tap, updates formulas, and commits/pushes changes. It uses the existing `Formula/taplctl.rb` as the template and updates `Formula/taplctl-pre.rb` plus `Aliases/taplctl@pre` on releases. Stable releases update `taplctl.rb` and the name migration metadata. The workflow removes `taplctl-semantic.rb` and maps its name to `taplctl` in `formula_renames.json`. The updater skips a version older than the formula's current version and validates generated Ruby syntax before committing/pushing the tap.
 
-The three formulas conflict because they provide the same commands. Runtime wheelhouse URLs and checksums select the matching macOS/Linux architecture. Viewer services use port 8000; the Homebrew formulas do not automatically start `searchd`. See [Viewer services](../guides/viewer.md#run-as-a-homebrew-service).
+The two formulas conflict because they provide the same commands. Runtime wheelhouse URLs and checksums select the matching macOS/Linux architecture. Viewer services use port 8000; the Homebrew formulas do not automatically start `searchd`. See [Viewer services](../guides/viewer.md#run-as-a-homebrew-service).
 
 ## Windows entry scripts and release installers
 

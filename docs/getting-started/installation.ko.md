@@ -36,11 +36,20 @@ brew install taplctl-pre
 
 `taplctl`은 안정 릴리스를 따릅니다. `taplctl-pre`는 가장 최근 공개된 릴리스를 선택하므로 안정 버전이나 프리릴리즈일 수 있습니다. `taplctl@pre`는 별칭입니다. Trust와 prefix 조회에는 위의 정식 formula 이름을 사용하세요.
 
-세 formula 모두 `taplctl`, `tapl-mcp`, `tapl-hook`을 제공하므로 함께 설치할 수 없습니다. 전환 전에는 `brew uninstall taplctl`처럼 현재 formula를 제거하세요. Formula는 설치 시 PyPI에서 패키지를 해석하지 않고 릴리스에 고정된 wheel 묶음을 사용합니다.
+두 formula 모두 `taplctl`, `tapl-mcp`, `tapl-hook`을 제공하므로 함께 설치할 수 없습니다. 전환 전에는 `brew uninstall taplctl`처럼 현재 formula를 제거하세요. Formula는 설치 시 PyPI에서 패키지를 해석하지 않고 릴리스에 고정된 wheel 묶음을 사용합니다.
 
 `taplctl`과 `taplctl-pre`는 macOS 14 이상 Apple Silicon과 glibc 2.28 이상 Linux x64·ARM64에 의미 검색 의존성을 기본 설치합니다. Intel Mac과 그보다 오래된 Linux에서는 전문 검색을 사용합니다. 기록의 첫 색인과 모델 선택은 [검색 안내](../guides/search.ko.md)를 참고하세요.
 
-기존 `taplctl-semantic` 사용자는 같은 구성을 받는 호환 formula를 계속 업그레이드할 수 있습니다. `taplctl`로 전환하면 [클라이언트 연결](integrations.ko.md)의 실행 경로도 새 formula에 맞춰 갱신하세요.
+Homebrew에서 `taplctl-semantic`을 `taplctl`로 이전했습니다. 기존 Viewer 서비스가 실행 중이면 이전 전에 `brew services stop taplctl-semantic`으로 중지하세요.
+
+```sh
+brew update
+# Homebrew에 taplctl-semantic이 여전히 설치된 것으로 표시될 때만 실행합니다.
+brew migrate taplctl-semantic
+brew upgrade taplctl
+```
+
+Homebrew 이전은 TAPL 설정과 워크스페이스 DB를 보존합니다. Viewer 서비스를 사용했다면 `brew services start taplctl`로 다시 실행하세요. [클라이언트 연결 갱신](integrations.ko.md) 시 `taplctl` 경로를 사용하세요.
 
 ## Linux
 
@@ -149,7 +158,7 @@ Homebrew는 설치한 formula를 갱신합니다.
 ```sh
 brew update
 brew upgrade taplctl
-# 설치한 formula가 taplctl-semantic 또는 taplctl-pre라면 그 이름을 사용합니다.
+# 설치한 formula가 taplctl-pre라면 그 이름을 사용합니다.
 ```
 
 `taplctl update`는 Homebrew나 소스 체크아웃을 갱신하지 않습니다. Homebrew 업그레이드·재설치 중 Viewer 서비스가 이미 실행 중인 경우에만 재시작을 시도합니다. 신규 설치나 중지된 서비스는 중지 상태를 유지하며, 수동으로 시작한 MCP stdio와 `searchd` 프로세스는 재시작하지 않습니다.

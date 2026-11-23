@@ -36,11 +36,20 @@ brew install taplctl-pre
 
 `taplctl` follows stable releases. `taplctl-pre` selects the newest published release, which can be stable or prerelease; `taplctl@pre` is an alias. Use the canonical formula name for trust and prefix lookup.
 
-All three provide `taplctl`, `tapl-mcp`, and `tapl-hook` and cannot coexist. Uninstall the current formula before switching, for example `brew uninstall taplctl`. Formulae use pinned release-hosted wheel bundles without resolving packages from PyPI at installation time.
+Both formulas provide `taplctl`, `tapl-mcp`, and `tapl-hook` and cannot coexist. Uninstall the current formula before switching, for example `brew uninstall taplctl`. Formulae use pinned release-hosted wheel bundles without resolving packages from PyPI at installation time.
 
 `taplctl` and `taplctl-pre` include semantic dependencies on Apple Silicon with macOS 14+, and Linux x64 or ARM64 with glibc 2.28+. Full-text search is available on Intel Macs and older Linux systems. See [Search](../guides/search.md) for model selection and indexing.
 
-Existing `taplctl-semantic` users can upgrade the compatibility formula and receive the same runtime. When switching to `taplctl`, refresh [client integrations](integrations.md) with the new executable path.
+Homebrew has moved `taplctl-semantic` to `taplctl`. If the old Viewer service is running, stop it with `brew services stop taplctl-semantic` before migrating.
+
+```sh
+brew update
+# Run only if Homebrew still lists taplctl-semantic as installed.
+brew migrate taplctl-semantic
+brew upgrade taplctl
+```
+
+Homebrew migration preserves TAPL settings and workspace databases. Restart the Viewer with `brew services start taplctl` if you used the service. Use the `taplctl` path when [refreshing client integrations](integrations.md).
 
 ## Linux
 
@@ -149,7 +158,7 @@ For Homebrew, update the installed formula instead:
 ```sh
 brew update
 brew upgrade taplctl
-# Use taplctl-semantic or taplctl-pre if that is your installed formula.
+# Use taplctl-pre if that is your installed formula.
 ```
 
 `taplctl update` does not update Homebrew or source checkouts. During Homebrew upgrade/reinstall, the formula attempts to restart its Viewer service only if already running. A fresh install or stopped service remains stopped. Manually started MCP stdio and `searchd` processes are not restarted.
