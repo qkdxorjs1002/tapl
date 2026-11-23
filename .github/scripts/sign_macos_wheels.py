@@ -64,6 +64,15 @@ def verify_signature(path: Path, team_id: str) -> None:
         raise ValueError(f"Missing Developer ID, team, timestamp, or hardened runtime: {path.name}")
 
 
+def normalize_install_id(path: Path) -> None:
+    result = subprocess.run(["otool", "-D", str(path)], check=True, capture_output=True, text=True)
+    names = [line.strip() for line in result.stdout.splitlines() if line.strip() and not line.endswith(":")]
+    # Some wheels record a relative build path as the dylib ID. Homebrew
+    # rewrites those IDs after installation, but preserves @rpath IDs.
+    if names and all(not name.startswith(("/", "@")) for name in names):
+        subprocess.run(["install_name_tool", "-id", f"@rpath/{path.name}", str(path)], check=True)
+
+
 def sign_wheelhouse(wheelhouse: Path, keychain: str, team_id: str) -> int:
     if re.fullmatch(r"[A-Z0-9]{10}", team_id) is None:
         raise ValueError("APPLE_TEAM_ID must be the 10-character Apple developer Team ID.")
@@ -92,6 +101,7 @@ def sign_wheelhouse(wheelhouse: Path, keychain: str, team_id: str) -> int:
             if not binaries:
                 continue
             for binary in binaries:
+                normalize_install_id(binary)
                 subprocess.run(
                     ["codesign", "--force", "--sign", identity, "--keychain", keychain,
                      "--timestamp", "--options", "runtime", str(binary)],

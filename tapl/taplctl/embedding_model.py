@@ -64,6 +64,21 @@ def _matches_sha256(path: Path, expected: str) -> bool:
 def _verified_file(path: Path, url: str, expected_sha256: str) -> Path:
     if _matches_sha256(path, expected_sha256):
         return path
+    from http.client import IncompleteRead
+    from time import sleep
+    from urllib.error import HTTPError, URLError
+
+    for backoff in (1, 2):
+        try:
+            return _download_file(path, url, expected_sha256)
+        except (URLError, TimeoutError, ConnectionError, IncompleteRead) as exc:
+            if isinstance(exc, HTTPError) and exc.code not in (408, 429, 500, 502, 503, 504):
+                raise
+            sleep(backoff)
+    return _download_file(path, url, expected_sha256)
+
+
+def _download_file(path: Path, url: str, expected_sha256: str) -> Path:
     from urllib.request import urlopen
 
     path.parent.mkdir(parents=True, exist_ok=True)

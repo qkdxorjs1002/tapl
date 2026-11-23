@@ -5,6 +5,7 @@ from contextlib import closing
 import hashlib
 import io
 import struct
+from urllib.error import HTTPError
 
 import pytest
 
@@ -30,6 +31,26 @@ def test_cache_only_installs_complete_verified_artifacts(tmp_path, monkeypatch):
     assert embedding_model._verified_file(target, url, digest).read_bytes() == b"complete"
     monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: pytest.fail("unexpected download"))
     assert embedding_model._verified_file(target, url, digest) == target
+
+
+def test_model_download_retries_transient_http_errors(tmp_path, monkeypatch):
+    target = tmp_path / "model.onnx"
+    url = "https://example.invalid/revision/model.onnx"
+    outcomes = iter([502, 503, 200])
+    sleeps = []
+
+    def fetch(request_url, *, timeout):
+        status = next(outcomes)
+        if status != 200:
+            raise HTTPError(request_url, status, "temporary failure", {}, None)
+        return io.BytesIO(b"model data")
+
+    monkeypatch.setattr("urllib.request.urlopen", fetch)
+    monkeypatch.setattr("time.sleep", sleeps.append)
+    digest = hashlib.sha256(b"model data").hexdigest()
+    assert embedding_model._verified_file(target, url, digest).read_bytes() == b"model data"
+    assert sleeps == [1, 2]
+    assert list(tmp_path.iterdir()) == [target]
 
 
 @pytest.mark.parametrize("mode", ["semantic", "hybrid", "bm25", "word"])

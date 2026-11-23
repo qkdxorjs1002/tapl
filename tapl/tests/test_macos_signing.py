@@ -37,6 +37,8 @@ class MacosWheelSigningTests(unittest.TestCase):
         self.wheelhouse = Path(self.temporary.name)
         self.real_run = subprocess.run
         self.signed_paths = []
+        self.install_ids = None
+        self.normalized_paths = []
         self.fail_signing = False
         self.details = DETAILS
 
@@ -61,6 +63,19 @@ class MacosWheelSigningTests(unittest.TestCase):
     def run_command(self, command, **kwargs):
         if command[0] == "security":
             return subprocess.CompletedProcess(command, 0, f'  1) {IDENTITY} "Developer ID Application: Fixture ({TEAM})"\n', "")
+        if command[0] == "otool":
+            path = Path(command[-1])
+            names = self.install_ids if path.name == "extension.so" else None
+            lines = [f"{path}:"] if names is None else [
+                f"{path} (architecture {arch}):\n{name}" for arch, name in names.items()
+            ]
+            return subprocess.CompletedProcess(command, 0, "\n".join(lines), "")
+        if command[0] == "install_name_tool":
+            path = Path(command[-1])
+            self.assertEqual(command[1:3], ["-id", f"@rpath/{path.name}"])
+            path.write_bytes(path.read_bytes() + b"relocatable ID")
+            self.normalized_paths.append(path.name)
+            return subprocess.CompletedProcess(command, 0, "", "")
         if command[0] != "codesign":
             return self.real_run(command, **kwargs)
         path = Path(command[-1])
@@ -109,6 +124,14 @@ class MacosWheelSigningTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.sign()
         self.assertEqual(wheel.read_bytes(), before)
+
+    def test_relative_ids_are_normalized_in_every_slice_before_signing(self):
+        native = self.make_wheel(payload=NATIVE)
+        self.install_ids = {"x86_64": "bazel-out/x64/lib_message.so", "arm64": "bazel-out/arm64/lib_message.so"}
+        self.assertEqual(self.sign(), 2)
+        self.assertEqual(self.normalized_paths, ["extension.so"])
+        with WheelFile(native) as archive:
+            self.assertEqual(archive.read("native/extension.so"), NATIVE + b"relocatable ID" + SIGNATURE)
 
     def test_bad_later_wheel_does_not_replace_already_signed_wheel(self):
         first = self.make_wheel("aaa", NATIVE)
