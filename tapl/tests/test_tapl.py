@@ -1070,7 +1070,7 @@ class TaplRuntimeTests(unittest.TestCase):
             "**RUN**, **PLAN**, **TASK**, **HISTORY**, **FINDING**, **APPROVAL**, or **ARCHIVE**",
             "Normal notices: one clause, at most 60 characters, progressive, current activity only",
             "after `tapl_summarize_run`, report only returned work_type",
-            "` · [Viewer 보기](viewer_url)`",
+            "` · [Viewer 바로가기](viewer_url)`",
             "work_type, workflow_mode and derived record_mode",
             "repeat only on classification change",
             "omit completed results, counts, rationale, lists, sequences, next steps, receipts, tables, IDs, statuses, payloads and summaries",

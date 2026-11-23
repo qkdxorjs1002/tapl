@@ -201,7 +201,7 @@ const releaseCards: (StepDefinition & { version: string; requiresMemory?: boolea
   {
     version: '2.24.0',
     id: 'open-viewer-link', page: 'current', copy: {
-      ko: { title: '대화에서 Viewer 바로 열기', description: '에이전트의 RUN 분류 안내에 있는 Viewer 보기를 누르면 해당 워크스페이스와 RUN이 열립니다. 로컬 Viewer가 기본 포트 8000에서 실행 중이어야 합니다.' },
+      ko: { title: '대화에서 Viewer 바로 열기', description: '에이전트의 RUN 분류 안내에 있는 Viewer 바로가기를 누르면 해당 워크스페이스와 RUN이 열립니다. 로컬 Viewer가 기본 포트 8000에서 실행 중이어야 합니다.' },
       en: { title: 'Open the Viewer from your conversation', description: 'Click Open Viewer in the agent’s RUN classification notice to open that workspace and RUN. The local Viewer needs to be running on its default port 8000.' }
     }
   },
