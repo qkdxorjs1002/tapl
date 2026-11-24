@@ -1,12 +1,12 @@
 {
-  "extension.displayName": "tapl workflow 뷰어",
+  "extension.displayName": "tapl Workflow Viewer",
   "extension.description": "로컬 tapl-mcp 서버를 통해 TAPL 계획, 작업, 발견 사항, 승인 및 아카이브를 확인합니다.",
-  "command.category": "tapl workflow",
-  "command.refresh.title": "workflow 보기 새로고침",
+  "command.category": "tapl Workflow",
+  "command.refresh.title": "Workflow 보기 새로 고침",
   "command.openOverview.title": "tapl 대시보드 열기",
   "command.showTour.title": "제품 둘러보기",
   "command.openArchive.title": "tapl 아카이브 열기",
-  "command.search.title": "tapl workflow 검색",
+  "command.search.title": "tapl Workflow 검색",
   "view.active.name": "활성",
   "view.archives.name": "아카이브"
 }

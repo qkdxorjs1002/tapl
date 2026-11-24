@@ -153,7 +153,7 @@ test('associative-memory SVG connections also stay in central 35% side bands', a
 });
 
 test('repeated used payloads promote one source card and path without changing workflow or camera', {timeout: 30000}, async () => {
-  for (const [locale, label] of [['en-US', 'Used'], ['ko-KR', '사용']]) {
+  for (const [locale, label] of [['en-US', 'Used'], ['ko-KR', '작업에 사용']]) {
     const page = await isolatedPage({viewport: {width: 1440, height: 1000}, locale, reducedMotion: 'reduce'});
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     let overview, used = false;

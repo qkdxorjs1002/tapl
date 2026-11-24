@@ -84,7 +84,7 @@ BM25/전문 검색에는 선택적 의미 검색 의존성이 필요하지 않�
 
 브라우저와 VS Code는 React 구성 요소, CSS, 프로토콜 타입을 공유합니다. 브라우저 HTTP는 origin·콘텐츠·워크스페이스를 검사합니다. VS Code는 pool로 관리하는 stdio 클라이언트를 사용하며 오래된 워크스페이스·화면 이동 결과를 거부합니다. 서버의 지원 기능 표시에 따라 메모리·확인된 폐기를 제공하고 구버전에서도 다른 화면을 유지합니다. 메모리 화면은 읽기 전용입니다.
 
-공유 `src/webview/workbench/`는 화면 구조·원본을 포함한 이동·RUN별 설정·탐색 목록·RUN/TASK 화면·기록 검색을 맡습니다. `App.tsx`는 호스트 상태와 확인 후 RUN 삭제를 유지하며 `RecordDetail.tsx`·`MemoryView.tsx`·`SecondaryViews.tsx`가 읽기·보조 페이지를 구성합니다. `ValueTree.tsx`가 중첩 필드를 표시합니다. 브라우저 폴더 검증은 성공 후에만 식별자를 변경하며, 모달 아래의 페이지는 마운트 상태를 유지하므로 취소·잘못된 경로가 화면 문맥을 지우지 않습니다. 두 호스트는 읽기 전용 `tapl_get_run`·`tapl_list_records` 어댑터를 사용하며 목록은 페이지 분할 전 필터와 원본 오류를 제공합니다. 브라우저 내부 run/records 경로는 새 공개 CLI 명령이 아닙니다.
+공유 `src/webview/workbench/`는 화면 구조·원본을 포함한 이동·RUN별 설정·탐색 목록·RUN/TASK 화면·기록 검색을 맡습니다. `App.tsx`는 호스트 상태와 확인 후 RUN 폐기를 유지하며 `RecordDetail.tsx`·`MemoryView.tsx`·`SecondaryViews.tsx`가 읽기·보조 페이지를 구성합니다. `ValueTree.tsx`가 중첩 필드를 표시합니다. 브라우저 폴더 검증은 성공 후에만 식별자를 변경하며, 모달 아래의 페이지는 마운트 상태를 유지하므로 취소·잘못된 경로가 화면 문맥을 지우지 않습니다. 두 호스트는 읽기 전용 `tapl_get_run`·`tapl_list_records` 어댑터를 사용하며 목록은 페이지 분할 전 필터와 원본 오류를 제공합니다. 브라우저 내부 run/records 경로는 새 공개 CLI 명령이 아닙니다.
 
 지도 모션은 문서 표시 상태와 `IntersectionObserver`의 뷰포트 교차 여부를 사용하며, 창 포커스로 렌더링·자동 추적을 제한하지 않습니다. 브라우저 revision 폴링도 문서 표시 상태를 따릅니다. VS Code 스냅샷 조회는 `WebviewPanel.visible`을 기준으로 하며 숨겨진 패널이 다시 표시되면 밀린 변경을 한 번의 갱신으로 모아 반영합니다. 호스트가 보고하는 이 신호들은 화면의 정확한 물리적 노출을 측정하지 않습니다. [Page Visibility API](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API#concepts_and_usage)는 표시 여부와 포커스를, [VS Code API](https://code.visualstudio.com/api/references/vscode-api#WebviewPanel)는 패널 표시 여부와 활성 포커스를 구분합니다. `WindowState.active`는 표시 여부가 아닌 최근 입력 활동을 나타냅니다. 추적 대상 선택과 입력 규칙은 [Viewer 탐색](../guides/viewer.ko.md#viewer-탐색)을 참고하세요.
 

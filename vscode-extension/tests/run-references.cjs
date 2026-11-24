@@ -265,7 +265,7 @@ test('a retained RUN card invokes the latest committed reference handler without
 test('reference stages, kind legend and jump controls render in both languages without completion badges', () => {
   const value = snapshot([memory(), history({stage: 'opened', title: '<script>Escaped original</script>'}), memory({memory_id: 'M-008', stage: 'used'})]);
   for (const [locale, labels] of [['en', ['Retrieved', 'Opened', 'Used', 'Show memory references', 'Show history references']],
-    ['ko', ['조회', '원문 확인', '사용', '기억 참조 보기', '과거 기록 참조 보기']]]) {
+    ['ko', ['찾음', '원문 확인', '작업에 사용', '기억 참조 보기', '과거 기록 참조 보기']]]) {
     const html = renderToStaticMarkup(React.createElement(I18nProvider, {locale}, React.createElement(CurrentRun,
       {snapshot: value, open() {}, openReference() {}})));
     labels.forEach(label => assert.ok(html.includes(label), label));

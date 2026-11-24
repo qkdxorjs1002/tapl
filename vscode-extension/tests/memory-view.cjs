@@ -57,7 +57,7 @@ function render(locale, diagnostics) {
 test('shared memory screen distinguishes stored and matched counts in both locales', () => {
   for (const [locale, stored, matched] of [
     ['en', 'Total stored', 'Matching this query'],
-    ['ko', '전체 저장 수', '현재 검색 일치 수']
+    ['ko', '저장된 기억 수', '검색과 일치한 기억 수']
   ]) {
     const html = render(locale, { stored_count: 4, matched_count: 0, last_capture_error: null });
     assert.ok(html.includes(`<dt>${stored}</dt><dd>4</dd>`));

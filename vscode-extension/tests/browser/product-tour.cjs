@@ -205,6 +205,10 @@ test('Korean dark modals fit a narrow reduced-motion viewport and Later lasts fo
     await panel(page).getByRole('button', { name: '빠른 시작' }).click();
     for (const id of ['run-tabs', 'run-map', 'follow', 'record-search']) {
       const next = await step(page, id, '다음', id);
+      if (id === 'run-tabs') {
+        await expect(dialog(page)).toContainText('예시 화면');
+        await expect(dialog(page).locator('.driver-popover-title')).toHaveText('RUN 선택하기');
+      }
       if (id === 'follow') await screenshot(page, 'web-mobile-dark');
       await next.click();
     }

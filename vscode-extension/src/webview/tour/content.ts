@@ -25,14 +25,14 @@ export const tourCopy = {
     later: '나중에',
     dismiss: '다시 보지 않기',
     blocked: '막힌 작업 찾기',
-    references: '원문과 사용 표시 읽기',
+    references: '참조 기록과 사용 여부 보기',
     appearance: '화면 설정 바꾸기',
     finished: '이어서 살펴보기',
     current: '현재 RUN',
     records: '기록 검색',
-    example: '예시 시나리오',
+    example: '예시 화면',
     selectWorkspace: 'TAPL 기록이 있는 프로젝트 폴더를 열면 빠른 시작 안내를 볼 수 있어요.',
-    labels: { next: '다음', previous: '이전', done: '마치기', close: '닫기', progress: '{{total}}단계 중 {{current}}' }
+    labels: { next: '다음', previous: '이전', done: '마치기', close: '닫기', progress: '{{total}}단계 중 {{current}}단계' }
   },
   en: {
     help: 'TAPL Help',
@@ -59,7 +59,7 @@ export const tourCopy = {
 const runTabs: StepDefinition = {
   id: 'run-tabs', page: 'current', target: 'run-tabs', copy: {
     ko: {
-      title: '볼 작업 고르기',
+      title: 'RUN 선택하기',
       description: 'RUN은 에이전트 작업 한 건의 기록입니다. 상단 탭에서 살펴볼 작업을 고를 수 있어요.'
     },
     en: {
@@ -72,7 +72,7 @@ const runMap: StepDefinition = {
   id: 'run-map', page: 'current', target: 'run-map', copy: {
     ko: {
       title: '계획과 작업 읽기',
-      description: 'PLAN은 진행 방향, TASK는 실행 항목입니다. 마인드맵 카드를 열면 계획의 목적이나 작업의 결과·검증 내용을 볼 수 있어요.'
+      description: 'PLAN에는 작업 방향을, TASK에는 할 일을 기록합니다. 마인드맵에서 카드를 열면 계획의 목적이나 작업 결과와 검증 내용을 볼 수 있어요.'
     },
     en: {
       title: 'Read plans and tasks',
@@ -84,7 +84,7 @@ const follow: StepDefinition = {
   id: 'follow', page: 'current', target: 'follow', copy: {
     ko: {
       title: '진행 중인 작업 따라가기',
-      description: '자동 추적을 켜면 진행 중인 작업이 화면에 들어옵니다. TASK가 아직 없어도 초안이나 확정된 PLAN을 따라갑니다. 끄면 원하는 위치를 자유롭게 살펴볼 수 있어요.'
+      description: '자동 추적을 켜면 화면이 진행 중인 작업으로 이동합니다. TASK가 아직 없어도 초안이나 확정된 PLAN을 따라갑니다. 끄면 원하는 위치를 자유롭게 살펴볼 수 있어요.'
     },
     en: {
       title: 'Follow active work',
@@ -107,7 +107,7 @@ const records: StepDefinition = {
 const memories: StepDefinition = {
   id: 'memory-list', page: 'memories', target: 'memory-list', copy: {
     ko: {
-      title: '짧은 교훈에서 원문 열기',
+      title: '기억에서 원문 찾기',
       description: '연상 기억에는 다시 쓸 만한 교훈이 짧게 남습니다. 기억 카드를 열고 연결된 원문에서 근거를 확인해 보세요.'
     },
     en: {
@@ -119,13 +119,13 @@ const memories: StepDefinition = {
 const blocked: StepDefinition[] = [
   {
     id: 'task-filter', page: 'tasks', target: 'task-filter', copy: {
-      ko: { title: '막힌 작업 걸러 보기', description: 'TASK 현황의 상태 필터에서 Blocked를 고르면 막힌 작업만 볼 수 있어요.' },
+      ko: { title: '막힌 작업 걸러 보기', description: 'TASK 현황의 상태 필터에서 막힘을 고르면 막힌 작업만 볼 수 있어요.' },
       en: { title: 'Filter for blocked tasks', description: 'In the task view, select Blocked to show only the tasks that need attention.' }
     }
   },
   {
     id: 'blocked-task', page: 'tasks', target: 'blocked-task', copy: {
-      ko: { title: '막힌 이유와 다음 행동 읽기', description: 'TASK 상세에서 막힘 사유와 다음 행동을 확인하세요. 돌아가기를 누르면 필터를 유지한 채 목록으로 돌아옵니다.' },
+      ko: { title: '막힌 이유와 다음에 할 일', description: 'TASK를 열고 막힌 이유와 다음에 할 일을 확인하세요. 돌아가기를 누르면 필터를 유지한 채 목록으로 돌아옵니다.' },
       en: { title: 'Read the blocker and next action', description: 'Open a TASK to see its blocker and next action. Back returns to the filtered list.' }
     }
   }
@@ -145,7 +145,7 @@ const references: StepDefinition[] = [
   },
   {
     id: 'reference-usage', page: 'current', target: 'reference-stage', copy: {
-      ko: { title: '참조 상태 읽기', description: '조회는 에이전트가 항목을 찾은 상태입니다. 원문 확인은 실제 기록을 열었을 때, 사용은 그 내용을 작업에 활용했다고 기록했을 때 표시됩니다.' },
+      ko: { title: '참조 상태 읽기', description: '‘찾음’은 에이전트가 항목을 찾았다는 뜻입니다. ‘원문 확인’은 실제 기록을 열었을 때, ‘작업에 사용’은 그 내용을 작업에 활용했다고 에이전트가 기록했을 때 표시됩니다.' },
       en: { title: 'Read a reference’s state', description: 'Retrieved means the agent found the item. Source opened means it checked the original record. Used means the agent recorded that it relied on the information.' }
     }
   }
