@@ -129,12 +129,9 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
         branch_end = workflow.index("\n\n          ruby -c", branch_start)
         stable_body = workflow[branch_start:branch_end]
         self.assertIn('stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")', stable_body)
-        self.assertIn('stable_brew_files+=("homebrew-tap/Formula/taplctl-semantic.rb")', stable_body)
+        self.assertIn('stable_options+=(--retire-semantic homebrew-tap)', stable_body)
         self.assertNotIn('stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")', workflow[branch_end:])
-        self.assertNotIn(
-            'stable_brew_files+=("homebrew-tap/Formula/taplctl-semantic.rb")',
-            workflow[branch_end:],
-        )
+        self.assertNotIn('--retire-semantic', workflow[branch_end:])
         self.assertIn("create_args+=(--prerelease)", workflow)
         self.assertIn("edit_args+=(--prerelease=false)", workflow)
 
