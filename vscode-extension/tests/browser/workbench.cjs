@@ -825,7 +825,7 @@ test('delegated TASK models update without shifting RUN cards and fit at narrow 
     await page.evaluate(payload => window.postMessage({ ...payload, type: 'view:update', locale: 'ko' }, '*'), updated);
     await running.getByText(model, { exact: true }).waitFor();
     assert.deepEqual(await geometry(), before);
-    assert.equal(await running.locator(badge).getAttribute('title'), `서브에이전트 모델: ${model} (high)`);
+    assert.equal(await running.locator(badge).getAttribute('title'), `SubAgent 모델: ${model} (high)`);
     assert.equal(await card('TASK-009').locator(badge).innerText(), '모델 상속');
     await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 320, height: 540 });

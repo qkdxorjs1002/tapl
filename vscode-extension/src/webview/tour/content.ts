@@ -18,7 +18,7 @@ export const tourCopy = {
     help: 'TAPL 도움말',
     quick: '빠른 시작',
     welcome: 'TAPL을 처음 쓰시나요?',
-    intro: '에이전트가 어디까지 진행했고 어떤 근거를 참고했는지 TAPL에서 살펴보세요.',
+    intro: 'Agent가 어디까지 진행했고 어떤 근거를 참고했는지 TAPL에서 살펴보세요.',
     latest: '새 기능',
     version: '새 기능 보기',
     update: '업데이트한 버전에서 달라진 화면과 사용법을 확인하세요.',
@@ -60,7 +60,7 @@ const runTabs: StepDefinition = {
   id: 'run-tabs', page: 'current', target: 'run-tabs', copy: {
     ko: {
       title: 'RUN 선택하기',
-      description: 'RUN은 에이전트 작업 한 건의 기록입니다. 상단 탭에서 살펴볼 작업을 고를 수 있어요.'
+      description: 'RUN은 Agent 작업 한 건의 기록입니다. 상단 탭에서 살펴볼 작업을 고를 수 있어요.'
     },
     en: {
       title: 'Choose a RUN',
@@ -71,8 +71,8 @@ const runTabs: StepDefinition = {
 const runMap: StepDefinition = {
   id: 'run-map', page: 'current', target: 'run-map', copy: {
     ko: {
-      title: '계획과 작업 읽기',
-      description: 'PLAN에는 작업 방향을, TASK에는 할 일을 기록합니다. 마인드맵에서 카드를 열면 계획의 목적이나 작업 결과와 검증 내용을 볼 수 있어요.'
+      title: 'PLAN과 TASK 읽기',
+      description: 'PLAN에는 작업 방향을, TASK에는 할 일을 기록합니다. 마인드맵에서 카드를 열면 PLAN의 목적이나 TASK의 결과와 검증 내용을 볼 수 있어요.'
     },
     en: {
       title: 'Read plans and tasks',
@@ -145,7 +145,7 @@ const references: StepDefinition[] = [
   },
   {
     id: 'reference-usage', page: 'current', target: 'reference-stage', copy: {
-      ko: { title: '참조 상태 읽기', description: '‘찾음’은 에이전트가 항목을 찾았다는 뜻입니다. ‘원문 확인’은 실제 기록을 열었을 때, ‘작업에 사용’은 그 내용을 작업에 활용했다고 에이전트가 기록했을 때 표시됩니다.' },
+      ko: { title: '참조 상태 읽기', description: '‘찾음’은 Agent가 항목을 찾았다는 뜻입니다. ‘원문 확인’은 실제 기록을 열었을 때, ‘작업에 사용’은 그 내용을 작업에 활용했다고 Agent가 기록했을 때 표시됩니다.' },
       en: { title: 'Read a reference’s state', description: 'Retrieved means the agent found the item. Source opened means it checked the original record. Used means the agent recorded that it relied on the information.' }
     }
   }
@@ -189,14 +189,14 @@ const releaseCards: (StepDefinition & { version: string; requiresMemory?: boolea
   {
     version: '2.24.0',
     id: 'delegated-task-model', page: 'current', target: 'delegated-task-model', copy: {
-      ko: { title: '위임 TASK의 모델 확인하기', description: '모델이 기록된 위임 TASK에는 제목 아래에 에이전트 아이콘과 모델명이 표시됩니다. 모델명에 마우스를 올리면 전체 이름과 기록된 추론 강도를 볼 수 있어요.' },
+      ko: { title: '위임 TASK의 모델 확인하기', description: '모델이 기록된 위임 TASK에는 제목 아래에 SubAgent 아이콘과 모델명이 표시됩니다. 모델명에 마우스를 올리면 전체 이름과 기록된 추론 강도를 볼 수 있어요.' },
       en: { title: 'See which model a delegated task used', description: 'When a delegated task has a recorded model, an agent icon and the model name appear under its title. Hover over the name to see the full value and recorded reasoning effort.' }
     }
   },
   {
     version: '2.24.0',
     id: 'open-viewer-link', page: 'current', copy: {
-      ko: { title: '대화에서 Viewer 바로 열기', description: '에이전트의 RUN 분류 안내에 있는 Viewer 바로가기를 누르면 해당 워크스페이스와 RUN이 열립니다. 로컬 Viewer가 기본 포트 8000에서 실행 중이어야 합니다.' },
+      ko: { title: '대화에서 Viewer 바로 열기', description: 'Agent의 RUN 분류 안내에 있는 Viewer 바로가기를 누르면 해당 워크스페이스와 RUN이 열립니다. 로컬 Viewer가 기본 포트 8000에서 실행 중이어야 합니다.' },
       en: { title: 'Open the Viewer from your conversation', description: 'Click Open Viewer in the agent’s RUN classification notice to open that workspace and RUN. The local Viewer needs to be running on its default port 8000.' }
     }
   },
@@ -210,7 +210,7 @@ const releaseCards: (StepDefinition & { version: string; requiresMemory?: boolea
   {
     version: '2.23.0', requiresMemory: true,
     id: 'memory-source-hints', page: 'current', target: 'run-references', copy: {
-      ko: { title: '기억 단서에서 원문 찾기', description: '에이전트는 한 번에 최대 세 개의 기억 단서를 받을 수 있어요. 현재 RUN에 참조 카드가 보이면 카드를 열어 저장된 원문을 확인하세요.' },
+      ko: { title: '기억 단서에서 원문 찾기', description: 'Agent는 한 번에 최대 세 개의 기억 단서를 받을 수 있어요. 현재 RUN에 참조 카드가 보이면 카드를 열어 저장된 원문을 확인하세요.' },
       en: { title: 'Find the source behind a memory hint', description: 'The agent can receive up to three memory hints at once. When a reference card appears on the current RUN, open it to check the recorded source.' }
     }
   },

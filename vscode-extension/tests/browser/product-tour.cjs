@@ -199,6 +199,7 @@ test('Korean dark modals fit a narrow reduced-motion viewport and Later lasts fo
   });
   try {
     await assertEntryFits(card(page));
+    await expect(card(page)).toContainText('Agent가 어디까지 진행했고');
     await card(page).getByRole('button', { name: '나중에' }).click();
     await expect(card(page)).toHaveCount(0);
     await help(page).click();
@@ -208,7 +209,9 @@ test('Korean dark modals fit a narrow reduced-motion viewport and Later lasts fo
       if (id === 'run-tabs') {
         await expect(dialog(page)).toContainText('예시 화면');
         await expect(dialog(page).locator('.driver-popover-title')).toHaveText('RUN 선택하기');
+        await expect(dialog(page)).toContainText('RUN은 Agent 작업 한 건의 기록입니다.');
       }
+      if (id === 'run-map') await expect(dialog(page).locator('.driver-popover-title')).toHaveText('PLAN과 TASK 읽기');
       if (id === 'follow') await screenshot(page, 'web-mobile-dark');
       await next.click();
     }

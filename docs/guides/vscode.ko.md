@@ -8,7 +8,7 @@ TAPL Workflow Viewer는 VS Code에 활성 작업·아카이브 트리, 이력 �
 
 ## 설치와 열기
 
-VS Code **1.90+**, `.tapl/tapl-{UUID}.db`가 있는 초기화된 워크스페이스, 실행 가능한 `tapl-mcp`가 필요합니다. 먼저 [설치](../getting-started/installation.ko.md)와 [에이전트 연결](../getting-started/integrations.ko.md)을 완료하세요.
+VS Code **1.90+**, `.tapl/tapl-{UUID}.db`가 있는 초기화된 워크스페이스, 실행 가능한 `tapl-mcp`가 필요합니다. 먼저 [설치](../getting-started/installation.ko.md)와 [Agent 연결](../getting-started/integrations.ko.md)을 완료하세요.
 
 Marketplace에서 `paragonnov.tapl-workflow-viewer`를 설치하거나 [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases)에서 `.vsix`를 받아 **Extensions: Install from VSIX…**를 실행합니다. 초기화한 폴더를 열고 활동 표시줄에서 **TAPL**을 선택한 뒤 **TAPL Workflow: Open TAPL Dashboard**를 실행하세요.
 
@@ -60,9 +60,9 @@ TAPL은 VS Code의 실시간 색상 팔레트를 계속 따릅니다. 밝기가 
 
 ## 공유 Viewer와 기능 조건
 
-브라우저와 확장은 React 화면, CSS, `src/viewer/types.ts`를 공유합니다. VS Code는 워크스페이스·MCP 어댑터를, 브라우저는 HTTP와 로컬 폴더 선택을 제공합니다. 둘 다 메모리 목록·검색·상세·원본 이동을 지원합니다. 메모리 수정과 삭제는 에이전트에게 명시적으로 요청해야 합니다.
+브라우저와 확장은 React 화면, CSS, `src/viewer/types.ts`를 공유합니다. VS Code는 워크스페이스·MCP 어댑터를, 브라우저는 HTTP와 로컬 폴더 선택을 제공합니다. 둘 다 메모리 목록·검색·상세·원본 이동을 지원합니다. 메모리 수정과 삭제는 Agent에게 명시적으로 요청해야 합니다.
 
-지원 기능은 서버가 알려 줍니다. 메모리를 지원하지 않는 구버전 서버에서도 다른 화면은 사용할 수 있습니다. **관리 → RUN 폐기**는 최신 서버가 기능 지원을 알릴 때만 제공하며 그 외에는 RUN 기록이 읽기 전용입니다. 대화상자에서 전체 RUN ID를 정확히 입력하고 명시적으로 확인해야 합니다. 보존할 기록은 아카이브하며 정말 빈 RUN은 삭제합니다. 외부 에이전트는 계속 실행됩니다. 정확한 영향은 [Viewer](viewer.ko.md#run-폐기)를 보세요.
+지원 기능은 서버가 알려 줍니다. 메모리를 지원하지 않는 구버전 서버에서도 다른 화면은 사용할 수 있습니다. **관리 → RUN 폐기**는 최신 서버가 기능 지원을 알릴 때만 제공하며 그 외에는 RUN 기록이 읽기 전용입니다. 대화상자에서 전체 RUN ID를 정확히 입력하고 명시적으로 확인해야 합니다. 보존할 기록은 아카이브하며 정말 빈 RUN은 삭제합니다. 외부 Agent는 계속 실행됩니다. 정확한 영향은 [Viewer](viewer.ko.md#run-폐기)를 보세요.
 
 현재 RUN 및 워크스페이스 중심 기억 관계 마인드맵·고정 RUN 탭·축소 아이콘 탐색과 고정/호버 확장·탐색 확장 패널·RUN별 TASK 필터·기록 검색·돌아가기는 [공유 Viewer 탐색](viewer.ko.md#viewer-탐색)을 참고하세요. `small`은 탐색 서랍을 사용하며 다른 레이아웃은 너비가 충분하면 고정 구조를 유지합니다. 정확한 과거 RUN 페이지와 기록 목록은 워크스페이스 MCP 서버도 업데이트해야 합니다. 미지원 메모리는 기능 조건으로 구분합니다.
 
