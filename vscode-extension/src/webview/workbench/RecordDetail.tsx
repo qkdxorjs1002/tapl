@@ -175,7 +175,12 @@ const taskBodyLabels = [
   ['next_action', 'Next action']
 ] as const;
 
-export function RecordDetail({ view, send, back }: { view: RecordView; send: Send; back?: () => void }): JSX.Element {
+export function RecordDetail({ view, send, back, tourTarget }: {
+  view: RecordView;
+  send: Send;
+  back?: () => void;
+  tourTarget?: string;
+}): JSX.Element {
   const { t, kind, status } = useI18n();
   const { result, detail } = view;
   const item = detail ?? result;
@@ -314,7 +319,7 @@ export function RecordDetail({ view, send, back }: { view: RecordView; send: Sen
               <span className="wb-reading-id wb-mono">{stableId}</span>
               <StatusMark value={statusValue} />
             </div>
-            <h1 tabIndex={-1} data-wb-page-heading>
+            <h1 tabIndex={-1} data-wb-page-heading data-tapl-tour={tourTarget}>
               {title}
             </h1>
             {(owner || detail?.updated_at) && (

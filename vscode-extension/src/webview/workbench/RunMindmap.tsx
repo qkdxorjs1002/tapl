@@ -52,12 +52,14 @@ export function RunMindmap({
   snapshot: incomingSnapshot,
   open: incomingOpen,
   openReference: incomingOpenReference,
-  back
+  back,
+  previewTarget
 }: {
   snapshot: TaplRunSnapshot;
   open: (item: TaplItem, run?: TaplWorkflowRun) => void;
   openReference?: (reference: TaplRunReference) => void;
   back?: () => void;
+  previewTarget?: 'run-map' | 'reference-stage' | 'delegated-task-model';
 }): JSX.Element {
   const { t, status } = useI18n();
   const snapshot = incomingSnapshot;
@@ -75,7 +77,18 @@ export function RunMindmap({
   const models = useMemo(() => delegatedTaskModels(snapshot), [snapshot]);
   const runKey = JSON.stringify([snapshot.run.source_db ?? '', snapshot.run.id]);
   const archived = snapshot.run.status === 'archived';
-  const follow = useMemo(() => mindmapRunFollowKeys(graph.nodes, snapshot.run.status), [graph, snapshot.run.status]);
+  const follow = useMemo(() => {
+    switch (previewTarget) {
+      case 'run-map':
+        return graph.nodes.filter(node => node.kind === 'plan' || node.status === 'In Progress').map(node => node.key);
+      case 'reference-stage':
+        return graph.nodes.filter(node => node.reference?.stage === 'used').map(node => node.key);
+      case 'delegated-task-model':
+        return graph.nodes.filter(node => node.item && models.has(node.item.stable_id)).map(node => node.key);
+      default:
+        return mindmapRunFollowKeys(graph.nodes, snapshot.run.status);
+    }
+  }, [graph, models, previewTarget, snapshot.run.status]);
   const [active, setActive] = useState<string>();
   const relations = useMemo(() => buildMindmapRelationIndex(graph), [graph]);
   const { hostRef, worldRef, controlsRef, edges, suppressClickCapture, following } = useMindmapViewport({
@@ -83,6 +96,7 @@ export function RunMindmap({
     cameraKey: archived ? `archive:${runKey}` : runKey,
     follow,
     fitEntireGraph: archived,
+    previewFollow: previewTarget ? 'upper' : undefined,
     setActive
   });
   const followAction = t(following ? 'wbMindmapFollowOff' : 'wbMindmapFollowOn');
@@ -92,8 +106,8 @@ export function RunMindmap({
   })).filter(group => group.nodes.length), [graph]);
   const related = useMemo(() => {
     if (active && relations.keys.has(active)) return relatedMindmapNodes(relations, active);
-    return following ? relatedMindmapNodes(relations, executing, { ancestorsOnly: true }) : undefined;
-  }, [active, relations, following, executing]);
+    return following && !previewTarget ? relatedMindmapNodes(relations, executing, { ancestorsOnly: true }) : undefined;
+  }, [active, relations, following, executing, previewTarget]);
 
   return (
     <div
@@ -313,7 +327,7 @@ const RunMindmapNode = memo(function RunMindmapNode({
     <div
       className={`wb-mm-node${emphasis ? ` wb-mm-${emphasis}` : ''}`}
       data-kind={node.kind}
-      data-tapl-tour={node.kind === 'run' ? 'run-map' : undefined}
+      data-tapl-tour={node.kind === 'plan' ? 'run-map' : undefined}
       data-reference-stage={node.reference?.stage}
       data-mindmap-node={node.key}
       style={

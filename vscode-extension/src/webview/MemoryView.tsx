@@ -14,13 +14,15 @@ export function MemoryView({
   supported,
   send,
   back,
-  workspaceKey
+  workspaceKey,
+  preview
 }: {
   view: MemoryScreen;
   supported: boolean;
   send: Send;
   back?: () => void;
   workspaceKey?: string;
+  preview?: boolean;
 }): JSX.Element {
   const { t } = useI18n();
   return (
@@ -45,7 +47,7 @@ export function MemoryView({
       {!supported ? (
         <EmptyState title={t('memoryUnsupported')} icon="book" />
       ) : view.type === 'memories' ? (
-        <MemoryList view={view} send={send} workspaceKey={workspaceKey} />
+        <MemoryList view={view} send={send} workspaceKey={workspaceKey} preview={preview} />
       ) : view.type === 'memory' ? (
         view.memory && view.memory.state !== 'deleted' ? (
           <MemoryDetail memory={view.memory} send={send} />
@@ -62,11 +64,13 @@ export function MemoryView({
 function MemoryList({
   view,
   send,
-  workspaceKey
+  workspaceKey,
+  preview
 }: {
   view: Extract<WebviewView, { type: 'memories' }>;
   send: Send;
   workspaceKey?: string;
+  preview?: boolean;
 }): JSX.Element {
   const { t } = useI18n();
   const [query, setQuery] = useState(view.query);
@@ -80,7 +84,7 @@ function MemoryList({
   const limit = Math.max(1, view.limit || 20);
   return (
     <div className="wb-memory-list">
-      <div className="wb-memory-intro" data-tapl-tour={view.memories.length ? 'memory-list' : undefined}>
+      <div className="wb-memory-intro">
         <div className="wb-memory-scope">
           <span>{t('wbMemoryScope')}</span>
           <ReadOnlyBadge />
@@ -117,6 +121,7 @@ function MemoryList({
           memories={view.memories}
           send={send}
           workspaceKey={workspaceKey}
+          preview={preview}
           cameraKey={JSON.stringify(['memories', 'radial', workspaceKey ?? '', view.query, view.offset])}
         />
       ) : (

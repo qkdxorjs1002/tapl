@@ -24,11 +24,13 @@ interface TourEntryProps {
   blockedByDialog: boolean;
   canInvite: boolean;
   selectPage: (page: NonNullable<TourStep['page']>) => void;
+  showPreview: (step?: TourStep) => void;
   closeNavigation: () => void;
 }
 
 function findAnchor(shell: HTMLElement, target: string): Element | undefined {
-  return Array.from(shell.querySelectorAll(`[data-tapl-tour="${target}"]`)).find(element => {
+  const scope = shell.querySelector(target === 'run-tabs' || target === 'theme' ? '.wb-topbar' : '[data-tour-preview-content]');
+  return Array.from(scope?.querySelectorAll(`[data-tapl-tour="${target}"]`) ?? []).find(element => {
     if (!(element.checkVisibility?.({ checkOpacity: true, checkVisibilityCSS: true })
       ?? getComputedStyle(element).visibility === 'visible')) return false;
     const box = element.getBoundingClientRect();
@@ -47,7 +49,8 @@ function waitForAnchor(shell: HTMLElement, step: TourStep, signal: AbortSignal):
   return new Promise(resolve => {
     let frame = 0;
     let scrolled = false;
-    const timeout = window.setTimeout(() => finish(), 700);
+    const onPreview = () => !step.page || shell.dataset.tourPreview === step.id;
+    const timeout = window.setTimeout(() => finish(onPreview() ? findAnchor(shell, target) : undefined), 1500);
     const cancel = () => finish();
     function finish(anchor?: Element) {
       window.clearTimeout(timeout);
@@ -57,11 +60,11 @@ function waitForAnchor(shell: HTMLElement, step: TourStep, signal: AbortSignal):
     }
     function locate() {
       if (signal.aborted || !shell.isConnected) { finish(); return; }
-      const onPage = !step.page || shell.dataset.tourPage === step.page;
+      const onPage = onPreview();
       const anchor = onPage ? findAnchor(shell, target) : undefined;
       if (anchor) { finish(anchor); return; }
       if (onPage && target === 'display-settings' && !scrolled) {
-        const viewerSettings = shell.querySelector('[data-tapl-tour="display-settings"]');
+        const viewerSettings = shell.querySelector('[data-tour-preview-content] [data-tapl-tour="display-settings"]');
         if (viewerSettings) {
           viewerSettings.scrollIntoView({ block: 'center' });
           scrolled = true;
@@ -74,14 +77,12 @@ function waitForAnchor(shell: HTMLElement, step: TourStep, signal: AbortSignal):
   });
 }
 
-export function TourEntry({ state, context, locale, blockedByDialog, canInvite, selectPage, closeNavigation }: TourEntryProps): JSX.Element {
+export function TourEntry({ state, context, locale, blockedByDialog, canInvite, selectPage, showPreview, closeNavigation }: TourEntryProps): JSX.Element {
   const copy = tourCopy[locale];
   const helpButton = useRef<HTMLButtonElement>(null);
   const helpPanel = useRef<HTMLElement>(null);
   const notice = useRef<HTMLElement>(null);
   const activeTour = useRef<ReturnType<typeof startDriverTour>>();
-  const selectPageRef = useRef(selectPage);
-  selectPageRef.current = selectPage;
   const [helpOpen, setHelpOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState(false);
@@ -160,13 +161,15 @@ export function TourEntry({ state, context, locale, blockedByDialog, canInvite, 
     setRunning(true);
     activeTour.current = startDriverTour(steps, {
       labels: copy.labels,
+      exampleLabel: copy.example,
       prepare(step, signal) {
-        if (step.page && shell.dataset.tourPage !== step.page) selectPageRef.current(step.page);
+        showPreview(step.page ? step : undefined);
         return waitForAnchor(shell, step, signal);
       },
       onEnd(completed) {
         if (!activeTour.current) return;
         activeTour.current = undefined;
+        showPreview();
         setRunning(false);
         if (!completed) return;
         if (kind === 'release' && pendingUpdate) {

@@ -3,14 +3,13 @@ import { compareTourVersions, type TourHistory } from '../../viewer/tourHistory'
 import type { TourStep } from './driver';
 
 type Localized<T> = Record<SupportedLocale, T>;
-type StepCopy = Pick<TourStep, 'title' | 'description' | 'fallbackDescription'>;
+type StepCopy = Pick<TourStep, 'title' | 'description'>;
 type StepDefinition = Omit<TourStep, keyof StepCopy> & { copy: Localized<StepCopy> };
 export type Guide = 'quick' | 'blocked' | 'references' | 'appearance';
 export type TourKind = Guide | 'release';
 export interface TourContext {
   browser: boolean;
   connected: boolean;
-  canFollow: boolean;
   memorySupported: boolean;
 }
 
@@ -31,6 +30,7 @@ export const tourCopy = {
     finished: '이어서 살펴보기',
     current: '현재 RUN',
     records: '기록 검색',
+    example: '예시 시나리오',
     selectWorkspace: 'TAPL 기록이 있는 프로젝트 폴더를 열면 빠른 시작 안내를 볼 수 있어요.',
     labels: { next: '다음', previous: '이전', done: '마치기', close: '닫기', progress: '{{total}}단계 중 {{current}}' }
   },
@@ -50,6 +50,7 @@ export const tourCopy = {
     finished: 'Keep exploring',
     current: 'Current RUN',
     records: 'Search records',
+    example: 'Example scenario',
     selectWorkspace: 'Open a project folder with TAPL records to see the quick start guide.',
     labels: { next: 'Next', previous: 'Previous', done: 'Done', close: 'Close', progress: '{{current}} of {{total}}' }
   }
@@ -59,13 +60,11 @@ const runTabs: StepDefinition = {
   id: 'run-tabs', page: 'current', target: 'run-tabs', copy: {
     ko: {
       title: '볼 작업 고르기',
-      description: 'RUN은 에이전트 작업 한 건의 기록입니다. 상단 탭에서 살펴볼 작업을 고를 수 있어요.',
-      fallbackDescription: 'RUN은 에이전트 작업 한 건의 기록입니다. 작업이 기록되면 상단에 RUN 탭이 나타납니다.'
+      description: 'RUN은 에이전트 작업 한 건의 기록입니다. 상단 탭에서 살펴볼 작업을 고를 수 있어요.'
     },
     en: {
       title: 'Choose a RUN',
-      description: 'A RUN records one piece of agent work. Use the tabs at the top to choose the RUN you want to explore.',
-      fallbackDescription: 'A RUN records one piece of agent work. Its tab appears at the top once work is recorded.'
+      description: 'A RUN records one piece of agent work. Use the tabs at the top to choose the RUN you want to explore.'
     }
   }
 };
@@ -109,13 +108,11 @@ const memories: StepDefinition = {
   id: 'memory-list', page: 'memories', target: 'memory-list', copy: {
     ko: {
       title: '짧은 교훈에서 원문 열기',
-      description: '연상 기억에는 다시 쓸 만한 교훈이 짧게 남습니다. 기억 카드를 열고 연결된 원문에서 근거를 확인해 보세요.',
-      fallbackDescription: '저장된 기억이 있으면 카드를 열어 연결된 원문을 확인할 수 있어요. 기억이 없다면 기록 검색에서 이전 작업을 찾아보세요.'
+      description: '연상 기억에는 다시 쓸 만한 교훈이 짧게 남습니다. 기억 카드를 열고 연결된 원문에서 근거를 확인해 보세요.'
     },
     en: {
       title: 'Open the source of a memory',
-      description: 'Associative memory keeps short, reusable lessons. Open a memory card and follow its source link to check the evidence.',
-      fallbackDescription: 'Open a saved memory card to check its linked source. If there are no memories yet, search records for earlier work.'
+      description: 'Associative memory keeps short, reusable lessons. Open a memory card and follow its source link to check the evidence.'
     }
   }
 };
@@ -138,13 +135,11 @@ const references: StepDefinition[] = [
     id: 'run-references', page: 'current', target: 'run-references', copy: {
       ko: {
         title: '현재 RUN의 참조 찾기',
-        description: '마인드맵의 메모리·기록 개수 버튼으로 참조 카드에 이동할 수 있어요. 카드를 열면 연결된 원문을 확인할 수 있습니다.',
-        fallbackDescription: '현재 RUN에 참조가 생기면 마인드맵에 메모리·기록 개수 버튼이 나타납니다. 버튼으로 카드에 이동하고 원문을 열 수 있어요.'
+        description: '마인드맵의 메모리·기록 개수 버튼으로 참조 카드에 이동할 수 있어요. 카드를 열면 연결된 원문을 확인할 수 있습니다.'
       },
       en: {
         title: 'Find references on the current RUN',
-        description: 'Use the memory and history counts on the mind map to jump to reference cards. Open a card to view its source.',
-        fallbackDescription: 'Memory and history counts appear on the mind map when the current RUN has references. Use them to find the cards and open their sources.'
+        description: 'Use the memory and history counts on the mind map to jump to reference cards. Open a card to view its source.'
       }
     }
   },
@@ -162,13 +157,13 @@ const appearance: StepDefinition = {
   }
 };
 const nativeBrightness: StepDefinition = {
-  id: 'viewer-brightness', target: 'theme', copy: {
+  id: 'viewer-brightness', page: 'settings', target: 'theme', copy: {
     ko: { title: 'TAPL 화면 밝기 바꾸기', description: '상단 해·달 버튼으로 TAPL 화면만 밝게 또는 어둡게 바꿉니다. 화면의 색감은 현재 VS Code 편집기 팔레트를 따라갑니다.' },
     en: { title: 'Change TAPL’s brightness', description: 'Use the sun or moon button to switch TAPL’s appearance. TAPL continues to use the current VS Code editor palette.' }
   }
 };
 const webBrightness: StepDefinition = {
-  id: 'viewer-brightness', target: 'theme', copy: {
+  id: 'viewer-brightness', page: 'settings', target: 'theme', copy: {
     ko: { title: 'Viewer 밝기 바꾸기', description: '상단 해·달 버튼으로 브라우저 Viewer의 밝은 화면과 어두운 화면을 전환합니다.' },
     en: { title: 'Change Viewer brightness', description: 'Use the sun or moon button to switch the browser Viewer between light and dark.' }
   }
@@ -230,12 +225,7 @@ export function guideSteps(guide: Guide, context: TourContext, locale: Supported
   if (!context.connected) return localizeSteps([setup(context.browser)], locale);
   switch (guide) {
     case 'quick':
-      return localizeSteps([
-        runTabs, runMap,
-        ...(context.canFollow ? [follow] : []),
-        records,
-        ...(context.memorySupported ? [memories] : [])
-      ], locale);
+      return localizeSteps([runTabs, runMap, follow, records, memories], locale);
     case 'blocked': return localizeSteps(blocked, locale);
     case 'references': return localizeSteps(references, locale);
     case 'appearance': return localizeSteps([appearance, context.browser ? webBrightness : nativeBrightness], locale);

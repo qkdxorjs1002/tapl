@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useBrowserLayoutEffect } from './effects';
 import { useMotionPresence, usePageMotion, workbenchMotionIdentity } from './workbenchMotion';
 import './motion.css';
@@ -30,6 +30,9 @@ import { runReferenceCommand } from './runReferences';
 import { recordRunKey, routeIdentity, runKey, runTitle, tabRuns, taskCounts, type WorkbenchPage } from './model';
 import { TourEntry, type TourEntryState } from '../tour/TourEntry';
 import { tourCopy } from '../tour/content';
+import type { TourStep } from '../tour/driver';
+import { tourExample } from '../tour/example';
+import { TourPreview } from '../tour/TourPreview';
 
 export interface WorkbenchProps {
   view: WebviewView;
@@ -149,9 +152,15 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
       persistRef.current?.({ ...(state as object), theme: themeRef.current, sidebarPinned: pinnedRef.current })
   });
   const { state, prefs, snapshot, selectedRun, activeRuns } = navigation;
+  const [tourStep, setTourStep] = useState<TourStep>();
+  const example = useMemo(() => tourExample(props.locale), [props.locale]);
+  const archivedExample = tourStep?.id === 'keep-archived-run';
+  const exampleSnapshot = archivedExample ? example.archive : example.current;
+  const exampleRuns = archivedExample ? [example.current.run, example.archive.run] : [example.current.run];
   const selectedKey = state.route.runKey;
-  const tabs = tabRuns(activeRuns, selectedRun);
-  const counts = taskCounts(snapshot);
+  const tabs = tourStep ? exampleRuns : tabRuns(activeRuns, selectedRun);
+  const tabKey = tourStep ? runKey(exampleSnapshot.run) : selectedKey;
+  const counts = taskCounts(tourStep ? exampleSnapshot : snapshot);
   const currentLegacy = state.route.view;
   const memoryPage = state.route.page === 'memories' || currentLegacy?.type === 'memorySource';
   const page = state.route.page;
@@ -293,7 +302,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
         .filter(Boolean)
         .join(' · ')}
       data-wb-tooltip={!mobile && !sidebarPinned ? 'true' : 'false'}
-      aria-current={page === target || (target === 'memories' && memoryPage) ? 'page' : undefined}
+      aria-current={(tourStep?.page ?? page) === target || (!tourStep && target === 'memories' && memoryPage) ? 'page' : undefined}
       onClick={() => selectPage(target)}
       data-wb-focus={`nav:${target}`}
     >
@@ -324,7 +333,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
       data-menu-open={menuOpen}
       data-sidebar-pinned={sidebarPinned}
       data-sidebar-expanded={sidebarExpanded}
-      data-tour-page={page}
+      data-tour-preview={tourStep?.id}
     >
       <a
         className="wb-skip-link"
@@ -385,10 +394,10 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
               context={{
                 browser: !!props.browser,
                 connected: !!props.workspace && props.view.type !== 'error' && props.view.type !== 'workspace',
-                canFollow: snapshot?.run.status === 'active',
                 memorySupported: props.memorySupported
               }}
               selectPage={selectPage}
+              showPreview={setTourStep}
               closeNavigation={closeMenu}
               blockedByDialog={workspaceOpen}
               canInvite={page === 'current' && !menuOpen}
@@ -398,8 +407,9 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
         <nav className="wb-run-tabs tabs" role="tablist" aria-label="RUN">
           {tabs.map((run, index) => {
             const key = runKey(run),
-              selected = key === selectedKey;
-            const temporary = !tabRuns(activeRuns, undefined).some((candidate) => runKey(candidate) === key);
+              selected = key === tabKey;
+            const temporary = tourStep ? run.status === 'archived' :
+              !tabRuns(activeRuns, undefined).some((candidate) => runKey(candidate) === key);
             return (
               <div key={key} role="presentation" className={`wb-run-tab-slot ${temporary ? 'wb-run-tab-slot-temporary' : ''}`}>
                 <button
@@ -407,16 +417,17 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
                   role="tab"
                   className={`tab wb-run-tab ${temporary ? 'wb-run-tab-temporary' : ''}`}
                   aria-selected={selected}
-                  aria-controls="wb-page-content"
+                  aria-controls={tourStep ? undefined : 'wb-page-content'}
                   id={`wb-run-tab-${index}`}
                   tabIndex={
-                    selected || (index === 0 && !tabs.some((candidate) => runKey(candidate) === selectedKey)) ? 0 : -1
+                    selected || (index === 0 && !tabs.some((candidate) => runKey(candidate) === tabKey)) ? 0 : -1
                   }
                   title={[runTitle(run), run.id, run.source_db].filter(Boolean).join('\n')}
                   data-wb-focus={`run:${key}`}
-                  data-tapl-tour={selected || index === 0 && !selectedKey ? 'run-tabs' : undefined}
-                  onClick={() => openRun(run, false)}
+                  data-tapl-tour={selected || index === 0 && !tabKey ? 'run-tabs' : undefined}
+                  onClick={tourStep ? undefined : () => openRun(run, false)}
                   onKeyDown={(event) => {
+                    if (tourStep) return;
                     if (temporary && event.key === 'Delete') {
                       event.preventDefault();
                       navigation.closeTemporaryRun();
@@ -449,7 +460,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
                     className="wb-run-tab-close"
                     aria-label={t('wbCloseRunTab')}
                     data-wb-focus={`close-run:${key}`}
-                    onClick={navigation.closeTemporaryRun}
+                    onClick={tourStep ? undefined : navigation.closeTemporaryRun}
                   >
                     <Icon name="close" />
                   </button>
@@ -483,7 +494,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
                 type="button"
                 className="btn btn-ghost btn-xs btn-square"
                 aria-label={t('changeWorkspace')}
-                title={[t('changeWorkspace'), props.workspace].filter(Boolean).join(' · ')}
+                title={[t('changeWorkspace'), tourStep ? undefined : props.workspace].filter(Boolean).join(' · ')}
                 onClick={() => {
                   setMenuOpen(false);
                   setWorkspaceOpen(true);
@@ -499,12 +510,12 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
               'current',
               'focus',
               t('wbCurrent'),
-              snapshot ? { count: counts.percent, percentage: true } : undefined
+              snapshot || tourStep ? { count: counts.percent, percentage: true } : undefined
             )}
-            {navButton('tasks', 'table', t('wbTasks'), snapshot ? { count: counts.total } : undefined)}
+            {navButton('tasks', 'table', t('wbTasks'), snapshot || tourStep ? { count: counts.total } : undefined)}
           </nav>
         </section>
-        <section>
+        <section hidden={!!tourStep}>
           <h2 className="wb-nav-caption">{t('wbExplore')}</h2>
           <Explore
             snapshot={snapshot}
@@ -558,6 +569,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
       </aside>
       <main
         ref={pageRef}
+        data-tour-covered={tourStep ? '' : undefined}
         className="wb-page-scroll"
         data-current-mindmap={page === 'current' && !!snapshot && !props.loading}
         data-memory-mindmap={
@@ -656,6 +668,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
           )}
         </div>
       </main>
+      {tourStep && <TourPreview step={tourStep} example={example} />}
       <div className="wb-back-layer" ref={props.setBackLayer} />
       {props.browser && (
         <WorkspaceDialog

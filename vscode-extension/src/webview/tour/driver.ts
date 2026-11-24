@@ -8,11 +8,11 @@ export interface TourStep {
   description: string;
   target?: string;
   page?: 'current' | 'tasks' | 'records' | 'memories' | 'settings';
-  fallbackDescription?: string;
 }
 
 interface TourOptions {
   labels: { next: string; previous: string; done: string; close: string; progress: string };
+  exampleLabel: string;
   prepare: (step: TourStep, signal: AbortSignal) => Promise<Element | undefined>;
   onEnd: (completed: boolean) => void;
 }
@@ -31,7 +31,7 @@ function isVisible(element: Element): boolean {
   );
 }
 
-export function startDriverTour(steps: readonly TourStep[], { labels, prepare, onEnd }: TourOptions): { destroy(): void } {
+export function startDriverTour(steps: readonly TourStep[], { labels, exampleLabel, prepare, onEnd }: TourOptions): { destroy(): void } {
   const app = document.getElementById('root');
   const wasInert = app?.inert ?? false;
   const opener = document.activeElement;
@@ -81,6 +81,12 @@ export function startDriverTour(steps: readonly TourStep[], { labels, prepare, o
 
       const content = document.createElement('div');
       content.className = 'tapl-tour-content';
+      if (index !== undefined && steps[index].page) {
+        const caption = document.createElement('div');
+        caption.className = 'tapl-tour-example-label';
+        caption.textContent = exampleLabel;
+        content.append(caption);
+      }
       content.append(card.title, card.description, card.footer);
       card.wrapper.append(content);
     }
@@ -135,7 +141,6 @@ export function startDriverTour(steps: readonly TourStep[], { labels, prepare, o
 
     const anchor = target && isVisible(target) ? target : undefined;
     driverSteps[index].element = anchor;
-    driverSteps[index].popover.description = escapeText(anchor ? step.description : step.fallbackDescription ?? step.description);
     tour.drive(index);
   }
 

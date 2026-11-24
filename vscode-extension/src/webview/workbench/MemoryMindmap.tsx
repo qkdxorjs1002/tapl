@@ -17,12 +17,14 @@ export function MemoryMindmap({
   memories: incomingMemories,
   send: incomingSend,
   cameraKey,
-  workspaceKey
+  workspaceKey,
+  preview
 }: {
   memories: AssociativeMemory[];
   send: (message: WebviewCommand) => void;
   cameraKey: string;
   workspaceKey?: string;
+  preview?: boolean;
 }): JSX.Element {
   const { t } = useI18n();
   const projection = useMindmapValue(memoryMindmapProjection(incomingMemories));
@@ -35,9 +37,14 @@ export function MemoryMindmap({
   const [active, setActive] = useState<string>();
   const relations = useMemo(() => buildMindmapRelationIndex(graph), [graph]);
   const related = useMemo(() => relatedMindmapNodes(relations, active), [active, relations]);
+  const follow = useMemo(() => preview
+    ? graph.nodes.filter(node => node.kind === 'memory').map(node => node.key)
+    : undefined, [graph, preview]);
   const { hostRef, worldRef, controlsRef, edges, suppressClickCapture } = useMindmapViewport({
     graph,
     cameraKey,
+    follow,
+    previewFollow: preview ? 'center' : undefined,
     setActive
   });
   const open = useMindmapAction((node: MemoryMindmapNode) => {
@@ -84,6 +91,7 @@ export function MemoryMindmap({
             emphasis={related ? (related.has(node.key) ? 'emphasis' : 'dim') : undefined}
             workspaceKey={workspaceKey}
             memoryCount={graph.memoryCount}
+            tourTarget={preview && node.kind === 'memory'}
             open={open}
             setActive={setActive}
           />
@@ -144,7 +152,8 @@ const MemoryMindmapNodeCard = memo(function MemoryMindmapNodeCard({
   workspaceKey,
   memoryCount,
   open,
-  setActive
+  setActive,
+  tourTarget
 }: {
   node: MemoryMindmapNode;
   index: number;
@@ -153,6 +162,7 @@ const MemoryMindmapNodeCard = memo(function MemoryMindmapNodeCard({
   memoryCount: number;
   open: (node: MemoryMindmapNode) => void;
   setActive: (key?: string) => void;
+  tourTarget?: boolean;
 }): JSX.Element {
   const { t } = useI18n();
   const label = (node: MemoryMindmapNode) =>
@@ -246,6 +256,7 @@ const MemoryMindmapNodeCard = memo(function MemoryMindmapNodeCard({
     <div
       className={`wb-mm-node${emphasis ? ` wb-mm-${emphasis}` : ''}`}
       data-kind={node.kind}
+      data-tapl-tour={tourTarget ? 'memory-list' : undefined}
       data-matched={node.kind === 'cue' && node.matched ? 'true' : undefined}
       data-mindmap-node={node.key}
       style={

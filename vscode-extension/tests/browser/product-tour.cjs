@@ -49,10 +49,12 @@ before(async () => {
   origin = await serve(assets);
   unconnectedOrigin = await serve(assets, ['--without-default']);
   currentReleaseOrigin = await serve(buildFixtureAssets('2.24.0'));
-  browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: process.env.TAPL_TOUR_HEADED !== '1'
-  });
+  browser = process.env.WEBAPP_TESTING_CDP_URL
+    ? await chromium.connectOverCDP(process.env.WEBAPP_TESTING_CDP_URL)
+    : await chromium.launch({
+      ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
+      headless: process.env.TAPL_TOUR_HEADED !== '1'
+    });
 });
 after(async () => {
   await browser?.close();
@@ -69,8 +71,12 @@ async function open(options = {}) {
   const { history, failStorage, emptyRun, url = origin, ...view } = options;
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'en-US', ...view });
   const errors = [];
+  const commands = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (/violates.*Content Security Policy/.test(message.text())) errors.push(message.text()); });
+  page.on('request', request => {
+    if (request.url().endsWith('/api/message')) commands.push(request.postDataJSON()?.command);
+  });
   await page.route('https://api.github.com/repos/qkdxorjs1002/tapl/releases/latest', route =>
     route.fulfill({ json: { tag_name: 'v9.0.0', draft: false, prerelease: false } }));
   if (emptyRun) await page.route('**/api/message', async route => {
@@ -94,7 +100,7 @@ async function open(options = {}) {
   }, { key: historyKey, history, failStorage });
   await page.goto(url);
   if (url === origin && !emptyRun) await expect(page.locator('.wb-run-mindmap')).toBeVisible();
-  return { page, errors };
+  return { page, errors, commands };
 }
 const help = page => page.locator('[data-tour-focus-return]');
 const card = page => page.locator('.tapl-tour-card');
@@ -128,15 +134,18 @@ async function step(page, id, next, focusTarget) {
   return popup.getByRole('button', { name: next, exact: true });
 }
 
-test('first visit in English completes five steps, preserves the workspace and reopens from Help', async () => {
-  const { page, errors } = await open({ colorScheme: 'light' });
+test('first visit in English completes five steps, preserves the page and reopens from Help', async () => {
+  const { page, errors, commands } = await open({ colorScheme: 'light' });
   try {
+    const originalUrl = page.url();
     await expect(card(page)).toContainText('New to TAPL?');
     assert.deepEqual(await readHistory(page), { releaseSeenThrough: version });
     await assertEntryFits(card(page));
     await screenshot(page, 'web-welcome-light');
     await card(page).getByRole('button', { name: 'Quick start' }).click();
     const next = await step(page, 'run-tabs', 'Next', 'run-tabs');
+    await expect(dialog(page)).toContainText('Example scenario');
+    await expect(page.locator('[data-tapl-tour="run-tabs"]')).toContainText('Export search results');
     await expect(dialog(page).getByRole('button', { name: 'Previous' })).toBeDisabled();
     await screenshot(page, 'web-desktop-light');
     for (let index = 0; index < 4; index++) {
@@ -145,7 +154,7 @@ test('first visit in English completes five steps, preserves the workspace and r
     }
     await next.focus();
     await page.keyboard.press('Enter');
-    await step(page, 'run-map', 'Next');
+    await step(page, 'run-map', 'Next', 'run-map');
     await dialog(page).getByRole('button', { name: 'Previous' }).click();
     await (await step(page, 'run-tabs', 'Next')).click();
     await (await step(page, 'run-map', 'Next')).click();
@@ -154,6 +163,10 @@ test('first visit in English completes five steps, preserves the workspace and r
     await (await step(page, 'memory-list', 'Done', 'memory-list')).click();
     await expect(dialog(page)).toHaveCount(0);
     await expect(help(page)).toBeFocused();
+    await expect(page.locator('[data-tour-preview-content]')).toHaveCount(0);
+    await expect(page.locator('.wb-run-mindmap')).toBeVisible();
+    assert.equal(page.url(), originalUrl);
+    assert.ok(!commands.some(command => ['records', 'memories', 'openRun', 'getSettings'].includes(command)));
     await expect(card(page)).toContainText('Keep exploring');
     await card(page).getByRole('button', { name: 'Current RUN' }).click();
     await expect(page.locator('.wb-run-mindmap')).toBeVisible();
@@ -166,7 +179,8 @@ test('first visit in English completes five steps, preserves the workspace and r
     await screenshot(page, 'web-help-light');
     await panel(page).getByRole('button', { name: 'Find blocked tasks' }).click();
     await (await step(page, 'task-filter', 'Next', 'task-filter')).click();
-    await step(page, 'blocked-task', 'Done');
+    await step(page, 'blocked-task', 'Done', 'blocked-task');
+    await expect(page.locator('[data-tour-preview-content]')).toContainText('The sample report is waiting for approval.');
     await page.keyboard.press('Escape');
     await expect(dialog(page)).toHaveCount(0);
     await expect(help(page)).toBeFocused();
@@ -174,6 +188,7 @@ test('first visit in English completes five steps, preserves the workspace and r
     await panel(page).getByRole('button', { name: 'Change display settings' }).click();
     await (await step(page, 'display-settings', 'Next', 'display-settings')).click();
     await (await step(page, 'viewer-brightness', 'Done', 'theme')).click();
+    assert.ok(!commands.includes('getSettings'));
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });
@@ -189,17 +204,16 @@ test('Korean dark modals fit a narrow reduced-motion viewport and Later lasts fo
     await help(page).click();
     await panel(page).getByRole('button', { name: '빠른 시작' }).click();
     for (const id of ['run-tabs', 'run-map', 'follow', 'record-search']) {
-      const next = await step(page, id, '다음');
+      const next = await step(page, id, '다음', id);
       if (id === 'follow') await screenshot(page, 'web-mobile-dark');
       await next.click();
     }
-    await step(page, 'memory-list', '마치기');
+    await step(page, 'memory-list', '마치기', 'memory-list');
     await dialog(page).getByRole('button', { name: '닫기' }).click();
     await expect(help(page)).toBeFocused();
     assert.equal((await readHistory(page)).intro, undefined);
     await page.reload();
-    await expect(page.locator('.wb-memory-page')).toBeVisible();
-    await page.locator('.wb-brand').click();
+    await expect(page.locator('.wb-run-mindmap')).toBeVisible();
     await card(page).getByRole('button', { name: '다시 보지 않기' }).click();
     await page.reload();
     await expect(page.locator('.wb-run-mindmap, .wb-memory-page')).toBeVisible();
@@ -261,8 +275,10 @@ test('2.24.0 introduces the archive tab, delegated model and Viewer link in orde
     const offer = card(page);
     await expect(offer).toContainText('v2.24.0');
     await offer.getByRole('button', { name: '새 기능 보기' }).click();
-    await (await step(page, 'keep-archived-run', '다음', 'run-tabs')).click();
-    await (await step(page, 'delegated-task-model', '다음')).click();
+    const next = await step(page, 'keep-archived-run', '다음', 'run-tabs');
+    await expect(page.locator('[data-tapl-tour="run-tabs"]')).toHaveClass(/wb-run-tab-temporary/);
+    await next.click();
+    await (await step(page, 'delegated-task-model', '다음', 'delegated-task-model')).click();
     await (await step(page, 'open-viewer-link', '마치기')).click();
     await expect(dialog(page)).toHaveCount(0);
     assert.deepEqual(await readHistory(page), { intro: 'completed', releaseSeenThrough: '2.24.0' });
@@ -270,17 +286,32 @@ test('2.24.0 introduces the archive tab, delegated model and Viewer link in orde
   } finally { await page.close(); }
 });
 
-test('a workspace without an active RUN or memory support has centered explanations and usable navigation', async () => {
-  const { page, errors } = await open({ emptyRun: true, viewport: { width: 380, height: 540 } });
+test('an empty workspace highlights sample runs, tasks, records, memories and references', async () => {
+  const { page, errors, commands } = await open({ emptyRun: true, viewport: { width: 380, height: 540 } });
   try {
     await card(page).getByRole('button', { name: 'Quick start' }).click();
-    const next = await step(page, 'run-tabs', 'Next');
-    await expect(dialog(page)).toContainText('Its tab appears at the top once work is recorded.');
-    await next.click();
-    await (await step(page, 'run-map', 'Next')).click();
-    await (await step(page, 'record-search', 'Done', 'record-search')).click();
+    await (await step(page, 'run-tabs', 'Next', 'run-tabs')).click();
+    await (await step(page, 'run-map', 'Next', 'run-map')).click();
+    await (await step(page, 'follow', 'Next', 'follow')).click();
+    await (await step(page, 'record-search', 'Next', 'record-search')).click();
+    await (await step(page, 'memory-list', 'Done', 'memory-list')).click();
     await expect(card(page)).toContainText('Keep exploring');
-    await card(page).getByRole('button', { name: 'Search records' }).click();
+    await expect(page.locator('.wb-run-tabs [role="tab"]')).toHaveCount(0);
+    await expect(page.locator('[data-tour-preview-content]')).toHaveCount(0);
+    await help(page).click();
+    await panel(page).getByRole('button', { name: 'Read sources and usage' }).click();
+    await (await step(page, 'run-references', 'Next', 'run-references')).click();
+    await step(page, 'reference-usage', 'Done', 'reference-stage');
+    await expect(page.locator('[data-tapl-tour="reference-stage"].driver-active-element')).toHaveAttribute('data-stage', 'used');
+    await page.keyboard.press('Escape');
+    assert.ok(!commands.some(command => ['records', 'memories', 'openRun', 'openMemory', 'getSettings'].includes(command)));
+    await help(page).click();
+    await panel(page).getByRole('button', { name: 'Quick start' }).click();
+    await (await step(page, 'run-tabs', 'Next')).click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-tour-preview-content]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Navigation' }).click();
+    await page.locator('[data-wb-focus="nav:records"]').click();
     await expect(page.locator('[data-tapl-tour="record-search"]')).toBeVisible();
     assert.deepEqual(errors, []);
   } finally {

@@ -54,6 +54,7 @@ export function useMindmapViewport({
   cameraKey,
   follow: incomingFollow,
   fitEntireGraph = false,
+  previewFollow,
   setActive
 }: {
   graph: MindmapViewportGraph;
@@ -61,6 +62,7 @@ export function useMindmapViewport({
   /** Present only for active RUNs; an empty list follows the default RUN view. */
   follow?: string[];
   fitEntireGraph?: boolean;
+  previewFollow?: 'center' | 'upper';
   setActive: (key?: string) => void;
 }) {
   // Labels, bodies and navigation payloads can change without invalidating geometry or gestures.
@@ -333,9 +335,15 @@ export function useMindmapViewport({
     };
     const followKeys = new Set(follow);
     const followedNodes = graph.nodes.filter(node => followKeys.has(node.key));
-    const followTarget = () => mindmapFollowCamera(followedNodes, bounds);
+    const followTarget = () => {
+      const next = mindmapFollowCamera(followedNodes, bounds);
+      // Leave room for the tour popover below the highlighted RUN branch on compact screens.
+      if (previewFollow === 'upper' && bounds.width <= 520 && bounds.height <= 540) next.y -= bounds.height * 0.24;
+      return next;
+    };
     const track = (settle = false) => {
       target = followTarget(); // Following may center an outer leaf beyond normal pan constraints.
+      if (previewFollow) camera = { ...target };
       returnMotion = undefined;
       if (settle && !reduced) {
         const velocity: Camera = { x: 0, y: 0, zoom: 0 };
@@ -842,7 +850,7 @@ export function useMindmapViewport({
       window.removeEventListener('focus', focusWindow);
       motion.removeEventListener('change', motionChange);
     };
-  }, [cameraKey, graph, byKey, edges, follow, fitEntireGraph, setActive]);
+  }, [cameraKey, graph, byKey, edges, follow, fitEntireGraph, previewFollow, setActive]);
 
   const suppressClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (Date.now() < suppressClickRef.current && !(event.target as Element).closest('[data-mm-controls]')) {

@@ -34,7 +34,7 @@ Use **Open Viewer** in an agent’s RUN classification notice to open its worksp
 
 ### Product tours
 
-On first use, an invitation appears on Current RUN after a TAPL workspace is ready. It closes when you click elsewhere in the Viewer. **Quick start** shows how to choose a RUN, read its PLAN and TASK cards, use automatic following, search records, and open the source of a saved memory. Steps adapt to the workspace and the features the server supports. Use **Next** or **Previous** to move through the guide and **Esc** to close it. You can try the highlighted controls after closing the guide.
+On first use, an invitation appears on Current RUN after a TAPL workspace is ready. It closes when you click elsewhere in the Viewer. **Quick start** uses an example RUN to show how to choose a RUN, read PLAN and TASK cards, use automatic following, search records, and find the source of a saved memory. Tours use built-in examples, including in workspaces with no RUNs or saved records. Use **Next** or **Previous** to move through the guide and **Esc** to close it. Closing or completing a tour returns you to the page and RUN you were viewing.
 
 Use the **TAPL Help** question mark next to the theme button to replay Quick start, view recent changes, or open guides for blocked tasks, references, and display settings. **Later** hides the invitation until the next page load. Completing it or choosing **Don’t show again** records that choice. The browser remembers choices for the current address and port. VS Code keeps its own choices in your profile.
 
