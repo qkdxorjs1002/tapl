@@ -112,6 +112,33 @@ test('opened promotion deduplicates reads, guards current RUN records and preser
   assert.ok(referenceEdges(graph).every(edge => !edge.flowing));
 });
 
+test('dense reference groups spread outward below the workflow without overlaps', () => {
+  const memories = Array.from({ length: 9 }, (_, index) => memory({ memory_id: `M-${index}`, source: undefined }));
+  const records = Array.from({ length: 48 }, (_, index) => history({ item_id: index + 7 }));
+  const references = [...memories, ...records];
+  const graph = buildRunMindmap(snapshot(references));
+  assert.deepEqual(buildRunMindmap(snapshot([...references].reverse())), graph);
+  const workflow = buildRunMindmap(snapshot());
+  assert.deepEqual(graph.nodes.filter(node => !node.reference), workflow.nodes);
+
+  for (const [kind, direction, count] of [['memory', -1, memories.length], ['history', 1, records.length]]) {
+    const nodes = graph.nodes.filter(node => node.kind === kind);
+    assert.equal(nodes.length, count);
+    assert.ok(new Set(nodes.map(node => node.x)).size > 1, `${kind} uses multiple columns`);
+    assert.ok(new Set(nodes.map(node => node.y)).size <= Math.ceil(count / 2), `${kind} uses fewer rows`);
+    for (const [index, node] of nodes.entries()) {
+      assert.ok(node.x * direction > node.width / 2, `${kind} stays on its side`);
+      assert.ok(node.y - node.height / 2 > workflow.bounds.maxY, `${kind} stays below the workflow`);
+      for (const other of nodes.slice(index + 1)) {
+        assert.ok(Math.abs(node.x - other.x) > (node.width + other.width) / 2 ||
+          Math.abs(node.y - other.y) > (node.height + other.height) / 2, 'cards have space between them');
+      }
+    }
+  }
+  const historyOnly = buildRunMindmap(snapshot(records));
+  assert.deepEqual(historyOnly.nodes.filter(node => node.kind === 'history'), graph.nodes.filter(node => node.kind === 'history'));
+});
+
 test('a source RUN open creates one root target and never manufactures historical children', () => {
   const ref = history({ target_type: 'run', item_id: undefined, stage: 'opened' });
   const graph = buildRunMindmap(snapshot([ref]));
