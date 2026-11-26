@@ -8,7 +8,7 @@ from unittest import mock
 from mcp import Client
 import pytest
 
-from taplctl import config, db, mcp_server, prompt
+from taplctl import config, context, db, execution_evidence, mcp_server, prompt
 
 
 @pytest.mark.parametrize("template", [
@@ -68,11 +68,79 @@ def test_compact_history_guidance_keeps_workflow_gates():
     for contract in (
         "never print the full tool catalog",
         "Execution approval is required",
+        "Treat design direction, agreement, and plan edits as planning",
+        "Ask only when scope is materially ambiguous",
+        "the exact current user request as `prompt`",
         "inspect original sources", "atomic `tapl_dispatch_tasks`",
         "Finish, inspect memory, then archive separately",
         "tapl_get_item(compact=true)", "full formatted bodies remain available",
     ):
         assert contract in policy
+
+
+def test_active_run_context_leaves_request_interpretation_to_agent(tmp_path):
+    workspace = db.initialize_workspace(tmp_path)
+    settings = config.load(start=tmp_path)
+    with db.connect(workspace["db"], session_id="root") as conn:
+        db.ensure_active_run(conn)
+        db.update_active_run_summary(conn, request_summary="Plan API changes", work_type="planning")
+        db.upsert_plan(conn, plan_id="PLAN-001", title="Plan API changes", status="Draft")
+        same = context.build_context(
+            conn, event="UserPromptSubmit", settings=settings, payload={"prompt": "Plan API changes"},
+        )
+        follow_up = context.build_context(
+            conn, event="UserPromptSubmit", settings=settings, payload={"prompt": "이 설계에 오류 응답도 넣자"},
+        )
+    assert same["next_actions"] == follow_up["next_actions"]
+    assert prompt.active_run_request_next_action() in follow_up["next_actions"]
+    assert "Ask only if it is unclear" in context.format_context(follow_up)
+    assert "TAPL-APPROVE" not in context.format_context(follow_up)
+
+
+def test_context_surfaces_current_host_confirmation_without_changing_it(tmp_path):
+    workspace = db.initialize_workspace(tmp_path)
+    settings = config.load(start=tmp_path)
+    with db.connect(workspace["db"], session_id="root") as conn:
+        db.ensure_active_run(conn)
+        db.update_active_run_summary(conn, request_summary="Analyze API changes", work_type="analysis")
+        db.upsert_plan(conn, plan_id="PLAN-001", title="API changes", status="Finalized")
+        packet = context.build_context(conn, event="UserPromptSubmit", settings=settings)
+        command = execution_evidence.confirmation_command(conn)
+        assert command and command.startswith("TAPL-APPROVE ")
+        assert context.format_context(packet).count(command) == 1
+        assert "If the user explicitly requests execution" in context.format_context(packet)
+        helper = context.build_context(
+            conn, event="UserPromptSubmit", settings=settings, payload={"agent_id": "helper"},
+        )
+        assert helper["next_actions"] == []
+        assert command not in context.format_context(helper)
+        execution_evidence.observe_user_prompt(conn, {"prompt": command})
+        acknowledged = context.build_context(
+            conn, event="UserPromptSubmit", settings=settings, payload={"prompt": command},
+        )
+    assert "host confirmed the current plan" in context.format_context(acknowledged)
+    assert command not in context.format_context(acknowledged)
+
+
+def test_new_unsummarized_run_context_skips_host_execution_guard(tmp_path):
+    workspace = db.initialize_workspace(tmp_path)
+    settings = config.load(start=tmp_path)
+    with db.connect(workspace["db"], session_id="root") as conn:
+        db.ensure_active_run(conn)
+        execution_evidence.observe_user_prompt(conn, {"prompt": "Explain this term"})
+        packet = context.build_context(conn, event="UserPromptSubmit", settings=settings)
+    assert "Execution is on hold" not in context.format_context(packet)
+    assert "TAPL-APPROVE" not in context.format_context(packet)
+
+
+def test_short_policy_reload_and_task_stage_notice_guidance():
+    reload = prompt.post_compact_guidance()
+    assert "`tapl_get_next` without `known_policy_revision`" in reload
+    assert "complete `workflow_policy`, `subagent_guidance`, and config" in reload
+    notice = prompt.mcp_tool_result_display_guidance()
+    assert "verification notice once on entering that stage, after successful" in notice
+    assert "`tapl_start_task` or `tapl_dispatch_tasks`" in notice
+    assert "Skip repeats on retries" in notice
 
 
 @pytest.mark.parametrize("search", ["bm25", "word", "semantic", "hybrid"])

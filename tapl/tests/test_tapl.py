@@ -846,7 +846,7 @@ class TaplRuntimeTests(unittest.TestCase):
 
         # Includes readable record examples, memory and lossless compact reads.
         # This full policy loads once; repeated transport instructions stay <900.
-        self.assertLess(len(instructions), 13_750)
+        self.assertLess(len(instructions), 14_400)
         for guidance in (
             "Default to one RUN",
             "For independent topics use separate plan_ids (PLAN-001, PLAN-002, ...)",
@@ -867,7 +867,7 @@ class TaplRuntimeTests(unittest.TestCase):
                             subagents=tapl_config.SubagentsConfig(strategy=strategy, setup_complete=True)
                         )
                     ),
-                    13_750,
+                    13_850,
                 )
         required_policy = (
             "Do not modify source, tests, docs, configs, migrations, generated files",
@@ -896,7 +896,7 @@ class TaplRuntimeTests(unittest.TestCase):
             "record_mode=`lightweight` only for Fast non-durable Answer/Investigation/Analysis/Planning",
             "`tapl_apply_plan` promotes only record_mode",
             "Planning must happen before implementation",
-            "Finalize only after explicit user confirmation.",
+            "Obtain explicit user confirmation for material design choices before finalizing.",
             "use request_user_input Tool early",
             "continue with follow-ups until the plan is materially clear",
             "batch up to three short questions",
@@ -928,9 +928,8 @@ class TaplRuntimeTests(unittest.TestCase):
             "decision-relevant findings with source and impact",
             "never store raw dumps, long candidate lists, or stale findings",
             "Archive when no actionable work remains",
-            "Explicit planning-only: report the plan and keep active",
-            "If planning is requested without an execution decision, ask with request_user_input",
-            "never finish/archive before the choice",
+            "For design or plan revisions, report the current plan and keep it active",
+            "Ask a focused question only if the requested next step is materially ambiguous",
             "When the user asks to run, test, inspect, or show output",
             "lead with the observed result",
             "include the relevant raw output or a faithful excerpt",
@@ -988,17 +987,16 @@ class TaplRuntimeTests(unittest.TestCase):
         for action in (
             tapl_prompt.run_stopped_during_task_next_action("TASK-001"),
             tapl_prompt.incomplete_run_next_action(),
-            tapl_prompt.different_request_next_action(),
+            tapl_prompt.active_run_request_next_action(),
         ):
             self.assertNotIn("merge the work into one plan", action)
             self.assertIn("preserving separate topic plans", action)
 
     def test_planning_only_does_not_require_another_decision_after_explicit_limit(self) -> None:
-        # Startup policy and Stop must agree with lifecycle progression: the
-        # explicit stage limit already supplies the user's decision to wait.
+        # Startup policy and Stop retain the current plan during design work.
         for guidance in (tapl_prompt.mcp_server_instructions(), tapl_prompt.stop_guidance()):
-            self.assertIn("Explicit planning-only: report the plan and keep", guidance)
-            self.assertIn("If planning is requested without an execution decision, ask", guidance)
+            self.assertIn("For design or plan revisions, report the current plan and keep it active", guidance)
+            self.assertIn("materially ambiguous", guidance)
         self.assertIn("report the plan and keep the run active", tapl_prompt.workflow_stage_progression_guidance())
 
     def test_preclassification_scout_routes_known_and_unclear_scope(self) -> None:
@@ -1062,21 +1060,24 @@ class TaplRuntimeTests(unittest.TestCase):
         )
 
         required_result_guidance = (
-            "Emit one commentary notice when entering PLAN planning, TASK execution, and TASK verification",
+            "Emit one PLAN notice when planning begins",
+            "Emit a TASK execution or verification notice once on entering that stage, after successful",
+            "`tapl_start_task` or `tapl_dispatch_tasks`",
+            "Skip repeats on retries",
             "Never echo tool data or report each call",
             "On TAPL stage changes, emit at most one localized notice",
             "`<emoji> **<tapl-kind>** · <current activity>`",
             "`🧪 **TASK** · 전체 테스트 실행 중`",
             "Use the TAPL workflow kind",
             "**RUN**, **PLAN**, **TASK**, **HISTORY**, **FINDING**, **APPROVAL**, or **ARCHIVE**",
-            "Normal notices: one clause, at most 60 characters, progressive, current activity only",
-            "after `tapl_summarize_run`, report only returned work_type",
+            "Normal notices use one progressive clause of at most 60 characters",
+            "After `tapl_summarize_run`, report only returned work_type",
             "` · [Viewer 바로가기](viewer_url)`",
             "work_type, workflow_mode and derived record_mode",
-            "repeat only on classification change",
-            "omit completed results, counts, rationale, lists, sequences, next steps, receipts, tables, IDs, statuses, payloads and summaries",
+            "Repeat only on classification change",
+            "Keep record details in TAPL",
             "Never echo tool data",
-            "Icons: 🔎 inspect, 📝 plan, 🛠️ execute, 🧪 verify",
+            "Icons are 🔎 inspect, 📝 plan, 🛠️ execute, 🧪 verify",
             "combine consecutive calls",
             "Errors/blockers/approvals/input requests may include reason and next action",
             "localized notice",
@@ -1355,7 +1356,7 @@ class TaplRuntimeTests(unittest.TestCase):
         self.assertIn("complete the Fast non-durable work", next_action)
         self.assertIn("For work_type=planning", next_action)
         self.assertIn("keep the run active", next_action)
-        self.assertIn("do not archive before the user chooses", recorded_action)
+        self.assertIn("keep the run active unless the user requests closure", recorded_action)
         self.assertIn("record_mode to planned", next_action)
         self.assertNotIn("answer directly", next_action)
 
@@ -2368,7 +2369,11 @@ searchd_start_timeout_ms = 1
             hooks = json.loads((codex_home / "hooks.json").read_text(encoding="utf-8"))
             prompt_hook = hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
             self.assertEqual(prompt_hook, "tapl-hook --event UserPromptSubmit --mode observe")
-            self.assertNotIn("SessionStart", hooks["hooks"])
+            compact_start = hooks["hooks"]["SessionStart"][0]
+            self.assertEqual(compact_start["matcher"], "^compact$")
+            self.assertEqual(compact_start["hooks"][0]["command"], "tapl-hook --event SessionStart --mode observe")
+            post_compact = hooks["hooks"]["PostCompact"][0]["hooks"][0]["command"]
+            self.assertEqual(post_compact, "tapl-hook --event PostCompact --mode observe")
             self.assertNotIn("tapl_hook.py", json.dumps(hooks))
             self.assertTrue((codex_home / "config.toml").exists())
             codex_config = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
@@ -2569,7 +2574,10 @@ experimental = true
                 for entry in hooks["hooks"]["SessionStart"]
                 for hook in entry["hooks"]
             ]
-            self.assertEqual(session_commands, ["echo keep session"])
+            self.assertEqual(session_commands, [
+                "echo keep session", "/opt/tapl/bin/tapl-hook --event SessionStart --mode observe",
+            ])
+            self.assertEqual(hooks["hooks"]["SessionStart"][-1]["matcher"], "^compact$")
             pre_tool_commands = [hook["command"] for entry in hooks["hooks"]["PreToolUse"] for hook in entry["hooks"]]
             self.assertIn("echo keep", pre_tool_commands)
             self.assertIn(

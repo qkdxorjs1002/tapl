@@ -54,7 +54,7 @@ Codex MCP 설정은 TOML이며 Claude MCP 설정과 두 클라이언트의 hook 
 
 저장소 설치는 로컬 `.tapl` 설정과 워크플로 상태도 초기화합니다. 사용자 연결은 사용 시 각 세션 작업 폴더에 DB를 초기화하며 로컬 `.tapl/config.toml`이나 저장소 설치 표식은 만들지 않습니다.
 
-선택한 클라이언트를 재시작하세요. Codex는 요청이 나타나면 설치된 hook을 신뢰합니다. Claude Code는 MCP·작업 공간 신뢰 절차를 마치고 `/mcp`에서 확인합니다. 사용할 이력이 있는 폴더를 엽니다. 하위 폴더는 별도 DB를 소유하며 연결 범위가 모든 폴더의 이력을 합치지는 않습니다. [작업 공간과 세션 경계](../concepts/workflow.ko.md#작업-공간과-세션-경계)를 참고하세요.
+선택한 클라이언트를 재시작하세요. Codex는 설치나 업데이트 뒤 CLI의 `/hooks` 또는 데스크톱 앱의 **Settings > Hooks**에서 새로 추가되거나 변경된 TAPL 훅을 검토하고 신뢰하도록 설정합니다. Claude Code는 MCP·작업 공간 신뢰 절차를 마치고 `/mcp`에서 확인합니다. 사용할 이력이 있는 폴더를 엽니다. 하위 폴더는 별도 DB를 소유합니다. [Codex 훅 신뢰 설정](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks) · [작업 공간과 세션 경계](../concepts/workflow.ko.md#작업-공간과-세션-경계)
 
 ## 실행 파일 탐색
 
@@ -106,6 +106,14 @@ taplctl install repo --client claude-code --mode enforce
 ```
 
 Hook 모드와 Fast/Standard/Strict 워크플로 엄격도는 별개입니다. Enforce hook은 워크플로 검사이며 sandbox나 보안 경계가 아닙니다. [워크플로](../concepts/workflow.ko.md)를 참고하세요.
+
+Agent가 확정된 계획에 대해 `TAPL-APPROVE <token>`을 보여 주면 같은 호스트 세션에서 명령을 별도 메시지로 그대로 보내세요. `UserPromptSubmit` 훅이 확인을 기록합니다. [승인과 실행](../concepts/workflow.ko.md#승인과-실행)
+
+업그레이드 후 TAPL이 기존 실행 승인과 현재 호스트 세션·확정 계획의 연결을 검증할 수 없으면 다시 확인해야 할 수 있습니다.
+
+Codex가 문맥을 압축하면 TAPL은 `PostCompact` 이벤트를 기록합니다. 이어서 source가 `compact`인 `SessionStart`에서 `known_policy_revision` 없이 `tapl_get_next`를 호출해 전체 정책을 다시 읽도록 Agent에 안내합니다. 일반 진입 시에는 전체 정책이 문맥에 남아 있으면 revision을 재사용할 수 있습니다.
+
+Codex는 `apply_patch`와 쓰기로 분류된 셸 명령처럼 훅과 일치하는 호출에서 영구 변경을 검사합니다. `exec_command`는 훅에 `Bash`로 전달됩니다. Code Mode의 강제 적용 범위는 실제 호출 경로와 호스트가 전달하는 훅에 따라 달라집니다. [Codex 훅 적용 범위](https://learn.chatgpt.com/docs/hooks#tool-coverage)
 
 설치는 TAPL 소유 MCP 항목과 hook을 병합하며 무관한 호스트 설정을 보존합니다. 관리 템플릿에 `--force`를 사용하지 않으면 기존 Codex TOML 값이 우선합니다. Claude의 관리 MCP·hook 항목은 교체하되 다른 서버와 hook은 보존합니다. 런타임 TAPL 설정은 별도의 `--tapl-config-policy`를 사용합니다.
 

@@ -97,12 +97,19 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         if getattr(args, "resolved_client", args.client) == "claude-code":
             return _emit_claude_error(args, str(exc))
+        payload = getattr(args, "hook_payload", {})
+        if args.event == "PreToolUse" and args.mode == "enforce" and not (args.json or args.agent):
+            if hooks.is_durable_tool(args.tool or hooks.infer_tool_name(payload), payload):
+                outcome = {"event": args.event, "block": True, "message": f"TAPL could not verify execution: {exc}"}
+                _emit_outcome(outcome, as_json=False, as_agent=False)
+                return 0
         _emit_error(str(exc), as_json=args.json, as_agent=args.agent)
         return 1
 
 
 def _handle_hook(args: argparse.Namespace) -> int:
     payload = _read_stdin_payload()
+    args.hook_payload = payload
     args.stop_hook_active = payload.get("stop_hook_active") is True
     if current_client() == "claude-code":
         hooks.validate_claude_payload(payload, event=args.event, tool=args.tool)
@@ -138,8 +145,11 @@ def _handle_hook(args: argparse.Namespace) -> int:
     if current_client() == "claude-code" and not (args.json or args.agent):
         # Claude's JSON hook protocol is parsed only for a successful command.
         return 0
+    if args.event == "PreToolUse" and not (args.json or args.agent):
+        # Codex parses native permission decisions when the hook exits zero.
+        return 0
     # Codex may launch hooks through PowerShell -Command, which converts native
-    # exit code 2 to 1. Windows command hooks use Codex's supported JSON block
+    # exit code 2 to 1. Windows Stop hooks use Codex's supported JSON block
     # protocol with exit 0 instead. Explicit diagnostic output keeps its CLI API.
     if sys.platform == "win32" and not (args.json or args.agent):
         return 0
@@ -184,10 +194,25 @@ def _emit_outcome(outcome: dict[str, Any], *, as_json: bool, as_agent: bool) -> 
         if native:
             _print_json(native)
         return
+    event = outcome.get("event")
+    if event in {"PreToolUse", "SessionStart"}:
+        message = outcome.get("message")
+        specific = {"hookEventName": event}
+        if outcome.get("block"):
+            specific.update(permissionDecision="deny", permissionDecisionReason=message or "TAPL blocked this tool.")
+        elif message:
+            specific["additionalContext"] = message
+        if len(specific) > 1:
+            _print_json({"hookSpecificOutput": specific})
+        return
+    if event == "PostCompact":
+        # Its native output schema has no additionalContext. The compact-only
+        # SessionStart hook delivers the recorded guidance to the model.
+        return
     if sys.platform == "win32" and outcome.get("block"):
         _print_json({"decision": "block", "reason": outcome.get("message") or "tapl blocked this hook."})
         return
-    if outcome.get("event") == "Stop":
+    if event == "Stop":
         if outcome.get("block"):
             _print_json(
                 {

@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^compact$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tapl-hook --event SessionStart --mode observe"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -39,6 +50,16 @@
           {
             "type": "command",
             "command": "tapl-hook --event PostToolUse --mode observe"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tapl-hook --event PostCompact --mode observe"
           }
         ]
       }

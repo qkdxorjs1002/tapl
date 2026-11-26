@@ -54,7 +54,7 @@ MCP 초기화는 짧은 진입 안내를 제공합니다. 단순하지 않거나
 
 `config`에는 현재 실행에 필요한 설정만 포함합니다. 출처 경로·존재 여부, 해당 클라이언트 식별, `workflow.authoring_detail`, `recall.enabled`, 현재 SubAgent 설정 완료·활성화 상태를 제공합니다. 설정이 완료되고 위임이 활성화됐으면 승인된 선호·전략·모델/effort 허용 목록·프로필과 해당 Claude 선택 의미도 포함합니다. 비활성·설정 대기 상태에는 그 상태에 필요한 플래그·식별·지침만 반환합니다. 저장된 `available_models` 목록, 검색·Viewer 설정은 생략합니다. 실제 선택값과 선호는 구조화된 설정에 한 번만 두고 정책·지침은 공통 규칙과 절차를 제공합니다. 설정 상세도 선택 인자는 없습니다. 전체 관리 설정은 [사용자 설정](#사용자-설정), `taplctl config get`, `taplctl doctor`로 확인하세요.
 
-`policy_revision`은 실제 전달한 정책·위임 지침·실행 설정과 `authoring_policy`의 정확한 내용을 나타냅니다. RUN 모드를 포함해 이 묶음이 바뀌면 revision이 달라지지만 전달된 출처 경로·존재 여부와 클라이언트 식별이 같고 무관한 검색·Viewer 설정이나 저장된 모델 목록만 바뀌면 유지합니다. 해당 revision의 전체 묶음이 현재 문맥에 남아 있을 때만 `known_policy_revision`을 전달합니다. 쓰기 응답에서 새 revision만 받았다고 전체 정책을 조회한 것은 아닙니다. 일치하면 바뀌지 않은 정책 필드를 생략하지만 상태·권고와 요청된 모델 목록 비교는 새로 반환합니다. 완전한 비교에서 모델 변경이 확인되면 선호 검토에 필요한 현재 묶음과 차이를 함께 다시 전달합니다. 모르는 revision이나 내용 변경 시 전체 실행 정책 묶음을 반환합니다. 새 세션, 문맥 압축 후, 내용 보존이 불확실할 때는 revision을 생략합니다. 상태 캐시나 승인 근거가 아닙니다.
+`policy_revision`은 실제 전달한 정책·위임 지침·실행 설정과 `authoring_policy`의 정확한 내용을 나타냅니다. RUN 모드를 포함해 이 묶음이 바뀌면 revision이 달라지지만 전달된 출처 경로·존재 여부와 클라이언트 식별이 같고 무관한 검색·Viewer 설정이나 저장된 모델 목록만 바뀌면 유지합니다. 해당 revision의 전체 묶음이 현재 문맥에 남아 있을 때만 `known_policy_revision`을 전달합니다. 쓰기 응답에서 새 revision만 받았다고 전체 정책을 조회한 것은 아닙니다. 일치하면 바뀌지 않은 정책 필드를 생략하지만 상태·권고와 요청된 모델 목록 비교는 새로 반환합니다. 완전한 비교에서 모델 변경이 확인되면 선호 검토에 필요한 현재 묶음과 차이를 함께 다시 전달합니다. 모르는 revision이나 내용 변경 시 전체 실행 정책 묶음을 반환합니다. Codex `PostCompact` 이벤트가 기록되면 해당 세션의 이전 revision이 무효화됩니다. 새 세션, 문맥 압축 후, 내용 보존이 불확실할 때는 revision을 생략합니다. 상태 캐시나 승인 근거가 아닙니다.
 
 사용자가 요청한 설정 비교에서는 고정 역할 모델까지 포함한 **현재 위임 도구의 전체 모델 목록**과 `catalog_complete=true`를 전달합니다. 검증된 빈 목록은 제거를 확인할 수 있습니다. 기본값 `false`에서는 전달된 목록을 불완전하게 취급하고(`comparison_status="incomplete"`) 변경을 추론하거나 재설정을 요청하지 않습니다. 부족한 live 항목을 저장 설정으로 채우지 마세요. 설정 확인은 실제 사용자 답변이나 정확한 변경 요청이어야 하며 시간 초과는 확인이 아닙니다. 모델은 provider API 목록이 아닌 현재 위임 도구가 노출한 값이어야 합니다. Claude Code는 확인받은 `models={inherit: []}` 선택도 지원하며 `available_models`에는 넣지 않습니다. Alias의 `[]`는 effort 미지정입니다. [Claude 모델 선택](../getting-started/claude-code.ko.md#모델과-agent-실행)을 참고하세요. 빈 `models`는 비활성일 때만 허용하며 `profiles=[]`는 권고 프로필을 끕니다.
 
@@ -150,7 +150,7 @@ Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 
 | `tapl_split_run` | `requests` (객체 2–20개) | 객체마다 `key`, `summary`, `work_type`, `workflow_mode`, 선택 `depends_on=[]`가 있으며 앞선 키만 참조합니다. 계획 전 명시적으로 분리한 RUN 수명주기에 사용합니다. |
 | `tapl_apply_plan` | schema상 없음 | `plan_id="PLAN-001"`, `title`, `summary`, `objective`, `requirements_trace`, `selected_approach`, `affected_files`, `execution_order`, `risks`, `validation`, `approval_needs`, `notes`, `custom_fields`, `status`. 워크플로 검증에는 충분한 계획이 필요합니다. |
 | `tapl_add_finding` | `title` | `source=""`, `finding=""`, `impact=""`, `related_ids=""`. 판단에 필요한 근거와 출처를 기록합니다. |
-| `tapl_approve_execution` | `prompt` | `source="explicit_user"` 또는 `"request_user_input"`. 실제 받은 실행 승인만 기록합니다. |
+| `tapl_approve_execution` | `prompt` | `source="explicit_user"` 또는 `"request_user_input"`. 사용자가 실행을 승인한 범위를 기록합니다. |
 | `tapl_reject_execution` | `prompt` | 같은 `source` 값. 명시적 거절을 보존합니다. |
 | `tapl_finish_run` | `result` | `expected_run_id`, `memory_candidates`, `memory_uses`, `memory_review`. 아래 완료 절차 참고. |
 | `tapl_finish_archive` | `slug` (1–120자) | `summary=""` (최대 2000자). 작업·배치 정리와 완료 검토 후 호출합니다. |
@@ -159,6 +159,8 @@ Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 
 `work_type`: `answer`, `investigation`, `analysis`, `planning`, `implementation`, `mixed`. `workflow_mode`: `fast`, `standard`, `strict`. TAPL이 `record_mode`를 계산합니다. Fast의 비영속 답변·조사·분석·계획만 lightweight가 될 수 있으며 영속 작업과 Standard/Strict 작업은 계획·작업을 사용합니다. 다른 주제는 보통 RUN을 나누지 않고 하나의 RUN 안에서 별도 PLAN을 만듭니다.
 
 `tapl_split_run`의 키는 1–100자이며 영문·숫자로 시작하고 이후 영문·숫자·`.`·`_`·`-`를 허용합니다. 뒤의 키를 의존 대상으로 지정할 수 없습니다. 하나의 결과에 대한 요구 사항은 같은 주제 계획에 유지합니다.
+
+호스트에서 첫 요청으로 직접 구현을 지시한 경우 `source="explicit_user"`를 사용하고 현재 사용자 요청을 `prompt`에 그대로 전달합니다. 호스트에서 진행한 분석·계획을 실행으로 옮길 때는 `tapl_get_next`와 쓰기 응답의 `state_summary.execution_confirmation`을 확인합니다. `finalize_plan` 상태에서는 계획을 확정해야 합니다. `awaiting_user` 상태에서는 확정 범위와 반환된 `command`를 사용자에게 보여 줍니다. 사용자는 같은 호스트 세션에서 `TAPL-APPROVE <token>` 명령을 별도 메시지로 그대로 보냅니다. `confirmed` 상태가 되면 승인 범위를 `prompt`에 넣고 `source="explicit_user"`로 기록합니다. 호스트 확인은 현재 세션·RUN·계획에만 적용됩니다. 호스트 확인이 필요 없는 경우에는 호스트 질문 도구로 받은 실제 실행 승인을 `request_user_input`으로 기록합니다.
 
 ## 작업과 병렬 배치
 
@@ -175,9 +177,11 @@ Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 
 
 병렬 작업은 `execution_mode="parallel"`, `executor_kind="subagent"`, 같은 계획과 비어 있지 않은 `parallel_group`, 완료된 의존 작업, 겹치지 않는 독점 `owned_paths`, 실행 승인이 필요합니다. Root가 원자적으로 dispatch하고 기록된 `SubAgent Model`을 확인한 뒤 실제 에이전트를 생성합니다. `execution_metadata`는 작업 ID별 런타임 선택 객체이며 모델을 선택하면 완전한 `model`/`reasoning_effort` 쌍과 근거를 포함합니다. Claude Code의 미지정 effort는 `reasoning_effort=""`, 확인받은 호스트 제어 선택은 `model="inherit"`로 기록하고 해당 native Agent 인자는 생략합니다. TAPL 상태 쓰기는 root만 담당하며 각 작업은 manifest의 정확한 **`execution_id`**로 정리합니다. 중단·생성 실패 시 기존 배치를 복구하거나 취소한 뒤 재시도합니다. 안정된 `batch_id`는 같은 RUN·작업 집합의 멱등 재시도에 사용하며 다른 배치를 재사용하는 수단이 아닙니다.
 
+시작 또는 dispatch에 성공한 뒤 실행과 검증에 들어갈 때 Agent가 단계별로 사용자 언어로 TASK 알림을 한 번씩 표시합니다. 같은 시작 또는 dispatch를 재시도해도 알림은 반복하지 않습니다.
+
 ## 순차 수명주기 예제
 
-다음은 `taplctl config set workflow.authoring_detail precise`로 `precise`를 직접 선택한 MCP 호출 순서 개요이며 무조건 실행하는 셸 명령이나 스크립트가 아닙니다. `call(name, arguments)`는 호스트의 MCP 호출을 뜻합니다. `sid`는 실제 hook 식별자로 바꿉니다. 정책·관련 이력을 확인하고 계획을 확정하기 전에 사용자 확인을 받으세요. 실제 실행 승인이 있을 때만 승인을 기록하고 완료 필드에는 구체적 검증 근거를 넣습니다.
+다음은 `taplctl config set workflow.authoring_detail precise`로 `precise`를 직접 선택한 MCP 호출 순서 개요이며 무조건 실행하는 셸 명령이나 스크립트가 아닙니다. `call(name, arguments)`는 호스트의 MCP 호출을 뜻합니다. `sid`는 실제 hook 식별자로 바꿉니다. 정책·관련 이력을 확인하고 중요한 설계 결정을 확인한 뒤 계획을 확정하세요. 실제 실행 승인이 있을 때만 승인을 기록하고 완료 필드에는 구체적 검증 근거를 넣습니다.
 
 ```javascript
 const sid = "<hook session_id>";

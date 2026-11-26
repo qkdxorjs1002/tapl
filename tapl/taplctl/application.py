@@ -14,7 +14,7 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
 
-from . import clients, config, config_editor, context as tapl_context, db, history, prompt, recall as memory_store, recommendations, run_references, sessions, validation
+from . import clients, config, config_editor, context as tapl_context, db, execution_evidence, history, prompt, recall as memory_store, recommendations, run_references, sessions, validation
 from .prompt import authoring_policy_update
 
 
@@ -178,8 +178,15 @@ class WorkflowApplication:
 
     def _next_context(self) -> tuple[dict[str, Any], config.TaplConfig, list[dict[str, str]]]:
         with self._connection() as conn:
+            conn.execute("BEGIN")
             state = db.status_payload(conn)
             state["session_id"] = db.connection_session_id(conn)
+            state["execution_confirmation"] = execution_evidence.confirmation_state(conn)
+            state["compaction_epoch"] = conn.execute(
+                "SELECT max(id) FROM events WHERE session_id=? AND (event_type='PostCompact' "
+                "OR (event_type='SessionStart' AND json_extract(payload_json,'$.source')='compact'))",
+                (state["session_id"],),
+            ).fetchone()[0]
         settings = self._settings()
         authoring_policy = self._authoring_policy(settings, state)
         state["authoring_policy"] = authoring_policy
@@ -189,6 +196,14 @@ class WorkflowApplication:
         if not settings.recall.enabled:
             state["memory_review"] = {"status": "disabled"}
         actions = recommendations.next_recommendations(state, check)
+        confirmation = state["execution_confirmation"] or {}
+        if actions and actions[0]["name"] == "approve-execution":
+            if confirmation.get("state") == "awaiting_user":
+                actions[0] = {"name": "await-user-confirmation",
+                              "reason": "Show the user the finalized scope and exact execution_confirmation.command, then wait for their host message."}
+            elif confirmation.get("state") == "finalize_plan":
+                actions[0] = {"name": "apply-plan",
+                              "reason": "Finalize the requested plans before asking the user to authorize execution."}
         if not settings.subagents.setup_complete and not state.get("active_batches"):
             actions.insert(0, {
                 "name": "configure-subagents",
@@ -221,6 +236,8 @@ class WorkflowApplication:
             "counts": {key: len(state.get(key) or []) for key in (
                 "plans", "tasks", "findings", "active_batches", "active_executions", "queued_runs",
             )},
+            **({"execution_confirmation": state["execution_confirmation"]}
+               if state.get("execution_confirmation") else {}),
             "execution_approval": {"state": approval.get("state", "missing"),
                                    "approved": bool(approval.get("approved", False))},
         }
@@ -277,7 +294,8 @@ class WorkflowApplication:
             ),
         }
         revision = hashlib.sha256(
-            json.dumps(policy, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+            json.dumps([policy, state["session_id"], state["compaction_epoch"]], sort_keys=True, ensure_ascii=False,
+                       separators=(",", ":"), allow_nan=False).encode("utf-8")
         ).hexdigest()
         payload = {
             "ok": True,
@@ -722,6 +740,12 @@ class WorkflowApplication:
     def _write_task(self, task_id: str, **values: Any) -> dict[str, Any]:
         settings = self._settings()
         with self._connection() as conn:
+            if values.get("status") == "In Progress":
+                conn.execute("BEGIN IMMEDIATE")
+                run = db.active_run(conn)
+                if run is None:
+                    raise WorkflowApplicationError("No active RUN for task start.")
+                execution_evidence.bind_task_start(conn, run, task_id)
             authoring_policy = self._authoring_policy(settings, db.status_payload(conn))
             previous_policy = authoring_policy
             existing = db.get_active_task(conn, task_id)

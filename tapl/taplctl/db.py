@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import execution_evidence
 from . import embedding_model, identity, memory_cues, memory_search, sessions
 
 
@@ -853,7 +854,10 @@ def activate_next_queued_run(
         """,
         (now, candidate["id"]),
     )
-    return active_run(conn)
+    run = active_run(conn)
+    if run is not None:
+        execution_evidence.inherit_archive_hold(conn, run)
+    return run
 
 
 def split_active_run(
@@ -932,6 +936,9 @@ def split_active_run(
                 "active workflow run must be split before plans, tasks, approvals, or results exist"
             )
 
+        inherit_hold = execution_evidence.is_held(conn, run)
+        if inherit_hold:
+            execution_evidence.mark_hold(conn, run)
         group_id = str(uuid.uuid4())
         now = utc_now()
         first = request_rows[0]
@@ -982,6 +989,11 @@ def split_active_run(
                     now,
                 ),
             )
+        if first["work_type"] in execution_evidence.HELD_WORK_TYPES:
+            execution_evidence.mark_hold(conn, run)
+        if inherit_hold:
+            for child_id in list(run_ids.values())[1:]:
+                execution_evidence.mark_hold(conn, require_run_owner(conn, child_id))
         for request in request_rows:
             conn.executemany(
                 """
@@ -1104,7 +1116,9 @@ def _ensure_active_run(
         if existing:
             return existing
         raise
-    return active_run(conn)  # type: ignore[return-value]
+    run = require_run_owner(conn, run_id)
+    execution_evidence.inherit_archive_hold(conn, run)
+    return run
 
 
 def update_active_run_summary(
@@ -1130,6 +1144,10 @@ def update_active_run_summary(
         raise ValueError(f"invalid work_type: {work_type}")
     if workflow_mode is not None and workflow_mode not in WORKFLOW_MODES:
         raise ValueError(f"invalid workflow_mode: {workflow_mode}")
+
+    if work_type is not None and (work_type in execution_evidence.HELD_WORK_TYPES or execution_evidence.is_held(conn, run)):
+        entering_hold = work_type in execution_evidence.HELD_WORK_TYPES and run["work_type"] not in execution_evidence.HELD_WORK_TYPES
+        execution_evidence.mark_hold(conn, run, renew=entering_hold)
 
     updates: list[str] = []
     params: list[Any] = []
@@ -1466,6 +1484,7 @@ def upsert_plan(
         source=source,
         run_id=run_id,
         archived=archived,
+        commit=False,
     )
     conn.execute(
         """
@@ -2068,8 +2087,11 @@ def dispatch_tasks(
 
         existing_batch = execution_batch_payload(conn, resolved_batch_id)
         if existing_batch is not None:
+            approval = execution_evidence.require_approval(conn, run)
             if existing_batch["batch"]["run_id"] != run["id"]:
                 raise ValueError(f"batch_id belongs to another workflow run: {resolved_batch_id}")
+            if existing_batch["batch"]["approval_id"] != approval["id"]:
+                raise ValueError("The batch belongs to an earlier execution approval.")
             existing_task_ids = {
                 execution["task_id"] for execution in existing_batch["executions"]
             }
@@ -2100,7 +2122,7 @@ def dispatch_tasks(
             FROM items i
             JOIN tasks t ON t.item_id = i.id
             WHERE i.run_id = ?
-              AND i.kind = 'task'
+              AND i.kind = 'task' AND i.archived = 0
               AND i.stable_id IN ({placeholders})
             """,
             (run["id"], *requested_task_ids),
@@ -2120,7 +2142,7 @@ def dispatch_tasks(
             SELECT i.id
             FROM items i
             JOIN plans p ON p.item_id = i.id
-            WHERE i.run_id = ? AND i.kind = 'plan' AND i.stable_id = ?
+            WHERE i.run_id = ? AND i.kind = 'plan' AND i.archived = 0 AND i.stable_id = ?
             """,
             (run["id"], spec_id),
         ).fetchone()
@@ -2149,19 +2171,7 @@ def dispatch_tasks(
                 + ", ".join(invalid_contracts)
             )
 
-        approval = conn.execute(
-            """
-            SELECT *
-            FROM approvals
-            WHERE run_id = ? AND kind = ?
-            ORDER BY decided_at DESC, id DESC
-            LIMIT 1
-            """,
-            (run["id"], DEFAULT_APPROVAL_KIND),
-        ).fetchone()
-        if approval is None or approval["decision"] != "approved":
-            raise ValueError("parallel dispatch requires execution approval for the active run")
-
+        approval = execution_evidence.require_approval(conn, run)
         task_item_ids = [row["item_id"] for row in ordered_rows]
         item_placeholders = ", ".join("?" for _ in task_item_ids)
         unmet_dependencies = conn.execute(
@@ -2174,7 +2184,7 @@ def dispatch_tasks(
             JOIN items target ON target.id = td.task_item_id
             JOIN items dependency ON dependency.id = td.dependency_item_id
             WHERE td.task_item_id IN ({item_placeholders})
-              AND (dependency.run_id <> ? OR dependency.status <> 'Completed')
+              AND (dependency.run_id <> ? OR dependency.archived <> 0 OR dependency.status <> 'Completed')
             ORDER BY target.stable_id, dependency.stable_id
             """,
             (*task_item_ids, run["id"]),
@@ -2689,20 +2699,30 @@ def record_approval(
     if source not in APPROVAL_SOURCES:
         raise ValueError(f"invalid approval source: {source}")
 
-    run = require_run_owner(conn, run_id) if run_id else active_run(conn)
-    if not run:
-        raise ValueError("no active workflow run for approval")
+    with conn:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        run = require_run_owner(conn, run_id) if run_id else active_run(conn)
+        if not run:
+            raise ValueError("no active workflow run for approval")
+        proof = None
+        if kind == DEFAULT_APPROVAL_KIND and decision == "approved":
+            proof = execution_evidence.approval_proof(conn, run, prompt, source)
+            if proof is not None:
+                previous = latest_approval(conn, kind=kind, run_id=run["id"])
+                if execution_evidence.effective(conn, run, previous):
+                    return previous
+        # A host-bound approval stores the reference, not the user's request.
+        saved_prompt = f"Host user turn {proof['turn_event_id']}" if proof else prompt
+        cursor = conn.execute(
+            "INSERT INTO approvals(run_id, kind, prompt, decision, source, decided_at) VALUES(?,?,?,?,?,?)",
+            (run["id"], kind, saved_prompt, decision, source, utc_now()),
+        )
+        approval_id = cursor.lastrowid
+        if proof:
+            execution_evidence.bind_approval(conn, run, approval_id, proof)
+        return conn.execute("SELECT * FROM approvals WHERE id=?", (approval_id,)).fetchone()
 
-    now = utc_now()
-    conn.execute(
-        """
-        INSERT INTO approvals(run_id, kind, prompt, decision, source, decided_at)
-        VALUES(?, ?, ?, ?, ?, ?)
-        """,
-        (run["id"], kind, prompt, decision, source, now),
-    )
-    conn.commit()
-    return conn.execute("SELECT * FROM approvals WHERE id = last_insert_rowid()").fetchone()
 
 
 def latest_approval(
@@ -2757,11 +2777,12 @@ def approval_status(
         }
 
     decision = row["decision"]
+    approved = decision == "approved" and (kind != DEFAULT_APPROVAL_KIND or execution_evidence.effective(conn, run, row))
     return {
         "id": row["id"],
         "kind": row["kind"],
-        "state": decision,
-        "approved": decision == "approved",
+        "state": "stale" if decision == "approved" and not approved else decision,
+        "approved": approved,
         "decision": decision,
         "prompt": row["prompt"],
         "source": row["source"],

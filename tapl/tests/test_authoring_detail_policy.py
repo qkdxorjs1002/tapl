@@ -127,6 +127,7 @@ def test_application_and_hooks_share_live_config_across_writes_and_task_lifecycl
         assert blocked["block"]  # Authoring detail never grants execution approval.
         assert "execution_approval_missing" in blocked["message"]
     app.record_approval(decision="approved", prompt="Update the handler", source="explicit_user")
+    assert "task_granularity_too_coarse" not in codes(app.start_task("TASK-001")["plan_task_execute"])
     with app._connection() as conn:
         allowed = hooks.handle_event(conn, event="PreToolUse", mode="enforce", tool="Edit", payload={},
                                      tapl_settings=settings)
@@ -136,7 +137,6 @@ def test_application_and_hooks_share_live_config_across_writes_and_task_lifecycl
         assert startup["context"]["config"]["workflow"]["authoring_detail"] == detail
         assert f"PLAN/TASK authoring detail: {detail}" in startup["message"]
         assert prompt.task_granularity_guidance(authoring_detail=detail) not in startup["message"]
-    assert "task_granularity_too_coarse" not in codes(app.start_task("TASK-001")["plan_task_execute"])
     completed = app.settle_task("TASK-001", status="Completed", result="Corrected",
                                verification="Focused regression tests passed")
     assert completed["plan_task_execute"]["ok"]

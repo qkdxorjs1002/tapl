@@ -54,7 +54,7 @@ For a nondefault home, use `taplctl install user --codex-home /path/to/.codex` o
 
 Repository installation also initializes local `.tapl` configuration and workflow state. User integration initializes each session's working-folder database on use without creating local `.tapl/config.toml` or repository installation markers.
 
-Restart the selected client. In Codex, trust the installed hook when prompted. In Claude Code, complete MCP/workspace trust and check `/mcp`. Open the folder whose history you want to use. A nested folder owns its own database; connection scope does not make all folders share history. See [workspace and session boundaries](../concepts/workflow.md#workspace-and-session-boundaries).
+Restart the selected client. In Codex, review and trust new or changed TAPL hooks after installation or update using `/hooks` in the CLI or **Settings > Hooks** in the desktop app. In Claude Code, complete MCP/workspace trust and check `/mcp`. Open the folder whose history you want to use. A nested folder owns its own database. [Codex hook trust](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks) · [Workspace and session boundaries](../concepts/workflow.md#workspace-and-session-boundaries)
 
 ## Executable discovery
 
@@ -106,6 +106,14 @@ taplctl install repo --client claude-code --mode enforce
 ```
 
 Hook mode is separate from Fast/Standard/Strict workflow rigor. An enforced hook is a workflow check, not a sandbox or security boundary. See [workflow](../concepts/workflow.md).
+
+When the connected agent shows `TAPL-APPROVE <token>` for a finalized plan, send the exact command as its own message in the same host session. The `UserPromptSubmit` hook records the confirmation. [Approval and execution](../concepts/workflow.md#approval-and-execution)
+
+After an upgrade, an existing hosted approval can require confirmation again if TAPL cannot verify its link to the current session and finalized plan.
+
+After a Codex compaction, TAPL records the `PostCompact` event and uses `SessionStart` with source `compact` to remind the agent to reload the complete policy with `tapl_get_next` without `known_policy_revision`. Ordinary entry can reuse the revision while the full policy remains in context.
+
+In Codex, the durable-work check applies to matched tool calls such as `apply_patch` and shell commands classified as writes, including `exec_command` exposed to the hook as `Bash`. In Code Mode, enforcement depends on the underlying tool path and the hooks the host delivers. [Codex hook coverage](https://learn.chatgpt.com/docs/hooks#tool-coverage)
 
 Installation merges TAPL-owned MCP entries and hooks, preserving unrelated host settings. Existing Codex TOML values take precedence unless `--force` is used for managed templates. Claude's managed MCP and hook entries are replaced while other servers and hooks are preserved. Runtime TAPL config has a separate `--tapl-config-policy`:
 

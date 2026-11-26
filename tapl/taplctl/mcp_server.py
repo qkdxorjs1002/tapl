@@ -252,7 +252,8 @@ def mcp_next_recommendations(payload: dict[str, Any], *, client: str | None = No
         if not isinstance(recommendation, dict):
             continue
         item = dict(recommendation)
-        item["tool"] = tool_map.get(str(item.get("name") or ""), "tapl_get_status")
+        if item.get("name") != "await-user-confirmation":
+            item["tool"] = tool_map.get(str(item.get("name") or ""), "tapl_get_status")
         recommendations.append(item)
     return {**payload, "recommendations": recommendations}
 
@@ -1094,7 +1095,7 @@ def _create_server(
         source: Annotated[ApprovalSource, Field(description=tapl_prompt.field_help("approval", "source"))] = "explicit_user",
         session_id: SessionId = None,
     ) -> dict[str, Any]:
-        """Record execution approval only after the user explicitly requested execution or confirmed it through the host's question tool."""
+        """Record execution approval. For a direct first implementation request use source=explicit_user and its exact current user text as prompt. For a held RUN wait for the user to send execution_confirmation.command in the host, then record the approved scope. A tool argument alone cannot confirm a held RUN."""
 
         return await call_application_write(
             application,

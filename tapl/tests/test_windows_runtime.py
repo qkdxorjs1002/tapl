@@ -136,6 +136,7 @@ def test_encoded_hook_preserves_block_decision_through_windows_shells(tmp_path):
         result = subprocess.run(shell, env=env, cwd=repo, input=payload,
                                 encoding="utf-8", capture_output=True, timeout=60)
         assert result.returncode == 0, (result.stdout, result.stderr)
-        decision = json.loads(result.stdout)
-        assert decision["decision"] == "block"
-        assert decision["reason"]
+        decision = json.loads(result.stdout)["hookSpecificOutput"]
+        assert decision["hookEventName"] == "PreToolUse"
+        assert decision["permissionDecision"] == "deny"
+        assert decision["permissionDecisionReason"]

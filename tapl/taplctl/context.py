@@ -5,8 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from . import config as tapl_config, db, prompt as tapl_prompt, validation
-from .clients import current_client
+from . import config as tapl_config, db, execution_evidence, prompt as tapl_prompt, validation
 
 
 def external_findings_guidance() -> str:
@@ -29,7 +28,11 @@ def build_context(
         state, authoring_detail=settings.workflow.authoring_detail,
     )
     prompt = prompt_summary(payload or {})
-    helper = current_client() == "claude-code" and bool((payload or {}).get("agent_id"))
+    helper = bool((payload or {}).get("agent_id"))
+    confirmation = (
+        execution_evidence.confirmation_state(conn)
+        if not helper and event in {"UserPromptSubmit", "Manual"} else None
+    )
     covered_issue_codes = covered_validation_issue_codes(state, plan_task)
     return {
         "ok": True,
@@ -57,7 +60,6 @@ def build_context(
         "workflow_guidance": [] if helper else workflow_guidance(
             event=event,
             state=state,
-            prompt=prompt,
             subagents=settings.subagents,
             authoring_detail=settings.workflow.authoring_detail,
         ),
@@ -65,7 +67,7 @@ def build_context(
             ["Call `tapl_get_next` and ask the first-use SubAgent preference question before delegating."]
             if event != "SessionStart" and event != "Stop" and not settings.subagents.setup_complete
             else []
-        ) + next_actions(state, plan_task, event, prompt),
+        ) + next_actions(state, plan_task, event, confirmation=confirmation),
         "validation_issues": validation_issues(plan_task, covered_issue_codes),
         "prompt_summary": prompt,
     }
@@ -178,14 +180,12 @@ def workflow_guidance(
     *,
     event: str,
     state: dict[str, Any],
-    prompt: str = "",
     subagents: tapl_config.SubagentsConfig | None = None,
     authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
 ) -> list[str]:
     return tapl_prompt.context_workflow_guidance(
         event=event,
         state=state,
-        prompt=prompt,
         subagents=subagents,
         authoring_detail=authoring_detail,
     )
@@ -195,7 +195,8 @@ def next_actions(
     state: dict[str, Any],
     plan_task: dict[str, Any],
     event: str,
-    prompt: str = "",
+    *,
+    confirmation: dict[str, Any] | None = None,
 ) -> list[str]:
     actions: list[str] = []
     if event == "SessionStart":
@@ -220,9 +221,11 @@ def next_actions(
     if run.get("request_summary") == db.DEFAULT_REQUEST_SUMMARY:
         actions.append(tapl_prompt.summarize_request_next_action())
     if event == "UserPromptSubmit":
-        direction_action = active_run_direction_next_action(state, prompt)
+        direction_action = active_run_direction_next_action(state)
         if direction_action:
             actions.append(direction_action)
+    if confirmation:
+        actions.append(tapl_prompt.execution_confirmation_next_action(confirmation))
     has_plans = bool(state.get("plans"))
     has_tasks = bool(state.get("tasks"))
     if not has_plans:
@@ -235,7 +238,7 @@ def next_actions(
             actions.append(tapl_prompt.create_plan_next_action())
     elif not has_tasks:
         actions.append(tapl_prompt.decide_after_plan_next_action())
-    if state.get("incomplete_tasks", 0):
+    if state.get("incomplete_tasks", 0) and not confirmation:
         approval_action = approval_next_action(plan_task)
         if approval_action:
             actions.append(approval_action)
@@ -287,7 +290,7 @@ def validation_issues(
     return items
 
 
-def active_run_direction_next_action(state: dict[str, Any], prompt: str) -> str:
+def active_run_direction_next_action(state: dict[str, Any]) -> str:
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
     in_progress = [task for task in tasks if str(task.get("status") or "") == "In Progress"]
     if in_progress:
@@ -301,30 +304,10 @@ def active_run_direction_next_action(state: dict[str, Any], prompt: str) -> str:
     if state.get("incomplete_tasks", 0):
         return tapl_prompt.incomplete_run_next_action()
 
-    if request_differs_from_active_run(state, prompt):
-        return tapl_prompt.different_request_next_action()
+    if state.get("plans") or state.get("tasks") or state.get("findings"):
+        return tapl_prompt.active_run_request_next_action()
 
     return ""
-
-
-def request_differs_from_active_run(state: dict[str, Any], prompt: str) -> bool:
-    run = state.get("active_run") if isinstance(state.get("active_run"), dict) else {}
-    request_summary = str(run.get("request_summary") or "").strip()
-    if not prompt.strip():
-        return False
-
-    has_records = bool(state.get("plans") or state.get("tasks") or state.get("findings"))
-    if not has_records:
-        return False
-
-    if not request_summary or request_summary == db.DEFAULT_REQUEST_SUMMARY:
-        return False
-
-    return normalized_prompt(prompt) != normalized_prompt(request_summary)
-
-
-def normalized_prompt(value: str) -> str:
-    return " ".join(value.split()).casefold()
 
 
 def approval_next_action(plan_task: dict[str, Any]) -> str:

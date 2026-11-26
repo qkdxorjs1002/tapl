@@ -286,7 +286,7 @@ ${memory_guidance}
 
 When external search or documentation review affects the task, store only decision-relevant findings with source and impact; never store raw dumps, long candidate lists, or stale findings.
 
-Archive when no actionable work remains, the run is superseded or stale, or the user chooses archive/discard. Explicit planning-only: report the plan and keep active. If planning is requested without an execution decision, ask with request_user_input to keep active, execute, or archive; never finish/archive before the choice.
+Archive when no actionable work remains, the run is superseded or stale, or the user chooses archive/discard. For design or plan revisions, report the current plan and keep it active. Ask a focused question only if the requested next step is materially ambiguous.
 
 ## Completion Report
 
@@ -308,7 +308,7 @@ SessionStart is bootstrap only; wait for a concrete user request before creating
 
 STOP_GUIDANCE_TEMPLATE = """# TAPL MCP
 
-${receipt_guidance} Settle remaining tasks or batches. When work is verified, record the result with `tapl_finish_run`, inspect its memory-review result and recommendations, archive eligible work with `tapl_finish_archive`, and report changed behavior, verification, remaining risk, and archive status. Explicit planning-only: report the plan and keep the run active. If planning is requested without an execution decision, ask what to do next; do not finish or archive before the user's choice."""
+${receipt_guidance} Settle remaining tasks or batches. When work is verified, record the result with `tapl_finish_run`, inspect its memory-review result and recommendations, archive eligible work with `tapl_finish_archive`, and report changed behavior, verification, remaining risk, and archive status. For design or plan revisions, report the current plan and keep it active. Ask about the next step only if materially ambiguous."""
 
 def render_template(template: str, **variables: Any) -> str:
     values = {key: str(value) for key, value in variables.items()}
@@ -628,8 +628,7 @@ def execution_approval_rejected_remediation() -> str:
 
 def execution_approval_missing_remediation() -> str:
     return (
-        "Before starting or continuing task execution, use `tapl_approve_execution` with source "
-        "`explicit_user` for explicit execution requests or `request_user_input` for tool-confirmed continuation."
+        "Verify the current execution scope and host confirmation state before using `tapl_approve_execution`."
     )
 
 
@@ -659,8 +658,7 @@ def create_plan_next_action() -> str:
 def lightweight_run_next_action() -> str:
     return (
         "This run is lightweight: complete the Fast non-durable work without plan/task records. For work_type=planning, "
-        "report the plan, keep the run active, and use request_user_input to ask whether to keep it active, proceed to "
-        "execution, or finish and archive it; do not finish or archive before the user chooses. For other work types, use "
+        "report the plan and keep the run active unless the user requests closure. For other work types, use "
         "`tapl_finish_run` and `tapl_finish_archive` after completion. If the work becomes complex or needs durable edits, "
         "call `tapl_apply_plan`; "
         "creating the plan promotes its record_mode to planned."
@@ -669,37 +667,43 @@ def lightweight_run_next_action() -> str:
 
 def archive_lightweight_run_next_action() -> str:
     return (
-        "The lightweight result is recorded. For work_type=planning, keep the run active and use request_user_input to "
-        "ask whether to keep it active, proceed to execution, or finish and archive it; do not archive before the user "
-        "chooses. For other work types, archive it with `tapl_finish_archive`."
+        "The lightweight result is recorded. For work_type=planning, keep the run active unless the user requests "
+        "closure. For other work types, archive it with `tapl_finish_archive`."
     )
 
 
 def decide_after_plan_next_action() -> str:
     return (
         "Ensure all independent topics have distinct stored plans before task design; judge the user's requested scope directly. "
-        "If work_type=planning or the user limited work to planning, report the plan/status, keep the run active, and use "
-        "request_user_input to ask whether to keep it active, proceed to execution, or finish and archive it. Do not call "
-        "`tapl_finish_run` or `tapl_finish_archive` before the user chooses. For analysis or reporting scope, finish the run "
-        "without executable tasks. If execution, edits, testing, or verification were "
-        "explicitly requested, create executable tasks and record execution approval with "
-        "`tapl_approve_execution` using source `explicit_user` "
-        "before task execution."
+        "For design or plan revisions, report the plan and keep the run active. For analysis or reporting scope, finish "
+        "without executable tasks when no decisions remain. For explicit execution, create tasks and follow the current "
+        "approval gate before starting. Ask only about material ambiguity in the requested scope."
     )
 
 
 def approval_rejected_next_action() -> str:
     return (
-        "Approval rejected; resolve scope, then use `tapl_approve_execution` with source `explicit_user` "
-        "before continuing, or source `request_user_input` if approval came from that tool."
+        "Execution approval was rejected. Continue read-only work within the request and wait for new explicit "
+        "authorization before execution."
     )
 
 
 def approval_missing_next_action() -> str:
     return (
-        "Before task execution, use `tapl_approve_execution` with source `explicit_user` when the user explicitly "
-        "requested execution, or source `request_user_input` when the user approved continuing through that tool."
+        "Execution approval is missing. Follow the current approval gate if the user explicitly requests execution."
     )
+
+
+def execution_confirmation_next_action(confirmation: dict[str, Any]) -> str:
+    state = confirmation["state"]
+    if state == "awaiting_user":
+        return (
+            "Execution is on hold. If the user explicitly requests execution, ask them to send "
+            f"`{confirmation['command']}` as their next message in this host session."
+        )
+    if state == "finalize_plan":
+        return "Execution is on hold. If execution is requested, finalize the intended plan before host confirmation."
+    return "The host confirmed the current plan. Record scoped approval with `tapl_approve_execution` before starting tasks."
 
 
 def session_start_incomplete_next_action() -> str:
@@ -715,33 +719,31 @@ def stop_incomplete_tasks_next_action() -> str:
 
 def run_stopped_during_task_next_action(label: str) -> str:
     return (
-        f"Run stopped during task execution at {label}; get user approval before durable edits: "
-        f"continue execution from {label} and finish existing work first, defer the existing run and archive it, "
-        "or combine requests in this run while preserving separate topic plans."
+        f"{label} is in progress. Continue within the approved scope when requested. If new durable work creates an "
+        "ambiguous conflict, ask whether to finish or defer the existing work, or combine requests while preserving "
+        "separate topic plans."
     )
 
 
 def run_stopped_during_batch_next_action(labels: str) -> str:
     return (
-        f"Run stopped while a parallel batch is active for {labels}; do not start unrelated durable "
-        "work. Continue the existing SubAgents and settle every execution_id, or recover/cancel the "
-        "batch before asking the user whether to defer, archive, or merge a different request."
+        f"A parallel batch is active for {labels}. Follow the requested direction within approved scope. "
+        "Settle every execution_id or recover/cancel the batch before switching to unrelated durable work."
     )
 
 
 def incomplete_run_next_action() -> str:
     return (
-        "Open run has incomplete tasks; get user approval before durable edits: "
-        "finish existing work first, defer the existing run and archive it, or combine requests in this run "
-        "while preserving separate topic plans."
+        "The open run has incomplete tasks. If new durable work creates an ambiguous conflict, ask whether to finish "
+        "or defer the existing work, or combine requests while preserving separate topic plans."
     )
 
 
-def different_request_next_action() -> str:
+def active_run_request_next_action() -> str:
     return (
-        "This request appears different from the open run; get user approval before durable edits: "
-        "finish existing work first, defer the existing run and archive it, or combine requests in this run "
-        "while preserving separate topic plans."
+        "Interpret the latest request in the context of the open run. Continue clear design or execution scope under "
+        "its applicable gate. Ask only if it is unclear whether to continue, defer, or combine durable work while "
+        "preserving separate topic plans."
     )
 
 
@@ -857,7 +859,6 @@ def context_workflow_guidance(
     *,
     event: str,
     state: dict[str, Any],
-    prompt: str = "",
     subagents: tapl_config.SubagentsConfig | None = None,
     authoring_detail: str = tapl_config.DEFAULT_AUTHORING_DETAIL,
 ) -> list[str]:
@@ -880,6 +881,14 @@ def context_workflow_guidance(
 
 def session_start_guidance() -> str:
     return render(SESSION_START_GUIDANCE_TEMPLATE)
+
+
+def post_compact_guidance() -> str:
+    return (
+        "After compaction, call `tapl_get_next` without `known_policy_revision` and read the complete "
+        "`workflow_policy`, `subagent_guidance`, and config before continuing. Use `tapl_get_status` only for "
+        "missing details."
+    )
 
 
 def stop_guidance() -> str:
@@ -1001,8 +1010,8 @@ def _common_mcp_bootstrap_instructions() -> str:
         "context loss or uncertainty; a summary is insufficient. Read any returned replacement before continuing. "
         "The server returns full content for unknown revisions or changes. A policy revision only controls policy delivery; "
         "it is never a state cache or proof of approval.\n\n"
-        "Plan before implementation; durable edits and execution require approval. Explicit edit, test, "
-        "implementation and verification requests count as approval. Preserve user changes. Helpers require "
+        "Plan before implementation; durable edits and execution require approval. Follow the current host "
+        "confirmation state and distinguish direct execution from design discussion. Preserve user changes. Helpers require "
         "completed/enabled setup and model/effort pairs allowed by both confirmed preferences and the live catalog. "
         "Separate explicit delegation requests retain their own authority. "
         "Never treat an unanswered question or timeout as approval. Root alone writes TAPL state. Parallel executable TAPL tasks require atomic dispatch, "
@@ -1040,9 +1049,16 @@ def mcp_server_instructions(
 
 def context_execution_approval_guidance() -> str:
     return (
-        "Execution approval is required before "
-        "task execution or durable edits; explicit edit, test, implementation, and verification requests count as "
-        "explicit user approval. Tool-confirmed continuation uses the request_user_input source."
+        "Execution approval is required before durable edits or task execution. Treat design direction, agreement, "
+        "and plan edits as planning. Ask only when scope is materially ambiguous. Silence or timeout never authorizes "
+        "execution. A direct request to change project files, implement, test, or verify authorizes that scope. "
+        "For direct hosted work, call `tapl_approve_execution` with source `explicit_user` and the exact current "
+        "user request as `prompt`.\n\n"
+        "To execute after hosted analysis or planning, show the finalized scope and the exact TAPL-APPROVE command "
+        "from `state_summary.execution_confirmation` or hook guidance. The user sends it alone in the same session. "
+        "After host confirmation, record the approved scope with source `explicit_user`. Refresh confirmation if the "
+        "plan changes. Where host confirmation is not required, use source `request_user_input` for actual approval "
+        "from a user question tool."
     )
 
 
@@ -1067,19 +1083,19 @@ def plan_detail_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORIN
     if authoring_detail == "normal":
         return (
             "Normal authoring: write concise plan facts relevant to Fast/Standard/Strict mode. Strict retains "
-            "risks, interfaces, rollback and validation boundaries. Retain approval needs; finalize only after "
-            "explicit user confirmation."
+            "risks, interfaces, rollback and validation boundaries. Retain approval needs. "
+            "Obtain explicit user confirmation for material design choices before finalizing."
         )
     if authoring_detail == "minimal":
         return (
             "Minimal authoring: record essential objective, approach and verification. Strict retains risks, "
-            "interfaces, rollback and validation boundaries. Retain approval needs; finalize only after "
-            "explicit user confirmation."
+            "interfaces, rollback and validation boundaries. Retain approval needs. "
+            "Obtain explicit user confirmation for material design choices before finalizing."
         )
     return (
         "Plan depth follows the mode: Fast durable work gets a compact executable plan; Standard gets a concise "
         "executable plan; Strict documents risk, interfaces, rollback, and validation boundaries. "
-        "Finalize only after explicit user confirmation."
+        "Obtain explicit user confirmation for material design choices before finalizing."
     )
 
 
@@ -1091,7 +1107,8 @@ def planning_approval_guidance() -> str:
             "with mutually exclusive options supported by the actual tool schema. Continue useful independent "
             "work while awaiting answers. If unavailable, state reasonable assumptions or ask one concise "
             "plain-text question when blocked. Never invent a timeout/auto-resolution parameter or treat "
-            "an unanswered question as approval. AskUserQuestion confirmations map to the stable TAPL approval source `request_user_input`; direct explicit execution requests use `explicit_user`."
+            "an unanswered question as approval. A design decision authorizes only that design scope. "
+            "Follow the current execution approval gate before project edits or task execution."
         )
     guidance = (
         "Before finalizing with `tapl_apply_plan`, use request_user_input Tool early for unclear planning methods "
@@ -1189,16 +1206,17 @@ def custom_fields_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHOR
 
 def mcp_tool_result_display_guidance() -> str:
     return (
-        "Emit one commentary notice when entering PLAN planning, TASK execution, and TASK verification. "
-        "On TAPL stage changes, emit at most one localized notice (combine consecutive calls): "
-        "`<emoji> **<tapl-kind>** · <current activity>`, e.g. `🧪 **TASK** · 전체 테스트 실행 중`. Use the TAPL workflow "
-        "kind: **RUN**, **PLAN**, **TASK**, **HISTORY**, **FINDING**, **APPROVAL**, or **ARCHIVE**. Normal notices: one "
-        "clause, at most 60 characters, progressive, current activity only. Never echo tool data or report each call: "
-        "omit completed results, counts, rationale, lists, sequences, next steps, receipts, tables, IDs, statuses, "
-        "payloads and summaries. Exception: after `tapl_summarize_run`, report only returned work_type, workflow_mode "
-        "and derived record_mode once, with ` · [Viewer 바로가기](viewer_url)` if available; repeat only on "
-        "classification change. Errors/blockers/approvals/input requests may include reason and next action. "
-        "Icons: 🔎 inspect, 📝 plan, 🛠️ execute, 🧪 verify. Final reports use prose."
+        "On TAPL stage changes, emit at most one localized notice (combine consecutive calls) in the format "
+        "`<emoji> **<tapl-kind>** · <current activity>`, e.g. `🧪 **TASK** · 전체 테스트 실행 중`. "
+        "Use the TAPL workflow kind (**RUN**, **PLAN**, **TASK**, **HISTORY**, **FINDING**, **APPROVAL**, or **ARCHIVE**). "
+        "Emit one PLAN notice when planning begins. "
+        "Emit a TASK execution or verification notice once on entering that stage, after successful "
+        "`tapl_start_task` or `tapl_dispatch_tasks`. Skip repeats on retries. Never echo tool data or report each call. "
+        "Keep record details in TAPL. Normal notices use one progressive clause of at most 60 characters. "
+        "After `tapl_summarize_run`, report only "
+        "returned work_type, workflow_mode and derived record_mode with ` · [Viewer 바로가기](viewer_url)` if available. "
+        "Repeat only on classification change. Errors/blockers/approvals/input requests may include reason and next action. "
+        "Icons are 🔎 inspect, 📝 plan, 🛠️ execute, 🧪 verify. Final reports use prose."
     )
 
 
@@ -1211,7 +1229,7 @@ def stable_id_guidance() -> str:
 def workflow_order_guidance() -> str:
     return (
         "Lifecycle order: one `tapl_get_next` entry (conditional `tapl_get_status` for missing details) -> "
-        "resolve residual run direction with user approval -> "
+        "resolve materially ambiguous run direction with the user -> "
         "identify independent topics -> bounded local scout when needed -> `tapl_summarize_run` with the whole request's "
         "work_type and evidence-based workflow_mode -> inspect emitted memory cues and their original sources, or search "
         "relevant history when insufficient -> `tapl_apply_plan` for each topic before task design. Lightweight records "
@@ -1256,12 +1274,9 @@ def request_partition_guidance() -> str:
 
 def workflow_stage_progression_guidance() -> str:
     return (
-        "unless the user explicitly limits the workflow to a specific stage, continue to the next "
-        "lifecycle step automatically. If the user asks for planning only, report the plan and keep the run active. "
-        "If the user asks to plan but does not explicitly ask for implementation/execution, ask with request_user_input "
-        "whether to keep the run active, proceed to execution, or finish and archive it; do not finish or archive before "
-        "the user chooses. If the user explicitly asks for implementation, edits, verification, or "
-        "testing, treat that as explicit_user execution approval and record approval source accordingly before execution."
+        "Continue through the requested stages. For design or plan edits, report the plan and keep the run active. "
+        "Ask only when material ambiguity prevents continuing. If the user explicitly requests execution, follow the "
+        "current host confirmation and approval gates before starting tasks."
     )
 
 
@@ -1903,9 +1918,4 @@ def task_format_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORIN
 
 
 def execution_approval_guidance() -> str:
-    base = (
-        "After task design/task creation and before starting or continuing task execution, use "
-        "`tapl_approve_execution` with source `explicit_user` when the user explicitly requested execution; "
-        "use source `request_user_input` when approval came from that tool."
-    )
-    return base + " Missing execution approval is always a validation error."
+    return context_execution_approval_guidance()

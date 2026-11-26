@@ -94,6 +94,7 @@ def test_pretool_approved_durable_work_never_auto_allows(workspace, monkeypatch,
     app.apply_plan("PLAN-001", title="Update file")
     app.create_task("TASK-001", "Edit file", "PLAN-001", "Change one file", "Edit file", "Inspect diff")
     app.record_approval(decision="approved", prompt="Implement this change", source="explicit_user")
+    app.start_task("TASK-001")
     code, output, error = run_hook(workspace, monkeypatch, capsys, "PreToolUse", tool_name="Write",
                                    tool_input={"file_path": "file", "content": "updated"})
     assert code == 0 and not error

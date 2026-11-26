@@ -3,28 +3,32 @@
 from __future__ import annotations
 
 import re
+import shlex
 import sqlite3
 from typing import Any
 
 from . import config as tapl_config, context as tapl_context, db, prompt as tapl_prompt, validation
+from . import execution_evidence
 from .clients import client_scope, current_client, resolve_client, session_key, validate_session_key
 
 
 DURABLE_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 CLAUDE_EVENTS = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"}
-DURABLE_BASH_HINTS = (
-    ">",
-    ">>",
-    "tee ",
-    "cat <<",
-    "python ",
-    "python3 ",
-    "node ",
-    "npm ",
-    "rm ",
-    "mv ",
-    "cp ",
-)
+FILE_WRITE_COMMANDS = {
+    "apply_patch", "chmod", "chown", "cp", "install", "ln", "mkdir", "mv", "patch",
+    "rm", "rmdir", "tee", "touch", "truncate",
+}
+GIT_WRITE_COMMANDS = {
+    "add", "am", "apply", "checkout", "cherry-pick", "clean", "clone", "commit", "fetch",
+    "gc", "init", "merge", "mv", "pull", "push", "rebase", "repack", "reset", "restore",
+    "revert", "rm", "switch", "update-index", "update-ref",
+}
+GIT_GLOBAL_OPTIONS_WITH_VALUE = {"-C", "-c", "--config-env", "--git-dir", "--namespace", "--work-tree"}
+GIT_BRANCH_WRITE_FLAGS = {
+    "-c", "-C", "-d", "-D", "-f", "-m", "-M", "-t", "-u", "--copy", "--delete",
+    "--edit-description", "--force", "--move", "--no-track", "--set-upstream-to",
+    "--track", "--unset-upstream",
+}
 EXTERNAL_RESEARCH_HINTS = (
     "web.run",
     "search_query",
@@ -113,13 +117,17 @@ def _handle_event(
     archive: sqlite3.Row | None = None
     policy_update: dict[str, Any] = {}
     claude = current_client() == "claude-code"
-    helper = claude and bool(payload.get("agent_id"))
+    helper = bool(payload.get("agent_id"))
     repeated_stop = claude and payload.get("stop_hook_active") is True
 
     if event == "UserPromptSubmit" and not helper:
         db.ensure_active_run(conn, request_summary=db.DEFAULT_REQUEST_SUMMARY)
+        execution_evidence.observe_user_prompt(conn, payload)
 
-    if event in {"SessionStart", "UserPromptSubmit"}:
+    compact_start = event == "SessionStart" and payload.get("source") == "compact"
+    if not claude and (event == "PostCompact" or compact_start):
+        message = compact_resume_message(conn)
+    elif event in {"SessionStart", "UserPromptSubmit"}:
         context_packet = tapl_context.build_context(
             conn,
             event=event,
@@ -133,11 +141,13 @@ def _handle_event(
         state = db.status_payload(conn)
         active = state.get("active_run")
         authoring_policy = tapl_config.authoring_policy(authoring_detail, (active or {}).get("workflow_mode"))
-        task_count = len(state.get("tasks") or [])
-        if not active or task_count == 0:
-            message = tapl_prompt.durable_edit_requires_plan_message()
+        planned = bool(active and state.get("tasks"))
+        try:
+            execution_evidence.require_active_execution(conn)
+        except ValueError as exc:
+            message = str(exc) if planned else tapl_prompt.durable_edit_requires_plan_message()
             block = mode == "enforce"
-        else:
+        if planned:
             check = validation.validate_workflow_state(state, authoring_detail=authoring_detail)
             issue_message = validation.format_issues(check)
             if issue_message:
@@ -148,16 +158,12 @@ def _handle_event(
     if event == "PostToolUse" and is_external_research_tool(tool_name, payload):
         message = combine_messages(message, tapl_context.external_findings_guidance())
 
-    if event == "Stop" and not helper and not repeated_stop:
+    if event == "Stop" and not (claude and helper) and not repeated_stop:
         state = db.status_payload(conn)
         active = state.get("active_run")
         authoring_policy = tapl_config.authoring_policy(authoring_detail, (active or {}).get("workflow_mode"))
         if active:
             record_run_id = active["id"]
-        remaining = state.get("incomplete_tasks", 0)
-        if remaining:
-            message = tapl_prompt.stop_remaining_tasks_message(remaining)
-            block = mode == "enforce"
         active_batches = (
             state.get("active_batches") if isinstance(state.get("active_batches"), list) else []
         )
@@ -166,6 +172,17 @@ def _handle_event(
             if isinstance(state.get("active_executions"), list)
             else []
         )
+        confirmation = execution_evidence.confirmation_state(conn) or {}
+        awaiting_user = (
+            confirmation.get("state") in {"finalize_plan", "awaiting_user"}
+            and not active_batches
+            and not active_executions
+            and not any(task["status"] == "In Progress" for task in state["tasks"])
+        )
+        remaining = state.get("incomplete_tasks", 0)
+        if remaining and not awaiting_user:
+            message = tapl_prompt.stop_remaining_tasks_message(remaining)
+            block = mode == "enforce"
         if active_batches:
             message = combine_messages(
                 message,
@@ -176,7 +193,7 @@ def _handle_event(
         issue_message = validation.format_issues(check)
         if issue_message:
             message = combine_messages(message, issue_message)
-        if check["errors"] and mode == "enforce":
+        if check["errors"] and mode == "enforce" and not awaiting_user:
             block = True
         if should_auto_archive_on_stop(state, check, block, payload):
             archive = db.archive_active_run(
@@ -207,7 +224,8 @@ def _handle_event(
         event_type=event,
         tool_name=tool_name,
         mode=mode,
-        payload=payload,
+        payload={key: value for key, value in payload.items() if key != "prompt"}
+        if event == "UserPromptSubmit" else payload,
         message=message,
         run_id=record_run_id,
     )
@@ -233,6 +251,30 @@ def _handle_event(
 
 def combine_messages(*messages: str) -> str:
     return "\n".join(message for message in messages if message)
+
+
+def compact_resume_message(conn: sqlite3.Connection) -> str:
+    state = db.status_payload(conn)
+    active = state.get("active_run")
+    lines = [tapl_prompt.post_compact_guidance(), f"Current session_id: {db.connection_session_id(conn)!r}."]
+    if not active:
+        return "\n".join([*lines, "No active RUN."])
+    lines.append(f"Active RUN: {active['id']}.")
+    execution_ids = {
+        item["task_id"]: item["execution_id"] for item in state["active_executions"]
+    }
+    started = [
+        task["stable_id"] for task in state["tasks"] if task["status"] == "In Progress"
+    ]
+    if started:
+        listed = [
+            f"{task_id} ({execution_ids[task_id]})" if task_id in execution_ids else task_id
+            for task_id in started[:4]
+        ]
+        if len(started) > 4:
+            listed.append(f"{len(started) - 4} more")
+        lines.append(f"Started TASKs: {', '.join(listed)}.")
+    return "\n".join(lines)
 
 
 def has_execution_approval_issue(check: dict[str, Any]) -> bool:
@@ -385,10 +427,98 @@ def infer_tool_name(payload: dict[str, Any]) -> str | None:
 def is_durable_tool(tool_name: str | None, payload: dict[str, Any]) -> bool:
     if tool_name in DURABLE_TOOLS:
         return True
-    if tool_name == "Bash":
-        command = payload_command(payload)
-        return any(hint in command for hint in DURABLE_BASH_HINTS)
+    return tool_name == "Bash" and shell_writes(payload_command(payload))
+
+
+def shell_writes(command: str) -> bool:
+    """Identify direct writes in ordinary shell commands; this is not a shell sandbox."""
+    separators = "\n;|&()"
+    lexer = shlex.shlex(command, posix=False, punctuation_chars=separators + "<>")
+    lexer.whitespace = " \r\t"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    argv: list[str] = []
+    in_comment = False
+    try:
+        for token in lexer:
+            if all(char in separators for char in token):
+                if shell_argv_writes(argv):
+                    return True
+                argv = []
+                in_comment = in_comment and "\n" not in token
+            elif token.startswith("#") or in_comment:
+                in_comment = True
+            elif ">" in token and all(char in "<>&|" for char in token):
+                target = next(lexer, "")
+                if target not in {"/dev/null", "NUL"} and not (
+                    token == ">&" and (target.isdigit() or target == "-")
+                ):
+                    return True
+            else:
+                argv.append(token)
+    except ValueError:
+        # A malformed shell command cannot be reliably split into arguments.
+        return False
+    return shell_argv_writes(argv)
+
+
+def shell_argv_writes(argv: list[str]) -> bool:
+    for index, word in enumerate(argv):
+        word = word.strip("\"'")
+        if word in {"command", "env", "exec", "--"} or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", word):
+            continue
+        executable = re.split(r"[/\\]", word)[-1]
+        arguments = [arg.strip("\"'") for arg in argv[index + 1:]]
+        if executable in {"git", "git.exe"}:
+            return git_writes(arguments)
+        if executable == "sed":
+            for arg in arguments:
+                if arg == "--":
+                    break
+                if arg.startswith(("-i", "--in-place")):
+                    return True
+            return False
+        if executable in {"node", "npm", "python"} or re.fullmatch(r"python3(?:\.\d+)?", executable):
+            # Shell hooks cannot determine the effects of an arbitrary script.
+            return not arguments or arguments[0] not in {"-h", "--help", "-V", "--version"}
+        return executable in FILE_WRITE_COMMANDS
     return False
+
+
+def git_writes(argv: list[str]) -> bool:
+    # Git options are case-sensitive: -C changes directories, -c sets config,
+    # and branch flags such as -D and -M are mutating even in upper case.
+    options = iter(argv)
+    for subcommand in options:
+        if not subcommand.startswith("-"):
+            break
+        if subcommand in GIT_GLOBAL_OPTIONS_WITH_VALUE:
+            next(options, None)
+    else:
+        return False
+    args = list(options)
+    if args[:1] == ["--help"]:
+        return False
+    if subcommand in GIT_WRITE_COMMANDS:
+        return True
+    if subcommand == "branch":
+        return any(arg.partition("=")[0] in GIT_BRANCH_WRITE_FLAGS for arg in args) or bool(
+            args and all(not arg.startswith("-") for arg in args)
+        )
+    commands = {
+        "remote": {"add", "prune", "remove", "rename", "set-branches", "set-head", "set-url", "update"},
+        "stash": {"apply", "branch", "clear", "create", "drop", "pop", "push", "save", "store"},
+        "submodule": {"add", "deinit", "init", "sync", "update"},
+        "worktree": {"add", "lock", "move", "prune", "remove", "repair", "unlock"},
+    }
+    if subcommand == "stash" and not args:
+        return True
+    if subcommand == "tag":
+        return bool(args and not args[0].startswith("-")) or any(
+            arg.partition("=")[0] in {"-a", "-d", "-f", "-m", "-s", "-u", "--annotate", "--delete", "--force", "--message", "--sign"}
+            for arg in args
+        )
+    return bool(args and args[0] in commands.get(subcommand, ()))
 
 
 def is_external_research_tool(tool_name: str | None, payload: dict[str, Any]) -> bool:

@@ -46,8 +46,9 @@ class HomebrewPrereleaseWorkflowTests(unittest.TestCase):
         stable_body = run[branch_start:branch_end]
 
         self.assertIn('stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")', stable_body)
-        self.assertIn('stable_brew_files+=("homebrew-tap/Formula/taplctl-semantic.rb")', stable_body)
+        self.assertIn('stable_options+=(--retire-semantic homebrew-tap)', stable_body)
         self.assertIn('"${stable_brew_files[@]}"', run)
+        self.assertIn('"${stable_options[@]}"', run[branch_end:])
         self.assertNotIn('"${PRE_FORMULA_TEMPLATE}"', run[branch_end:])
 
     def test_tap_stages_pre_formula_and_alias_and_commit_identifies_channel(self) -> None:

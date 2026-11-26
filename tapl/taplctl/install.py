@@ -34,10 +34,12 @@ TAPL_CONFIG_POLICIES = (
     TAPL_CONFIG_POLICY_MERGE,
 )
 HOOK_EVENTS: tuple[dict[str, str | None], ...] = (
+    {"event": "SessionStart", "matcher": "^compact$"},
     {"event": "UserPromptSubmit", "matcher": None},
     {"event": "PreToolUse", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit"},
     {"event": "PermissionRequest", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit"},
     {"event": "PostToolUse", "matcher": "Bash|apply_patch|Edit|Write|MultiEdit|web\\.run|WebSearch|WebFetch|Browser"},
+    {"event": "PostCompact", "matcher": None},
     {"event": "Stop", "matcher": None},
 )
 CODEX_STATIC_TEMPLATE_FILES: tuple[Path, ...] = (

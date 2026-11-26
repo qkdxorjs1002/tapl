@@ -55,7 +55,9 @@ This usually yields one RUN with two plans, not a plan per edited file. If the r
 
 ## Approval and execution
 
-Planning precedes implementation. The agent resolves material scope, compatibility, interface, or tradeoff questions and obtains explicit user confirmation before finalizing the plan. Plan confirmation and execution approval have separate purposes: an explicit request to edit, implement, verify, or test already authorizes execution within that scope, and TAPL records that approval. Approval does not expand the request or authorize unrelated changes.
+Planning precedes implementation. The agent interprets the current request in context and asks when a material scope, compatibility, interface, or tradeoff decision is unclear. Discussion, agreement with a design, and edits to a plan stay within planning. A direct request to edit project files, implement, verify, or test authorizes that scope.
+
+To move an existing hosted analysis or planning RUN into execution, review the finalized scope and send the exact `TAPL-APPROVE <token>` shown by the agent as its own message in the same session. TAPL checks that confirmation against the current RUN and plan. The agent then records execution approval and starts the tasks. Plan changes can require a new confirmation. [MCP approval contract](../reference/mcp.md#runs-plans-findings-and-approval)
 
 For sequential execution, start a dependency-ready task immediately before work and settle it before starting the next task:
 
