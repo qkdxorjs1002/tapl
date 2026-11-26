@@ -153,7 +153,7 @@ A successful `tapl_summarize_run` returns `viewer_url` for the classification no
 | `tapl_split_run` | `requests` (2–20 objects) | Each object has `key`, `summary`, `work_type`, `workflow_mode`, optional `depends_on=[]` referencing earlier keys. For explicitly separate RUN lifecycles before planning. |
 | `tapl_apply_plan` | None in schema | `plan_id="PLAN-001"`, `title`, `summary`, `objective`, `requirements_trace`, `selected_approach`, `affected_files`, `execution_order`, `risks`, `validation`, `approval_needs`, `notes`, `custom_fields`, `status`. Workflow validation still requires an adequate plan. |
 | `tapl_add_finding` | `title` | `source=""`, `finding=""`, `impact=""`, `related_ids=""`. Record decision-relevant evidence and source. |
-| `tapl_approve_execution` | `prompt` | `source="explicit_user"` or `"request_user_input"`. Records the scope the user authorized for execution. |
+| `tapl_approve_execution` | `prompt` | `source="explicit_user"` or `"request_user_input"`. With the question tool on a managed RUN, pass the captured `approval_scope`. |
 | `tapl_reject_execution` | `prompt` | Same `source` values; preserves the explicit rejection. |
 | `tapl_finish_run` | `result` | `expected_run_id`, `memory_candidates`, `memory_uses`, `memory_review`; see completion below. |
 | `tapl_finish_archive` | `slug` (1–120 characters) | `summary=""` (at most 2000 characters). After task/batch settlement and completion review. |
@@ -163,7 +163,7 @@ A successful `tapl_summarize_run` returns `viewer_url` for the classification no
 
 `tapl_split_run` keys are 1–100 characters, start with an alphanumeric character, and then allow letters, digits, `.`, `_`, or `-`. Forward dependencies are not accepted. Keep all requirements for one outcome in the same topic plan.
 
-For an initial direct implementation request in the host, use `source="explicit_user"` and pass the current user request verbatim as `prompt`. To execute after hosted analysis or planning, follow `state_summary.execution_confirmation` in `tapl_get_next` and write receipts. The `finalize_plan` state requires a finalized plan. In `awaiting_user`, show the finalized scope and the supplied `command`. The user sends that exact `TAPL-APPROVE <token>` as a standalone message in the same host session. Once `confirmed`, record the approved scope as `prompt` with `source="explicit_user"`. Host confirmation is specific to the current session, RUN, and plan. Where host confirmation is not required, `request_user_input` records actual execution approval received through the host's question tool.
+For an initial direct implementation request, use `source="explicit_user"` and the exact current user request as `prompt`. For an existing analysis or planning RUN, follow `state_summary.execution_confirmation` in `tapl_get_next` and write receipts. In `finalize_plan`, finalize the intended plans. In `awaiting_user`, capture `scope` before asking with Codex `request_user_input` or Claude Code `AskUserQuestion`. After an explicit affirmative answer, record a summary as `prompt`, use `source="request_user_input"`, and pass the captured value as `approval_scope`. TAPL trusts the agent to record the actual answer and verifies the scope against the current session, RUN, and finalized plans. A stale scope requires a new question. Cancellation, timeout, and missing answers leave execution on hold.
 
 ## Tasks and parallel batches
 

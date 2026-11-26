@@ -234,6 +234,7 @@ def mcp_next_recommendations(payload: dict[str, Any], *, client: str | None = No
         "decide-after-plan": ["tapl_create_task", "tapl_finish_run"],
         "confirm-after-plan": question_tool,
         "approve-execution": "tapl_approve_execution",
+        "await-user-confirmation": question_tool,
         "settle-parallel-task": ["tapl_complete_task", "tapl_block_task", "tapl_skip_task"],
         "recover-parallel-batch": "tapl_recover_batch",
         "complete-or-block-task": ["tapl_complete_task", "tapl_block_task"],
@@ -252,8 +253,7 @@ def mcp_next_recommendations(payload: dict[str, Any], *, client: str | None = No
         if not isinstance(recommendation, dict):
             continue
         item = dict(recommendation)
-        if item.get("name") != "await-user-confirmation":
-            item["tool"] = tool_map.get(str(item.get("name") or ""), "tapl_get_status")
+        item["tool"] = tool_map.get(str(item.get("name") or ""), "tapl_get_status")
         recommendations.append(item)
     return {**payload, "recommendations": recommendations}
 
@@ -1094,8 +1094,13 @@ def _create_server(
         prompt: Annotated[str, Field(description=tapl_prompt.field_help("approval", "prompt"), min_length=1)],
         source: Annotated[ApprovalSource, Field(description=tapl_prompt.field_help("approval", "source"))] = "explicit_user",
         session_id: SessionId = None,
+        approval_scope: Annotated[str | None, Field(
+            description="Required when confirming a managed RUN through the host question tool. "
+            "Copy execution_confirmation.scope before asking and pass it only after the user's explicit approval.",
+            min_length=1, max_length=64,
+        )] = None,
     ) -> dict[str, Any]:
-        """Record execution approval. For a direct first implementation request use source=explicit_user and its exact current user text as prompt. For a held RUN wait for the user to send execution_confirmation.command in the host, then record the approved scope. A tool argument alone cannot confirm a held RUN."""
+        """Record explicit execution approval. For an initial direct implementation request, use source=explicit_user and the exact current user request. For an existing plan, ask with the native host question tool and wait for the affirmative answer. Record with source=request_user_input and the approval_scope captured before asking."""
 
         return await call_application_write(
             application,
@@ -1103,6 +1108,7 @@ def _create_server(
             decision="approved",
             prompt=prompt,
             source=source,
+            approval_scope=approval_scope,
             operation="approval_approve",
         )
 

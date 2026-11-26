@@ -2693,6 +2693,7 @@ def record_approval(
     prompt: str = "",
     source: str = DEFAULT_APPROVAL_SOURCE,
     run_id: str | None = None,
+    approval_scope: str | None = None,
 ) -> sqlite3.Row:
     if decision not in APPROVAL_DECISIONS:
         raise ValueError(f"invalid approval decision: {decision}")
@@ -2707,13 +2708,15 @@ def record_approval(
             raise ValueError("no active workflow run for approval")
         proof = None
         if kind == DEFAULT_APPROVAL_KIND and decision == "approved":
-            proof = execution_evidence.approval_proof(conn, run, prompt, source)
+            proof = execution_evidence.approval_proof(conn, run, prompt, source, approval_scope)
             if proof is not None:
                 previous = latest_approval(conn, kind=kind, run_id=run["id"])
                 if execution_evidence.effective(conn, run, previous):
                     return previous
-        # A host-bound approval stores the reference, not the user's request.
-        saved_prompt = f"Host user turn {proof['turn_event_id']}" if proof else prompt
+        # Keep the summary from a question, or the turn reference for a direct
+        # request whose exact input is only needed to check the original digest.
+        turn_id = (proof or {}).get("turn_event_id")
+        saved_prompt = f"Host user turn {turn_id}" if turn_id is not None else prompt
         cursor = conn.execute(
             "INSERT INTO approvals(run_id, kind, prompt, decision, source, decided_at) VALUES(?,?,?,?,?,?)",
             (run["id"], kind, saved_prompt, decision, source, utc_now()),

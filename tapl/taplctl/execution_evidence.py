@@ -1,4 +1,4 @@
-"""Bind execution approval to a host user turn and the RUN's finalized plans."""
+"""Bind execution approval to the current RUN and its finalized plans."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ _TURN = "execution_user_turn"
 _HOLD = "execution_scope_held"
 _BINDING = "execution_approval_bound"
 _START = "execution_task_started"
-_PREFIX = "TAPL-APPROVE "
 HELD_WORK_TYPES = ("analysis", "planning")
 
 
@@ -104,14 +103,16 @@ def observe_user_prompt(conn: sqlite3.Connection, payload: dict[str, Any]) -> No
         if run is None:
             raise ValueError("no active RUN for host user turn")
         inherit_archive_hold(conn, run)
-        scope = _scope(conn, run)
         prompt = payload.get("prompt")
         data: dict[str, str] = {}
         if isinstance(prompt, str) and prompt.strip():
-            if scope and prompt.strip() == _PREFIX + scope:
-                data["confirmed_scope"] = scope
-            elif not prompt.strip().startswith(_PREFIX):
-                data["prompt_digest"] = _digest(prompt)
+            data["prompt_digest"] = _digest(prompt)
+        turn_id = payload.get("turn_id")
+        if isinstance(turn_id, str) and turn_id:
+            data["turn_id"] = turn_id
+            previous = _event(conn, run, _TURN)
+            if previous is not None and json.loads(previous["payload_json"]) == data:
+                return
         _write(conn, run, _TURN, data)
 
 
@@ -151,17 +152,15 @@ def confirmation_state(conn: sqlite3.Connection) -> dict[str, str] | None:
     scope = _scope(conn, run)
     if not scope:
         return {"state": "finalize_plan"}
-    if turn and json.loads(turn["payload_json"]).get("confirmed_scope") == scope:
-        return {"state": "confirmed"}
-    return {"state": "awaiting_user", "command": _PREFIX + scope}
+    return {"state": "awaiting_user", "scope": _question_scope(scope, turn)}
 
 
-def confirmation_command(conn: sqlite3.Connection) -> str | None:
-    return (confirmation_state(conn) or {}).get("command")
+def _question_scope(scope: str, turn: sqlite3.Row | None) -> str:
+    return _digest(json.dumps([scope, turn["id"] if turn is not None else None]))
 
 
 def approval_proof(
-    conn: sqlite3.Connection, run: sqlite3.Row, prompt: str, source: str,
+    conn: sqlite3.Connection, run: sqlite3.Row, prompt: str, source: str, approval_scope: str | None,
 ) -> dict[str, Any] | None:
     if not _managed(conn, run):
         return None
@@ -171,6 +170,13 @@ def approval_proof(
     if not scope:
         raise ValueError("Finalize the current RUN's plans before recording execution approval.")
     turn = _event(conn, run, _TURN)
+    if source == "request_user_input":
+        if approval_scope != _question_scope(scope, turn):
+            raise ValueError("Execution approval needs the current approval_scope captured before the question. "
+                             "Ask the user again with request_user_input if the scope changed.")
+        # The Agent records the user's real tool answer. This check binds its
+        # record to the plans and turn, independent of the source of the answer.
+        return {"scope": scope}
     if turn:
         data = json.loads(turn["payload_json"])
         direct = False
@@ -180,10 +186,10 @@ def approval_proof(
                 previous = _event(conn, run, _BINDING)
                 direct = (previous is not None and json.loads(previous["payload_json"])["turn_event_id"] == turn["id"]
                           and effective(conn, run, db.latest_approval(conn, run_id=run["id"])))
-        if data.get("confirmed_scope") == scope or direct:
+        if direct:
             return {"turn_event_id": turn["id"], "scope": scope}
-    raise ValueError("Execution approval requires the user's host confirmation for this RUN and plan. "
-                     "Ask the user to send this exact message: " + _PREFIX + scope)
+    raise ValueError("Execution approval requires a verified direct user request or the user's "
+                     "request_user_input approval for this RUN and plan.")
 
 
 def bind_approval(conn: sqlite3.Connection, run: sqlite3.Row, approval_id: int, proof: dict) -> None:

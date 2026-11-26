@@ -107,7 +107,7 @@ taplctl install repo --client claude-code --mode enforce
 
 Hook mode is separate from Fast/Standard/Strict workflow rigor. An enforced hook is a workflow check, not a sandbox or security boundary. See [workflow](../concepts/workflow.md).
 
-When the connected agent shows `TAPL-APPROVE <token>` for a finalized plan, send the exact command as its own message in the same host session. The `UserPromptSubmit` hook records the confirmation. [Approval and execution](../concepts/workflow.md#approval-and-execution)
+The agent uses Codex `request_user_input` or Claude Code `AskUserQuestion` for material analysis and planning decisions and to confirm execution of an existing finalized plan. In Codex Default mode, the managed configuration enables `features.default_mode_request_user_input`. The agent records the actual answer, and TAPL checks the approval scope. If the question tool is unavailable, execution of the existing plan stays on hold. [Approval and execution](../concepts/workflow.md#approval-and-execution)
 
 After an upgrade, an existing hosted approval can require confirmation again if TAPL cannot verify its link to the current session and finalized plan.
 

@@ -286,7 +286,7 @@ ${memory_guidance}
 
 When external search or documentation review affects the task, store only decision-relevant findings with source and impact; never store raw dumps, long candidate lists, or stale findings.
 
-Archive when no actionable work remains, the run is superseded or stale, or the user chooses archive/discard. For design or plan revisions, report the current plan and keep it active. Ask a focused question only if the requested next step is materially ambiguous.
+Archive when no actionable work remains, the run is superseded or stale, or the user chooses archive/discard. For design or plan revisions, report the current plan and keep it active. If the requested next step is materially ambiguous, use request_user_input to confirm it.
 
 ## Completion Report
 
@@ -298,9 +298,11 @@ Record the final result with `tapl_finish_run` before archiving with `tapl_finis
 
 CONTEXT_INJECTION_PROMPT_TEMPLATE = """# TAPL MCP
 
-Use the installed `tapl_*` MCP tools for workflow state. The MCP server instructions, tool descriptions, and input schemas contain the authoritative workflow policy and field contracts.
+Use the installed `tapl_*` MCP tools for workflow state.
 
-${entry_guidance}"""
+${entry_guidance}
+
+${planning_question_reminder}"""
 
 SESSION_START_GUIDANCE_TEMPLATE = """# TAPL MCP
 
@@ -349,6 +351,7 @@ def _template_variable_providers(
         "task_statuses": lambda: "`, `".join(TASK_STATUSES),
         "plan_detail_guidance": plan_detail_guidance,
         "planning_approval_guidance": planning_approval_guidance,
+        "planning_question_reminder": planning_question_reminder,
         "task_granularity_guidance": task_granularity_guidance,
         "task_required_fields": task_required_fields,
         "task_fields_guidance": task_format_guidance,
@@ -673,11 +676,11 @@ def archive_lightweight_run_next_action() -> str:
 
 
 def decide_after_plan_next_action() -> str:
-    return (
+    return _host_policy(
         "Ensure all independent topics have distinct stored plans before task design; judge the user's requested scope directly. "
         "For design or plan revisions, report the plan and keep the run active. For analysis or reporting scope, finish "
         "without executable tasks when no decisions remain. For explicit execution, create tasks and follow the current "
-        "approval gate before starting. Ask only about material ambiguity in the requested scope."
+        "approval gate before starting. Resolve material decisions with request_user_input before relying on them."
     )
 
 
@@ -695,15 +698,12 @@ def approval_missing_next_action() -> str:
 
 
 def execution_confirmation_next_action(confirmation: dict[str, Any]) -> str:
-    state = confirmation["state"]
-    if state == "awaiting_user":
-        return (
-            "Execution is on hold. If the user explicitly requests execution, ask them to send "
-            f"`{confirmation['command']}` as their next message in this host session."
-        )
-    if state == "finalize_plan":
-        return "Execution is on hold. If execution is requested, finalize the intended plan before host confirmation."
-    return "The host confirmed the current plan. Record scoped approval with `tapl_approve_execution` before starting tasks."
+    if confirmation["state"] == "finalize_plan":
+        return "Execution is on hold. If execution is requested, finalize the intended plan before asking for approval."
+    return _host_policy(
+        "Execution is on hold. If execution is requested, use request_user_input to ask for explicit approval "
+        "of the finalized scope. Capture execution_confirmation.scope before asking and wait for the actual answer."
+    )
 
 
 def session_start_incomplete_next_action() -> str:
@@ -740,9 +740,9 @@ def incomplete_run_next_action() -> str:
 
 
 def active_run_request_next_action() -> str:
-    return (
+    return _host_policy(
         "Interpret the latest request in the context of the open run. Continue clear design or execution scope under "
-        "its applicable gate. Ask only if it is unclear whether to continue, defer, or combine durable work while "
+        "its applicable gate. Use request_user_input if it is unclear whether to continue, defer, or combine durable work while "
         "preserving separate topic plans."
     )
 
@@ -887,7 +887,7 @@ def post_compact_guidance() -> str:
     return (
         "After compaction, call `tapl_get_next` without `known_policy_revision` and read the complete "
         "`workflow_policy`, `subagent_guidance`, and config before continuing. Use `tapl_get_status` only for "
-        "missing details."
+        "missing details. " + planning_question_reminder()
     )
 
 
@@ -1048,17 +1048,16 @@ def mcp_server_instructions(
 
 
 def context_execution_approval_guidance() -> str:
-    return (
+    return _host_policy(
         "Execution approval is required before durable edits or task execution. Treat design direction, agreement, "
-        "and plan edits as planning. Ask only when scope is materially ambiguous. Silence or timeout never authorizes "
-        "execution. A direct request to change project files, implement, test, or verify authorizes that scope. "
-        "For direct hosted work, call `tapl_approve_execution` with source `explicit_user` and the exact current "
-        "user request as `prompt`.\n\n"
-        "To execute after hosted analysis or planning, show the finalized scope and the exact TAPL-APPROVE command "
-        "from `state_summary.execution_confirmation` or hook guidance. The user sends it alone in the same session. "
-        "After host confirmation, record the approved scope with source `explicit_user`. Refresh confirmation if the "
-        "plan changes. Where host confirmation is not required, use source `request_user_input` for actual approval "
-        "from a user question tool."
+        "and plan edits as planning. For an initial direct edit, implementation, verification or test request, use "
+        "`tapl_approve_execution` with source `explicit_user` and the exact current user request as `prompt`.\n\n"
+        "After analysis or planning, capture `state_summary.execution_confirmation.scope` before asking. Use "
+        "request_user_input to show the finalized scope and offer execution or continued planning. Wait for the user's "
+        "actual affirmative tool answer. Then call `tapl_approve_execution` with source `request_user_input`, "
+        "a scope summary as `prompt`, and the captured `approval_scope`. Keep the identifier internal. "
+        "Record explicit rejection with `tapl_reject_execution`. Keep execution on hold without an answer or tool. "
+        "Disable automatic answers when asking for approval. Ask again if scope changes."
     )
 
 
@@ -1099,29 +1098,19 @@ def plan_detail_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORIN
     )
 
 
-def planning_approval_guidance() -> str:
-    if clients.current_client() == "claude-code":
-        return (
-            "Before finalizing with `tapl_apply_plan`, use AskUserQuestion when the live host exposes it for "
-            "materially unclear scope, risk, API, UX, data, compatibility or tradeoffs. Ask focused questions "
-            "with mutually exclusive options supported by the actual tool schema. Continue useful independent "
-            "work while awaiting answers. If unavailable, state reasonable assumptions or ask one concise "
-            "plain-text question when blocked. Never invent a timeout/auto-resolution parameter or treat "
-            "an unanswered question as approval. A design decision authorizes only that design scope. "
-            "Follow the current execution approval gate before project edits or task execution."
-        )
-    guidance = (
-        "Before finalizing with `tapl_apply_plan`, use request_user_input Tool early for unclear planning methods "
-        "or material scope/risk/API/UX/data/compat/tradeoffs. Ask focused questions with 2-3 mutually exclusive "
-        "options and continue with follow-ups until "
-        "the plan is materially clear."
+def planning_question_reminder() -> str:
+    return _host_policy(
+        "During analysis and planning, use request_user_input early for material decisions."
     )
-    return (
-        f"{guidance} Use it only when available in the mode; "
-        "when multiple independent decisions are already known, batch up to three short questions in one "
-        "request_user_input call. Set autoResolutionMs=240000 whenever the tool contract allows auto-resolution; "
-        "omit it only when explicit user input is required before continuing; if unavailable, state assumptions "
-        "or ask one concise plain-text question only when blocked."
+
+
+def planning_approval_guidance() -> str:
+    return _host_policy(
+        planning_question_reminder() + " Ask before assuming the choice or finalizing the plan. Cover unresolved "
+        "scope, approach, risk, API, UX, data or compatibility decisions. Offer 2-3 distinct options. Where "
+        "supported, batch up to three short questions. Continue independent work while waiting. If the tool is "
+        "unavailable, ask the planning question in chat. A design answer authorizes only the choice asked. "
+        "Skip resolved choices and routine details."
     )
 
 
@@ -1273,10 +1262,10 @@ def request_partition_guidance() -> str:
 
 
 def workflow_stage_progression_guidance() -> str:
-    return (
+    return _host_policy(
         "Continue through the requested stages. For design or plan edits, report the plan and keep the run active. "
-        "Ask only when material ambiguity prevents continuing. If the user explicitly requests execution, follow the "
-        "current host confirmation and approval gates before starting tasks."
+        "Resolve material choices early with request_user_input. If the user explicitly requests execution, "
+        "follow the applicable approval gate before starting tasks."
     )
 
 

@@ -232,9 +232,8 @@ def planning_confirmation_recommendation() -> dict[str, str]:
     return recommendation(
         "confirm-after-plan",
         (
-            "Complete and report all requested topic plans, then use request_user_input to ask whether to keep "
-            "the run active, proceed to execution, or finish and archive it. Do not finish or archive before the "
-            "user chooses."
+            "Report the plan and keep it active for planning-only work. If the next stage requires a decision, "
+            "ask with the host question tool and wait. Do not finish or archive before the user chooses closure."
         ),
     )
 

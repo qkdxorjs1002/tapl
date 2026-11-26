@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from taplctl import db, execution_evidence, hook_cli, hooks, install
+from taplctl import db, hook_cli, hooks, install
 from taplctl.application import WorkflowApplication
 
 
@@ -69,21 +69,16 @@ def test_native_edit_gate_requires_approval_and_started_task(tmp_path, run_hook)
         assert "prompt" not in json.loads(saved["payload_json"])
 
 
-def test_only_root_prompt_submits_approval_confirmation(tmp_path, run_hook):
-    run_hook("UserPromptSubmit", prompt="Plan the handler update.", turn_id="planning")
+def test_duplicate_root_hooks_and_helper_prompts_preserve_first_user_turn(tmp_path, run_hook):
+    request = "Implement the handler update."
+    run_hook("UserPromptSubmit", prompt=request, turn_id="root")
     app = WorkflowApplication(tmp_path, session_id=SESSION_ID)
-    app.summarize_run("Plan the handler update", work_type="planning")
+    app.summarize_run("Implement the handler update", work_type="implementation")
     app.apply_plan("PLAN-001", title="Update handler", status="Finalized")
-    with closing(db.connect(db.local_db_path(tmp_path), session_id=SESSION_ID)) as conn:
-        token = execution_evidence.confirmation_command(conn)
-    assert token and token.startswith("TAPL-APPROVE ")
 
-    run_hook("UserPromptSubmit", prompt=token, turn_id="helper", agent_id="helper")
-    with pytest.raises(ValueError, match="host confirmation"):
-        app.record_approval(decision="approved", prompt=token, source="explicit_user")
-
-    run_hook("UserPromptSubmit", prompt=token, turn_id="root-confirmation")
-    assert app.record_approval(decision="approved", prompt=token, source="explicit_user")["ok"]
+    run_hook("UserPromptSubmit", mode="observe", prompt=request, turn_id="root")
+    run_hook("UserPromptSubmit", prompt="An unrelated request", turn_id="helper", agent_id="helper")
+    assert app.record_approval(decision="approved", prompt=request, source="explicit_user")["ok"]
 
 
 def test_enforce_allows_waiting_for_user_with_pending_planned_task(tmp_path, run_hook):

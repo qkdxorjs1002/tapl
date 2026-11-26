@@ -107,7 +107,7 @@ taplctl install repo --client claude-code --mode enforce
 
 Hook 모드와 Fast/Standard/Strict 워크플로 엄격도는 별개입니다. Enforce hook은 워크플로 검사이며 sandbox나 보안 경계가 아닙니다. [워크플로](../concepts/workflow.ko.md)를 참고하세요.
 
-Agent가 확정된 계획에 대해 `TAPL-APPROVE <token>`을 보여 주면 같은 호스트 세션에서 명령을 별도 메시지로 그대로 보내세요. `UserPromptSubmit` 훅이 확인을 기록합니다. [승인과 실행](../concepts/workflow.ko.md#승인과-실행)
+Agent는 분석·계획 중 중요한 결정과 기존 확정 계획의 실행 승인에 Codex `request_user_input` 또는 Claude Code `AskUserQuestion`을 사용합니다. 관리 설정은 Codex Default 모드의 `features.default_mode_request_user_input`을 켭니다. Agent가 실제 답변을 기록하면 TAPL이 승인 범위를 검사합니다. 질문 도구를 사용할 수 없으면 기존 계획의 실행을 보류합니다. [승인과 실행](../concepts/workflow.ko.md#승인과-실행)
 
 업그레이드 후 TAPL이 기존 실행 승인과 현재 호스트 세션·확정 계획의 연결을 검증할 수 없으면 다시 확인해야 할 수 있습니다.
 

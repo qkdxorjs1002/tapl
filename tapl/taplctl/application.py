@@ -200,7 +200,7 @@ class WorkflowApplication:
         if actions and actions[0]["name"] == "approve-execution":
             if confirmation.get("state") == "awaiting_user":
                 actions[0] = {"name": "await-user-confirmation",
-                              "reason": "Show the user the finalized scope and exact execution_confirmation.command, then wait for their host message."}
+                              "reason": prompt.execution_confirmation_next_action(confirmation)}
             elif confirmation.get("state") == "finalize_plan":
                 actions[0] = {"name": "apply-plan",
                               "reason": "Finalize the requested plans before asking the user to authorize execution."}
@@ -842,11 +842,12 @@ class WorkflowApplication:
             current_policy = self._authoring_policy(settings, {"active_run": db.workflow_run_to_dict(db.active_run(conn))})
         return {"ok": True, "item": db.row_to_dict(item), **authoring_policy_update(previous_policy, current_policy)}
 
-    def record_approval(self, *, decision: str, prompt: str, source: str) -> dict[str, Any]:
+    def record_approval(self, *, decision: str, prompt: str, source: str,
+                        approval_scope: str | None = None) -> dict[str, Any]:
         with self._connection() as conn:
             row = db.record_approval(
                 conn, kind=db.DEFAULT_APPROVAL_KIND, decision=decision,
-                prompt=prompt, source=source,
+                prompt=prompt, source=source, approval_scope=approval_scope,
             )
         return {"ok": True, "approval": db.row_to_dict(row)}
 

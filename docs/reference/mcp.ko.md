@@ -150,7 +150,7 @@ Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 
 | `tapl_split_run` | `requests` (객체 2–20개) | 객체마다 `key`, `summary`, `work_type`, `workflow_mode`, 선택 `depends_on=[]`가 있으며 앞선 키만 참조합니다. 계획 전 명시적으로 분리한 RUN 수명주기에 사용합니다. |
 | `tapl_apply_plan` | schema상 없음 | `plan_id="PLAN-001"`, `title`, `summary`, `objective`, `requirements_trace`, `selected_approach`, `affected_files`, `execution_order`, `risks`, `validation`, `approval_needs`, `notes`, `custom_fields`, `status`. 워크플로 검증에는 충분한 계획이 필요합니다. |
 | `tapl_add_finding` | `title` | `source=""`, `finding=""`, `impact=""`, `related_ids=""`. 판단에 필요한 근거와 출처를 기록합니다. |
-| `tapl_approve_execution` | `prompt` | `source="explicit_user"` 또는 `"request_user_input"`. 사용자가 실행을 승인한 범위를 기록합니다. |
+| `tapl_approve_execution` | `prompt` | `source="explicit_user"` 또는 `"request_user_input"`. 관리 RUN에서 질문 도구를 사용한 경우 질문 전에 받은 `approval_scope`를 전달합니다. |
 | `tapl_reject_execution` | `prompt` | 같은 `source` 값. 명시적 거절을 보존합니다. |
 | `tapl_finish_run` | `result` | `expected_run_id`, `memory_candidates`, `memory_uses`, `memory_review`. 아래 완료 절차 참고. |
 | `tapl_finish_archive` | `slug` (1–120자) | `summary=""` (최대 2000자). 작업·배치 정리와 완료 검토 후 호출합니다. |
@@ -160,7 +160,7 @@ Agent의 성공한 조회는 현재 소유 RUN의 마인드맵을 위해 기존 
 
 `tapl_split_run`의 키는 1–100자이며 영문·숫자로 시작하고 이후 영문·숫자·`.`·`_`·`-`를 허용합니다. 뒤의 키를 의존 대상으로 지정할 수 없습니다. 하나의 결과에 대한 요구 사항은 같은 주제 계획에 유지합니다.
 
-호스트에서 첫 요청으로 직접 구현을 지시한 경우 `source="explicit_user"`를 사용하고 현재 사용자 요청을 `prompt`에 그대로 전달합니다. 호스트에서 진행한 분석·계획을 실행으로 옮길 때는 `tapl_get_next`와 쓰기 응답의 `state_summary.execution_confirmation`을 확인합니다. `finalize_plan` 상태에서는 계획을 확정해야 합니다. `awaiting_user` 상태에서는 확정 범위와 반환된 `command`를 사용자에게 보여 줍니다. 사용자는 같은 호스트 세션에서 `TAPL-APPROVE <token>` 명령을 별도 메시지로 그대로 보냅니다. `confirmed` 상태가 되면 승인 범위를 `prompt`에 넣고 `source="explicit_user"`로 기록합니다. 호스트 확인은 현재 세션·RUN·계획에만 적용됩니다. 호스트 확인이 필요 없는 경우에는 호스트 질문 도구로 받은 실제 실행 승인을 `request_user_input`으로 기록합니다.
+첫 요청에서 구현을 직접 지시한 경우 `source="explicit_user"`를 사용하고 현재 사용자 요청을 `prompt`에 그대로 전달합니다. 기존 분석·계획 RUN을 실행으로 옮길 때는 `tapl_get_next`와 쓰기 응답의 `state_summary.execution_confirmation`을 확인합니다. `finalize_plan`에서는 실행할 계획을 확정합니다. `awaiting_user`에서는 `scope`를 확보한 뒤 Codex `request_user_input` 또는 Claude Code `AskUserQuestion`으로 묻습니다. 명시적인 실행 답변을 받으면 요약을 `prompt`에 넣고 `source="request_user_input"`과 질문 전 확보한 값을 `approval_scope`로 전달합니다. TAPL은 실제 답변의 기록을 Agent에 맡기고 범위가 현재 세션·RUN·확정 계획과 일치하는지 검사합니다. 범위가 달라졌다면 다시 질문합니다. 취소, 시간 초과, 미응답 시에는 실행을 보류합니다.
 
 ## 작업과 병렬 배치
 
