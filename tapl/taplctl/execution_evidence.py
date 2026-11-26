@@ -9,6 +9,7 @@ import sqlite3
 from typing import Any
 
 from . import db
+from .clients import user_question_tool
 
 
 # Ordinary host hook events use observe/enforce. Internal evidence is written
@@ -173,7 +174,7 @@ def approval_proof(
     if source == "request_user_input":
         if approval_scope != _question_scope(scope, turn):
             raise ValueError("Execution approval needs the current approval_scope captured before the question. "
-                             "Ask the user again with request_user_input if the scope changed.")
+                             f"Ask the user again with {user_question_tool()} if the scope changed.")
         # The Agent records the user's real tool answer. This check binds its
         # record to the plans and turn, independent of the source of the answer.
         return {"scope": scope}
@@ -189,7 +190,7 @@ def approval_proof(
         if direct:
             return {"turn_event_id": turn["id"], "scope": scope}
     raise ValueError("Execution approval requires a verified direct user request or the user's "
-                     "request_user_input approval for this RUN and plan.")
+                     f"approval through {user_question_tool()} for this RUN and plan.")
 
 
 def bind_approval(conn: sqlite3.Connection, run: sqlite3.Row, approval_id: int, proof: dict) -> None:

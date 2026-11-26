@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from . import __version__, db, install as tapl_install, prompt as tapl_prompt, run_references, sessions, settings
 from .application import WorkflowApplication
 from .command_runtime import configure_stdio
-from .clients import client_scope, resolve_client, validate_session_key
+from .clients import client_scope, resolve_client, user_question_tool, validate_session_key
 from .viewer import workspace_run_url
 
 
@@ -223,7 +223,7 @@ def application_client(application: Any) -> str:
 def mcp_next_recommendations(payload: dict[str, Any], *, client: str | None = None) -> dict[str, Any]:
     """Replace command recipes with MCP tool names in MCP-facing output."""
 
-    question_tool = "AskUserQuestion" if resolve_client(client) == "claude-code" else "request_user_input"
+    question_tool = user_question_tool(client)
     tool_map: dict[str, str | list[str]] = {
         "configure-subagents": question_tool,
         "review-subagent-models": question_tool,

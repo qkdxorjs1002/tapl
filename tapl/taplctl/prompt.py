@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from collections.abc import Callable
 from string import Template
 from typing import Any
@@ -16,12 +15,6 @@ def _host_policy(text: str) -> str:
     """Adapt common policy vocabulary without changing TAPL enum values."""
     if clients.current_client() != "claude-code":
         return text
-    text = text.replace("Tool-confirmed continuation uses the request_user_input source.",
-                        "AskUserQuestion-confirmed continuation uses TAPL source `request_user_input`.")
-    text = text.replace("request_user_input Tool", "AskUserQuestion")
-    text = text.replace("request_user_input call", "AskUserQuestion call")
-    # Approval source is TAPL's stable enum even when the host tool differs.
-    text = re.sub(r"(?<!`)\brequest_user_input\b(?!`)", "AskUserQuestion", text)
     text = text.replace("use `fork_turns=none`", "use a self-contained Agent prompt")
     text = text.replace("Use `fork_turns=none`", "Use a self-contained Agent prompt")
     text = text.replace("This UserPromptSubmit developer context", "This TAPL workspace context")
@@ -286,7 +279,7 @@ ${memory_guidance}
 
 When external search or documentation review affects the task, store only decision-relevant findings with source and impact; never store raw dumps, long candidate lists, or stale findings.
 
-Archive when no actionable work remains, the run is superseded or stale, or the user chooses archive/discard. For design or plan revisions, report the current plan and keep it active. If the requested next step is materially ambiguous, use request_user_input to confirm it.
+Archive when no actionable work remains, the run is superseded or stale, or the user chooses archive/discard. For design or plan revisions, report the current plan and keep it active. If the requested next step is materially ambiguous, use ${user_question_tool} to confirm it.
 
 ## Completion Report
 
@@ -346,6 +339,7 @@ def _template_variable_providers(
     authoring_detail = tapl_config.resolve_authoring_detail(authoring_detail)
     providers = {
         "entry_guidance": entry_guidance,
+        "user_question_tool": clients.user_question_tool,
         "receipt_guidance": receipt_guidance,
         "plan_labels": lambda: ", ".join(PLAN_KEY_LABELS),
         "task_statuses": lambda: "`, `".join(TASK_STATUSES),
@@ -676,11 +670,11 @@ def archive_lightweight_run_next_action() -> str:
 
 
 def decide_after_plan_next_action() -> str:
-    return _host_policy(
+    return (
         "Ensure all independent topics have distinct stored plans before task design; judge the user's requested scope directly. "
         "For design or plan revisions, report the plan and keep the run active. For analysis or reporting scope, finish "
         "without executable tasks when no decisions remain. For explicit execution, create tasks and follow the current "
-        "approval gate before starting. Resolve material decisions with request_user_input before relying on them."
+        f"approval gate before starting. Resolve material decisions with {clients.user_question_tool()} before relying on them."
     )
 
 
@@ -700,8 +694,8 @@ def approval_missing_next_action() -> str:
 def execution_confirmation_next_action(confirmation: dict[str, Any]) -> str:
     if confirmation["state"] == "finalize_plan":
         return "Execution is on hold. If execution is requested, finalize the intended plan before asking for approval."
-    return _host_policy(
-        "Execution is on hold. If execution is requested, use request_user_input to ask for explicit approval "
+    return (
+        f"Execution is on hold. If execution is requested, use {clients.user_question_tool()} to ask for explicit approval "
         "of the finalized scope. Capture execution_confirmation.scope before asking and wait for the actual answer."
     )
 
@@ -740,10 +734,10 @@ def incomplete_run_next_action() -> str:
 
 
 def active_run_request_next_action() -> str:
-    return _host_policy(
+    return (
         "Interpret the latest request in the context of the open run. Continue clear design or execution scope under "
-        "its applicable gate. Use request_user_input if it is unclear whether to continue, defer, or combine durable work while "
-        "preserving separate topic plans."
+        f"its applicable gate. Use {clients.user_question_tool()} if it is unclear whether to continue, defer, or "
+        "combine durable work while preserving separate topic plans."
     )
 
 
@@ -1048,12 +1042,12 @@ def mcp_server_instructions(
 
 
 def context_execution_approval_guidance() -> str:
-    return _host_policy(
+    return (
         "Execution approval is required before durable edits or task execution. Treat design direction, agreement, "
         "and plan edits as planning. For an initial direct edit, implementation, verification or test request, use "
         "`tapl_approve_execution` with source `explicit_user` and the exact current user request as `prompt`.\n\n"
         "After analysis or planning, capture `state_summary.execution_confirmation.scope` before asking. Use "
-        "request_user_input to show the finalized scope and offer execution or continued planning. Wait for the user's "
+        f"{clients.user_question_tool()} to show the finalized scope and offer execution or continued planning. Wait for the user's "
         "actual affirmative tool answer. Then call `tapl_approve_execution` with source `request_user_input`, "
         "a scope summary as `prompt`, and the captured `approval_scope`. Keep the identifier internal. "
         "Record explicit rejection with `tapl_reject_execution`. Keep execution on hold without an answer or tool. "
@@ -1099,9 +1093,7 @@ def plan_detail_guidance(*, authoring_detail: str = tapl_config.DEFAULT_AUTHORIN
 
 
 def planning_question_reminder() -> str:
-    return _host_policy(
-        "During analysis and planning, use request_user_input early for material decisions."
-    )
+    return f"During analysis and planning, use {clients.user_question_tool()} early for material decisions."
 
 
 def planning_approval_guidance() -> str:
@@ -1262,9 +1254,9 @@ def request_partition_guidance() -> str:
 
 
 def workflow_stage_progression_guidance() -> str:
-    return _host_policy(
+    return (
         "Continue through the requested stages. For design or plan edits, report the plan and keep the run active. "
-        "Resolve material choices early with request_user_input. If the user explicitly requests execution, "
+        f"Resolve material choices early with {clients.user_question_tool()}. If the user explicitly requests execution, "
         "follow the applicable approval gate before starting tasks."
     )
 
@@ -1346,7 +1338,7 @@ def _common_subagent_setup_guidance() -> str:
         "concrete user request whether to use SubAgents and what to prioritize (quality, speed, cost, or model "
         "preferences). Use the entry response's effective config path. Derive choices only from the current "
         "session's delegation tool model IDs and supported reasoning efforts; do not guess or use a provider API "
-        "catalog. If unavailable, defer setup and continue on the root agent. Use request_user_input when available. "
+        f"catalog. If unavailable, defer setup and continue on the root agent. Use {clients.user_question_tool()} when available. "
         "Wait for the actual answer; no answer or timeout is not confirmation. Do not repeat a pending question. "
         "After the answer, use `tapl_configure_subagents` with user_confirmed=true to save enabled, preference, "
         "strategy, models, the full available_models catalog and optional profiles; no second confirmation is needed. "

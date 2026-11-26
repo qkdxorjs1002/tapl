@@ -4,7 +4,7 @@ from pathlib import Path
 from mcp import Client
 import pytest
 
-from taplctl import db, execution_evidence as evidence, mcp_server
+from taplctl import clients, db, execution_evidence as evidence, mcp_server
 from taplctl.application import WorkflowApplication
 
 
@@ -179,22 +179,31 @@ def test_agent_can_record_scoped_question_answer_without_a_host_hook(tmp_path):
     assert approve_from_question(app)["ok"]
 
 
-def test_mcp_routes_plan_approval_to_question_tool_and_records_scope(tmp_path):
-    app = application(tmp_path)
-    prepare(app)
+@pytest.mark.parametrize(("host", "question_tool"), [
+    ("codex", "request_user_input"),
+    ("claude-code", "AskUserQuestion"),
+])
+def test_mcp_routes_plan_approval_to_question_tool_and_records_scope(tmp_path, host, question_tool):
+    with clients.client_scope(host):
+        app = application(tmp_path, clients.session_key("thread-A"))
+        prepare(app)
     args = {"session_id": app.session_id}
 
     async def exercise():
-        async with Client(mcp_server.create_server(workspace_root=tmp_path, client="codex")) as client:
+        async with Client(mcp_server.create_server(workspace_root=tmp_path, client=host)) as client:
             next_result = (await client.call_tool("tapl_get_next", args)).structured_content
+            assert f"During analysis and planning, use {question_tool}" in next_result["workflow_policy"]
+            assert "source `request_user_input`" in next_result["workflow_policy"]
             approval_action = next(action for action in next_result["recommendations"]
                                    if action["name"] == "await-user-confirmation")
-            assert approval_action["tool"] == "request_user_input"
+            assert approval_action["tool"] == question_tool
+            assert f"use {question_tool} to ask" in approval_action["reason"]
             question = next_result["state_summary"]["execution_confirmation"]
             assert question["state"] == "awaiting_user" and "command" not in question
             approval = {"prompt": "Update only a.py as approved", "source": "request_user_input", **args}
             missing = await client.call_tool("tapl_approve_execution", approval)
             assert missing.is_error
+            assert f"Ask the user again with {question_tool}" in str(missing.content)
             recorded = await client.call_tool("tapl_approve_execution", {**approval, "approval_scope": question["scope"]})
             assert not recorded.is_error
             state = recorded.structured_content["state_summary"]

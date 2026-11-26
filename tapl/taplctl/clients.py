@@ -29,6 +29,10 @@ def current_client() -> str:
     return resolve_client()
 
 
+def user_question_tool(client: str | None = None) -> str:
+    return "AskUserQuestion" if resolve_client(client) == "claude-code" else "request_user_input"
+
+
 @contextmanager
 def client_scope(client: str) -> Iterator[None]:
     token = _client.set(resolve_client(client))
