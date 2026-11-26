@@ -5,6 +5,7 @@ Codex credentials are used. Works on Windows and POSIX for release validation.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import importlib.util
 import json
@@ -151,16 +152,21 @@ def main():
         assert Path(mcp["command"]).is_file(), mcp
         rpc_smoke(mcp["command"], repo, env)
         hooks = json.loads((repo / ".codex/hooks.json").read_text(encoding="utf-8"))["hooks"]
-        for event, expected in (("UserPromptSubmit", 0), ("PreToolUse", 2)):
+        user_prompt = "유니코드 입력"
+        for event in ("UserPromptSubmit", "PreToolUse"):
             command = hooks[event][-1]["hooks"][0]["command"]
-            payload = json.dumps({"cwd": str(repo), "session_id": "native-smoke-한글", "prompt": "유니코드 입력",
-                                  "tool_name": "Write", "tool_input": {"file_path": str(repo / "new.txt")}}, ensure_ascii=False)
+            payload = {"cwd": str(repo), "session_id": "native-smoke-한글", "hook_event_name": event}
+            if event == "UserPromptSubmit":
+                payload["prompt"] = user_prompt
+            else:
+                payload.update(tool_name="Write", tool_input={"file_path": str(repo / "new.txt")})
+            hook_input = json.dumps(payload, ensure_ascii=False)
             for shell in shell_commands(command, env):
-                output = run(shell, cwd=repo, env=env, input=payload,
-                             expected=0 if os.name == "nt" else expected)
-                if event == "PreToolUse" and os.name == "nt":
-                    decision = json.loads(output)
-                    assert decision["decision"] == "block" and decision["reason"], decision
+                output = run(shell, cwd=repo, env=env, input=hook_input)
+                if event == "PreToolUse":
+                    decision = json.loads(output)["hookSpecificOutput"]
+                    assert decision["hookEventName"] == event, decision
+                    assert decision["permissionDecision"] == "deny" and decision["permissionDecisionReason"], decision
         # Inspect only the disposable DB, after all processes have released it.
         identity_path = home / ".tapl/installation_id"
         installation_id = identity_path.read_text(encoding="utf-8").strip()
@@ -168,7 +174,14 @@ def main():
         connection = sqlite3.connect(local_db)
         try:
             rows = connection.execute("SELECT payload_json FROM events WHERE event_type = 'UserPromptSubmit'").fetchall()
-            assert rows and all(json.loads(row[0])["prompt"] == "유니코드 입력" for row in rows)
+            assert rows and all("prompt" not in json.loads(row[0]) for row in rows)
+            evidence = connection.execute(
+                "SELECT payload_json FROM events WHERE event_type = 'execution_user_turn' "
+                "AND mode = 'execution_evidence'"
+            ).fetchall()
+            digest = hashlib.sha256(user_prompt.encode("utf-8")).hexdigest()
+            assert len(evidence) == len(rows)
+            assert all(json.loads(row[0])["prompt_digest"] == digest for row in evidence)
         finally:
             connection.close()
         for scope, root in (("repo", repo), ("user", home)):
