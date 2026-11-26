@@ -72,6 +72,8 @@ State validation uses one transactionally consistent snapshot. Reuse successful 
 
 `tapl_save_settings` requires `values` (an object keyed by canonical editable field names) and `expected_revision` from that document. Use it only for changes the user explicitly requested. Model maps and profiles are structured values and validate together before one atomic write. Optional `reset_all=true` requires `values={}` and an explicitly confirmed reset; it removes all supported Codex/Claude overrides while retaining unrelated content and catalogs. Stale revisions fail without overwriting changes. Do not automatically retry a save after a lost acknowledgement; reload first. There is no arbitrary file-path argument. Both tools retain the common client/session identity rules and operate independently of selected RUN/source ownership. See [Viewer settings](../guides/configuration.md#viewer-settings).
 
+A save or reset that changes settings can trigger background writes to the current workspace's semantic index. The optional `reindex` field reports `status="scheduled"` when the background check is scheduled or `status="failed"` with an `error` if scheduling fails. Check the index itself with `taplctl reindex --dry-run --json`. See [Search indexing](../guides/search.md#semantic-dependencies-and-index).
+
 ## History and memory
 
 Search, lists, and recall read multiple databases in the working folder. Preserve each result's `source_db` in detail reads and `memory_uses`. Foreign updates, deletion, and RUN discard are rejected; foreign memory uses return a read-only skip. A memory use must name its source when the same ID exists in another database. Per-source failures appear in `source_errors`. See [Local identity and shared history](../guides/storage.md).

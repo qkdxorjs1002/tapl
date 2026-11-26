@@ -12,7 +12,7 @@ from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import __version__, db, install as tapl_install, prompt as tapl_prompt, run_references, sessions, settings
+from . import __version__, auto_reindex, db, install as tapl_install, prompt as tapl_prompt, run_references, sessions, settings
 from .application import WorkflowApplication
 from .command_runtime import configure_stdio
 from .clients import client_scope, resolve_client, validate_session_key
@@ -496,6 +496,8 @@ def _create_server(
     if refresh_install:
         refresh_options = {"client": selected_client} if selected_client != "codex" else {}
         tapl_install.auto_install_if_needed(start=root, **refresh_options)
+        if auto_reindex.is_homebrew_runtime():
+            auto_reindex.schedule(root)
     application = WorkflowApplication(root)
     application.tapl_client = selected_client
     server_instructions = instructions
@@ -511,7 +513,7 @@ def _create_server(
 
     async def call_settings(session_id: str | None, *, values: dict[str, Any] | None = None,
                             expected_revision: str = "", reset_all: bool = False) -> dict[str, Any]:
-        # Configuration actions do not borrow a RUN owner or touch workflow DBs.
+        # Configuration actions are independent of RUN ownership.
         try:
             owner = validate_session_key(session_id, selected_client)
             if selected_client == "claude-code" and not owner:
@@ -537,7 +539,7 @@ def _create_server(
         reset_all: Annotated[bool, Field(strict=True, description="True only for an explicitly user-confirmed reset of all supported Codex and Claude settings overrides.")] = False,
         session_id: SessionId = None,
     ) -> dict[str, Any]:
-        """Atomically save or reset preferences only as an explicit user settings action. Never call during ordinary workflow entry. No workflow approval, RUN, task or database mutation occurs. Reject stale revisions; reload after conflicts instead of retrying writes."""
+        """Atomically save or reset preferences only as an explicit user settings action. Never call during ordinary workflow entry. A changed configuration may schedule a rebuild of the workspace's local semantic search index. Workflow approvals, RUNs and tasks are unaffected. Reject stale revisions; reload after conflicts instead of retrying writes."""
         return await call_settings(session_id, values=values, expected_revision=expected_revision, reset_all=reset_all)
 
     @server.tool(

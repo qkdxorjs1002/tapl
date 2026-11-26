@@ -1,7 +1,6 @@
 """Workspace-bound settings documents and atomic, revision-checked edits.
 
-This service never opens a workflow database. Its only write entry point is an
-explicit user settings action; callers must not invoke it from workflow entry.
+Explicit configuration edits can schedule maintenance of the local search index.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from . import clients, config, config_editor
+from . import auto_reindex, clients, config, config_editor
 
 
 class SettingsConflict(ValueError):
@@ -169,7 +168,12 @@ class SettingsService:
                 if self._path() != path or self._revision(path, config_editor._read(path), path.exists()) != expected_revision:
                     raise SettingsConflict("Settings changed while saving. Reload settings before saving.")
                 config_editor._atomic_write(path, candidate)
-            return {"ok": True, "settings": document, "changed": changed}
+        result: dict[str, Any] = {"ok": True, "settings": document, "changed": changed}
+        if changed:
+            reindex = auto_reindex.schedule(self.workspace, config_path=self.config_path)
+            if reindex is not None:
+                result["reindex"] = reindex
+        return result
 
 
 def _normalize(*, field: dict[str, Any], value: Any) -> Any:

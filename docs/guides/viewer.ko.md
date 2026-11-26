@@ -137,7 +137,9 @@ brew services restart taplctl
 brew services stop taplctl
 ```
 
-업그레이드·재설치는 실행 중인 Viewer 서비스의 재시작을 시도합니다. semantic formula는 검색 데몬을 미리 올리지 않습니다. Unix에서 필요할 때 따로 시작하세요.
+업그레이드·재설치는 실행 중인 Viewer 서비스의 재시작을 시도합니다. 업그레이드 후 작업 공간을 처음 열면 시맨틱 색인을 백그라운드에서 다시 만들 수 있습니다. [검색 색인](search.ko.md#시맨틱-의존성과-색인)을 참고하세요.
+
+semantic formula는 검색 데몬을 미리 올리지 않습니다. Unix에서 필요할 때 따로 시작하세요.
 
 ```sh
 taplctl searchd start

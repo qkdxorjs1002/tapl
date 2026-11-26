@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import lru_cache
 import importlib.util
@@ -70,8 +70,21 @@ def _index_identity(conn: sqlite3.Connection) -> tuple[str | None, str | None]:
     return None, None
 
 
+def index_model_mismatch(conn: sqlite3.Connection, model: str) -> bool:
+    """Check an existing index's identity without reading records or loading a model."""
+    indexed_model, fingerprint = _index_identity(conn)
+    return indexed_model is not None and (indexed_model, fingerprint) != (
+        model, embedding_model.MODELS[model].fingerprint,
+    )
+
+
+class _ReindexRetry(ValueError):
+    """The snapshot or its effective model changed before publication."""
+
+
 def reindex(
     conn: sqlite3.Connection, *, model: str = embedding_model.DEFAULT_MODEL, dry_run: bool = False,
+    should_publish: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     spec = embedding_model.MODELS[model]
     status = dependency_status()
@@ -109,8 +122,10 @@ def reindex(
             # Take the write lock only after downloads and inference. Confirm
             # exactly the inputs used above before publishing this generation.
             db.set_meta(conn, "onnx_embedding_model", model)
+            if should_publish is not None and not should_publish():
+                raise _ReindexRetry("selected search model changed during the rebuild")
             if any(before != after for before, after in zip_longest(items, conn.execute(_ITEMS_SQL))):
-                raise ValueError("indexed items changed during the rebuild; retry taplctl reindex")
+                raise _ReindexRetry("indexed items changed during the rebuild; retry taplctl reindex")
             conn.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS {_INDEX_TABLE}
                 USING vec0(embedding float[{embedding_model.DIMENSION}], kind text, run_id text)
@@ -133,6 +148,8 @@ def reindex(
             )
             db.set_meta(conn, "onnx_embedding_fingerprint", spec.fingerprint)
             db.set_meta(conn, "onnx_embedding_source_hash", source_hash)
+    except _ReindexRetry as exc:
+        return {**payload, "ok": False, "retryable": True, "error": f"semantic reindex failed: {exc}"}
     except Exception as exc:
         return {**payload, "ok": False, "error": f"semantic reindex failed: {exc}"}
     return {**payload, "ok": True, "items": len(items), "indexed": len(items), "needs_reindex": False,

@@ -19,6 +19,7 @@ from typing import Any
 
 from . import (
     __version__,
+    auto_reindex,
     config as tapl_config,
     config_editor,
     db,
@@ -491,6 +492,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def cmd_update(args: argparse.Namespace) -> int:
     payload = updater.check_for_update() if args.check else updater.update_installation()
+    if not args.check and payload.get("ok") and payload.get("updated") and (venv := payload.get("venv")):
+        launcher = Path(payload.get("executable", ""))
+        python_path = "Scripts/python.exe" if launcher.suffix.lower() == ".cmd" else "bin/python"
+        attach_reindex_receipt(args, payload, python=Path(venv) / python_path)
     if args.json:
         print_json(payload)
     elif args.agent:
@@ -619,36 +624,44 @@ def cmd_config_get(args: argparse.Namespace) -> int:
 def cmd_config_set(args: argparse.Namespace) -> int:
     path = tapl_config.resolve_config_path(args.config)
     result = config_editor.set_value(path, args.key, args.value)
-    emit(
-        {
-            "ok": True,
-            "config_action": "set",
-            "path": result.path,
-            "key": result.key,
-            "value": result.value,
-            "changed": result.changed,
-        },
-        args.json,
-        args.agent,
-    )
+    payload = {
+        "ok": True,
+        "config_action": "set",
+        "path": result.path,
+        "key": result.key,
+        "value": result.value,
+        "changed": result.changed,
+    }
+    if result.changed:
+        attach_reindex_receipt(args, payload)
+    emit(payload, args.json, args.agent)
     return 0
 
 
 def cmd_config_unset(args: argparse.Namespace) -> int:
     path = tapl_config.resolve_config_path(args.config)
     result = config_editor.unset_value(path, args.key)
-    emit(
-        {
-            "ok": True,
-            "config_action": "unset",
-            "path": result.path,
-            "key": result.key,
-            "changed": result.changed,
-        },
-        args.json,
-        args.agent,
-    )
+    payload = {
+        "ok": True,
+        "config_action": "unset",
+        "path": result.path,
+        "key": result.key,
+        "changed": result.changed,
+    }
+    if result.changed:
+        attach_reindex_receipt(args, payload)
+    emit(payload, args.json, args.agent)
     return 0
+
+
+def attach_reindex_receipt(
+    args: argparse.Namespace, payload: dict[str, Any], *, python: Path | None = None,
+) -> None:
+    receipt = auto_reindex.schedule(
+        config_path=args.config, database=args.db, python=python,
+    )
+    if receipt is not None:
+        payload["reindex"] = receipt
 
 
 def cmd_reindex(args: argparse.Namespace) -> int:
@@ -725,7 +738,7 @@ def humanize_update(payload: dict[str, Any]) -> str:
         return f"Installed taplctl ({current}) is newer than the published release ({latest})."
     if status == "updated":
         previous = str(payload.get("previous_version") or current)
-        return f"Updated taplctl: {previous} → {current}."
+        return f"Updated taplctl: {previous} → {current}." + reindex_status_line(payload)
     return f"taplctl update: {status or 'completed'} (current version: {current})."
 
 
@@ -747,6 +760,15 @@ def emit(payload: dict[str, Any], as_json: bool, as_agent: bool = False) -> None
         print(agent_output(payload))
     else:
         print(humanize(payload))
+
+
+def reindex_status_line(payload: dict[str, Any]) -> str:
+    receipt = payload.get("reindex")
+    if receipt is None:
+        return ""
+    if receipt["status"] == "scheduled":
+        return "\nSemantic index check scheduled."
+    return f"\nCould not schedule the semantic index check ({receipt['error']})."
 
 
 def print_json(payload: dict[str, Any]) -> None:
@@ -777,6 +799,7 @@ def humanize(payload: dict[str, Any]) -> str:
         return (
             f"config {payload['config_action']} {payload.get('key')}: {state} "
             f"({payload.get('path')})"
+            + reindex_status_line(payload)
         )
     if "running" in payload:
         state = "running" if payload.get("running") else "stopped"

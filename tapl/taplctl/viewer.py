@@ -9,10 +9,11 @@ import sqlite3
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
 from typing import Any, Callable, Iterable
 from urllib.parse import quote, unquote, urlencode, urlsplit
 
-from . import config, db, embeddings, recall, sessions, settings, validation
+from . import auto_reindex, config, db, embeddings, recall, sessions, settings, validation
 from .application import WorkflowApplication, WorkflowApplicationError
 
 
@@ -933,6 +934,8 @@ class ViewerHTTPServer(ThreadingHTTPServer):
     ) -> None:
         configured_origins = {parse_allowed_origin(origin) for origin in allowed_origins}
         self.app = app
+        self._opened_workspaces: set[Path] = set()
+        self._workspace_lock = Lock()
         super().__init__(server_address, ViewerRequestHandler)
         host, port = self.server_address[:2]
         local_origins = {f"http://{host}:{port}"}
@@ -944,6 +947,18 @@ class ViewerHTTPServer(ThreadingHTTPServer):
     def browser_origin(self) -> str:
         host, port = self.server_address[:2]
         return f"http://{host}:{port}"
+
+    def schedule_reindex_on_open(self, workspace: Path) -> None:
+        if not auto_reindex.is_homebrew_runtime():
+            return
+        with self._workspace_lock:
+            if workspace in self._opened_workspaces:
+                return
+            self._opened_workspaces.add(workspace)
+        receipt = auto_reindex.schedule(workspace, config_path=self.app.config_path)
+        if receipt is not None and receipt.get("status") == "failed":
+            with self._workspace_lock:
+                self._opened_workspaces.remove(workspace)
 
 
 class ViewerRequestHandler(BaseHTTPRequestHandler):
@@ -995,7 +1010,13 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
                 "action": {"getSettings": "get", "saveSettings": "save", "resetSettings": "reset"}[payload["command"]],
             })
             return
-        self._send_json(HTTPStatus.OK, self.server.app.handle_message(payload))
+        result = self.server.app.handle_message(payload)
+        if (self.headers.get("Origin") and isinstance(payload, dict)
+                and payload.get("command") in ("ready", "selectWorkspace")
+                and result.get("view", {}).get("type") in {"overview", "run"}
+                and (workspace := result.get("workspace"))):
+            self.server.schedule_reindex_on_open(Path(workspace))
+        self._send_json(HTTPStatus.OK, result)
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self._send_json(HTTPStatus.METHOD_NOT_ALLOWED, {"ok": False, "error": "CORS is not enabled."})

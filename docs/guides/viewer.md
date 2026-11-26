@@ -137,7 +137,9 @@ brew services restart taplctl
 brew services stop taplctl
 ```
 
-Upgrade/reinstall attempts to restart a running Viewer service. The semantic formula does not preload a search daemon. On Unix, start it separately when wanted:
+Upgrade/reinstall attempts to restart a running Viewer service. The first open of a workspace after an upgrade can trigger a background semantic index rebuild. See [Search indexing](search.md#semantic-dependencies-and-index).
+
+The semantic formula does not preload a search daemon. On Unix, start it separately when wanted:
 
 ```sh
 taplctl searchd start
