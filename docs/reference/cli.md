@@ -122,6 +122,8 @@ taplctl [--config PATH] config unset KEY
 
 `get` reads effective values, including defaults; omit `KEY` for all settings or use a section such as `search`. `set` writes a supported key using TOML value syntax; enum strings such as `hybrid` may be unquoted. `unset` removes the explicit value so the built-in default applies. Edits preserve comments and unrelated settings, and the resulting complete config must remain valid.
 
+Changes from `set` or `unset` can trigger a background semantic index rebuild for the current workspace. See [Search indexing](../guides/search.md#semantic-dependencies-and-index).
+
 ```sh
 taplctl config get
 taplctl config get search.mode --json
@@ -175,14 +177,16 @@ taplctl update --json
 
 `--check` checks without installing. Without it, an available newer release is installed after manifest and SHA-256 verification. Both forms require valid official standalone-install metadata. Homebrew and source installations must use their own update method. Channel preservation and deliberate version changes are explained in [installation](../getting-started/installation.md#update).
 
+Activating a new release can trigger a background semantic index rebuild. For `update`, `config set`, and `config unset`, the optional structured `reindex` field reports `status="scheduled"` when the background check is scheduled or `status="failed"` with an `error` if scheduling fails. Check the index itself with `taplctl reindex --dry-run --json`. See [Search indexing](../guides/search.md#semantic-dependencies-and-index).
+
 ## reindex
 
 ```sh
-taplctl reindex --dry-run
+taplctl reindex --dry-run --json
 taplctl reindex --json
 ```
 
-Builds the optional semantic index for the selected workspace's records. `--dry-run` previews indexing work. Semantic indexing requires optional dependencies; full-text search does not. See [search](../guides/search.md) for providers, fallback behavior, and indexing.
+Builds the optional semantic index for the workspace's records, with the usual support for `--db`. Use it for the first index or a manual rebuild. `--dry-run` previews indexing work without downloading a model. Semantic indexing requires optional dependencies; full-text search does not. See [Search indexing](../guides/search.md#semantic-dependencies-and-index) for automatic rebuilds and BM25 fallback.
 
 ## searchd
 

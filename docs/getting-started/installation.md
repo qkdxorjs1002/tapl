@@ -163,6 +163,8 @@ brew upgrade taplctl
 
 `taplctl update` does not update Homebrew or source checkouts. During Homebrew upgrade/reinstall, the formula attempts to restart its Viewer service only if already running. A fresh install or stopped service remains stopped. Manually started MCP stdio and `searchd` processes are not restarted.
 
+A standalone `taplctl update` that activates a new release can rebuild an incompatible local semantic index in the current workspace in the background. After a Homebrew upgrade, that check happens when you first open the workspace in the Viewer or start MCP there. See [Search indexing](../guides/search.md#semantic-dependencies-and-index) for eligibility and manual indexing.
+
 Existing opted-in Codex and Claude Code integrations refresh at MCP startup and hook entry when the version or shipped templates change. Refresh preserves settings and hook mode, merges missing defaults, and migrates known obsolete keys. Repeating `taplctl install` is normally unnecessary after an update; restart your coding client to reload host configuration. See [refresh boundaries](integrations.md#automatic-refresh).
 
 ## Verify and continue

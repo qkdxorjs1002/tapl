@@ -55,14 +55,20 @@ Select a model under **Settings → Search → Search embedding model**, or use 
 | KoEn-E5-Tiny INT8 | `koen-e5-tiny-int8` | Default for Korean and English |
 | multilingual-e5-small INT8 | `multilingual-e5-small-int8` | Searching records across more languages |
 
-Both models use a 128-token limit and 384-dimensional vectors. Run these commands in the current workspace on initial setup or after switching models.
+Both models use a 128-token limit and 384-dimensional vectors. With the semantic dependencies installed and search mode set to `semantic` or `hybrid`, TAPL rebuilds an existing index in the background when its model or model fingerprint differs from the current model's identity. Automatic rebuilds target the current workspace's local or legacy local database. A `--db` override is eligible only if it points to one of those databases. TAPL checks in these cases:
+
+- A save or reset in the browser Viewer or VS Code changes settings, or `taplctl config set` or `taplctl config unset` changes them.
+- A standalone `taplctl update` activates a new release. `taplctl update --check` only checks for updates.
+- After a Homebrew upgrade, you first open the workspace in the Viewer or start MCP in that workspace.
+
+TAPL searches with BM25 until a matching index is ready. It keeps the existing vectors until the replacement is committed atomically and leaves peer databases untouched. Create the first index manually. Run these commands in the current workspace to check whether rebuilding is needed or to run it yourself.
 
 ```sh
 taplctl reindex --dry-run --json
 taplctl reindex --json
 ```
 
-`--dry-run` reports the current index and whether it needs rebuilding without downloading a model. Actual indexing downloads the pinned model and tokenizer, verifies SHA-256, and caches them under `~/.cache/tapl/models`. Set `TAPL_MODEL_CACHE` to use another cache. Existing MiniLM indexes are preserved. TAPL uses BM25 until an index for the selected model is ready.
+`--dry-run` reports the current index and `needs_reindex` without downloading a model. Actual indexing requires the semantic dependencies. It downloads the pinned model and tokenizer as needed, verifies SHA-256, and caches them under `~/.cache/tapl/models`. Set `TAPL_MODEL_CACHE` to use another cache. Existing MiniLM indexes are preserved.
 
 ## Embedding provider and searchd
 

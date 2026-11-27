@@ -55,6 +55,8 @@ Check the displayed file path: selection follows the precedence above for the cu
 
 **Reset all to defaults** requires confirmation and removes every editable override for both clients from that file, including legacy aliases. Built-in defaults apply; comments, unrelated keys and saved model catalogs remain. A field's **Use default** control changes its draft value; save to apply it. Reset returns display language and layout to `auto`. Origin changes require restarting the browser Viewer service. A backend without settings support shows an update notice; update TAPL and restart its MCP/Viewer process. The CLI commands above remain available.
 
+A save or reset that changes settings can trigger a background rebuild of the current workspace's existing semantic index. The same applies to CLI `config set` and `config unset`. See [Search indexing](search.md#semantic-dependencies-and-index) for conditions and manual indexing.
+
 The extension reads these bootstrap fields directly before starting MCP; settings-page reads and writes use MCP, while the browser uses HTTP to the same validated Python settings service. Workspace and user config changes refresh the Viewer; changing the MCP executable reconnects after an in-flight save reply. The retired VS Code settings `taplWorkflow.language`, `taplWorkflow.layout` and `taplWorkflow.taplMcpPath` are ignored. Set the new TOML keys explicitly; no automatic migration writes user files.
 
 ## Public configuration keys

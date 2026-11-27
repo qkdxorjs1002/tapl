@@ -122,6 +122,8 @@ taplctl [--config PATH] config unset KEY
 
 `get`은 기본값을 포함한 실제 적용값을 읽습니다. `KEY`를 생략하면 전체 설정, `search` 같은 값을 지정하면 해당 절을 읽습니다. `set`은 TOML 값 문법으로 지원 키를 쓰며 `hybrid` 같은 enum 문자열은 따옴표를 생략할 수 있습니다. `unset`은 명시적 값을 지워 내장 기본값이 적용되게 합니다. 수정 시 주석과 무관한 설정을 보존하고 변경 후 전체 설정도 유효해야 합니다.
 
+`set`이나 `unset`으로 설정을 바꾸면 현재 작업 공간의 시맨틱 색인을 백그라운드에서 다시 만들 수 있습니다. [검색 색인](../guides/search.ko.md#시맨틱-의존성과-색인)을 참고하세요.
+
 ```sh
 taplctl config get
 taplctl config get search.mode --json
@@ -175,14 +177,16 @@ taplctl update --json
 
 `--check`는 설치하지 않고 확인합니다. 생략하면 manifest와 SHA-256을 검증한 뒤 사용 가능한 새 릴리스를 설치합니다. 두 형식 모두 유효한 공식 독립 설치 메타데이터가 필요합니다. Homebrew·소스 설치는 각자의 업데이트 방법을 사용해야 합니다. 채널 보존과 의도적 버전 변경은 [설치](../getting-started/installation.ko.md#업데이트)를 참고하세요.
 
+새 릴리스를 활성화하면 시맨틱 색인을 백그라운드에서 다시 만들 수 있습니다. `update`, `config set`, `config unset`의 구조화된 출력에 선택적으로 포함되는 `reindex`는 백그라운드 확인이 예약되면 `status="scheduled"`, 예약에 실패하면 `status="failed"`와 `error`를 반환합니다. 색인 상태는 `taplctl reindex --dry-run --json`으로 확인하세요. [검색 색인](../guides/search.ko.md#시맨틱-의존성과-색인)을 참고하세요.
+
 ## reindex
 
 ```sh
-taplctl reindex --dry-run
+taplctl reindex --dry-run --json
 taplctl reindex --json
 ```
 
-선택한 작업 공간의 기록으로 선택적 시맨틱 인덱스를 만듭니다. `--dry-run`은 인덱싱 작업을 미리 보여 줍니다. 시맨틱 인덱싱에는 선택 의존성이 필요하지만 전문 검색에는 필요하지 않습니다. Provider·fallback·인덱싱은 [검색](../guides/search.ko.md)을 참고하세요.
+작업 공간 기록의 선택적 시맨틱 색인을 만듭니다. `--db`로 대상을 지정할 수도 있습니다. 첫 색인을 만들거나 수동으로 다시 만들 때 사용하세요. `--dry-run`은 모델을 다운로드하지 않고 예정된 작업을 보여 줍니다. 시맨틱 색인에는 선택 의존성이 필요하지만 전문 검색에는 필요하지 않습니다. 자동 재색인과 BM25 대체 동작은 [검색 색인](../guides/search.ko.md#시맨틱-의존성과-색인)을 참고하세요.
 
 ## searchd
 

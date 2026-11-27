@@ -55,6 +55,8 @@ taplctl config set viewer.allowed_origins '["https://viewer.example.invalid"]'
 
 **모두 기본값으로 초기화**는 확인 후 두 클라이언트의 모든 편집 가능 재정의와 기존 별칭을 이 파일에서 제거합니다. 내장 기본값을 적용하며 주석·무관한 키·저장된 모델 카탈로그는 유지합니다. 개별 항목의 **기본값 사용**은 입력값을 바꾸므로 저장해야 반영됩니다. 초기화하면 표시 언어와 레이아웃도 `auto`로 돌아갑니다. Origin 변경은 브라우저 Viewer 서비스를 재시작해야 적용됩니다. 설정을 지원하지 않는 백엔드는 업데이트 안내를 표시합니다. TAPL을 업데이트하고 MCP/Viewer 프로세스를 다시 시작하세요. 위 CLI 명령도 계속 사용할 수 있습니다.
 
+저장이나 초기화로 설정이 바뀌면 현재 작업 공간의 기존 시맨틱 색인을 백그라운드에서 다시 만들 수 있습니다. CLI의 `config set`과 `config unset`도 같은 방식으로 동작합니다. 조건과 수동 색인 명령은 [검색 색인](search.ko.md#시맨틱-의존성과-색인)을 참고하세요.
+
 확장은 MCP 시작 전에 이 초기 연결 필드를 직접 읽습니다. 설정 페이지 조회·저장은 MCP로, 브라우저는 HTTP로 같은 Python 검증 서비스에 요청합니다. 작업공간·사용자 설정 파일 변경은 Viewer를 갱신하며 MCP 실행 파일 변경은 진행 중 저장 응답을 받은 뒤 재연결합니다. 이전 VS Code 설정 `taplWorkflow.language`, `taplWorkflow.layout`, `taplWorkflow.taplMcpPath`는 무시합니다. 새 TOML 키를 직접 지정하며 사용자 파일에 자동 이관하지 않습니다.
 
 ## 공개 설정 키
