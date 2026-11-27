@@ -69,6 +69,19 @@ test('Current RUN renders the actual mindmap and all TASK statuses in both langu
   }
 });
 
+test('Deferred PLAN labels follow the Viewer language in active and archived RUNs', () => {
+  for (const readonly of [false, true]) {
+    const value = snapshot({ run: { ...run, status: readonly ? 'archived' : 'active' }, readonly,
+      plans: [plan(1, { status: 'Deferred' })] });
+    for (const [locale, label] of [['ko', '보류'], ['en', 'Deferred']]) {
+      const html = render(value, locale);
+      assert.match(html, /data-status="Deferred"/);
+      assert.ok(html.includes(`>${label}</span>`), `${locale} ${readonly ? 'archived' : 'active'}`);
+      if (locale === 'ko') assert.doesNotMatch(html, />Deferred</);
+    }
+  }
+});
+
 test('empty RUN has one real root and missing RUN retains its localized guidance', () => {
   for (const locale of ['en', 'ko']) {
     const html = render(snapshot(), locale);

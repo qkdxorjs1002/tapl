@@ -29,7 +29,7 @@ export function I18nProvider({ locale, children }: { locale: SupportedLocale; ch
     locale,
     t: (key, params) => translate(locale, key, params),
     kind: (kind) => translateKind(locale, kind),
-    status: (status) => translateStatus(locale, status)
+    status: (status) => locale === 'ko' && status === 'Deferred' ? '보류' : translateStatus(locale, status)
   }), [locale]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
