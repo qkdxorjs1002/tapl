@@ -189,13 +189,13 @@ allowed_origins = [
 
     def test_release_build_syncs_assets_before_wheel_and_writes_viewer_service(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]
-        workflow = (repo_root / ".github" / "workflows" / "release.yml").read_text(
+        workflow = (repo_root / ".github" / "workflows" / "release-ctl.yml").read_text(
             encoding="utf-8"
         )
         formula_updater = (repo_root / ".github" / "scripts" / "update_homebrew_formula.rb").read_text(
             encoding="utf-8"
         )
-        self.assertLess(workflow.index("- name: Build shared viewer assets"), workflow.index("- name: Build Python wheel"))
+        self.assertLess(workflow.index("- name: Build shared Viewer assets"), workflow.index("- name: Build Python wheel"))
         self.assertIn(".github/scripts/update_homebrew_formula.rb", workflow)
         self.assertIn('run [opt_bin/\\"taplctl\\", \\"viewer\\"]', formula_updater)
         self.assertNotIn('run [opt_bin/\\"taplctl\\", \\"searchd\\", \\"run\\"]', formula_updater)

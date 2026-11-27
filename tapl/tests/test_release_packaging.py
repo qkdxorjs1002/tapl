@@ -23,7 +23,7 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 TAPL_ROOT = REPOSITORY_ROOT / "tapl"
 PYPROJECT = TAPL_ROOT / "pyproject.toml"
-RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release-ctl.yml"
 FORMULA_UPDATER = REPOSITORY_ROOT / ".github" / "scripts" / "update_homebrew_formula.rb"
 VSCODE_PACKAGE = REPOSITORY_ROOT / "vscode-extension" / "package.json"
 VSCODE_IGNORE = REPOSITORY_ROOT / "vscode-extension" / ".vscodeignore"
@@ -434,7 +434,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         jobs = workflow['jobs']
         producers = {'windows-installer-fixtures', 'windows-installer-preflight',
                      'build-packages', 'linux-runtime', 'macos-runtime'}
-        self.assertEqual(set(jobs), producers | {'semantic-model-files', 'release', 'homebrew', 'marketplace'})
+        self.assertEqual(set(jobs), producers | {'semantic-model-files', 'release', 'homebrew'})
         self.assertEqual(set(jobs['release']['needs']), producers)
         model_consumers = {'windows-installer-preflight', 'linux-runtime', 'macos-runtime'}
         for name in model_consumers:
@@ -445,8 +445,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             self.assertNotIn('needs', jobs[name], f'{name} must start independently')
         for name, job in jobs.items():
             self.assertNotIn('continue-on-error', job)
-            if name != 'marketplace':
-                self.assertNotIn('if', job, f'{name} must require successful dependencies')
+            self.assertNotIn('if', job, f'{name} must require successful dependencies')
             for step in job['steps']:
                 self.assertNotIn('continue-on-error', step)
                 self.assertNotIn('always()', step.get('if', ''))
@@ -469,28 +468,24 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         jobs = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding='utf-8'))['jobs']
         build_steps = {step['name']: step for step in jobs['build-packages']['steps']}
         names = list(build_steps)
-        ordered = ['Resolve release version', 'Sync package versions', 'Build shared viewer assets',
-                   'Build Python wheel', 'Build VS Code extension package', 'Verify versioned packages',
-                   'Upload versioned packages']
+        ordered = ['Resolve release version', 'Sync Python package version', 'Build shared Viewer assets',
+                   'Build Python wheel', 'Verify versioned wheel', 'Upload versioned wheel']
         self.assertEqual(sorted(ordered, key=names.index), ordered)
         self.assertIn('release_version.py', build_steps['Resolve release version']['run'])
-        self.assertEqual(build_steps['Sync package versions']['env'], {
+        self.assertEqual(build_steps['Sync Python package version']['env'], {
             'PYTHON_VERSION': '${{ steps.version.outputs.python_version }}',
-            'TAG_VERSION': '${{ steps.version.outputs.version }}',
         })
-        viewer = build_steps['Build shared viewer assets']['run']
-        self.assertLess(viewer.index('npm run test:host'), viewer.index('npm run compile'))
-        packages = build_steps['Upload versioned packages']['with']
-        self.assertEqual(packages['name'], 'release-packages-${{ steps.version.outputs.version }}')
-        self.assertEqual(packages['path'].splitlines(), [
-            'release-dist/taplctl-${{ steps.version.outputs.python_version }}-py3-none-any.whl',
-            'release-dist/tapl-workflow-viewer-${{ steps.version.outputs.version }}.vsix',
-        ])
+        viewer = build_steps['Build shared Viewer assets']
+        self.assertEqual(viewer['env'], {'VITE_TAPL_CTL_VERSION': '${{ steps.version.outputs.version }}'})
+        self.assertLess(viewer['run'].index('npm run test:host'), viewer['run'].index('npm run compile:webview'))
+        packages = build_steps['Upload versioned wheel']['with']
+        self.assertEqual(packages['name'], 'release-wheel-${{ steps.version.outputs.version }}')
+        self.assertEqual(packages['path'],
+                         'release-dist/taplctl-${{ steps.version.outputs.python_version }}-py3-none-any.whl')
         self.assertEqual(packages['if-no-files-found'], 'error')
-        verification = build_steps['Verify versioned packages']['run']
+        verification = build_steps['Verify versioned wheel']['run']
         self.assertIn('set -euo pipefail', verification)
         self.assertIn('test -f "release-dist/taplctl-${PYTHON_VERSION}-py3-none-any.whl"', verification)
-        self.assertIn('test -f "release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix"', verification)
         for job_name, upload_name, artifact_name in (
             ('linux-runtime', 'Upload Linux runtime', 'runtime-${{ matrix.target }}'),
             ('macos-runtime', 'Upload signed macOS runtime', 'signed-runtime-${{ matrix.target }}'),
@@ -542,11 +537,6 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn('tap_paths+=(formula_renames.json)', update['run'])
         self.assertIn('stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")', stable_branch)
         self.assertIn('--pre-alias homebrew-tap/Aliases/taplctl@pre', update['run'])
-        marketplace = jobs['marketplace']
-        self.assertEqual(marketplace['needs'], 'release')
-        self.assertEqual(marketplace['if'], "needs.release.outputs.prerelease == 'false'")
-        self.assertEqual(marketplace['environment'], 'vscode-marketplace')
-        self.assertEqual(marketplace['permissions'], {'contents': 'read', 'id-token': 'write'})
         self.assertNotIn('id-token', jobs['release']['permissions'])
         self.assertEqual(yaml.safe_load(RELEASE_WORKFLOW.read_text())['permissions'], {'contents': 'read'})
 
@@ -570,7 +560,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
                     'schema_version': 1, 'version': version,
                     'wheel': {'url': wheel_url, 'sha256': wheel_hash},
                 }))
-                for name in (f'tapl-workflow-viewer-{tag}.vsix', 'install.ps1', 'install.cmd'):
+                for name in ('install.ps1', 'install.cmd'):
                     (assets / name).write_bytes(b'fixture')
                 env = dict(os.environ, GITHUB_REPOSITORY='example/tapl', GITHUB_REF_NAME=tag, TAG_VERSION=tag)
                 for kind, targets, distributions in (
@@ -591,7 +581,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
                         key = f'{kind}_runtime_{target}'.upper().replace('-', '_')
                         env[f'{key}_URL'] = base_url + name
                         env[f'{key}_SHA256'] = hashlib.sha256(archive.read_bytes()).hexdigest()
-                self.assertEqual(len(list(assets.iterdir())), 12)
+                self.assertEqual(len(list(assets.iterdir())), 11)
 
                 def validate() -> subprocess.CompletedProcess[str]:
                     return subprocess.run(
@@ -601,7 +591,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
 
                 result = validate()
                 self.assertEqual(result.returncode, 0, result.stderr)
-                extra = assets / 'unexpected.tar.gz'
+                extra = assets / f'tapl-workflow-viewer-{tag}.vsix'
                 extra.write_bytes(b'extra')
                 self.assertIn('release asset set mismatch', validate().stderr)
                 extra.unlink()
@@ -630,6 +620,13 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         fixtures = release['jobs']['windows-installer-fixtures']
         setup_names = {'Checkout source', 'Set up Python', 'Download verified semantic model files'}
         ci_checks = {step['name']: step for step in ci_job['steps'] if step['name'] not in setup_names}
+        icon_check = ci_checks.pop('Validate Marketplace icon dimensions')
+        viewer_workflow = yaml.safe_load(
+            (REPOSITORY_ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+        )
+        viewer_steps = {step['name']: step for step in viewer_workflow['jobs']['build']['steps']}
+        self.assertIn(icon_check['run'].splitlines()[-1].strip(),
+                      viewer_steps['Validate Marketplace icon dimensions']['run'])
         release_checks = [dict(step) for job in (fixtures, preflight) for step in job['steps']
                           if step['name'] not in setup_names]
         semantic = next(step for step in release_checks if step['name'] == 'Verify Windows x64 semantic wheel on CPU')
@@ -662,8 +659,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
                       runtime_steps['Test Windows runtime regressions']['run'])
         self.assertIn('tapl.tests.test_release_packaging.WindowsInstallerAssetTests',
                       runtime_steps['Test version-bound Windows release assets']['run'])
-        self.assertIn('tapl.tests.test_release_packaging.VsCodeMarketplaceAssetTests',
-                      runtime_steps['Validate Marketplace icon dimensions']['run'])
+        self.assertNotIn('Validate Marketplace icon dimensions', runtime_steps)
         self.assertIn('pip wheel --no-deps', runtime_steps['Build actual TAPL wheel']['run'])
         smoke = runtime_steps['Test actual wheel install, update, reinstall, uninstall and CLI/MCP runtime']
         self.assertEqual(smoke['shell'], 'powershell')

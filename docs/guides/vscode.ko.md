@@ -10,7 +10,7 @@ TAPL Workflow Viewer는 VS Code에 활성 작업·아카이브 트리, 이력 �
 
 VS Code **1.90+**, `.tapl/tapl-{UUID}.db`가 있는 초기화된 워크스페이스, 실행 가능한 `tapl-mcp`가 필요합니다. 먼저 [설치](../getting-started/installation.ko.md)와 [Agent 연결](../getting-started/integrations.ko.md)을 완료하세요.
 
-Marketplace에서 `paragonnov.tapl-workflow-viewer`를 설치하거나 [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases)에서 `.vsix`를 받아 **Extensions: Install from VSIX…**를 실행합니다. 초기화한 폴더를 열고 활동 표시줄에서 **TAPL**을 선택한 뒤 **TAPL Workflow: Open TAPL Dashboard**를 실행하세요.
+Marketplace에서 `paragonnov.tapl-workflow-viewer`를 설치하거나 [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases)의 `viewer-*` 릴리스에서 `.vsix`를 받아 **Extensions: Install from VSIX…**를 실행합니다. 초기화한 폴더를 열고 활동 표시줄에서 **TAPL**을 선택한 뒤 **TAPL Workflow: Open TAPL Dashboard**를 실행하세요.
 
 대시보드는 VS Code에서 연 워크스페이스를 사용하며 워크스페이스 변경 버튼이나 폴더 선택 모달을 표시하지 않습니다. Viewer 내부의 폴더 선택은 [웹 Viewer](viewer.ko.md#viewer-탐색)에서만 제공합니다.
 

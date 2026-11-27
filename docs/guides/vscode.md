@@ -10,7 +10,7 @@ Shared history results, details, and RUN selections preserve their database sour
 
 You need VS Code **1.90+**, an initialized workspace containing `.tapl/tapl-{UUID}.db`, and a reachable `tapl-mcp` executable. Follow [Installation](../getting-started/installation.md) and [Agent integration](../getting-started/integrations.md) first.
 
-Install `paragonnov.tapl-workflow-viewer` from Marketplace, or download a `.vsix` from [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases) and run **Extensions: Install from VSIX…**. Open the initialized folder, select **TAPL** in the Activity Bar, then run **TAPL Workflow: Open TAPL Dashboard**.
+Install `paragonnov.tapl-workflow-viewer` from Marketplace, or download a `.vsix` from a `viewer-*` entry in [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases) and run **Extensions: Install from VSIX…**. Open the initialized folder, select **TAPL** in the Activity Bar, then run **TAPL Workflow: Open TAPL Dashboard**.
 
 The dashboard uses the workspace opened in VS Code and has no workspace-change button or folder-selection modal. Folder selection inside the Viewer is available only in the [browser Viewer](viewer.md#navigate-the-viewer).
 

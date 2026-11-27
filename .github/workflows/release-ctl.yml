@@ -1,0 +1,977 @@
+name: Release taplctl
+
+on:
+  push:
+    tags:
+      - '[0-9]*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  semantic-model-files:
+    name: Prepare verified semantic model files
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch pinned model and tokenizer bytes
+        env:
+          PYTHONPATH: tapl
+          TAPL_MODEL_CACHE: ${{ runner.temp }}/tapl-semantic-models
+        shell: bash
+        run: |
+          python - <<'PY'
+          from taplctl import embedding_model
+
+          for model in embedding_model.MODELS:
+              embedding_model.model_files(model, embedding_model.cache_root())
+              print(f"Verified {model}", flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-semantic-model-files
+          path: ${{ runner.temp }}/tapl-semantic-models
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 1
+
+  windows-installer-fixtures:
+    name: Windows installer fixtures (Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Parse installer and lifecycle smoke with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach ($script in @('install.ps1', '.github/scripts/install-windows.ps1', '.github/scripts/windows_install_smoke.ps1')) {
+            $tokens = $null
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $script).Path, [ref]$tokens, [ref]$parseErrors
+            )
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error $_.Message }
+              throw "$script contains PowerShell syntax errors."
+            }
+          }
+
+      - name: Test standalone Windows bootstrap
+        run: python -m unittest -v tapl.tests.test_installer_bootstrap --failfast
+
+      - name: Run Windows installer tests (stdlib-only fixtures)
+        run: python -m unittest -v tapl.tests.test_installer_windows --failfast
+
+  windows-installer-preflight:
+    name: Windows release preflight (Python ${{ matrix.python-version }})
+    needs: semantic-model-files
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Test Windows runtime regressions
+        run: |
+          python -m pip install "./tapl[test]"
+          python -m pytest -q tapl/tests/test_windows_runtime.py
+
+      - name: Test version-bound Windows release assets
+        run: python -m unittest -v tapl.tests.test_release_packaging.WindowsInstallerAssetTests
+
+      - name: Build actual TAPL wheel
+        run: python -m pip wheel --no-deps --wheel-dir dist ./tapl
+
+      - name: Download verified semantic model files
+        if: matrix.python-version == '3.12'
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-semantic-model-files
+          path: ${{ runner.temp }}/tapl-semantic-models
+
+      - name: Verify Windows x64 semantic wheel on CPU
+        if: matrix.python-version == '3.12'
+        env:
+          TAPL_MODEL_CACHE: ${{ runner.temp }}/tapl-semantic-models
+        shell: powershell
+        run: |
+          $wheel = (Get-ChildItem -LiteralPath dist -Filter 'taplctl-*.whl').FullName
+          python -m pip install "${wheel}[semantic]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python .github/scripts/semantic_runtime_smoke.py
+
+      - name: Test actual wheel install, update, reinstall, uninstall and CLI/MCP runtime
+        shell: powershell
+        run: |
+          $wheel = (Get-ChildItem -LiteralPath dist -Filter 'taplctl-*.whl').FullName
+          ./.github/scripts/windows_install_smoke.ps1 -Wheel $wheel -Python (Get-Command python).Source
+
+  macos-runtime:
+    name: Sign macOS runtime (${{ matrix.target }})
+    needs: semantic-model-files
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            platform: macosx_11_0_arm64
+            runner: macos-15
+          - target: macos-x86_64
+            platform: macosx_10_13_x86_64
+            runner: macos-15-intel
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Require macOS signing configuration
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Set ${name} before releasing macOS runtimes; see .github/MACOS_SIGNING.md." >&2
+              exit 1
+            fi
+          done
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve release version
+        id: version
+        run: >-
+          python .github/scripts/release_version.py
+          "${GITHUB_REF_NAME}"
+          --github-output "${GITHUB_OUTPUT}"
+
+      - name: Download macOS runtime wheels
+        env:
+          RUNTIME_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install 'wheel==0.46.2'
+          mcp_requirement="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          project = tomllib.loads(Path("tapl/pyproject.toml").read_text(encoding="utf-8"))["project"]
+          matches = [item for item in project["dependencies"] if item.startswith("mcp==")]
+          if len(matches) != 1:
+              raise SystemExit("tapl must pin exactly one mcp== runtime dependency")
+          print(matches[0])
+          PY
+          )"
+          python -m pip download \
+            --disable-pip-version-check --only-binary=:all: \
+            --platform "${RUNTIME_PLATFORM}" --python-version 3.12 --implementation cp \
+            --dest "${RUNNER_TEMP}/wheelhouse" "${mcp_requirement}"
+
+      - name: Download locked semantic wheels
+        if: matrix.target == 'macos-arm64'
+        run: >-
+          python .github/scripts/build_semantic_wheelhouse.py macos-arm64
+          "${RUNNER_TEMP}/wheelhouse" "${RUNNER_TEMP}/semantic-wheelhouse"
+
+      - name: Sign and verify macOS runtime wheels
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          wheelhouses=("${RUNNER_TEMP}/wheelhouse")
+          if [[ "${{ matrix.target }}" == macos-arm64 ]]; then
+            wheelhouses+=("${RUNNER_TEMP}/semantic-wheelhouse")
+          fi
+          bash .github/scripts/sign_macos_runtime.sh "${wheelhouses[@]}"
+
+      - name: Archive signed macOS runtime
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          RUNTIME_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import gzip
+          import os
+          from pathlib import Path
+          import tarfile
+
+          bundles = {"mcp": "wheelhouse"}
+          if os.environ["RUNTIME_TARGET"] == "macos-arm64":
+              bundles["semantic"] = "semantic-wheelhouse"
+          for kind, folder in bundles.items():
+              wheelhouse = Path(os.environ["RUNNER_TEMP"]) / folder
+              archive = Path("release-dist") / (
+                  f"taplctl-{kind}-runtime-{os.environ['TAG_VERSION']}-{os.environ['RUNTIME_TARGET']}.tar.gz"
+              )
+              archive.parent.mkdir(exist_ok=True)
+              with archive.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as zipped:
+                  with tarfile.open(fileobj=zipped, mode="w") as output:
+                      for wheel in sorted(wheelhouse.glob("*.whl")):
+                          info = output.gettarinfo(str(wheel), arcname=f"./{wheel.name}")
+                          info.uid = info.gid = info.mtime = 0
+                          info.uname = info.gname = ""
+                          info.mode = 0o644
+                          with wheel.open("rb") as data:
+                              output.addfile(info, data)
+          PY
+
+      - name: Build TAPL wheel for Homebrew verification
+        run: python -m pip wheel --no-deps --wheel-dir "${RUNNER_TEMP}/homebrew-app" ./tapl
+
+      - name: Download verified semantic model files
+        if: matrix.target == 'macos-arm64'
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-semantic-model-files
+          path: ${{ runner.temp }}/tapl-semantic-models
+
+      - name: Verify signatures after Homebrew install and reinstall
+        env:
+          TAPL_MODEL_CACHE: ${{ runner.temp }}/tapl-semantic-models
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          RUNTIME_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheels=("${RUNNER_TEMP}"/homebrew-app/*.whl)
+          args=(--wheel "${wheels[0]}" --team-id "${APPLE_TEAM_ID}"
+                --runtime "release-dist/taplctl-mcp-runtime-${TAG_VERSION}-${RUNTIME_TARGET}.tar.gz")
+          if [[ "${RUNTIME_TARGET}" == macos-arm64 ]]; then
+            args+=(--semantic-runtime "release-dist/taplctl-semantic-runtime-${TAG_VERSION}-${RUNTIME_TARGET}.tar.gz")
+          fi
+          python .github/scripts/verify_homebrew_macos.py "${args[@]}"
+
+      - name: Upload signed macOS runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-runtime-${{ matrix.target }}
+          path: release-dist/taplctl-*-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  build-packages:
+    name: Build Python wheel
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        run: >-
+          python .github/scripts/release_version.py
+          "${GITHUB_REF_NAME}"
+          --github-output "${GITHUB_OUTPUT}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Sync Python package version
+        env:
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          python_version = os.environ["PYTHON_VERSION"]
+
+          pyproject = Path("tapl/pyproject.toml")
+          pyproject_text = pyproject.read_text()
+          pyproject_text, pyproject_count = re.subn(
+              r'(?m)^version = "[^"]+"$',
+              f'version = "{python_version}"',
+              pyproject_text,
+              count=1,
+          )
+          if pyproject_count != 1:
+              raise SystemExit("Could not update tapl/pyproject.toml version")
+          pyproject.write_text(pyproject_text)
+          PY
+
+      - name: Build shared Viewer assets
+        working-directory: vscode-extension
+        env:
+          VITE_TAPL_CTL_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm install --package-lock=false
+          npm run test:host
+          npm run compile:webview
+
+      - name: Build Python wheel
+        working-directory: tapl
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir ../release-dist
+
+      - name: Verify versioned wheel
+        env:
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "release-dist/taplctl-${PYTHON_VERSION}-py3-none-any.whl"
+
+      - name: Upload versioned wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-wheel-${{ steps.version.outputs.version }}
+          path: release-dist/taplctl-${{ steps.version.outputs.python_version }}-py3-none-any.whl
+          if-no-files-found: error
+          retention-days: 1
+
+  linux-runtime:
+    name: Build Linux runtime (${{ matrix.target }})
+    needs: semantic-model-files
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-arm64
+            platform: manylinux2014_aarch64
+            runner: ubuntu-24.04-arm
+          - target: linux-x86_64
+            platform: manylinux2014_x86_64
+            runner: ubuntu-24.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve release version
+        id: version
+        run: >-
+          python .github/scripts/release_version.py
+          "${GITHUB_REF_NAME}"
+          --github-output "${GITHUB_OUTPUT}"
+
+      - name: Build MCP runtime wheelhouses
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          RUNTIME_TARGET: ${{ matrix.target }}
+          RUNTIME_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mcp_requirement="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          project = tomllib.loads(Path("tapl/pyproject.toml").read_text(encoding="utf-8"))["project"]
+          matches = [item for item in project["dependencies"] if item.startswith("mcp==")]
+          if len(matches) != 1:
+              raise SystemExit("tapl must pin exactly one mcp== runtime dependency")
+          print(matches[0])
+          PY
+          )"
+
+          target="${RUNTIME_TARGET}"
+          platform="${RUNTIME_PLATFORM}"
+          wheelhouse="${RUNNER_TEMP}/taplctl-mcp-runtime-${target}"
+          archive="release-dist/taplctl-mcp-runtime-${TAG_VERSION}-${target}.tar.gz"
+          mkdir -p release-dist
+
+          rm -rf "${wheelhouse}"
+          mkdir -p "${wheelhouse}"
+          python -m pip download \
+            --disable-pip-version-check \
+            --only-binary=:all: \
+            --platform "${platform}" \
+            --python-version 3.12 \
+            --implementation cp \
+            --dest "${wheelhouse}" \
+            "${mcp_requirement}"
+
+          python - "${wheelhouse}" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          wheelhouse = Path(sys.argv[1])
+          distributions = {
+              path.name.split("-", 1)[0].lower()
+              for path in wheelhouse.glob("*.whl")
+          }
+          required = {"mcp", "mcp_types", "pydantic", "pydantic_core", "cryptography"}
+          missing = sorted(required - distributions)
+          if missing:
+              raise SystemExit(f"MCP runtime wheelhouse is incomplete: {', '.join(missing)}")
+          for path in wheelhouse.iterdir():
+              if not path.is_file() or re.search(r"\.whl$", path.name) is None:
+                  raise SystemExit(f"unexpected MCP runtime asset: {path.name}")
+          PY
+
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -C "${wheelhouse}" \
+            -czf "${archive}" \
+            .
+
+      - name: Download verified semantic model files
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-semantic-model-files
+          path: ${{ runner.temp }}/tapl-semantic-models
+
+      - name: Build and exercise the native semantic wheelhouse
+        env:
+          TAPL_MODEL_CACHE: ${{ runner.temp }}/tapl-semantic-models
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          RUNTIME_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mcp="${RUNNER_TEMP}/taplctl-mcp-runtime-${RUNTIME_TARGET}"
+          extra="${RUNNER_TEMP}/semantic-wheelhouse"
+          python .github/scripts/build_semantic_wheelhouse.py "${RUNTIME_TARGET}" "${mcp}" "${extra}"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -C "${extra}" -czf "release-dist/taplctl-semantic-runtime-${TAG_VERSION}-${RUNTIME_TARGET}.tar.gz" .
+          python -m pip wheel --no-deps --wheel-dir "${RUNNER_TEMP}/app" ./tapl
+          python -m venv "${RUNNER_TEMP}/semantic-test"
+          py="${RUNNER_TEMP}/semantic-test/bin/python"
+          app=("${RUNNER_TEMP}"/app/*.whl)
+          "${py}" -m pip install --no-index --find-links "${mcp}" --find-links "${extra}" "${app[0]}[semantic]"
+          "${py}" .github/scripts/semantic_runtime_smoke.py
+
+      - name: Upload Linux runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.target }}
+          path: release-dist/taplctl-*-runtime-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Validate and publish release
+    needs: [windows-installer-fixtures, windows-installer-preflight, build-packages, linux-runtime, macos-runtime]
+    outputs:
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      version: ${{ steps.version.outputs.version }}
+      python_version: ${{ steps.version.outputs.python_version }}
+      wheel_url: ${{ steps.assets.outputs.wheel_url }}
+      wheel_sha256: ${{ steps.assets.outputs.wheel_sha256 }}
+      mcp_runtime_macos_arm64_url: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
+      semantic_runtime_macos_arm64_url: ${{ steps.assets.outputs.semantic_runtime_macos_arm64_url }}
+      mcp_runtime_macos_arm64_sha256: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_sha256 }}
+      semantic_runtime_macos_arm64_sha256: ${{ steps.assets.outputs.semantic_runtime_macos_arm64_sha256 }}
+      mcp_runtime_macos_x86_64_url: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_url }}
+      mcp_runtime_macos_x86_64_sha256: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_sha256 }}
+      mcp_runtime_linux_arm64_url: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_url }}
+      semantic_runtime_linux_arm64_url: ${{ steps.assets.outputs.semantic_runtime_linux_arm64_url }}
+      mcp_runtime_linux_arm64_sha256: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_sha256 }}
+      semantic_runtime_linux_arm64_sha256: ${{ steps.assets.outputs.semantic_runtime_linux_arm64_sha256 }}
+      mcp_runtime_linux_x86_64_url: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_url }}
+      semantic_runtime_linux_x86_64_url: ${{ steps.assets.outputs.semantic_runtime_linux_x86_64_url }}
+      mcp_runtime_linux_x86_64_sha256: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_sha256 }}
+      semantic_runtime_linux_x86_64_sha256: ${{ steps.assets.outputs.semantic_runtime_linux_x86_64_sha256 }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        run: >-
+          python .github/scripts/release_version.py
+          "${GITHUB_REF_NAME}"
+          --github-output "${GITHUB_OUTPUT}"
+
+      - name: Require Homebrew tap token
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
+            echo "Set the HOMEBREW_TAP_TOKEN secret with write access to qkdxorjs1002/homebrew-tap." >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download versioned wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: release-wheel-${{ steps.version.outputs.version }}
+          path: release-dist
+
+      - name: Download signed macOS arm64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-runtime-macos-arm64
+          path: release-dist
+
+      - name: Download signed macOS x86_64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-runtime-macos-x86_64
+          path: release-dist
+
+      - name: Download Linux arm64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-linux-arm64
+          path: release-dist
+
+      - name: Download Linux x86_64 runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-linux-x86_64
+          path: release-dist
+
+      - name: Prepare release assets
+        id: assets
+        env:
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          wheel_path="release-dist/taplctl-${PYTHON_VERSION}-py3-none-any.whl"
+          test -f "${wheel_path}"
+          python .github/scripts/prepare_windows_installers.py \
+            --tag "${TAG_VERSION}" --python-version "${PYTHON_VERSION}" --output-dir release-dist
+
+          wheel_name="$(basename "${wheel_path}")"
+          wheel_sha256="$(sha256sum "${wheel_path}" | awk '{print $1}')"
+          wheel_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${wheel_name}"
+          manifest_path="release-dist/taplctl-install-manifest.json"
+
+          python - "${manifest_path}" "${PYTHON_VERSION}" "${wheel_url}" "${wheel_sha256}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          manifest_path = Path(sys.argv[1])
+          manifest = {
+              "schema_version": 1,
+              "version": sys.argv[2],
+              "wheel": {
+                  "url": sys.argv[3],
+                  "sha256": sys.argv[4],
+              },
+          }
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
+
+          echo "wheel_name=${wheel_name}" >> "${GITHUB_OUTPUT}"
+          echo "wheel_sha256=${wheel_sha256}" >> "${GITHUB_OUTPUT}"
+          echo "wheel_url=${wheel_url}" >> "${GITHUB_OUTPUT}"
+
+          for kind in mcp semantic; do
+            targets=(macos-arm64 linux-arm64 linux-x86_64)
+            if [[ "${kind}" == mcp ]]; then targets+=(macos-x86_64); fi
+            for target in "${targets[@]}"; do
+              runtime_name="taplctl-${kind}-runtime-${TAG_VERSION}-${target}.tar.gz"
+              runtime_path="release-dist/${runtime_name}"
+              test -f "${runtime_path}"
+              runtime_sha256="$(sha256sum "${runtime_path}" | awk '{print $1}')"
+              runtime_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${runtime_name}"
+              key="${kind}_runtime_${target//-/_}"
+              echo "${key}_sha256=${runtime_sha256}" >> "${GITHUB_OUTPUT}"
+              echo "${key}_url=${runtime_url}" >> "${GITHUB_OUTPUT}"
+            done
+          done
+
+          ls -lh release-dist
+
+      - name: Validate release assets
+        env:
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          WHEEL_NAME: ${{ steps.assets.outputs.wheel_name }}
+          WHEEL_URL: ${{ steps.assets.outputs.wheel_url }}
+          WHEEL_SHA256: ${{ steps.assets.outputs.wheel_sha256 }}
+          MCP_RUNTIME_MACOS_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_url }}
+          SEMANTIC_RUNTIME_MACOS_ARM64_URL: ${{ steps.assets.outputs.semantic_runtime_macos_arm64_url }}
+          MCP_RUNTIME_MACOS_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_arm64_sha256 }}
+          SEMANTIC_RUNTIME_MACOS_ARM64_SHA256: ${{ steps.assets.outputs.semantic_runtime_macos_arm64_sha256 }}
+          MCP_RUNTIME_MACOS_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_url }}
+          MCP_RUNTIME_MACOS_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_macos_x86_64_sha256 }}
+          MCP_RUNTIME_LINUX_ARM64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_url }}
+          SEMANTIC_RUNTIME_LINUX_ARM64_URL: ${{ steps.assets.outputs.semantic_runtime_linux_arm64_url }}
+          MCP_RUNTIME_LINUX_ARM64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_arm64_sha256 }}
+          SEMANTIC_RUNTIME_LINUX_ARM64_SHA256: ${{ steps.assets.outputs.semantic_runtime_linux_arm64_sha256 }}
+          MCP_RUNTIME_LINUX_X86_64_URL: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_url }}
+          SEMANTIC_RUNTIME_LINUX_X86_64_URL: ${{ steps.assets.outputs.semantic_runtime_linux_x86_64_url }}
+          MCP_RUNTIME_LINUX_X86_64_SHA256: ${{ steps.assets.outputs.mcp_runtime_linux_x86_64_sha256 }}
+          SEMANTIC_RUNTIME_LINUX_X86_64_SHA256: ${{ steps.assets.outputs.semantic_runtime_linux_x86_64_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sh -n install.sh
+          python .github/scripts/prepare_windows_installers.py \
+            --tag "${TAG_VERSION}" --python-version "${PYTHON_VERSION}" --output-dir release-dist --check
+          python - "release-dist/taplctl-install-manifest.json" "release-dist/${WHEEL_NAME}" "${PYTHON_VERSION}" "${WHEEL_URL}" "${WHEEL_SHA256}" <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import sys
+          import tarfile
+          from pathlib import Path
+
+          manifest_path = Path(sys.argv[1])
+          wheel_path = Path(sys.argv[2])
+          version, wheel_url, wheel_sha256 = sys.argv[3:]
+
+          if re.fullmatch(
+              r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+              r"(?:(?:a|b|rc)(?:0|[1-9][0-9]*))?",
+              version,
+          ) is None:
+              raise SystemExit("invalid release version")
+          if re.fullmatch(r"[0-9a-f]{64}", wheel_sha256) is None:
+              raise SystemExit("invalid wheel SHA-256")
+          expected_wheel_name = f"taplctl-{version}-py3-none-any.whl"
+          expected_wheel_url = (
+              f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/"
+              f"{os.environ['GITHUB_REF_NAME']}/{expected_wheel_name}"
+          )
+          if wheel_path.name != expected_wheel_name:
+              raise SystemExit(f"unexpected wheel filename: {wheel_path.name}")
+          if wheel_url != expected_wheel_url:
+              raise SystemExit(f"unexpected wheel URL: {wheel_url}")
+          if not wheel_path.is_file():
+              raise SystemExit(f"wheel is missing: {wheel_path}")
+
+          expected = {
+              "schema_version": 1,
+              "version": version,
+              "wheel": {
+                  "url": wheel_url,
+                  "sha256": wheel_sha256,
+              },
+          }
+          try:
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+              raise SystemExit(f"invalid install manifest JSON: {exc}")
+          if manifest != expected:
+              raise SystemExit("install manifest does not match the required schema or release asset metadata")
+
+          actual_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+          if actual_sha256 != wheel_sha256:
+              raise SystemExit(
+                  f"wheel SHA-256 mismatch: expected {wheel_sha256}, got {actual_sha256}"
+              )
+
+          runtime_targets = {
+              "mcp": ("macos-arm64", "macos-x86_64", "linux-arm64", "linux-x86_64"),
+              "semantic": ("macos-arm64", "linux-arm64", "linux-x86_64"),
+          }
+          expected_assets = {
+              expected_wheel_name,
+              "install.ps1",
+              "install.cmd",
+              "taplctl-install-manifest.json",
+              *(
+                  f"taplctl-{kind}-runtime-{os.environ['TAG_VERSION']}-{target}.tar.gz"
+                  for kind, targets in runtime_targets.items() for target in targets
+              ),
+          }
+          actual_assets = {path.name for path in Path("release-dist").iterdir() if path.is_file()}
+          if actual_assets != expected_assets or any(
+              not path.is_file() for path in Path("release-dist").iterdir()
+          ):
+              raise SystemExit(
+                  f"release asset set mismatch: missing={sorted(expected_assets - actual_assets)}, "
+                  f"unexpected={sorted(actual_assets - expected_assets)}"
+              )
+
+          required_runtime_distributions = {
+              "mcp": {"mcp", "mcp_types", "pydantic", "pydantic_core", "cryptography"},
+              "semantic": {"numpy", "onnxruntime", "tokenizers", "sqlite_vec"},
+          }
+          for kind, targets in runtime_targets.items():
+              for target in targets:
+                  name = f"taplctl-{kind}-runtime-{os.environ['TAG_VERSION']}-{target}.tar.gz"
+                  path = Path("release-dist") / name
+                  expected_url = (
+                      f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/"
+                      f"{os.environ['GITHUB_REF_NAME']}/{name}"
+                  )
+                  key = f"{kind}_runtime_{target}".replace("-", "_").upper()
+                  if os.environ[key + "_URL"] != expected_url:
+                      raise SystemExit(f"unexpected {kind.upper()} runtime URL for {target}")
+                  if hashlib.sha256(path.read_bytes()).hexdigest() != os.environ[key + "_SHA256"]:
+                      raise SystemExit(f"{kind.upper()} runtime SHA-256 mismatch for {target}")
+                  with tarfile.open(path, "r:gz") as archive:
+                      wheels = [Path(member.name).name for member in archive if member.isfile()]
+                  distributions = {n.split("-", 1)[0].lower() for n in wheels if n.endswith(".whl")}
+                  missing = required_runtime_distributions[kind] - distributions
+                  if missing:
+                      raise SystemExit(f"{name} is missing: {', '.join(sorted(missing))}")
+          PY
+
+      - name: Smoke-test isolated MCP runtime
+        env:
+          PYTHON_VERSION: ${{ steps.version.outputs.python_version }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+          WHEEL_NAME: ${{ steps.assets.outputs.wheel_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          smoke_root="${RUNNER_TEMP}/tapl-mcp-release-smoke"
+          runtime_dir="${smoke_root}/runtime"
+          workspace="${smoke_root}/workspace"
+          rm -rf "${smoke_root}"
+          mkdir -p "${runtime_dir}" "${workspace}"
+          tar -xzf "release-dist/taplctl-mcp-runtime-${TAG_VERSION}-linux-x86_64.tar.gz" \
+            -C "${runtime_dir}"
+          python -m venv "${smoke_root}/venv"
+          "${smoke_root}/venv/bin/python" -m pip install \
+            --disable-pip-version-check --no-index --no-deps --no-compile \
+            "${runtime_dir}"/*.whl
+          "${smoke_root}/venv/bin/python" -m pip install \
+            --disable-pip-version-check --no-index --no-deps --no-compile \
+            "release-dist/${WHEEL_NAME}"
+          installed_version="$("${smoke_root}/venv/bin/taplctl" --version)"
+          if [[ "${installed_version}" != "taplctl ${PYTHON_VERSION}" ]]; then
+            echo "Expected taplctl ${PYTHON_VERSION}, got ${installed_version}" >&2
+            exit 1
+          fi
+          "${smoke_root}/venv/bin/taplctl" init --workspace-root "${workspace}" --json
+          "${smoke_root}/venv/bin/python" - "${workspace}" <<'PY'
+          import asyncio
+          import sys
+          from pathlib import Path
+
+          from mcp import Client
+          from taplctl.mcp_server import create_server
+
+          async def main() -> None:
+              server = create_server(workspace_root=Path(sys.argv[1]))
+              expected_tools = {tool.name for tool in await server.list_tools()}
+              async with Client(server) as client:
+                  tools = await client.list_tools()
+                  actual_tools = {tool.name for tool in tools.tools}
+                  if actual_tools != expected_tools:
+                      raise SystemExit(
+                          f"TAPL MCP tool mismatch: missing={sorted(expected_tools - actual_tools)}, "
+                          f"unexpected={sorted(actual_tools - expected_tools)}"
+                      )
+                  result = await client.call_tool("tapl_get_status", {})
+                  if result.is_error:
+                      raise SystemExit("tapl_get_status failed in isolated runtime")
+
+          asyncio.run(main())
+          PY
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          TAG_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            edit_args=(--title "taplctl ${TAG_VERSION}")
+            if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
+              edit_args+=(--prerelease)
+            else
+              edit_args+=(--prerelease=false)
+            fi
+            gh release edit "${RELEASE_TAG}" "${edit_args[@]}"
+            gh release upload "${RELEASE_TAG}" release-dist/* --clobber
+          else
+            create_args=(--title "taplctl ${TAG_VERSION}" --generate-notes)
+            previous_tag="$(
+              gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+                jq -r --arg current "${TAG_VERSION%%-*}" '
+                  def version_parts: split(".") | map(tonumber);
+                  [
+                    .[][] | select(.draft == false and .prerelease == false) | .tag_name
+                    | select(test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))
+                    | select(version_parts < ($current | version_parts))
+                  ] | max_by(version_parts) // empty
+                '
+            )"
+            if [[ -n "${previous_tag}" ]]; then
+              create_args+=(--notes-start-tag "${previous_tag}")
+            fi
+            if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
+              create_args+=(--prerelease)
+            fi
+            gh release create "${RELEASE_TAG}" release-dist/* "${create_args[@]}"
+          fi
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: qkdxorjs1002/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update taplctl Homebrew package
+        env:
+          RELEASE_VERSION: ${{ needs.release.outputs.python_version }}
+          RELEASE_PRERELEASE: ${{ needs.release.outputs.prerelease }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PRE_FORMULA_TEMPLATE: homebrew-tap/Formula/taplctl.rb
+          WHEEL_SHA256: ${{ needs.release.outputs.wheel_sha256 }}
+          WHEEL_URL: ${{ needs.release.outputs.wheel_url }}
+          MCP_RUNTIME_MACOS_ARM64_URL: ${{ needs.release.outputs.mcp_runtime_macos_arm64_url }}
+          SEMANTIC_RUNTIME_MACOS_ARM64_URL: ${{ needs.release.outputs.semantic_runtime_macos_arm64_url }}
+          MCP_RUNTIME_MACOS_ARM64_SHA256: ${{ needs.release.outputs.mcp_runtime_macos_arm64_sha256 }}
+          SEMANTIC_RUNTIME_MACOS_ARM64_SHA256: ${{ needs.release.outputs.semantic_runtime_macos_arm64_sha256 }}
+          MCP_RUNTIME_MACOS_X86_64_URL: ${{ needs.release.outputs.mcp_runtime_macos_x86_64_url }}
+          MCP_RUNTIME_MACOS_X86_64_SHA256: ${{ needs.release.outputs.mcp_runtime_macos_x86_64_sha256 }}
+          MCP_RUNTIME_LINUX_ARM64_URL: ${{ needs.release.outputs.mcp_runtime_linux_arm64_url }}
+          SEMANTIC_RUNTIME_LINUX_ARM64_URL: ${{ needs.release.outputs.semantic_runtime_linux_arm64_url }}
+          MCP_RUNTIME_LINUX_ARM64_SHA256: ${{ needs.release.outputs.mcp_runtime_linux_arm64_sha256 }}
+          SEMANTIC_RUNTIME_LINUX_ARM64_SHA256: ${{ needs.release.outputs.semantic_runtime_linux_arm64_sha256 }}
+          MCP_RUNTIME_LINUX_X86_64_URL: ${{ needs.release.outputs.mcp_runtime_linux_x86_64_url }}
+          SEMANTIC_RUNTIME_LINUX_X86_64_URL: ${{ needs.release.outputs.semantic_runtime_linux_x86_64_url }}
+          MCP_RUNTIME_LINUX_X86_64_SHA256: ${{ needs.release.outputs.mcp_runtime_linux_x86_64_sha256 }}
+          SEMANTIC_RUNTIME_LINUX_X86_64_SHA256: ${{ needs.release.outputs.semantic_runtime_linux_x86_64_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "${PRE_FORMULA_TEMPLATE}" ]]; then
+            echo "Could not find ${PRE_FORMULA_TEMPLATE} in qkdxorjs1002/homebrew-tap." >&2
+            exit 1
+          fi
+
+          stable_brew_files=()
+          stable_options=()
+          if [[ "${RELEASE_PRERELEASE}" == "false" ]]; then
+            stable_brew_files+=("${PRE_FORMULA_TEMPLATE}")
+            stable_options+=(--retire-semantic homebrew-tap)
+          fi
+
+          ruby -c .github/scripts/update_homebrew_formula.rb
+          ruby .github/scripts/update_homebrew_formula.rb \
+            --pre-formula homebrew-tap/Formula/taplctl-pre.rb \
+            --pre-alias homebrew-tap/Aliases/taplctl@pre \
+            "${stable_options[@]}" \
+            "${stable_brew_files[@]}"
+          ruby -c homebrew-tap/Formula/taplctl-pre.rb
+          for brew_file in "${stable_brew_files[@]}"; do
+            ruby -c "${brew_file}"
+          done
+
+          tap_paths=(
+            "Formula/taplctl-pre.rb"
+            "Aliases/taplctl@pre"
+          )
+          for brew_file in "${stable_brew_files[@]}"; do
+            tap_paths+=("${brew_file#homebrew-tap/}")
+          done
+          if [[ "${RELEASE_PRERELEASE}" == "false" ]]; then
+            if [[ -f homebrew-tap/formula_renames.json ]]; then
+              tap_paths+=(formula_renames.json)
+            fi
+            if [[ -n "$(git -C homebrew-tap ls-files -- Formula/taplctl-semantic.rb)" ]]; then
+              tap_paths+=(Formula/taplctl-semantic.rb)
+            fi
+          fi
+
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap add "${tap_paths[@]}"
+
+          if git -C homebrew-tap diff --cached --quiet; then
+            echo "Homebrew tap is already up to date."
+            exit 0
+          fi
+
+          release_channel="stable"
+          if [[ "${RELEASE_PRERELEASE}" == "true" ]]; then
+            release_channel="prerelease"
+          fi
+          git -C homebrew-tap commit -m "taplctl ${RELEASE_TAG} (${release_channel})"
+          git -C homebrew-tap push

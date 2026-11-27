@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
-import { version as viewerVersion } from '../../package.json';
 import { useI18n } from './i18n';
-import { createReleaseChecker, isNewerRelease, releaseUrl, RELEASE_RETRY_MS } from './viewerRelease';
+import { createReleaseChecker, installedViewerRelease, isNewerRelease, releaseUrl, RELEASE_RETRY_MS } from './viewerRelease';
 
-export function ViewerVersion(): JSX.Element {
+export function ViewerVersion({ browser }: { browser: boolean }): JSX.Element {
   const { t } = useI18n();
+  const { version: viewerVersion, tag } = installedViewerRelease(browser);
   const [checker] = useState(() => {
     let storage: Storage | undefined;
     try { storage = window.localStorage; } catch { /* Private/sandboxed storage is optional. */ }
-    return createReleaseChecker({ fetch: (...args) => globalThis.fetch(...args), storage });
+    return createReleaseChecker({ channel: browser ? 'ctl' : 'viewer', fetch: (...args) => globalThis.fetch(...args), storage });
   });
   const [release, setRelease] = useState(checker.cached);
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden');
@@ -30,7 +30,7 @@ export function ViewerVersion(): JSX.Element {
   return (
     <footer className="tapl-viewer-version" data-update={!!update} data-visible={visible}>
       <span className="tapl-viewer-version-pill">
-        <a className="tapl-viewer-version-current" href={releaseUrl(viewerVersion)}
+        <a className="tapl-viewer-version-current" href={releaseUrl(tag)}
           target="_blank" rel="noopener noreferrer" aria-label={currentLabel} title={currentLabel}>
           v{viewerVersion}
         </a>

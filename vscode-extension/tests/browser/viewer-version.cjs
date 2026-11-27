@@ -5,10 +5,12 @@ const { mkdtempSync, realpathSync, rmSync, mkdirSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { chromium } = require('@playwright/test');
-const { version } = require('../../package.json');
+const { version: extensionVersion } = require('../../package.json');
+const version = process.env.VITE_TAPL_CTL_VERSION || extensionVersion;
 const root = path.resolve(__dirname, '../../..');
 const workspace = realpathSync(mkdtempSync(path.join(tmpdir(), 'tapl-version-')));
 const api = 'https://api.github.com/repos/qkdxorjs1002/tapl/releases/latest';
+const viewerApi = 'https://api.github.com/repos/qkdxorjs1002/tapl/releases?per_page=100&page=1';
 let server, browser, origin;
 
 before(async () => {
@@ -111,8 +113,12 @@ test('new stable release has a subtle ambient highlight and opens its exact fixe
   } finally {await page.close();}
 });
 
-test('reduced motion keeps the glow static and native VS Code adapter shows the same build version', async () => {
-  const {page, errors} = await fixture({tag: '99.0.0', reducedMotion: 'reduce'});
+test('native VS Code checks the extension release channel and respects reduced motion', async () => {
+  const {page, errors, requests} = await fixture({reducedMotion: 'reduce'});
+  await page.route(url => url.href === viewerApi, route => route.fulfill({json: [
+    {tag_name: '100.0.0', draft: false, prerelease: false},
+    {tag_name: 'viewer-99.0.0', draft: false, prerelease: false},
+  ]}));
   await page.addInitScript(() => {
     window.acquireVsCodeApi = () => ({getState: () => undefined, setState() {}, postMessage(message) {
       if (message.command === 'ready') window.postMessage({type: 'hydrate', locale: 'ko', layout: 'auto', view: {type: 'error', message: 'Native host fixture'}}, '*');
@@ -121,6 +127,9 @@ test('reduced motion keeps the glow static and native VS Code adapter shows the 
   try {
     await page.goto(origin); await page.getByText('Native host fixture').waitFor();
     const footer = page.locator('.tapl-viewer-version[data-update=true]'); await footer.waitFor(); await bounds(page);
+    assert.equal(await footer.locator('.tapl-viewer-version-current').getAttribute('href'), `https://github.com/qkdxorjs1002/tapl/releases/tag/viewer-${extensionVersion}`);
+    assert.equal(await footer.locator('.tapl-viewer-version-latest').getAttribute('href'), 'https://github.com/qkdxorjs1002/tapl/releases/tag/viewer-99.0.0');
+    assert.equal(requests.length, 0);
     assert.equal(await footer.locator('.tapl-viewer-version-pill').evaluate(pill => getComputedStyle(pill, '::before').animationName), 'none');
     await shot(page, 'viewer-version-native-reduced-motion'); assert.deepEqual(errors, []);
   } finally {await page.close();}

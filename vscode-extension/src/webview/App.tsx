@@ -275,7 +275,7 @@ export function App(): JSX.Element {
             />
           )}
         />
-        <ViewerVersion />
+        <ViewerVersion browser={browser} />
       </div>
     </I18nProvider>
   );

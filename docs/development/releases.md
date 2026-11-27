@@ -2,22 +2,32 @@
 
 [Documentation](../README.md) · [한국어](releases.ko.md)
 
-TAPL's release workflow builds versioned Python, runtime, installer, and VS Code assets from a Git tag. This guide describes the checked-in publishing contract and maintainer setup. For end-user install/update commands, use [Installation](../getting-started/installation.md).
+TAPL releases `taplctl` and the VS Code Viewer extension separately. The CLI includes the browser Viewer, and the VS Code extension has its own VSIX and Marketplace version. See [Installation](../getting-started/installation.md) and [VS Code Viewer](../guides/vscode.md) for end-user updates.
 
 ## Tags and injected versions
 
-[The release workflow](../../.github/workflows/release.yml) triggers on pushed `*.*.*` tags, then [`release_version.py`](../../.github/scripts/release_version.py) validates the canonical form:
-
-| Tag example | Python package version | Channel behavior |
+| Product | Example tag | Published packages |
 | --- | --- | --- |
-| `2.0.1` | `2.0.1` | Stable release; Marketplace eligible. |
-| `2.0.1-alpha1` | `2.0.1a1` | GitHub prerelease. |
-| `2.0.1-beta4` | `2.0.1b4` | GitHub prerelease. |
-| `2.0.1-rc1` | `2.0.1rc1` | GitHub prerelease. |
+| [taplctl](../../.github/workflows/release-ctl.yml) | `2.25.6`, `2.25.6-beta1` | Python wheel, runtimes, installers and Homebrew |
+| [VS Code Viewer](../../.github/workflows/release.yml) | `viewer-2.26.0`, `viewer-2.26.0-beta1` | VSIX on GitHub, plus Marketplace for stable Viewer tags |
 
-Tags have no leading `v` and no build metadata. The workflow injects the PEP 440 version into `tapl/pyproject.toml` and the tag version into `vscode-extension/package.json` before building. Checked-in static versions are development metadata, not a declaration of the latest published version. Inspect the intended tag's assets or `taplctl --version` for an installation.
+Choose the next version from each product's own published versions. Numeric ctl tags preserve existing installer URLs. `taplctl` applies the PEP 440 equivalent to Python package metadata and uses the original ctl tag for the bundled browser Viewer. Viewer tags use their SemVer suffix for the extension manifest and VSIX filename. Both support `alphaN`, `betaN` and `rcN` suffixes. Omit the leading `v` and build metadata. [Tag parser](../../.github/scripts/release_version.py)
 
-A local, non-publishing validation example:
+Use a ctl tag for runtime, hooks, CLI, installer, or browser-only Python server changes. Use a Viewer tag when the VSIX inputs change, including shared Viewer UI and VS Code extension code. Shared changes can be delivered in both packages with separate tags. Check whether an extension change still works with the ctl versions it connects to before publishing it.
+
+The Viewer workflow compares release inputs with the previous published Viewer release in the same stable or prerelease channel. During the transition, it falls back to an earlier stable numeric release carrying a VSIX. With no baseline, the first release compares against an empty tree. Tests, generated bundles and version-only manifest changes do not trigger a new Viewer publication. GitHub Latest is reserved for stable ctl installers. [Viewer release planner](../../.github/scripts/viewer_release.py)
+
+For an authorized publication, tag the reviewed commit using the appropriate channel. These are example versions.
+
+```sh
+git tag -a 2.25.6 -m "taplctl 2.25.6"
+git push origin refs/tags/2.25.6
+
+git tag -a viewer-2.26.0 -m "TAPL Viewer 2.26.0"
+git push origin refs/tags/viewer-2.26.0
+```
+
+You can check ctl version conversion locally without publishing.
 
 ```sh
 python3 .github/scripts/release_version.py 2.0.1-beta4
@@ -28,14 +38,14 @@ python3 .github/scripts/release_version.py 2.0.1-beta4
 
 ## Build and publication flow
 
-The workflow runs these independent checks and artifact producers concurrently:
+The ctl workflow runs these independent checks and artifact producers concurrently:
 
 - Windows installer fixtures use a Python 3.11/3.12 matrix for PowerShell 5.1 parsing, bootstrap tests, and stdlib-only installer fixtures.
-- Windows runtime preflight uses a separate Python 3.11/3.12 matrix for runtime regressions, version-bound asset/icon contracts, a real wheel build, and install/update/reinstall/uninstall plus CLI/MCP smoke checks.
-- `build-packages` uses Python 3.12 and Node.js 22, injects tag/Python versions, runs extension host tests and compiles the shared Viewer, then builds the application wheel and VSIX.
+- Windows runtime preflight uses a separate Python 3.11/3.12 matrix for runtime regressions, version-bound installer assets, a real wheel build, and install/update/reinstall/uninstall plus CLI/MCP smoke checks.
+- `build-packages` uses Python 3.12 and Node.js 22, injects the Python and browser Viewer versions, tests the shared Viewer code, and builds the application wheel.
 - Linux runtime jobs build arm64/x86_64 wheelhouses in a matrix. The macOS arm64/x86_64 matrix signs runtime wheelhouses and verifies real Homebrew install/reinstall before uploading signed artifacts.
 
-The Ubuntu `release` job waits for every check and producer to succeed. It downloads the exact versioned wheel, VSIX, and runtime archives, prepares installers/manifest, and validates asset bytes, versions, exact URLs, SHA-256 values, required runtime distributions, and rendered Windows installer contents. An isolated Linux x86_64 venv smoke verifies the installed version and native MCP tool inventory/status. The Homebrew token guard must also pass before GitHub Release publication. The three additional wheelhouses for Homebrew use dependencies verified against the lockfile. Release CI verifies the pinned model files and shares them with each check. Both models must pass indexing and search checks on Windows x64, Linux x64 and ARM64, and macOS ARM64 before publication.
+The Ubuntu `release` job waits for every check and producer to succeed. It downloads the exact versioned wheel and runtime archives, prepares installers/manifest, and validates asset bytes, versions, exact URLs, SHA-256 values, required runtime distributions, and rendered Windows installer contents. An isolated Linux x86_64 venv smoke verifies the installed version and native MCP tool inventory/status. The Homebrew token guard must also pass before GitHub Release publication. The three additional wheelhouses for Homebrew use dependencies verified against the lockfile. Release CI verifies the pinned model files and shares them with each check. Both models must pass indexing and search checks on Windows x64, Linux x64 and ARM64, and macOS ARM64 before publication.
 
 | Asset | Purpose |
 | --- | --- |
@@ -46,13 +56,12 @@ The Ubuntu `release` job waits for every check and producer to succeed. It downl
 | `taplctl-mcp-runtime-TAG-linux-x86_64.tar.gz` | Linux x86_64 MCP dependency wheelhouse. |
 | `taplctl-semantic-runtime-TAG-macos-arm64.tar.gz` | Signed Apple Silicon semantic dependency wheelhouse. |
 | `taplctl-semantic-runtime-TAG-linux-arm64.tar.gz`, `taplctl-semantic-runtime-TAG-linux-x86_64.tar.gz` | Linux semantic dependency wheelhouses. |
-| `tapl-workflow-viewer-TAG.vsix` | Validated VS Code extension. Prerelease tags also publish this through GitHub Releases. |
 | `taplctl-install-manifest.json` | Schema version 1, Python version, wheel URL, and wheel SHA-256. |
 | `install.ps1`, `install.cmd` | Windows release assets; the PowerShell installer is stamped for that release. |
 
 `PYTHON_VERSION` and `TAG` above are naming placeholders, including their different prerelease syntax. The manifest does not list every runtime archive; release/Homebrew runtime URL/hash metadata is computed separately from the final asset bytes. A Windows wheelhouse is not among these tarball targets.
 
-The workflow creates or updates the tagged GitHub Release and uploads the validated assets (`--clobber` on an existing release). Prereleases are marked explicitly. After this succeeds, Homebrew updates and stable-only Marketplace publication run as independent downstream jobs; failure in either does not suppress the other. Re-running can replace same-tag assets, so review the concrete source and generated contents before publication.
+The workflow creates or updates the tagged GitHub Release and uploads the validated assets (`--clobber` on an existing release). Prereleases are marked explicitly. Homebrew updates after the ctl GitHub Release succeeds. Re-running can replace same-tag assets, so review the concrete source and generated contents before publication.
 
 ## Homebrew channels
 
@@ -124,7 +133,7 @@ Check `Authority=Developer ID Application: …`, intended `TeamIdentifier`, `Tim
 
 ## VS Code Marketplace
 
-Stable tags publish **`paragonnov.tapl-workflow-viewer`** after the `release` job validates the VSIX and publishes the GitHub Release. The Marketplace job depends directly on `release` and runs independently of the downstream Homebrew job. Alpha/beta/RC tags retain GitHub Release VSIX assets and skip Marketplace publication. Authentication uses GitHub OIDC directly with Marketplace Trusted Publishing. No Azure subscription, Entra application, `azure/login`, `AZURE_*` secrets, or Marketplace PAT is required.
+Stable `viewer-*` tags publish **`paragonnov.tapl-workflow-viewer`** after the Viewer GitHub Release is published. The Viewer release contains only the VSIX and is excluded from GitHub Latest. Viewer alpha, beta and RC tags publish the VSIX on GitHub. Authentication uses GitHub OIDC directly with Marketplace Trusted Publishing. No Azure subscription, Entra application, `azure/login`, `AZURE_*` secrets, or Marketplace PAT is required.
 
 The extension icon at `vscode-extension/resources/icon.png` is derived from `assets/readme/tapl-logo.png`. Keep both dimensions at or below **1024 pixels**, preserving the logo's aspect ratio and transparency. Publication requires the release preflight check of the PNG referenced by the extension manifest; a successful local VSIX build alone does not establish Marketplace acceptance.
 
@@ -143,7 +152,7 @@ The extension icon at `vscode-extension/resources/icon.png` is derived from `ass
 2. Create the GitHub environment **`vscode-marketplace`** and restrict deployment branches/tags to trusted release refs. The publishing job must reference that exact environment and grant `contents: read` and `id-token: write`; [the release workflow](../../.github/workflows/release.yml) declares these settings.
 3. For a private repository, complete the first successful token exchange within 48 hours of creating the policy to activate it permanently. See [Microsoft's Trusted Publishing setup](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing).
 
-The Marketplace job downloads the validated stable VSIX artifact and runs `vsce publish --oidc --packagePath ... --skip-duplicate`. Duplicate versions count as successful on rerun. The repository uses `@vscode/vsce` `^4.1.0` with Node.js 22 or later. After `npm install --package-lock=false --ignore-scripts` in `vscode-extension`, inspect the installed CLI without publishing:
+The Marketplace job downloads the VSIX from the stable Viewer GitHub Release and runs `vsce publish --oidc --packagePath ... --skip-duplicate`. Duplicate versions count as successful on rerun. The repository uses `@vscode/vsce` `^4.1.0` with Node.js 22 or later. After `npm install --package-lock=false --ignore-scripts` in `vscode-extension`, inspect the installed CLI without publishing:
 
 ```sh
 npx --no-install vsce --version

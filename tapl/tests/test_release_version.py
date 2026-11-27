@@ -10,7 +10,8 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 HELPER = REPOSITORY_ROOT / ".github" / "scripts" / "release_version.py"
-WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
+WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release-ctl.yml"
+VIEWER_WORKFLOW = WORKFLOW.with_name("release.yml")
 
 _SPEC = importlib.util.spec_from_file_location("release_version", HELPER)
 assert _SPEC is not None and _SPEC.loader is not None
@@ -114,10 +115,10 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
         self.assertIn("python .github/scripts/release_version.py", workflow)
         self.assertIn("steps.version.outputs.python_version", workflow)
         self.assertIn("taplctl-${PYTHON_VERSION}-py3-none-any.whl", workflow)
-        self.assertIn("tapl-workflow-viewer-${TAG_VERSION}.vsix", workflow)
+        self.assertNotIn(".vsix", workflow)
         self.assertIn("taplctl-mcp-runtime-${TAG_VERSION}-${target}.tar.gz", workflow)
         self.assertIn('"prerelease": "true" if self.prerelease else "false"', HELPER.read_text())
-        self.assertIn("Upload stable VSIX for Marketplace publication", workflow)
+        self.assertNotIn("marketplace:", workflow)
         self.assertIn("- name: Require Homebrew tap token\n        env:", workflow)
         self.assertIn("- name: Checkout Homebrew tap\n        uses:", workflow)
         self.assertIn("- name: Update taplctl Homebrew package\n        env:", workflow)
@@ -135,26 +136,17 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
         self.assertIn("create_args+=(--prerelease)", workflow)
         self.assertIn("edit_args+=(--prerelease=false)", workflow)
 
-    def test_marketplace_job_publishes_only_stable_tags_with_trusted_publishing(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-
-        self.assertIn("prerelease: ${{ steps.version.outputs.prerelease }}", workflow)
-        self.assertIn("version: ${{ steps.version.outputs.version }}", workflow)
-        self.assertIn("if: steps.version.outputs.prerelease == 'false'", workflow)
-        self.assertIn("if: needs.release.outputs.prerelease == 'false'", workflow)
-        self.assertIn("environment: vscode-marketplace", workflow)
-        self.assertIn("id-token: write", workflow)
+    def test_viewer_only_tags_publish_vsix_and_stable_marketplace_with_trusted_publishing(self) -> None:
+        workflow = VIEWER_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("viewer_release.py", workflow)
+        self.assertIn("--verify-tag", workflow)
         self.assertIn("--oidc", workflow)
         self.assertIn("--skip-duplicate", workflow)
         self.assertIn("--packagePath", workflow)
-        for obsolete_authentication in (
-            "azure/login@",
-            "AZURE_",
-            "az rest",
-            "--azure-credential",
-            "VSCE_PAT",
-            "--pat",
-        ):
+        self.assertIn("tapl-workflow-viewer-${TAG_VERSION}.vsix", workflow)
+        for other_product in ("homebrew", ".whl", "taplctl-install-manifest", "windows-runtime"):
+            self.assertNotIn(other_product, workflow)
+        for obsolete_authentication in ("azure/login@", "AZURE_", "az rest", "--azure-credential", "VSCE_PAT"):
             with self.subTest(obsolete_authentication=obsolete_authentication):
                 self.assertNotIn(obsolete_authentication, workflow)
 
@@ -164,33 +156,32 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
             self.skipTest("PyYAML is not installed")
 
         parsed = yaml.safe_load(workflow)
-        release_job = parsed["jobs"]["release"]
-        marketplace_job = parsed["jobs"]["marketplace"]
-        self.assertNotIn("if", release_job)
-        self.assertEqual(marketplace_job["needs"], "release")
-        self.assertEqual(marketplace_job["if"], "needs.release.outputs.prerelease == 'false'")
-        self.assertEqual(marketplace_job["environment"], "vscode-marketplace")
-        self.assertEqual(marketplace_job["permissions"]["contents"], "read")
-        self.assertEqual(marketplace_job["permissions"]["id-token"], "write")
+        event = parsed.get("on", parsed.get(True))
+        self.assertEqual(event["push"]["tags"], ["viewer-*.*.*"])
+        jobs = parsed["jobs"]
+        self.assertEqual(set(jobs), {"plan", "build", "release", "marketplace"})
+        self.assertIn("needs.plan.outputs.publish == 'true'", jobs["build"]["if"])
+        self.assertIn("needs.plan.outputs.publish == 'true'", jobs["release"]["if"])
+        self.assertEqual(jobs["release"]["needs"], ["plan", "build"])
+        release_command = next(step["run"] for step in jobs["release"]["steps"]
+                       if step["name"] == "Verify existing tag and publish GitHub Release")
+        self.assertEqual(release_command.count("--latest=false"), 3)
+        marketplace = jobs["marketplace"]
+        self.assertEqual(marketplace["needs"], ["plan", "release"])
+        self.assertEqual(marketplace["if"], "needs.plan.outputs.prerelease == 'false'")
+        self.assertEqual(marketplace["environment"], "vscode-marketplace")
+        self.assertEqual(marketplace["permissions"], {"contents": "read", "id-token": "write"})
+        ctl = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        ctl_event = ctl.get("on", ctl.get(True))
+        self.assertEqual(ctl_event["push"]["tags"], ["[0-9]*.*.*"])
 
-        steps = {step["name"]: step for step in marketplace_job["steps"]}
+        steps = {step["name"]: step for step in marketplace["steps"]}
         self.assertEqual(steps["Set up Node.js"]["with"]["node-version"], "22")
-        download = steps["Download validated VSIX"]
-        self.assertEqual(download["uses"], "actions/download-artifact@v4")
-        self.assertEqual(
-            download["with"]["name"],
-            "vscode-marketplace-${{ needs.release.outputs.version }}",
-        )
-        self.assertEqual(download["with"]["path"], "release-dist")
         publish = steps["Publish VS Code extension to Marketplace"]
         self.assertEqual(publish["working-directory"], "vscode-extension")
-        self.assertEqual(publish["env"]["TAG_VERSION"], "${{ needs.release.outputs.version }}")
         self.assertIn("npm exec -- vsce publish", publish["run"])
+        self.assertNotIn("--pat", publish["run"].split())
         self.assertIn("--oidc", publish["run"])
-        self.assertIn(
-            '--packagePath "../release-dist/tapl-workflow-viewer-${TAG_VERSION}.vsix"',
-            publish["run"],
-        )
         self.assertIn("--skip-duplicate", publish["run"])
 
     def test_workflow_is_valid_yaml_when_pyyaml_is_available(self) -> None:

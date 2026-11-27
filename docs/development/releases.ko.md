@@ -2,22 +2,32 @@
 
 [문서 홈](../README.ko.md) · [English](releases.md)
 
-TAPL 릴리스 workflow는 Git 태그에서 버전별 Python·런타임·설치기·VS Code 자산을 빌드합니다. 이 안내는 저장소에 구현된 게시 계약과 관리자 설정을 설명합니다. 사용자 설치·업데이트 명령은 [설치](../getting-started/installation.ko.md)를 참고하세요.
+TAPL은 `taplctl`과 VS Code Viewer 확장을 별도로 배포합니다. CLI에는 브라우저 Viewer가 포함되고 VS Code 확장은 자체 VSIX와 Marketplace 버전을 사용합니다. 사용자 업데이트 절차는 [설치](../getting-started/installation.ko.md)와 [VS Code Viewer](../guides/vscode.ko.md)를 참고하세요.
 
 ## 태그와 버전 주입
 
-[릴리스 workflow](../../.github/workflows/release.yml)는 `*.*.*` 태그 push로 시작하고 [`release_version.py`](../../.github/scripts/release_version.py)가 표준 형식을 검증합니다.
-
-| 태그 예제 | Python 패키지 버전 | 채널 동작 |
+| 제품 | 태그 예시 | 게시 대상 |
 | --- | --- | --- |
-| `2.0.1` | `2.0.1` | 정식 릴리스, Marketplace 게시 대상. |
-| `2.0.1-alpha1` | `2.0.1a1` | GitHub prerelease. |
-| `2.0.1-beta4` | `2.0.1b4` | GitHub prerelease. |
-| `2.0.1-rc1` | `2.0.1rc1` | GitHub prerelease. |
+| [taplctl](../../.github/workflows/release-ctl.yml) | `2.25.6`, `2.25.6-beta1` | Python wheel, 런타임, 설치기, Homebrew |
+| [VS Code Viewer](../../.github/workflows/release.yml) | `viewer-2.26.0`, `viewer-2.26.0-beta1` | GitHub VSIX, 안정판은 Marketplace에도 게시 |
 
-태그 앞에 `v`를 붙이거나 build metadata를 넣지 않습니다. Workflow는 빌드 전에 PEP 440 버전을 `tapl/pyproject.toml`에, 태그 버전을 `vscode-extension/package.json`에 주입합니다. 저장소의 정적 버전은 개발 메타데이터이며 최신 배포 버전을 뜻하지 않습니다. 의도한 태그의 자산이나 설치된 `taplctl --version`을 확인하세요.
+각 제품의 기존 배포 버전을 기준으로 다음 버전을 정합니다. ctl은 기존 숫자 태그로 설치 URL을 유지합니다. Python 패키지 메타데이터에는 PEP 440 버전을, 포함된 브라우저 Viewer에는 원래 ctl 태그를 주입합니다. Viewer 태그는 `viewer-` 뒤의 SemVer를 확장 manifest와 VSIX 파일명에 사용합니다. 두 채널은 `alphaN`, `betaN`, `rcN` 접미사를 지원합니다. 앞에 붙이는 `v`와 빌드 메타데이터는 생략합니다. [태그 파서](../../.github/scripts/release_version.py)
 
-게시하지 않는 로컬 검증 예제입니다.
+런타임, 훅, CLI, 설치기 또는 브라우저 Viewer의 Python 서버만 변경되면 ctl 태그를 사용합니다. 공용 Viewer UI와 VS Code 확장 코드를 포함한 VSIX 입력이 바뀌면 Viewer 태그를 사용합니다. 공용 변경은 두 패키지에 별도 태그로 배포할 수 있습니다. 확장 게시 전 연결 대상 ctl 버전과의 호환성을 확인하세요.
+
+Viewer 워크플로는 같은 안정판 또는 프리릴리스 채널의 직전 게시본과 배포 입력을 비교합니다. 분리 전환기에는 VSIX가 포함된 기존 숫자 태그 안정판을 기준으로 삼습니다. 기준 게시본이 없으면 빈 트리와 비교합니다. 테스트, 생성된 번들, manifest의 버전 번호만 바뀐 경우에는 Viewer를 새로 게시하지 않습니다. GitHub Latest는 ctl 안정판 설치기에 사용합니다. [Viewer 릴리스 판정 코드](../../.github/scripts/viewer_release.py)
+
+게시 승인을 받은 경우 검토한 커밋에 해당 채널의 태그를 붙입니다. 아래 버전은 예시입니다.
+
+```sh
+git tag -a 2.25.6 -m "taplctl 2.25.6"
+git push origin refs/tags/2.25.6
+
+git tag -a viewer-2.26.0 -m "TAPL Viewer 2.26.0"
+git push origin refs/tags/viewer-2.26.0
+```
+
+게시 없이 로컬에서 ctl 버전 변환을 확인할 수 있습니다.
 
 ```sh
 python3 .github/scripts/release_version.py 2.0.1-beta4
@@ -28,14 +38,14 @@ python3 .github/scripts/release_version.py 2.0.1-beta4
 
 ## 빌드와 게시 흐름
 
-Workflow는 다음 독립 검사와 자산 생성 job을 병렬 실행합니다.
+ctl 워크플로는 다음 독립 검사와 자산 생성 작업을 병렬로 실행합니다.
 
 - Windows 설치기 fixture는 Python 3.11/3.12 matrix로 PowerShell 5.1 구문 검사, bootstrap 테스트, stdlib-only 설치기 fixture를 실행합니다.
-- Windows 런타임 사전 검사는 별도 Python 3.11/3.12 matrix로 런타임 회귀, 버전 고정 자산·아이콘 계약, 실제 wheel 빌드, 설치·업데이트·재설치·제거와 CLI·MCP smoke를 수행합니다.
-- `build-packages`는 Python 3.12·Node.js 22를 사용해 태그·Python 버전을 주입하고 확장 호스트 테스트와 공유 Viewer 컴파일을 수행한 뒤 애플리케이션 wheel과 VSIX를 빌드합니다.
+- Windows 런타임 사전 검사는 별도 Python 3.11/3.12 matrix로 런타임 회귀, 버전이 고정된 설치기 파일 검사, 실제 wheel 빌드, 설치·업데이트·재설치·제거와 CLI·MCP smoke를 수행합니다.
+- `build-packages`는 Python 3.12·Node.js 22를 사용해 Python과 브라우저 Viewer의 버전을 주입하고 공유 Viewer를 검증한 뒤 애플리케이션 wheel을 빌드합니다.
 - Linux 런타임 job은 arm64/x86_64 matrix로 wheelhouse를 빌드합니다. macOS arm64/x86_64 matrix는 런타임 wheelhouse에 서명하고 실제 Homebrew 설치·재설치를 검증한 뒤 서명 artifact를 올립니다.
 
-Ubuntu `release` job은 모든 검사와 생성 job의 성공을 기다립니다. 정확한 버전별 wheel·VSIX·런타임 아카이브를 내려받아 설치기·manifest를 준비하고 자산 바이트·버전·정확한 URL·SHA-256·필수 런타임 distribution·렌더링된 Windows 설치기를 검증합니다. 격리 Linux x86_64 venv smoke는 설치 버전과 native MCP 도구 목록·상태를 검증합니다. GitHub Release 게시 전에 Homebrew 토큰 검사도 통과해야 합니다. Homebrew용 세 의미 검색 wheelhouse에는 잠금 파일의 해시를 검증한 의존성이 들어갑니다. 릴리스 CI는 고정 모델 파일의 체크섬을 확인한 뒤 각 검증 작업에 전달합니다. GitHub 게시 전에 Windows x64·Linux x64 및 ARM64·macOS ARM64에서 두 모델을 색인하고 검색합니다.
+Ubuntu `release` job은 모든 검사와 생성 job의 성공을 기다립니다. 정확한 버전별 wheel·런타임 아카이브를 내려받아 설치기·manifest를 준비하고 자산 바이트·버전·정확한 URL·SHA-256·필수 런타임 distribution·렌더링된 Windows 설치기를 검증합니다. 격리 Linux x86_64 venv smoke는 설치 버전과 native MCP 도구 목록·상태를 검증합니다. GitHub Release 게시 전에 Homebrew 토큰 검사도 통과해야 합니다. Homebrew용 세 의미 검색 wheelhouse에는 잠금 파일의 해시를 검증한 의존성이 들어갑니다. 릴리스 CI는 고정 모델 파일의 체크섬을 확인한 뒤 각 검증 작업에 전달합니다. GitHub 게시 전에 Windows x64·Linux x64 및 ARM64·macOS ARM64에서 두 모델을 색인하고 검색합니다.
 
 | 자산 | 용도 |
 | --- | --- |
@@ -46,13 +56,12 @@ Ubuntu `release` job은 모든 검사와 생성 job의 성공을 기다립니다
 | `taplctl-mcp-runtime-TAG-linux-x86_64.tar.gz` | Linux x86_64 MCP 의존성 wheelhouse. |
 | `taplctl-semantic-runtime-TAG-macos-arm64.tar.gz` | 서명된 Apple Silicon 의미 검색 의존성 wheelhouse. |
 | `taplctl-semantic-runtime-TAG-linux-arm64.tar.gz`, `taplctl-semantic-runtime-TAG-linux-x86_64.tar.gz` | Linux 의미 검색 의존성 wheelhouse. |
-| `tapl-workflow-viewer-TAG.vsix` | 검증된 VS Code 확장. Prerelease 태그도 GitHub Releases에 이 자산을 게시합니다. |
 | `taplctl-install-manifest.json` | Schema version 1, Python 버전, wheel URL·SHA-256. |
 | `install.ps1`, `install.cmd` | Windows 릴리스 자산. PowerShell 설치기에 해당 릴리스 버전을 주입합니다. |
 
 위 `PYTHON_VERSION`·`TAG`는 이름 자리표시자이며 prerelease 표기가 서로 다릅니다. Manifest에는 모든 런타임 아카이브가 들어 있지 않습니다. 릴리스·Homebrew용 런타임 URL·해시는 최종 자산 바이트에서 별도로 계산합니다. 위 tarball 대상에 Windows wheelhouse는 없습니다.
 
-Workflow는 태그의 GitHub Release를 만들거나 갱신하고 검증한 자산을 올립니다. 기존 릴리스에서는 `--clobber`를 사용합니다. Prerelease 여부는 명시적으로 지정합니다. 성공 후 Homebrew 갱신과 정식 태그 전용 Marketplace 게시가 독립된 후속 job으로 실행되며 어느 한쪽 실패가 다른 쪽 실행을 막지 않습니다. 재실행은 같은 태그 자산을 교체할 수 있으므로 게시 전에 구체적 소스와 생성 내용을 검토하세요.
+Workflow는 태그의 GitHub Release를 만들거나 갱신하고 검증한 자산을 올립니다. 기존 릴리스에서는 `--clobber`를 사용합니다. Prerelease 여부는 명시적으로 지정합니다. ctl GitHub Release 게시에 성공하면 Homebrew를 갱신합니다. 재실행은 같은 태그 자산을 교체할 수 있으므로 게시 전에 구체적 소스와 생성 내용을 검토하세요.
 
 ## Homebrew 채널
 
@@ -124,7 +133,7 @@ codesign --display --verbose=4 /path/to/unpacked/native-library.so
 
 ## VS Code Marketplace
 
-정식 태그는 `release` job이 VSIX를 검증하고 GitHub Release를 게시한 뒤 **`paragonnov.tapl-workflow-viewer`**를 게시합니다. Marketplace job은 `release`에 직접 의존하며 후속 Homebrew job과 독립적으로 실행됩니다. Alpha·beta·RC 태그는 GitHub Release VSIX 자산을 유지하고 Marketplace 게시는 건너뜁니다. GitHub OIDC로 Marketplace Trusted Publishing에 직접 인증합니다. Azure 구독, Entra application, `azure/login`, `AZURE_*` secret, Marketplace PAT가 필요하지 않습니다.
+안정판 `viewer-*` 태그는 Viewer GitHub Release 게시 후 **`paragonnov.tapl-workflow-viewer`**를 Marketplace에 게시합니다. Viewer 릴리스에는 VSIX만 포함되며 GitHub Latest에서 제외됩니다. Viewer alpha·beta·RC 태그는 GitHub에 VSIX를 게시합니다. GitHub OIDC로 Marketplace Trusted Publishing에 직접 인증합니다. Azure 구독, Entra application, `azure/login`, `AZURE_*` secret, Marketplace PAT가 필요하지 않습니다.
 
 확장 아이콘 `vscode-extension/resources/icon.png`는 `assets/readme/tapl-logo.png`에서 만듭니다. 로고 비율과 투명도를 유지하면서 가로·세로를 각각 **1024픽셀 이하**로 맞추세요. 게시하려면 릴리스 사전 검사에서 확장 manifest가 참조하는 PNG를 확인해야 합니다. 로컬 VSIX 빌드 성공만으로 Marketplace 승인까지 확인되는 것은 아닙니다.
 
@@ -143,7 +152,7 @@ codesign --display --verbose=4 /path/to/unpacked/native-library.so
 2. GitHub environment **`vscode-marketplace`**를 만들고 신뢰할 릴리스 ref만 허용하도록 배포 branch·tag를 제한합니다. 게시 job은 정확히 같은 environment를 참조하고 `contents: read`와 `id-token: write` 권한을 부여해야 합니다. [릴리스 workflow](../../.github/workflows/release.yml)에 이 설정이 선언되어 있습니다.
 3. 비공개 저장소는 정책 생성 후 48시간 안에 첫 토큰 교환을 성공해야 정책이 영구 활성화됩니다. [Microsoft의 Trusted Publishing 설정](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing)을 참고하세요.
 
-Marketplace job은 검증된 정식 VSIX artifact를 받아 `vsce publish --oidc --packagePath ... --skip-duplicate`를 실행합니다. 재실행 시 이미 있는 버전은 성공으로 처리합니다. 저장소는 `@vscode/vsce` `^4.1.0`과 Node.js 22 이상을 사용합니다. `vscode-extension`에서 `npm install --package-lock=false --ignore-scripts`를 실행한 뒤 게시 없이 설치된 CLI를 확인할 수 있습니다.
+Marketplace job은 Viewer 안정판의 GitHub Release에서 VSIX를 받아 `vsce publish --oidc --packagePath ... --skip-duplicate`를 실행합니다. 재실행 시 이미 있는 버전은 성공으로 처리합니다. 저장소는 `@vscode/vsce` `^4.1.0`과 Node.js 22 이상을 사용합니다. `vscode-extension`에서 `npm install --package-lock=false --ignore-scripts`를 실행한 뒤 게시 없이 설치된 CLI를 확인할 수 있습니다.
 
 ```sh
 npx --no-install vsce --version

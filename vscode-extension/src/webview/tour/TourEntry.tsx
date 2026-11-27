@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { version as installedVersion } from '../../../package.json';
 import type { SupportedLocale } from '../../i18n';
 import type { TourHistory } from '../../viewer/tourHistory';
 import { Icon } from '../workbench/Icon';
+import { installedViewerRelease } from '../viewerRelease';
 import { guideSteps, releaseSteps, tourCopy, tourOffer, type TourContext, type TourKind } from './content';
 import { startDriverTour, type TourStep } from './driver';
 import './entry.css';
@@ -88,6 +88,7 @@ export function TourEntry({ state, context, locale, blockedByDialog, canInvite, 
   const [finished, setFinished] = useState(false);
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState === 'visible');
   const { history, ready, save, helpRequested, consumeHelpRequest, snoozed, snooze } = state;
+  const { version: installedVersion } = installedViewerRelease(context.browser);
   const recent = releaseSteps(installedVersion, context, locale);
   const updates = history?.releaseSeenThrough
     ? releaseSteps(installedVersion, context, locale, history.releaseSeenThrough)
@@ -103,7 +104,7 @@ export function TourEntry({ state, context, locale, blockedByDialog, canInvite, 
   }, []);
   useEffect(() => {
     if (canOffer && offer?.advanceBaseline) save({ releaseSeenThrough: installedVersion });
-  }, [canOffer, offer?.advanceBaseline, save]);
+  }, [canOffer, offer?.advanceBaseline, installedVersion, save]);
 
   useEffect(() => {
     if (!helpRequested || !ready || !visible || blockedByDialog || running) return;

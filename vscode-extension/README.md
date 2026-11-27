@@ -36,7 +36,7 @@ initialized by TAPL.
 
 1. [Install TAPL and connect Codex or Claude Code](https://github.com/qkdxorjs1002/tapl/blob/main/docs/getting-started/integrations.md).
 2. Install the extension. You can download a `.vsix` from
-   [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases) and use
+   a `viewer-*` entry in [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases) and use
    **Extensions: Install from VSIX…** in the Command Palette.
 3. Open the working folder containing `.tapl/tapl-{UUID}.db` and select **TAPL** in the Activity Bar.
 4. Run **TAPL Workflow: Open TAPL Dashboard** for the complete workspace view.

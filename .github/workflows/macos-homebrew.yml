@@ -9,7 +9,7 @@ on:
       - '.github/scripts/sign_macos*'
       - '.github/scripts/semantic_runtime_smoke.py'
       - '.github/workflows/macos-homebrew.yml'
-      - '.github/workflows/release.yml'
+      - '.github/workflows/release-ctl.yml'
       - 'tapl/pyproject.toml'
   pull_request:
     paths:
@@ -17,7 +17,7 @@ on:
       - '.github/scripts/sign_macos*'
       - '.github/scripts/semantic_runtime_smoke.py'
       - '.github/workflows/macos-homebrew.yml'
-      - '.github/workflows/release.yml'
+      - '.github/workflows/release-ctl.yml'
       - 'tapl/pyproject.toml'
 
 permissions:
