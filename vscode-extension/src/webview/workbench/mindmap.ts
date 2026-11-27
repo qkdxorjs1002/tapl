@@ -37,6 +37,8 @@ interface Branch {
 
 const TASK_STEP = 88;
 const GROUP_GAP = 48;
+const REFERENCE_COLUMN_STEP = 280;
+const REFERENCE_ROW_STEP = 122;
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'variant' });
 
 function compareText(a: string, b: string): number {
@@ -174,8 +176,14 @@ export function buildRunMindmap(snapshot: TaplRunSnapshot): MindmapGraph {
   }));
   const memoryNodes = referenceNodes.filter(node => node.kind === 'memory');
   const historyNodes = referenceNodes.filter(node => node.kind === 'history');
-  for (const [column, group] of [memoryNodes, historyNodes].entries()) {
-    group.forEach((node, index) => { node.x = column === 0 ? -310 : 310; node.y = workflowBottom + 148 + index * 122; });
+  for (const [side, group] of [memoryNodes, historyNodes].entries()) {
+    const direction = side === 0 ? -1 : 1;
+    // Balance the footprint in graph units: cards take more space across than down.
+    const columns = Math.max(1, Math.round(Math.sqrt(group.length * REFERENCE_ROW_STEP / REFERENCE_COLUMN_STEP)));
+    group.forEach((node, index) => {
+      node.x = direction * (310 + index % columns * REFERENCE_COLUMN_STEP);
+      node.y = workflowBottom + 148 + Math.floor(index / columns) * REFERENCE_ROW_STEP;
+    });
   }
   const linkedMemories = new Set<string>();
   const memoriesByOriginal = new Map<string, MindmapNode[]>();
