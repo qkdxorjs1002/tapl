@@ -77,6 +77,6 @@ for bundled dependencies.
 
 ## Shared Viewer
 
-The extension and browser share RUN navigation, TASK details, record browsing and language/theme controls. The extension opens its own local MCP connection. Confirmed RUN discard is available when the connected server advertises the Viewer discard tool and the selected RUN supports it. See the [extension guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#shared-viewer-and-capabilities) and [RUN discard guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/viewer.md#discard-a-run).
+The extension loads the Viewer from `taplctl` 2.27.0+ through its local MCP connection. It uses the current VS Code workspace and theme. After updating `taplctl`, close and reopen the dashboard to load the new Viewer. Older installs use the compatibility Viewer included in the extension. See the [extension guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#shared-viewer-and-capabilities).
 
 For development checks, use [contributing and verification](https://github.com/qkdxorjs1002/tapl/blob/main/docs/development/contributing.md).

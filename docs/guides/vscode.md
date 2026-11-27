@@ -12,6 +12,8 @@ You need VS Code **1.90+**, an initialized workspace containing `.tapl/tapl-{UUI
 
 Install `paragonnov.tapl-workflow-viewer` from Marketplace, or download a `.vsix` from a `viewer-*` entry in [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases) and run **Extensions: Install from VSIX…**. Open the initialized folder, select **TAPL** in the Activity Bar, then run **TAPL Workflow: Open TAPL Dashboard**.
 
+Starting with extension **2.26.0** and `taplctl` **2.27.0**, VS Code loads the dashboard from the `taplctl` installation that provides the selected `tapl-mcp`. After updating `taplctl`, close and reopen the dashboard to load the new Viewer. If that installation has an older ctl, an unsupported protocol, or missing Viewer assets, the extension uses its bundled compatibility Viewer.
+
 The dashboard uses the workspace opened in VS Code and has no workspace-change button or folder-selection modal. Folder selection inside the Viewer is available only in the [browser Viewer](viewer.md#navigate-the-viewer).
 
 The default executable search uses `PATH`, `/opt/homebrew/bin/tapl-mcp`, and `/usr/local/bin/tapl-mcp`; Windows uses `tapl-mcp.exe`. Override it when necessary:
@@ -60,7 +62,7 @@ Changing the executable invalidates connections. Changing workspace resets the d
 
 ## Shared Viewer and capabilities
 
-The browser and extension share React screens, CSS, and `src/viewer/types.ts`. VS Code supplies workspace/MCP adapters; the browser supplies HTTP and local folder selection. Both provide memory list/search/detail and original-source navigation. Memory editing and deletion require an explicit agent request.
+The browser and extension share React screens, CSS, and protocol types. The VS Code host supplies the open workspace, editor theme, Activity Bar, and command palette. The browser supplies HTTP and local folder selection. Both provide memory list/search/detail and original-source navigation. Memory editing and deletion require an explicit agent request.
 
 The extension discovers the server's supported tools when it connects. Earlier servers with `tapl_get_run` can still open exact RUNs. **Management → Discard RUN** requires an eligible local RUN and a server that advertises `tapl_viewer_discard_run`. The dialog requires the full matching RUN ID and explicit confirmation. See [Discard a RUN](viewer.md#discard-a-run).
 

@@ -17,7 +17,7 @@ from . import __version__, auto_reindex, db, history, install as tapl_install, p
 from .application import WorkflowApplication
 from .command_runtime import configure_stdio
 from .clients import client_scope, resolve_client, user_question_tool, validate_session_key
-from .viewer import ViewerApplication, discard_viewer_run, workspace_run_url
+from .viewer import ViewerApplication, discard_viewer_run, installed_viewer_asset_root, workspace_run_url
 
 
 SERVER_NAME = "tapl_mcp"
@@ -72,6 +72,13 @@ SourceDb = Annotated[
 ApprovalSource = Literal["explicit_user", "request_user_input"]
 WorkType = Literal["answer", "investigation", "analysis", "planning", "implementation", "mixed"]
 WorkflowMode = Literal["fast", "standard", "strict"]
+
+
+class ViewerBundle(BaseModel):
+    ok: Literal[True]
+    protocol: Literal[1]
+    asset_root: Annotated[str, Field(description="Absolute directory containing the installed TAPL Viewer assets.")]
+    ctl_version: Annotated[str, Field(description="Version of the taplctl installation serving this bundle.")]
 
 
 class MemoryCandidate(BaseModel):
@@ -546,6 +553,20 @@ def _create_server(
 
     if viewer_mode:
         viewer = ViewerApplication(default_workspace=root)
+
+        @server.tool(name="tapl_viewer_get_bundle", title="Locate the installed TAPL Viewer bundle", annotations=READ_ONLY)
+        async def viewer_get_bundle() -> ViewerBundle:
+            """Locate the packaged Viewer assets and report their native message protocol."""
+            asset_root = await asyncio.to_thread(installed_viewer_asset_root)
+            return ViewerBundle(ok=True, protocol=1, asset_root=str(asset_root), ctl_version=__version__)
+
+        @server.tool(name="tapl_viewer_dispatch", title="Dispatch a workspace Viewer message", annotations=DESTRUCTIVE)
+        async def viewer_dispatch(
+            protocol: Annotated[int, Field(strict=True, ge=1, le=1, description="Native Viewer protocol version (1).")],
+            message: Annotated[dict[str, Any], Field(description="Native Viewer command and arguments.")],
+        ) -> dict[str, Any]:
+            """Handle a Viewer message, including explicit writes, within the current MCP workspace."""
+            return await asyncio.to_thread(viewer.handle_workspace_message, root, message)
 
         @server.tool(name="tapl_viewer_get_status", title="Read TAPL Viewer status", annotations=READ_ONLY)
         async def viewer_get_status(

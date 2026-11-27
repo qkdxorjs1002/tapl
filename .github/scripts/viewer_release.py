@@ -21,6 +21,11 @@ _VSIX_INPUTS = (
     ":(exclude)vscode-extension/tests",
     ":(exclude)vscode-extension/out",
     ":(exclude)vscode-extension/webview-dist",
+    # The installed ctl provides shared UI updates. The VSIX copy is a compatibility fallback.
+    ":(exclude)vscode-extension/src/webview",
+    ":(exclude)vscode-extension/vite.config.ts",
+    ":(exclude)vscode-extension/tsconfig.webview.json",
+    ":(exclude)vscode-extension/scripts/sync-viewer-assets.mjs",
     ":(exclude)vscode-extension/node_modules",
     ":(exclude)vscode-extension/AGENTS.md",
     ":(exclude)vscode-extension/README.ko.md",

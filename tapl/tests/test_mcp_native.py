@@ -132,6 +132,7 @@ def test_mcp_exposes_native_application_tools() -> None:
 
     by_name = {tool.name: tool for tool in tools}
     assert len(tools) == 37
+    assert not any(name.startswith("tapl_viewer_") for name in by_name)
     assert "tapl_discard_run" in by_name
     assert by_name["tapl_discard_run"].annotations.destructive_hint
     assert set(by_name["tapl_discard_run"].input_schema["required"]) == {

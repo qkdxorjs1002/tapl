@@ -51,6 +51,7 @@ export interface WorkbenchProps {
   initialState?: unknown;
   onStateChange?: (state: unknown) => void;
   browser?: boolean;
+  ctlAssets?: boolean;
   workspace?: string;
   tour?: TourEntryState;
 }
@@ -279,7 +280,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
       return;
     }
     const command = commandForRun(run, activeRuns);
-    navigation.go({ page: 'current', runKey: runKey(run) }, command, internal, run);
+    navigation.go({ page: 'current', runKey: runKey(run) }, command, internal);
     closeMenu();
   };
   const navButton = (
@@ -396,6 +397,7 @@ function WorkbenchShell(props: WorkbenchProps & { setBackLayer: (element: HTMLDi
                 connected: !!props.workspace && props.view.type !== 'error' && props.view.type !== 'workspace',
                 memorySupported: props.memorySupported
               }}
+              ctlAssets={props.ctlAssets ?? !!props.browser}
               selectPage={selectPage}
               showPreview={setTourStep}
               closeNavigation={closeMenu}

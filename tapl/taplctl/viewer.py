@@ -22,6 +22,13 @@ DEFAULT_PORT = 8000
 MAX_REQUEST_BYTES = 64 * 1024
 ASSET_ROOT = Path(__file__).with_name("_viewer")
 INDEX_PATH = Path("src/webview/index.html")
+SETTINGS_ACTIONS = {"getSettings": "get", "saveSettings": "save", "resetSettings": "reset"}
+WORKSPACE_VIEWER_READS = frozenset({
+    "ready", "revision", "refresh", "selectWorkspace", "selectRun", "openRun", "records", "debug",
+    "openArchive", "archiveEvents", "search", "openSearchResult", "memories", "openMemory",
+    "openMemorySource", "getSettings",
+})
+WORKSPACE_VIEWER_WRITES = frozenset({"discardRun", "saveSettings", "resetSettings"})
 DEFAULT_STATUS: dict[str, Any] = {
     "active_run": None,
     "task_counts": {},
@@ -48,6 +55,25 @@ class ViewerError(RuntimeError):
 
 class WorkspaceRequired(ViewerError):
     """Raised when a browser request has no usable tapl workspace."""
+
+
+def installed_viewer_asset_root() -> Path:
+    """Locate and validate both fixed entry points in this taplctl installation."""
+    root = Path(__file__).resolve().with_name("_viewer")
+    entry = Path(".")
+    try:
+        if root.resolve(strict=True) != root or not root.is_dir():
+            raise ValueError("Invalid Viewer directory.")
+        for entry in (Path("assets/index.js"), Path("assets/index.css")):
+            asset = (root / entry).resolve(strict=True)
+            if not asset.is_relative_to(root) or not asset.is_file():
+                raise ValueError("Invalid Viewer asset.")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ViewerError(
+            f"Installed TAPL Viewer assets are missing or invalid at {root / entry}. "
+            "Reinstall or update taplctl, then reload the Viewer."
+        ) from exc
+    return root
 
 
 JsonRunner = Callable[[Path, list[str]], dict[str, Any]]
@@ -111,7 +137,12 @@ def existing_workspace(start: Path | None = None) -> Path | None:
 
 
 def workspace_database(workspace: str | Path) -> tuple[Path, Path]:
-    root = Path(workspace).expanduser().resolve()
+    path = Path(workspace)
+    # Browser links and native hosts carry exact absolute paths, which may end
+    # in whitespace. Relative paths entered in the browser may be padded.
+    if isinstance(workspace, str) and not path.is_absolute():
+        path = Path(workspace.strip())
+    root = path.expanduser().resolve()
     if not root.is_dir():
         raise WorkspaceRequired(f"Workspace directory does not exist: {root}")
     paths = db.discover_db_paths(root)
@@ -462,10 +493,7 @@ class ViewerApplication:
 
     def resolve_database(self, raw_workspace: object) -> tuple[Path | None, Path]:
         if isinstance(raw_workspace, str) and raw_workspace.strip():
-            # Browser links carry an exact absolute folder, including any
-            # whitespace at the end of its name.
-            path = Path(raw_workspace)
-            return workspace_database(path if path.is_absolute() else raw_workspace.strip())
+            return workspace_database(raw_workspace)
         if self.default_db is not None:
             if not self.default_db.is_file():
                 raise WorkspaceRequired(f"tapl database does not exist: {self.default_db}")
@@ -475,10 +503,41 @@ class ViewerApplication:
             return workspace, db_path
         raise WorkspaceRequired("Choose a workspace that contains a TAPL database in .tapl/.")
 
+    def handle_workspace_message(self, workspace: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        """Dispatch the native protocol with file access bound to the host's workspace."""
+        command = payload.get("command")
+        locale = "ko" if str(payload.get("locale") or "").lower().startswith("ko") else "en"
+        layout = payload.get("layout")
+        if layout not in ("small", "medium", "large"):
+            layout = "auto"
+        if command == "browseWorkspace":
+            return {"type": "workspace:directory", "requestId": payload.get("requestId"), "ok": False,
+                    "message": "Choose a workspace through the Viewer host."}
+        if not isinstance(command, str) or (
+            command not in WORKSPACE_VIEWER_READS and command not in WORKSPACE_VIEWER_WRITES
+        ):
+            return self._error_message("Unsupported Viewer command.", locale=locale, layout=layout)
+
+        if command in WORKSPACE_VIEWER_WRITES:
+            captured = payload.get("workspace")
+            if not isinstance(captured, str) or Path(captured) != workspace:
+                message = "This action requires the current Viewer workspace."
+                if command in SETTINGS_ACTIONS:
+                    return {"type": "settings:result", "requestId": payload.get("requestId"),
+                            "workspace": captured if isinstance(captured, str) else "",
+                            "action": SETTINGS_ACTIONS[command], "ok": False,
+                            "code": "workspace_mismatch", "message": message}
+                run_id = payload.get("runId")
+                return {**self._error_message(message, locale=locale, layout=layout),
+                        "discardResult": {"runId": run_id if isinstance(run_id, str) else "",
+                                          "ok": False, "message": message}}
+
+        return self.handle_message({**payload, "workspace": str(workspace), "layout": layout})
+
     def handle_message(self, payload: object) -> dict[str, Any]:
         if isinstance(payload, dict) and payload.get("command") == "browseWorkspace":
             return self._browse_workspace(payload)
-        if isinstance(payload, dict) and payload.get("command") in {"getSettings", "saveSettings", "resetSettings"}:
+        if isinstance(payload, dict) and payload.get("command") in SETTINGS_ACTIONS:
             return self._settings_message(payload)
         identity = payload.get("sessionId") if isinstance(payload, dict) else None
         try:
@@ -495,7 +554,7 @@ class ViewerApplication:
 
     def _settings_message(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Handle user preferences independently of page, RUN, and read owner."""
-        action = {"getSettings": "get", "saveSettings": "save", "resetSettings": "reset"}[payload["command"]]
+        action = SETTINGS_ACTIONS[payload["command"]]
         response: dict[str, Any] = {
             "type": "settings:result", "requestId": payload.get("requestId"),
             "workspace": payload.get("workspace") if isinstance(payload.get("workspace"), str) else "",
@@ -552,7 +611,7 @@ class ViewerApplication:
                 raise ViewerError("Missing workspace.")
             # Each browser captures its own workspace in the confirmation. The
             # stateless server resolves that explicit target without a default.
-            workspace, db_path = workspace_database(raw_workspace.strip())
+            workspace, db_path = workspace_database(raw_workspace)
             metadata = self._display_metadata(workspace, payload)
             locale, layout = metadata["locale"], metadata["layout"]
             source = payload.get("source_db")

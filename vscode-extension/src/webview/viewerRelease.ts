@@ -20,8 +20,8 @@ function versionFromTag(tag: string, channel: ReleaseChannel): string | undefine
   if (compareTourVersions(version, version) === 0) return version.replace(/^v/, '');
 }
 
-export function installedViewerRelease(browser: boolean): ViewerRelease {
-  if (!browser) return { tag: `${VIEWER_TAG_PREFIX}${extensionVersion}`, version: extensionVersion };
+export function installedViewerRelease(ctlAssets: boolean): ViewerRelease {
+  if (!ctlAssets) return { tag: `${VIEWER_TAG_PREFIX}${extensionVersion}`, version: extensionVersion };
   const tag = typeof __TAPL_CTL_RELEASE_TAG__ === 'string' ? __TAPL_CTL_RELEASE_TAG__ : '';
   const version = versionFromTag(tag, 'ctl');
   // Source builds can use the manifest version when no ctl release tag is provided.

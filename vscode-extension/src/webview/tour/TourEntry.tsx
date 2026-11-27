@@ -20,6 +20,7 @@ export interface TourEntryState {
 interface TourEntryProps {
   state: TourEntryState;
   context: TourContext;
+  ctlAssets: boolean;
   locale: SupportedLocale;
   blockedByDialog: boolean;
   canInvite: boolean;
@@ -77,7 +78,7 @@ function waitForAnchor(shell: HTMLElement, step: TourStep, signal: AbortSignal):
   });
 }
 
-export function TourEntry({ state, context, locale, blockedByDialog, canInvite, selectPage, showPreview, closeNavigation }: TourEntryProps): JSX.Element {
+export function TourEntry({ state, context, ctlAssets, locale, blockedByDialog, canInvite, selectPage, showPreview, closeNavigation }: TourEntryProps): JSX.Element {
   const copy = tourCopy[locale];
   const helpButton = useRef<HTMLButtonElement>(null);
   const helpPanel = useRef<HTMLElement>(null);
@@ -88,7 +89,7 @@ export function TourEntry({ state, context, locale, blockedByDialog, canInvite, 
   const [finished, setFinished] = useState(false);
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState === 'visible');
   const { history, ready, save, helpRequested, consumeHelpRequest, snoozed, snooze } = state;
-  const { version: installedVersion } = installedViewerRelease(context.browser);
+  const { version: installedVersion } = installedViewerRelease(ctlAssets);
   const recent = releaseSteps(installedVersion, context, locale);
   const updates = history?.releaseSeenThrough
     ? releaseSteps(installedVersion, context, locale, history.releaseSeenThrough)

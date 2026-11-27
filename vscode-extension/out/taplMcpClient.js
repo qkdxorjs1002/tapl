@@ -26,10 +26,11 @@ class WorkspaceTaplMcpClient {
     async callTool(name, args = {}) {
         let lastError;
         // A lost acknowledgement can follow a successful mutation.
-        const attempts = name === 'tapl_save_settings' || name === 'tapl_viewer_discard_run' ? 1 : 2;
+        // Dispatch is intentionally opaque: future ctl versions may add writes.
+        const attempts = ['tapl_save_settings', 'tapl_viewer_discard_run', 'tapl_viewer_dispatch'].includes(name) ? 1 : 2;
         for (let attempt = 0; attempt < attempts; attempt += 1) {
             const connection = await this.getConnection();
-            if ((name === 'tapl_viewer_get_status' || name === 'tapl_viewer_discard_run') && !connection.tools.has(name)) {
+            if (name.startsWith('tapl_viewer_') && !connection.tools.has(name)) {
                 throw new TaplMcpToolError(`This TAPL MCP server does not support ${name}.`);
             }
             try {

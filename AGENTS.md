@@ -10,7 +10,7 @@
 
 ## Release Rule
 - `taplctl`과 VS Code Viewer 확장은 독립적으로 버전을 올린다. ctl은 `X.Y.Z` 태그, 확장은 `viewer-X.Y.Z` 태그를 사용하고 각 채널의 프리릴리스 접미사는 해당 태그에 붙인다.
-- ctl 또는 브라우저 Viewer의 Python 서버만 변경되면 ctl만 배포한다. VS Code 확장 또는 공용 Viewer UI의 배포 내용이 바뀌면 확장 태그로 배포한다. 공용 변경이 두 패키지에 영향을 주면 각 채널의 반영 필요성과 기존 ctl과의 MCP 호환성을 확인하고 태그를 각각 올린다.
+- ctl, Viewer 서버, 공용 Viewer UI만 변경되면 ctl만 배포한다. VS Code 호스트, 확장 manifest 또는 패키지 자원이 변경되면 확장 태그로 배포한다. 두 패키지에 변경이 있으면 기존 ctl과의 MCP 호환성을 확인하고 ctl을 먼저 배포한 뒤 확장 태그를 별도로 올린다.
 - GitHub의 Latest는 ctl 안정판 설치 경로로 사용한다. Viewer 릴리스는 Latest로 지정하지 않는다. 확장 안정판은 VS Code Marketplace에 게시하고 확장 프리릴리스는 GitHub의 VSIX로 제공한다. 상세 절차는 [릴리스 가이드](docs/development/releases.ko.md)를 참고한다.
 
 ## Documentation Rule

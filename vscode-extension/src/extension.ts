@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { DatabaseRevisions, ViewerRefreshQueue } from './viewerRefresh';
 import {
@@ -16,6 +17,8 @@ import {
 } from './taplMcpClient';
 import { defaultViewerPreferences, loadViewerConfig, viewerConfigRequiresTrust, type ViewerConfig } from './viewerConfig';
 import { mergeTourHistory, normalizeTourHistory, TOUR_HISTORY_KEY, type TourHistory } from './viewer/tourHistory';
+import { installedViewerBundle, type InstalledViewerBundle } from './viewerInstall';
+import { INSTALLED_VIEWER_PROTOCOL, type InstalledViewerNavigation } from './viewer/types';
 
 import type { ViewerPreferences, DisplayLayout, AssociativeMemory, MemoryDiagnostics, SettingsDocument, SettingsResult, HostCapabilities, RunDiscardResult, TaplRunSnapshot, TaplStatus, TaplItem, TaplArchive, TaplEvent, TaplSearchResult, TaplSearchPayload, TaplArchiveDetail, TaplItemDetail, WebviewView, HostMessage as HostWebviewMessage } from './viewer/types';
 
@@ -299,6 +302,12 @@ class WorkflowWebviewManager {
   private readonly backStack: PanelView[] = [];
   private lastSearchQuery = '';
   private shellReady = false;
+  private reconnectOnOpen = false;
+  private shellProbe?: { root?: vscode.WorkspaceFolder; promise: Promise<void> };
+  private installed?: InstalledViewerBundle & { channel: string; workspace: TaplMcpWorkspace };
+  private installedSelection = 0;
+  private pendingNavigation?: InstalledViewerNavigation['message'];
+  private resetInstalledWorkspace = false;
   private generation = 0;
   private capabilities: HostCapabilities = { associativeMemory: false };
   private discardPending = false;
@@ -341,6 +350,7 @@ class WorkflowWebviewManager {
       return;
     }
     this.deferredConfigRefresh = false;
+    this.shellProbe = undefined;
     this.refreshConfiguration();
   }
 
@@ -352,7 +362,7 @@ class WorkflowWebviewManager {
   async showTour(): Promise<void> {
     const panel = this.ensurePanel(true);
     this.tourPanel.openRequested = true;
-    this.initializeShell(panel);
+    await this.initializeShell(panel);
     await this.postTourOpen(panel);
   }
 
@@ -366,13 +376,19 @@ class WorkflowWebviewManager {
     this.generation += 1;
     this.backStack.length = 0;
     this.currentView = { type: 'overview' };
+    this.pendingNavigation = undefined;
+    this.resetInstalledWorkspace = this.installed !== undefined;
     this.capabilities = { associativeMemory: false };
   }
 
   async refresh(): Promise<void> {
-    if (this.panel) {
-      await this.postCurrentView('view:update');
-    }
+    const panel = this.panel;
+    if (!panel) return;
+    await this.initializeShell(panel);
+    if (this.panel !== panel) return;
+    panel.title = workspaceTaplTitle();
+    if (this.installed) await this.navigateInstalled(panel, { command: 'refresh' });
+    else await this.postCurrentView('view:update');
   }
 
   async searchFromCommand(): Promise<void> {
@@ -389,15 +405,81 @@ class WorkflowWebviewManager {
     this.currentView = view;
     const panel = this.ensurePanel(options.reveal ?? false);
     panel.title = workspaceTaplTitle();
-    this.initializeShell(panel);
+    await this.initializeShell(panel);
+    if (panel !== this.panel || this.currentView !== view) return;
+    if (this.installed) {
+      if (view.type === 'archive') await this.navigateInstalled(panel, { command: 'openArchive', archiveId: view.archiveId, source_db: view.source_db });
+      else if (view.type === 'search') await this.navigateInstalled(panel, { command: 'search', query: view.query });
+      else await this.navigateInstalled(panel, { command: 'ready' });
+      return;
+    }
     await this.postCurrentView('view:update');
   }
 
-  private initializeShell(panel: vscode.WebviewPanel): void {
-    if (!this.shellReady) {
-      panel.webview.html = this.renderShell(panel.webview);
+  private initializeShell(panel: vscode.WebviewPanel): Promise<void> {
+    const root = getWorkspaceRoot();
+    if (this.shellProbe && this.shellProbe.root === root) return this.shellProbe.promise;
+    const promise = this.findInstalledViewer(root).then(candidate => {
+      if (panel !== this.panel || this.shellProbe?.promise !== promise || getWorkspaceRoot() !== root) return;
+      const previous = this.installed;
+      const sameWorkspace = candidate?.workspace.key === previous?.workspace.key;
+      if (this.shellReady && candidate?.assets === previous?.assets && candidate?.version === previous?.version
+        && (sameWorkspace || this.tourPanel.hydrated)) {
+        if (candidate && previous) {
+          if (previous.workspace.key !== candidate.workspace.key) {
+            this.pendingNavigation = undefined;
+            this.resetInstalledWorkspace = true;
+          }
+          previous.workspace = candidate.workspace;
+        }
+        return;
+      }
+      this.installed = candidate && { ...candidate, channel: randomBytes(16).toString('hex') };
+      this.pendingNavigation = undefined;
+      this.resetInstalledWorkspace = false;
+      this.tourPanel = { historyReady: false, hydrated: false, openRequested: this.tourPanel.openRequested, opening: false };
+      this.generation += 1;
+      const file = this.installed && vscode.Uri.file(this.installed.assets);
+      const installedRoot = file && (this.extensionUri.scheme === 'vscode-remote' ? this.extensionUri.with({ path: file.path }) : file);
+      const resourceRoot = installedRoot ?? vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets');
+      panel.webview.options = { enableScripts: true, localResourceRoots: [resourceRoot] };
+      panel.webview.html = this.renderShell(panel.webview, installedRoot, this.installed?.channel);
       this.shellReady = true;
+    });
+    this.shellProbe = { root, promise };
+    return promise;
+  }
+
+  private async findInstalledViewer(root?: vscode.WorkspaceFolder) {
+    if (!root || !taplMcpClients) return;
+    try {
+      const workspace = taplMcpWorkspace(root);
+      const bundle = await installedViewerBundle(taplMcpClients, workspace);
+      if (bundle) return { ...bundle, workspace };
+    } catch { /* Older or unavailable installations use the VSIX renderer and its diagnostics. */ }
+  }
+
+  private async navigateInstalled(panel: vscode.WebviewPanel, command: InstalledViewerNavigation['message']): Promise<void> {
+    const installed = this.installed;
+    if (!installed || installed.workspace.key !== getWorkspaceRoot()?.uri.fsPath) return;
+    if (!this.panelVisible() || !this.tourPanel.hydrated) {
+      if (command.command !== 'refresh') this.pendingNavigation = command;
+      if (!this.panelVisible()) this.deferredPanelRefresh = true;
+      return;
     }
+    const message = this.pendingNavigation ?? (this.resetInstalledWorkspace && command.command === 'refresh' ? { command: 'ready' } : command);
+    const reset = this.resetInstalledWorkspace;
+    this.resetInstalledWorkspace = false;
+    this.pendingNavigation = undefined;
+    await panel.webview.postMessage({ type: 'viewer:navigate', channel: installed.channel, message,
+      ...(reset ? { reset: true } : {}) } satisfies InstalledViewerNavigation);
+  }
+
+  private async installedReady(panel: vscode.WebviewPanel): Promise<void> {
+    this.tourPanel.hydrated = true;
+    void this.postTourOpen(panel);
+    if (this.pendingNavigation?.command === 'ready' && !this.resetInstalledWorkspace) this.pendingNavigation = undefined;
+    if (this.pendingNavigation || this.resetInstalledWorkspace) await this.navigateInstalled(panel, { command: 'ready' });
   }
 
   private ensurePanel(reveal: boolean): vscode.WebviewPanel {
@@ -405,10 +487,16 @@ class WorkflowWebviewManager {
       if (reveal) { this.panel.reveal(vscode.ViewColumn.One); }
       return this.panel;
     }
+    const root = getWorkspaceRoot();
+    if (this.reconnectOnOpen && root) {
+      if (this.settingsWritePending) this.deferredConfigRefresh = true;
+      else taplMcpClients?.invalidate(root.uri.fsPath);
+    }
+    this.reconnectOnOpen = false;
     this.panel = vscode.window.createWebviewPanel('taplWorkflow.viewer', workspaceTaplTitle(), vscode.ViewColumn.One, {
       enableScripts: true,
       retainContextWhenHidden: true,
-      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'webview-dist')]
+      localResourceRoots: []
     });
     const panel = this.panel;
     panel.webview.onDidReceiveMessage((message: unknown) => {
@@ -420,6 +508,10 @@ class WorkflowWebviewManager {
       this.settingsRevision = undefined;
       this.generation += 1;
       this.panel = undefined;
+      this.reconnectOnOpen = true;
+      this.shellProbe = undefined;
+      this.installed = undefined;
+      this.pendingNavigation = undefined;
       this.shellReady = false;
       this.tourPanel = { historyReady: false, hydrated: false, openRequested: false, opening: false };
       this.deferredPanelRefresh = false;
@@ -453,9 +545,7 @@ class WorkflowWebviewManager {
     await this.tourHistoryWrite;
   }
 
-  private async hydratePanel(): Promise<void> {
-    const panel = this.panel;
-    if (!panel) return;
+  private async sendTourHistory(panel: vscode.WebviewPanel): Promise<void> {
     const state = this.tourPanel;
     state.historyReady = false;
     state.hydrated = false;
@@ -463,12 +553,18 @@ class WorkflowWebviewManager {
     try {
       state.historyReady = await panel.webview.postMessage({ type: 'tour:history', history: this.tourHistory } satisfies HostWebviewMessage);
     } catch { /* The panel can close before the message is delivered. */ }
+  }
+
+  private async hydratePanel(): Promise<void> {
+    const panel = this.panel;
+    if (!panel) return;
+    await this.sendTourHistory(panel);
     if (panel === this.panel) await this.postCurrentView('hydrate');
   }
 
   private async postTourOpen(panel: vscode.WebviewPanel | undefined): Promise<void> {
     const state = this.tourPanel;
-    if (!panel || panel !== this.panel || !this.panelVisible() || !state.hydrated || !state.openRequested || state.opening) return;
+    if (!panel || panel !== this.panel || !this.panelVisible() || !state.historyReady || !state.hydrated || !state.openRequested || state.opening) return;
     state.opening = true;
     try {
       if (await panel.webview.postMessage({ type: 'tour:open' } satisfies HostWebviewMessage)) state.openRequested = false;
@@ -476,19 +572,23 @@ class WorkflowWebviewManager {
     finally { state.opening = false; }
   }
 
-  private renderShell(webview: vscode.Webview): string {
-    const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets', 'index.js'));
-    const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets', 'index.css'));
+  private renderShell(webview: vscode.Webview, installedRoot?: vscode.Uri, channel?: string): string {
+    const asset = (name: string) => webview.asWebviewUri(installedRoot
+      ? vscode.Uri.joinPath(installedRoot, name)
+      : vscode.Uri.joinPath(this.extensionUri, 'webview-dist', 'assets', name));
+    const bridge = channel ? `<meta name="tapl-viewer-protocol" content="${INSTALLED_VIEWER_PROTOCOL}">
+  <meta name="tapl-viewer-channel" content="${channel}">` : '';
     return `<!doctype html>
 <html lang="${displayLocale()}">
 <head>
   <meta charset="UTF-8">
+  ${bridge}
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src ${webview.cspSource}; font-src ${webview.cspSource}; connect-src https://api.github.com;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="${styleUri}">
+  <link rel="stylesheet" href="${asset('index.css')}">
   <title>${localize('appTitle')}</title>
 </head>
-<body><div id="root"></div><script type="module" src="${scriptUri}"></script></body>
+<body><div id="root"></div><script type="module" src="${asset('index.js')}"></script></body>
 </html>`;
   }
 
@@ -618,6 +718,10 @@ class WorkflowWebviewManager {
 
   private async handleMessage(message: unknown): Promise<void> {
     if (!isRecord(message) || typeof message.command !== 'string') { return; }
+    if (this.installed && message.command !== 'chooseWorkspace' && message.command !== 'saveTourHistory') {
+      if (message.command === 'viewerRequest') await this.dispatchInstalled(message);
+      return;
+    }
     switch (message.command) {
       case 'ready': await this.hydratePanel(); return;
       case 'saveTourHistory': await this.saveTourHistory(message.history); return;
@@ -700,6 +804,69 @@ class WorkflowWebviewManager {
           await this.navigate({ type: message.command === 'openMemory' ? 'memory' : 'memorySource', memoryId: message.memoryId, source_db: typeof message.source_db === "string" ? message.source_db : undefined }, { pushHistory: true });
         }
         return;
+    }
+  }
+
+  private async dispatchInstalled(request: Record<string, unknown>): Promise<void> {
+    const panel = this.panel, installed = this.installed, root = getWorkspaceRoot();
+    const { requestId, message } = request;
+    if (!panel || !installed || !root || request.protocol !== INSTALLED_VIEWER_PROTOCOL || request.channel !== installed.channel
+      || typeof requestId !== 'string' || !requestId || requestId.length > 128
+      || !isRecord(message) || Array.isArray(message) || typeof message.command !== 'string') return;
+    const workspace = installed.workspace;
+    await this.initializeShell(panel);
+    const current = () => this.panel === panel && this.installed === installed && getWorkspaceRoot() === root
+      && installed.workspace.key === workspace.key && workspace.key === root.uri.fsPath;
+    if (!current() || !taplMcpClients) return;
+    const response = { type: 'viewer:response', channel: installed.channel, requestId };
+    const command = message.command;
+    const selection = ['selectRun', 'discardRun', 'ready'].includes(command) ? ++this.installedSelection : undefined;
+    const writingSettings = command === 'saveSettings' || command === 'resetSettings';
+    if (writingSettings && this.settingsWritePending) {
+      await panel.webview.postMessage({ ...response, error: 'A settings write is already in progress.' });
+      return;
+    }
+    try {
+      if (writingSettings) {
+        this.settingsWritePending = true;
+        settingsWriteConfigs.set(workspace.key, loadViewerConfig(workspace.key));
+      }
+      if (command === 'ready') await this.sendTourHistory(panel);
+      if (!current()) return;
+      const before = command === 'revision' ? undefined : await this.revisions.read(workspace.key);
+      if (!current()) return;
+      const payload = await taplMcpClients.callTool(installed.workspace, 'tapl_viewer_dispatch', {
+        protocol: INSTALLED_VIEWER_PROTOCOL, message: { ...message, locale: vscode.env.language }
+      });
+      if (!current()) return;
+      const delivered = await panel.webview.postMessage({ ...response, payload });
+      if (!current() || !delivered) return;
+      if (command === 'ready') await this.installedReady(panel);
+      if (selection === this.installedSelection && current()) {
+        const view = payload.view;
+        if (isRecord(view) && view.type === 'overview' && isRecord(view.status)) {
+          const run = view.status.active_run;
+          if (isRecord(run) && typeof run.id === 'string') {
+            const source = run.source_db ?? view.status.source_db;
+            selectedRuns.set(workspace.key, { runId: run.id, source_db: typeof source === 'string' ? source : undefined });
+          } else selectedRuns.delete(workspace.key);
+          this.refreshTreeViews();
+        }
+      }
+      if (payload.type === 'hydrate' || payload.type === 'view:update') {
+        await this.observeRead(workspace.key, before, current);
+      }
+    } catch (error) {
+      if (current()) {
+        const delivered = await panel.webview.postMessage({ ...response, error: error instanceof Error ? error.message : String(error) });
+        if (delivered && current() && command === 'ready') await this.installedReady(panel);
+      }
+    } finally {
+      if (writingSettings) {
+        settingsWriteConfigs.delete(workspace.key);
+        this.settingsWritePending = false;
+        if (this.deferredConfigRefresh) this.configurationChanged();
+      }
     }
   }
 

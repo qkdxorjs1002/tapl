@@ -273,6 +273,8 @@ VS Code 확장은 `TAPL_MCP_MODE=viewer`를 설정해 별도의 로컬 `tapl-mcp
 
 | 도구 | 필수 인자 | 옵션과 동작 |
 | --- | --- | --- |
+| `tapl_viewer_get_bundle` | 없음 | `protocol`, `ctl_version`, 설치된 Viewer의 로컬 절대 경로 `asset_root`를 반환합니다. 확장은 프로토콜과 자산 파일을 확인한 뒤 로드합니다. |
+| `tapl_viewer_dispatch` | `protocol`, `message` | 프로토콜 `1`과 Viewer 명령 객체를 받습니다. 현재 MCP 프로세스가 워크스페이스를 고정합니다. 브라우저 전용 폴더 명령은 사용할 수 없습니다. 설정 변경과 RUN 폐기에는 기존 확인 요구 사항을 적용합니다. |
 | `tapl_viewer_get_status` | 없음 | `run_id`와 `source_db`는 선택 인자입니다. `run_id`를 생략하면 워크스페이스 개요를 반환합니다. Viewer에서 RUN을 선택하면 정확한 RUN ID와 원본 파일명을 전달합니다. `full=true`로 설정하면 기록 본문을 포함합니다(기본값 `false`). 최근 이벤트 옵션은 `include_events`(기본값 `false`)와 `events_limit`(기본값 12, 범위 0–100)입니다. |
 | `tapl_viewer_discard_run` | `source_db`, `run_id`, `target_session_id`, `confirmed`, `confirmation_run_id` | 정확한 로컬 원본 파일명, 활성 RUN ID, 저장된 소유자가 필요합니다. 기존 RUN의 소유자는 `""`일 수 있습니다. `confirmed=true`를 전달하고 `confirmation_run_id`에 정확한 전체 RUN ID를 넣습니다. |
 

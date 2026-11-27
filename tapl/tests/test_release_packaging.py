@@ -87,6 +87,8 @@ class PythonPackagingContractTests(unittest.TestCase):
                 scripts = wheel.read(entry_points).decode("utf-8")
 
         self.assertNotIn("taplctl/importer.py", names)
+        self.assertIn("taplctl/_viewer/assets/index.js", names)
+        self.assertIn("taplctl/_viewer/assets/index.css", names)
         self.assertIn("tapl-mcp = taplctl.mcp_server:main", scripts)
         self.assertIn("tapl-hook = taplctl.hook_cli:main", scripts)
 

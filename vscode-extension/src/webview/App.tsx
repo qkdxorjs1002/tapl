@@ -64,7 +64,9 @@ function readBrowserTourHistory(): TourHistory {
 
 export function App(): JSX.Element {
   const api = vscodeApi();
-  const browser = !!api.setPollingActive;
+  const tracksViewerState = !!api.setPollingActive;
+  const browser = tracksViewerState && !api.installedViewer;
+  const ctlAssets = browser || api.installedViewer === true;
   const [tourReady, setTourReady] = useState(false);
   const [tourHistory, setTourHistory] = useState<TourHistory | undefined>(() => browser ? readBrowserTourHistory() : undefined);
   const [tourSnoozed, setTourSnoozed] = useState(false);
@@ -119,18 +121,16 @@ export function App(): JSX.Element {
       : restored?.workbench
   );
   const persist = (values: Partial<PersistedAppState>) => {
-    const browser = typeof api.setPollingActive === 'function';
     // BrowserApi also owns request/route context; preserve its live state merge behavior.
-    const previous = browser ? api.getState() : persistedRef.current;
-    const next = mergePersistedAppState(previous, values, browser);
-    if (!browser && sameMindmapValue(previous, next)) return;
+    const previous = tracksViewerState ? api.getState() : persistedRef.current;
+    const next = mergePersistedAppState(previous, values, tracksViewerState);
+    if (!tracksViewerState && sameMindmapValue(previous, next)) return;
     persistedRef.current = next;
     api.setState(next);
   };
 
   useEffect(() => {
-    const listener = (event: MessageEvent<HostMessage>) => {
-      const message = event.data;
+    const receive = (message: HostMessage) => {
       if (!message || typeof message.type !== 'string') return;
       if (message.type === 'tour:history') {
         if (!browser) receiveTourHistory(message.history);
@@ -218,11 +218,14 @@ export function App(): JSX.Element {
         persist({ view: errorView, locale: nextLocale, layout: nextLayout });
       }
     };
-    window.addEventListener('message', listener);
+    const listener = (event: MessageEvent<HostMessage>) => receive(event.data);
+    const unsubscribe = api.subscribe?.(receive);
+    if (!unsubscribe) window.addEventListener('message', listener);
     api.setPollingActive?.(true);
     api.postMessage({ command: 'ready' });
     return () => {
-      window.removeEventListener('message', listener);
+      if (unsubscribe) unsubscribe();
+      else window.removeEventListener('message', listener);
       api.setPollingActive?.(false);
     };
   }, [api, browser, receiveTourHistory]);
@@ -248,6 +251,7 @@ export function App(): JSX.Element {
           send={(message) => api.postMessage(message)}
           locale={locale}
           browser={browser}
+          ctlAssets={ctlAssets}
           tour={{
             history: tourHistory,
             ready: tourReady,
@@ -275,7 +279,7 @@ export function App(): JSX.Element {
             />
           )}
         />
-        <ViewerVersion browser={browser} />
+        <ViewerVersion ctlAssets={ctlAssets} />
       </div>
     </I18nProvider>
   );

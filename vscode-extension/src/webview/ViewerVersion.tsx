@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react';
 import { useI18n } from './i18n';
 import { createReleaseChecker, installedViewerRelease, isNewerRelease, releaseUrl, RELEASE_RETRY_MS } from './viewerRelease';
 
-export function ViewerVersion({ browser }: { browser: boolean }): JSX.Element {
+export function ViewerVersion({ ctlAssets }: { ctlAssets: boolean }): JSX.Element {
   const { t } = useI18n();
-  const { version: viewerVersion, tag } = installedViewerRelease(browser);
+  const { version: viewerVersion, tag } = installedViewerRelease(ctlAssets);
   const [checker] = useState(() => {
     let storage: Storage | undefined;
     try { storage = window.localStorage; } catch { /* Private/sandboxed storage is optional. */ }
-    return createReleaseChecker({ channel: browser ? 'ctl' : 'viewer', fetch: (...args) => globalThis.fetch(...args), storage });
+    return createReleaseChecker({ channel: ctlAssets ? 'ctl' : 'viewer', fetch: (...args) => globalThis.fetch(...args), storage });
   });
   const [release, setRelease] = useState(checker.cached);
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden');

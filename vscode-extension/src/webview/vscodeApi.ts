@@ -1,9 +1,13 @@
 import { translate } from '../i18n';
+import { mergePersistedAppState, type PersistedAppState } from './appState';
+import { InstalledViewerBridge, installedViewerChannel, type NativeVsCodeApi } from './installedViewerBridge';
+import { sameMindmapValue } from './workbench/mindmapCache';
 import type {
   BrowserApiCommand,
   DisplayLayout,
   HostMessage,
   HostCapabilities,
+  InstalledViewerNavigation,
   RevisionMessage,
   SettingsResult,
   ViewerPreferences,
@@ -16,7 +20,11 @@ type VsCodeApi = {
   getState: () => unknown;
   setState: (state: unknown) => void;
   setPollingActive?: (active: boolean) => void;
+  installedViewer?: boolean;
+  subscribe?: (listener: (message: HostMessage) => void) => () => void;
 };
+
+type NavigationCommand = Exclude<BrowserApiCommand, { command: 'back' | 'chooseWorkspace' | 'revision' }>;
 
 type PersistedState = {
   view?: WebviewView;
@@ -29,7 +37,7 @@ type PersistedState = {
   selectedSourceDb?: string;
 };
 
-declare const acquireVsCodeApi: (() => VsCodeApi) | undefined;
+declare const acquireVsCodeApi: (() => NativeVsCodeApi) | undefined;
 
 const SESSION_STATE_KEY = 'tapl.viewer.state.v1';
 const SESSION_HISTORY_KEY = 'tapl.viewer.history.v1';
@@ -56,21 +64,27 @@ let api: VsCodeApi | undefined;
 
 export function vscodeApi(): VsCodeApi {
   if (!api) {
-    api = typeof acquireVsCodeApi === 'function'
-      ? acquireVsCodeApi()
-      : new BrowserApi();
+    if (typeof acquireVsCodeApi === 'function') {
+      const native = acquireVsCodeApi();
+      const channel = installedViewerChannel();
+      api = channel ? new BrowserApi(native, channel) : native;
+    } else api = new BrowserApi();
   }
   return api;
 }
 
 class BrowserApi implements VsCodeApi {
+  readonly installedViewer: boolean;
+  readonly subscribe?: VsCodeApi['subscribe'];
+  private readonly bridge?: InstalledViewerBridge;
   private pendingNavigation = false;
   private requestGeneration = 0;
   private workspaceGeneration = 0;
-  private startupLink = readViewerStartupLink(window.location);
-  private rememberWorkspace = !this.startupLink;
-  private state: PersistedState = this.startupLink ? {} : readStorage<PersistedState>(sessionStorage, SESSION_STATE_KEY) ?? {};
-  private history = this.startupLink ? [] : readStorage<WebviewView[]>(sessionStorage, SESSION_HISTORY_KEY) ?? [];
+  private startupLink: ViewerStartupLink | undefined;
+  private rememberWorkspace: boolean;
+  private state: PersistedState;
+  private savedNativeState?: PersistedAppState;
+  private history: WebviewView[];
   private activeWorkspace: string | undefined;
   private revisionBaseline: string | undefined;
   private revisionWorkspace: string | undefined;
@@ -89,6 +103,43 @@ class BrowserApi implements VsCodeApi {
   private settingsRevision: { workspace: string; revision: string } | undefined;
   private workspaceSelecting = false;
   private workspaceSelectionId = 0;
+
+  constructor(native?: NativeVsCodeApi, channel?: string) {
+    this.installedViewer = !!(native && channel);
+    if (native && channel) {
+      const bridge = new InstalledViewerBridge(native, channel, (navigation) => this.navigateFromHost(navigation));
+      this.bridge = bridge;
+      this.subscribe = (listener) => bridge.subscribe(listener);
+      this.rememberWorkspace = false;
+      this.savedNativeState = mergePersistedAppState(native.getState(), {}, false);
+      this.state = { ...this.savedNativeState, layout: undefined };
+      this.history = [];
+    } else {
+      this.startupLink = readViewerStartupLink(window.location);
+      this.rememberWorkspace = !this.startupLink;
+      this.state = this.startupLink ? {} : readStorage<PersistedState>(sessionStorage, SESSION_STATE_KEY) ?? {};
+      this.history = this.startupLink ? [] : readStorage<WebviewView[]>(sessionStorage, SESSION_HISTORY_KEY) ?? [];
+    }
+  }
+
+  private navigateFromHost({ message, reset }: InstalledViewerNavigation): void {
+    if (reset === true) {
+      this.requestGeneration += 1;
+      this.workspaceGeneration += 1;
+      this.history = [];
+      this.state = { ...this.state, workspace: undefined, view: undefined, capabilities: undefined,
+        selectedSessionId: undefined, selectedSourceDb: undefined };
+      this.activeWorkspace = undefined;
+      this.settingsRevision = undefined;
+      this.pendingNavigation = false;
+      this.refreshDirty = false;
+      this.autoRefreshPending = false;
+      this.resetRevisionBaseline();
+      this.resetBackgroundBackoff();
+      this.bridge?.reset();
+    }
+    this.postMessage(message);
+  }
 
   private readonly onVisibilityChange = (): void => {
     if (document.visibilityState === 'visible') {
@@ -111,6 +162,13 @@ class BrowserApi implements VsCodeApi {
   };
 
   postMessage(message: WebviewCommand): void {
+    if (this.bridge) {
+      if (message.command === 'saveTourHistory' || message.command === 'chooseWorkspace') {
+        this.bridge.native.postMessage(message);
+        return;
+      }
+      if (message.command === 'browseWorkspace' || message.command === 'selectWorkspace') return;
+    }
     if (message.command === 'saveTourHistory') return;
     if (message.command === 'browseWorkspace') { void this.browseWorkspace(message); return; }
     if (message.command === 'getSettings' || message.command === 'saveSettings' || message.command === 'resetSettings') {
@@ -118,7 +176,7 @@ class BrowserApi implements VsCodeApi {
     }
     if (message.command === 'selectWorkspace') { void this.selectWorkspace(message.workspace); return; }
     if (message.command === 'discardRun') {
-      const workspace = this.activeWorkspace ?? this.state.workspace ?? readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
+      const workspace = this.currentWorkspace();
       if (this.discardPending || this.state.capabilities?.discardRun !== true || message.confirmed !== true
         || typeof message.runId !== 'string' || !message.runId.trim()
         || typeof message.confirmationRunId !== 'string' || message.confirmationRunId !== message.runId
@@ -162,9 +220,9 @@ class BrowserApi implements VsCodeApi {
 
   /** Settings travel independently from page navigation and never replace the route snapshot. */
   private async settingsRequest(message: Extract<WebviewCommand, { command: 'getSettings' | 'saveSettings' | 'resetSettings' }>): Promise<void> {
-    const workspace = this.activeWorkspace ?? this.state.workspace ?? readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
+    const workspace = this.currentWorkspace();
     const action = message.command === 'getSettings' ? 'get' : message.command === 'saveSettings' ? 'save' : 'reset';
-    const error = (text: string, code: string) => dispatchHostMessage({ type: 'settings:result', requestId: message.requestId,
+    const error = (text: string, code: string) => this.publish({ type: 'settings:result', requestId: message.requestId,
       workspace, action, ok: false, message: text, code });
     if (typeof message.requestId !== 'string' || !message.requestId || message.requestId.length > 128
       || !workspace || (message.workspace !== undefined && message.workspace !== workspace)) {
@@ -183,13 +241,12 @@ class BrowserApi implements VsCodeApi {
     const generation = ++this.settingsGeneration;
     const workspaceGeneration = this.workspaceGeneration;
     const current = () => generation === this.settingsGeneration && workspaceGeneration === this.workspaceGeneration
-      && workspace === (this.activeWorkspace ?? this.state.workspace ?? readStorage<string>(localStorage, WORKSPACE_KEY) ?? '');
+      && workspace === this.currentWorkspace();
     this.settingsPending += 1;
     this.settingsWritePending = action !== 'get';
     this.clearRevisionTimer();
     try {
-      const response = await fetch('/api/message', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...message, workspace, locale: navigator.language }) });
+      const response = await this.request({ ...message, workspace, locale: navigator.language });
       const payload = await response.json() as SettingsResult;
       if (!current()) return;
       if (payload.type !== 'settings:result' || payload.requestId !== message.requestId || payload.workspace !== workspace) {
@@ -203,7 +260,7 @@ class BrowserApi implements VsCodeApi {
         this.settingsRevision = { workspace, revision: payload.settings.revision };
         this.rememberPreferences(payload);
       }
-      dispatchHostMessage({ ...payload, action });
+      this.publish({ ...payload, action });
     } catch (failure) {
       if (current()) error(failure instanceof Error ? failure.message : 'Settings request failed.', 'request_failed');
     } finally {
@@ -216,14 +273,13 @@ class BrowserApi implements VsCodeApi {
   /** Directory reads never navigate, persist a workspace, or interrupt RUN polling. */
   private async browseWorkspace(message: Extract<WebviewCommand, { command: 'browseWorkspace' }>): Promise<void> {
     try {
-      const response = await fetch('/api/message', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(message) });
+      const response = await this.request(message);
       const payload = await response.json() as HostMessage;
       if (!response.ok || payload.type !== 'workspace:directory' || payload.requestId !== message.requestId)
         throw new Error(`Directory request failed (${response.status}).`);
-      dispatchHostMessage(payload);
+      this.publish(payload);
     } catch (error) {
-      dispatchHostMessage({ type: 'workspace:directory', requestId: message.requestId, ok: false,
+      this.publish({ type: 'workspace:directory', requestId: message.requestId, ok: false,
         message: error instanceof Error ? error.message : 'Directory request failed.' });
     }
   }
@@ -238,12 +294,11 @@ class BrowserApi implements VsCodeApi {
     const currentSelection = () => selection === this.workspaceSelectionId && generation === this.requestGeneration
       && workspaceGeneration === this.workspaceGeneration && current === (this.activeWorkspace ?? this.state.workspace);
     const settleSuperseded = () => {
-      if (selection === this.workspaceSelectionId) dispatchHostMessage({ type: 'workspace:result', ok: false,
+      if (selection === this.workspaceSelectionId) this.publish({ type: 'workspace:result', ok: false,
         message: translate(this.state.locale ?? resolveBrowserLocale(), 'wbWorkspaceSelectionChanged') });
     };
     try {
-      const response = await fetch('/api/message', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'selectWorkspace', workspace: candidate.trim(), locale: navigator.language }) });
+      const response = await this.request({ command: 'selectWorkspace', workspace: candidate.trim(), locale: navigator.language });
       const payload = await response.json() as HostMessage;
       if (!currentSelection()) { settleSuperseded(); return; }
       if (!response.ok || payload.type === 'error'
@@ -263,7 +318,7 @@ class BrowserApi implements VsCodeApi {
       }
       if (payload.workspace === current && this.state.view?.type !== 'workspace') {
         this.setActiveWorkspace(payload.workspace);
-        dispatchHostMessage({ type: 'workspace:result', ok: true, workspace: payload.workspace });
+        this.publish({ type: 'workspace:result', ok: true, workspace: payload.workspace });
         return;
       }
       this.requestGeneration += 1;
@@ -272,17 +327,17 @@ class BrowserApi implements VsCodeApi {
       this.state.selectedSessionId = undefined; this.state.selectedSourceDb = undefined;
       this.history = []; this.persistHistory();
       this.setActiveWorkspace(payload.workspace);
-      dispatchHostMessage(payload);
-      dispatchHostMessage({ type: 'workspace:result', ok: true, workspace: payload.workspace });
+      this.publish(payload);
+      this.publish({ type: 'workspace:result', ok: true, workspace: payload.workspace });
     } catch (error) {
-      if (currentSelection()) dispatchHostMessage({ type: 'workspace:result', ok: false, message: error instanceof Error ? error.message : 'Workspace selection failed.' });
+      if (currentSelection()) this.publish({ type: 'workspace:result', ok: false, message: error instanceof Error ? error.message : 'Workspace selection failed.' });
       else settleSuperseded();
     } finally {
       if (selection === this.workspaceSelectionId) { this.workspaceSelecting = false; this.scheduleRevisionCheck(); }
     }
   }
 
-  private navigate(message: Exclude<WebviewCommand, { command: 'back' | 'chooseWorkspace' }>, view?: WebviewView): void {
+  private navigate(message: NavigationCommand, view?: WebviewView): void {
     const generation = this.requestGeneration;
     this.pendingNavigation = true;
     this.clearRevisionTimer();
@@ -303,7 +358,13 @@ class BrowserApi implements VsCodeApi {
     const next = isRecord(state) ? state as PersistedState : {};
     const status = next.view?.type === 'overview' || next.view?.type === 'debug' ? next.view.status : undefined;
     this.state = { ...this.state, ...next, selectedSessionId: status?.session_id ?? this.state.selectedSessionId, selectedSourceDb: status?.source_db ?? this.state.selectedSourceDb };
-    writeStorage(sessionStorage, SESSION_STATE_KEY, this.state);
+    if (this.bridge) {
+      const nativeState = mergePersistedAppState(this.state, {}, false);
+      if (!sameMindmapValue(this.savedNativeState, nativeState)) {
+        this.savedNativeState = nativeState;
+        this.bridge.native.setState(nativeState);
+      }
+    } else writeStorage(sessionStorage, SESSION_STATE_KEY, this.state);
     this.scheduleRevisionCheck();
   }
 
@@ -314,17 +375,46 @@ class BrowserApi implements VsCodeApi {
     this.pollingActive = active;
     if (active) {
       document.addEventListener('visibilitychange', this.onVisibilityChange);
-      window.addEventListener('hashchange', this.onHashChange);
+      if (!this.bridge) window.addEventListener('hashchange', this.onHashChange);
       this.scheduleRevisionCheck();
       return;
     }
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
-    window.removeEventListener('hashchange', this.onHashChange);
+    if (!this.bridge) window.removeEventListener('hashchange', this.onHashChange);
     this.clearRevisionTimer();
   }
 
+  private request(message: BrowserApiCommand & { locale?: string }): Promise<Pick<Response, 'ok' | 'status' | 'json'>> {
+    if (this.bridge) return this.bridge.request(message);
+    return fetch('/api/message', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(message)
+    });
+  }
+
+  private recentWorkspace(): string {
+    return this.bridge ? '' : readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
+  }
+
+  private currentWorkspace(): string {
+    return this.activeWorkspace ?? (this.bridge ? '' : this.state.workspace ?? this.recentWorkspace());
+  }
+
+  private publish(message: HostMessage): void {
+    if (!this.bridge) {
+      window.dispatchEvent(new MessageEvent('message', { data: message }));
+      return;
+    }
+    if ((message.type === 'hydrate' || message.type === 'view:update') && message.view.type === 'workspace') {
+      // The native error page routes folder selection through VS Code's workspace picker.
+      message = { ...message, workspace: '', view: { type: 'error', message: message.view.message ?? '' } };
+    } else if (message.type === 'error' && !message.discardResult && !this.activeWorkspace) {
+      message = { ...message, type: 'view:update', workspace: '', view: { type: 'error', message: message.message } };
+    }
+    this.bridge.publish(message);
+  }
+
   private async send(
-    message: Exclude<WebviewCommand, { command: 'back' | 'chooseWorkspace' }>,
+    message: NavigationCommand,
     options: { background?: boolean; view?: WebviewView } = {}
   ): Promise<boolean> {
     const selectionEpoch = this.workspaceSelectionId;
@@ -332,7 +422,7 @@ class BrowserApi implements VsCodeApi {
     const generation = this.requestGeneration;
     const workspaceGeneration = this.workspaceGeneration;
     const activeWorkspace = this.activeWorkspace;
-    const recentWorkspace = readStorage<string>(localStorage, WORKSPACE_KEY) ?? '';
+    const recentWorkspace = this.recentWorkspace();
     const link = message.command === 'ready' ? this.startupLink : undefined;
     const requestWorkspace = message.command === 'discardRun'
       ? message.workspace
@@ -354,11 +444,7 @@ class BrowserApi implements VsCodeApi {
     };
 
     try {
-      const response = await fetch('/api/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request)
-      });
+      const response = await this.request(request);
       const payload = await response.json() as HostMessage;
       if (options.background && selectionEpoch !== this.workspaceSelectionId) return true;
       if (generation !== this.requestGeneration || workspaceGeneration !== this.workspaceGeneration || activeWorkspace !== this.activeWorkspace) {
@@ -368,7 +454,7 @@ class BrowserApi implements VsCodeApi {
           const discardResult = 'discardResult' in payload && payload.discardResult
             ? payload.discardResult
             : { runId: message.runId, ok: false, message: 'RUN discard response was unavailable.' };
-          dispatchHostMessage({ type: 'error', message: discardResult.message ?? '',
+          this.publish({ type: 'error', message: discardResult.message ?? '',
             locale: this.state.locale ?? resolveBrowserLocale(), layout: this.state.layout ?? 'auto', discardResult });
           this.autoRefreshPending = true;
         }
@@ -406,7 +492,7 @@ class BrowserApi implements VsCodeApi {
         await this.send({ command: 'selectWorkspace', workspace: recentWorkspace });
         return true;
       }
-      if (!link && (message.command === 'ready' || message.command === 'selectWorkspace')
+      if (!this.bridge && !link && (message.command === 'ready' || message.command === 'selectWorkspace')
         && (isMemoryView(previous) || isExactView(previous) || overviewRunId(previous))
         && (payload.type === 'hydrate' || payload.type === 'view:update')
         && (!isMemoryView(previous) || payload.capabilities?.associativeMemory === true)
@@ -419,7 +505,7 @@ class BrowserApi implements VsCodeApi {
         this.history.push(previous as WebviewView);
         this.persistHistory();
       }
-      dispatchHostMessage(payload);
+      this.publish(payload);
       return true;
     } catch (error) {
       if (workspaceGeneration !== this.workspaceGeneration || activeWorkspace !== this.activeWorkspace
@@ -431,7 +517,7 @@ class BrowserApi implements VsCodeApi {
           this.discardError(message.runId, error instanceof Error ? error.message : 'The local viewer request failed.');
           return false;
         }
-        dispatchHostMessage({
+        this.publish({
           type: 'error',
           message: error instanceof Error ? error.message : 'The local viewer request failed.',
           locale: this.state.locale ?? resolveBrowserLocale(),
@@ -443,7 +529,7 @@ class BrowserApi implements VsCodeApi {
   }
 
   private discardError(runId: string, message: string): void {
-    dispatchHostMessage({ type: 'error', message, locale: this.state.locale ?? resolveBrowserLocale(),
+    this.publish({ type: 'error', message, locale: this.state.locale ?? resolveBrowserLocale(),
       layout: this.state.layout ?? 'auto', discardResult: { runId, ok: false, message } });
   }
 
@@ -512,11 +598,7 @@ class BrowserApi implements VsCodeApi {
     const workspaceGeneration = this.workspaceGeneration;
     const request = this.revisionRequest();
     try {
-      const response = await fetch('/api/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request)
-      });
+      const response = await this.request(request);
       const payload: unknown = await response.json();
       if (this.workspaceSelecting || selectionEpoch !== this.workspaceSelectionId) return;
       if (generation !== this.requestGeneration || workspaceGeneration !== this.workspaceGeneration || request.workspace !== this.revisionRequest().workspace) {
@@ -536,7 +618,7 @@ class BrowserApi implements VsCodeApi {
       this.resetBackgroundBackoff();
     } catch {
       // Polling is opportunistic: leave the current screen intact and retry later.
-      this.recordBackgroundFailure();
+      if (workspaceGeneration === this.workspaceGeneration) this.recordBackgroundFailure();
     } finally {
       this.revisionInFlight = false;
       this.scheduleRevisionCheck();
@@ -546,7 +628,7 @@ class BrowserApi implements VsCodeApi {
   private revisionRequest(): Extract<BrowserApiCommand, { command: 'revision' }> {
     return {
       command: 'revision',
-      workspace: this.activeWorkspace ?? readStorage<string>(localStorage, WORKSPACE_KEY) ?? ''
+      workspace: this.activeWorkspace ?? this.recentWorkspace()
     };
   }
 
@@ -575,7 +657,7 @@ class BrowserApi implements VsCodeApi {
     this.activeWorkspace = undefined;
     this.resetRevisionBaseline();
     this.autoRefreshPending = false;
-    dispatchHostMessage({
+    this.publish({
       type: 'view:update',
       view: {
         type: 'workspace',
@@ -594,6 +676,7 @@ class BrowserApi implements VsCodeApi {
       && !this.workspaceSelecting
       && !this.settingsPending
       && !this.pendingNavigation
+      && (!this.bridge || !!this.activeWorkspace)
       && document.visibilityState === 'visible'
       && !!this.state.view
       && this.state.view.type !== 'workspace';
@@ -646,7 +729,7 @@ class BrowserApi implements VsCodeApi {
       this.navigate({ command: 'refresh' }, previous);
       return;
     }
-    dispatchHostMessage({
+    this.publish({
       type: 'view:update',
       view: previous,
       locale: this.state.locale ?? resolveBrowserLocale(),
@@ -662,7 +745,7 @@ class BrowserApi implements VsCodeApi {
       this.history.push(this.state.view);
       this.persistHistory();
     }
-    dispatchHostMessage({
+    this.publish({
       type: 'view:update',
       view: {
         type: 'workspace',
@@ -681,16 +764,16 @@ class BrowserApi implements VsCodeApi {
     if (message.locale === 'en' || message.locale === 'ko') this.state.locale = message.locale;
     if (message.layout) this.state.layout = message.layout;
     if (message.preferences) this.state.preferences = message.preferences;
-    writeStorage(sessionStorage, SESSION_STATE_KEY, this.state);
+    if (!this.bridge) writeStorage(sessionStorage, SESSION_STATE_KEY, this.state);
   }
 
   private persistHistory(): void {
-    writeStorage(sessionStorage, SESSION_HISTORY_KEY, this.history.slice(-20));
+    if (!this.bridge) writeStorage(sessionStorage, SESSION_HISTORY_KEY, this.history.slice(-20));
   }
 }
 
 function refreshContext(
-  message: Exclude<WebviewCommand, { command: 'back' | 'chooseWorkspace' }>,
+  message: NavigationCommand,
   view: WebviewView | undefined
 ): Record<string, unknown> {
   if (message.command !== 'refresh' || !view) {
@@ -739,7 +822,7 @@ function isExactView(view: WebviewView | undefined): boolean {
 }
 
 function shouldPushHistory(
-  command: Exclude<WebviewCommand, { command: 'back' | 'chooseWorkspace' }>,
+  command: NavigationCommand,
   previous: WebviewView | undefined,
   response: HostMessage
 ): boolean {
@@ -753,10 +836,6 @@ function shouldPushHistory(
 
 function resolveBrowserLocale(): 'en' | 'ko' {
   return navigator.language.toLowerCase().startsWith('ko') ? 'ko' : 'en';
-}
-
-function dispatchHostMessage(message: HostMessage): void {
-  window.dispatchEvent(new MessageEvent('message', { data: message }));
 }
 
 function readStorage<T>(storage: Storage, key: string): T | undefined {

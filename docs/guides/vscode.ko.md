@@ -12,6 +12,8 @@ VS Code **1.90+**, `.tapl/tapl-{UUID}.db`가 있는 초기화된 워크스페이
 
 Marketplace에서 `paragonnov.tapl-workflow-viewer`를 설치하거나 [GitHub Releases](https://github.com/qkdxorjs1002/tapl/releases)의 `viewer-*` 릴리스에서 `.vsix`를 받아 **Extensions: Install from VSIX…**를 실행합니다. 초기화한 폴더를 열고 활동 표시줄에서 **TAPL**을 선택한 뒤 **TAPL Workflow: Open TAPL Dashboard**를 실행하세요.
 
+확장 **2.26.0**과 `taplctl` **2.27.0**부터 VS Code는 선택된 `tapl-mcp`를 제공하는 `taplctl` 설치본에서 대시보드를 불러옵니다. `taplctl`을 업데이트한 뒤 대시보드를 닫았다 열면 새 Viewer가 적용됩니다. ctl이 구버전이거나 프로토콜을 지원하지 않거나 Viewer 자산이 누락된 경우에는 확장에 포함된 호환 Viewer를 사용합니다.
+
 대시보드는 VS Code에서 연 워크스페이스를 사용하며 워크스페이스 변경 버튼이나 폴더 선택 모달을 표시하지 않습니다. Viewer 내부의 폴더 선택은 [웹 Viewer](viewer.ko.md#viewer-탐색)에서만 제공합니다.
 
 기본 검색 경로는 `PATH`, `/opt/homebrew/bin/tapl-mcp`, `/usr/local/bin/tapl-mcp`이며 Windows에서는 `tapl-mcp.exe`를 사용합니다. 필요하면 다음처럼 지정합니다.
@@ -60,7 +62,7 @@ TAPL은 VS Code의 실시간 색상 팔레트를 계속 따릅니다. 밝기가 
 
 ## 공유 Viewer와 기능 조건
 
-브라우저와 확장은 React 화면, CSS, `src/viewer/types.ts`를 공유합니다. VS Code는 워크스페이스·MCP 어댑터를, 브라우저는 HTTP와 로컬 폴더 선택을 제공합니다. 둘 다 메모리 목록·검색·상세·원본 이동을 지원합니다. 메모리 수정과 삭제는 Agent에게 명시적으로 요청해야 합니다.
+브라우저와 확장은 React 화면, CSS, 프로토콜 타입을 공유합니다. VS Code는 현재 워크스페이스, 편집기 테마, 활동 표시줄과 명령 팔레트를 제공합니다. 브라우저는 HTTP와 로컬 폴더 선택을 제공합니다. 둘 다 메모리 목록·검색·상세·원본 이동을 지원합니다. 메모리 수정과 삭제는 Agent에게 명시적으로 요청해야 합니다.
 
 확장은 연결할 때 서버가 제공하는 도구를 확인합니다. `tapl_get_run`을 지원하는 이전 서버에서도 정확한 RUN을 열 수 있습니다. **관리 → RUN 폐기**는 폐기 가능한 로컬 RUN을 선택했고 서버가 `tapl_viewer_discard_run`을 제공할 때 사용할 수 있습니다. 대화상자에서 전체 RUN ID를 정확히 입력하고 명시적으로 확인해야 합니다. [RUN 폐기](viewer.ko.md#run-폐기)를 참고하세요.
 

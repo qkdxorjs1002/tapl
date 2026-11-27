@@ -86,7 +86,11 @@ def test_viewer_release_uses_the_last_published_vsix_in_each_channel(tmp_path: P
     retry = plan(repo, tmp_path, "viewer-2.26.0", releases, viewer)
     assert retry["publish"] == retry["existing_asset"] == "true"
 
-    ctl = commit(repo, {"tapl/taplctl/viewer.py": "# Another Python server edit\n"})
+    ctl = commit(repo, {
+        "tapl/taplctl/viewer.py": "# Another Python server edit\n",
+        "vscode-extension/src/webview/App.tsx": "// Another shared UI edit\n",
+        "vscode-extension/vite.config.ts": "// Another shared UI build edit\n",
+    })
     git(repo, "tag", "viewer-2.26.1")
     unchanged = plan(repo, tmp_path, "viewer-2.26.1", releases, ctl)
     assert unchanged["baseline"] == "viewer-2.26.0"

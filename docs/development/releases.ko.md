@@ -13,9 +13,11 @@ TAPL은 `taplctl`과 VS Code Viewer 확장을 별도로 배포합니다. CLI에�
 
 각 제품의 기존 배포 버전을 기준으로 다음 버전을 정합니다. ctl은 기존 숫자 태그로 설치 URL을 유지합니다. Python 패키지 메타데이터에는 PEP 440 버전을, 포함된 브라우저 Viewer에는 원래 ctl 태그를 주입합니다. Viewer 태그는 `viewer-` 뒤의 SemVer를 확장 manifest와 VSIX 파일명에 사용합니다. 두 채널은 `alphaN`, `betaN`, `rcN` 접미사를 지원합니다. 앞에 붙이는 `v`와 빌드 메타데이터는 생략합니다. [태그 파서](../../.github/scripts/release_version.py)
 
-런타임, 훅, CLI, 설치기 또는 브라우저 Viewer의 Python 서버만 변경되면 ctl 태그를 사용합니다. 공용 Viewer UI와 VS Code 확장 코드를 포함한 VSIX 입력이 바뀌면 Viewer 태그를 사용합니다. 공용 변경은 두 패키지에 별도 태그로 배포할 수 있습니다. 확장 게시 전 연결 대상 ctl 버전과의 호환성을 확인하세요.
+런타임, 훅, CLI, 설치기, Viewer 서버, 공용 Viewer UI가 바뀌면 ctl 태그를 사용합니다. VS Code는 설치된 ctl의 UI를 불러옵니다. VS Code 호스트, 확장 manifest 또는 확장 패키지 자원이 바뀌면 Viewer 태그를 사용합니다. 두 채널 모두 변경되면 이전 ctl과의 호환성을 확인하고 ctl을 먼저 게시한 뒤 확장을 별도로 게시합니다.
 
-Viewer 워크플로는 같은 안정판 또는 프리릴리스 채널의 직전 게시본과 배포 입력을 비교합니다. 분리 전환기에는 VSIX가 포함된 기존 숫자 태그 안정판을 기준으로 삼습니다. 기준 게시본이 없으면 빈 트리와 비교합니다. 테스트, 생성된 번들, manifest의 버전 번호만 바뀐 경우에는 Viewer를 새로 게시하지 않습니다. GitHub Latest는 ctl 안정판 설치기에 사용합니다. [Viewer 릴리스 판정 코드](../../.github/scripts/viewer_release.py)
+Viewer 워크플로는 같은 안정판 또는 프리릴리스 채널의 직전 게시본과 확장 배포 입력을 비교합니다. 분리 전환기에는 VSIX가 포함된 기존 숫자 태그 안정판을 기준으로 삼습니다. 기준 게시본이 없으면 빈 트리와 비교합니다. 공용 UI, 테스트, 생성된 번들, manifest의 버전 번호만 바뀐 경우에는 확장을 새로 게시하지 않습니다. GitHub Latest는 ctl 안정판 설치기에 사용합니다. [Viewer 릴리스 판정 코드](../../.github/scripts/viewer_release.py)
+
+VSIX는 이전 ctl과의 호환을 위해 UI 사본을 포함합니다. VS Code 호스트를 변경하면 같은 VSIX로 설치형 Viewer를 지원하는 ctl과 호환 Viewer를 사용하는 이전 ctl을 각각 검증합니다. 공용 UI 변경은 VSIX를 설치한 채 ctl 빌드를 바꾸고 대시보드를 다시 열어 로드된 버전, 워크스페이스, 호스트 테마를 확인합니다. [Viewer stdio 계약](../reference/mcp.ko.md#viewer-stdio)
 
 게시 승인을 받은 경우 검토한 커밋에 해당 채널의 태그를 붙입니다. 아래 버전은 예시입니다.
 

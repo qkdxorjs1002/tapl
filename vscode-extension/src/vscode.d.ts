@@ -4,7 +4,9 @@ declare module 'vscode' {
     path: string;
     fsPath: string;
     static parse(value: string): Uri;
+    static file(path: string): Uri;
     static joinPath(base: Uri, ...pathSegments: string[]): Uri;
+    with(change: { path: string }): Uri;
   }
 
   export class ThemeIcon {
@@ -88,6 +90,7 @@ declare module 'vscode' {
   export interface Webview {
     html: string;
     cspSource: string;
+    options: WebviewOptions;
     asWebviewUri(localResource: Uri): Uri;
     onDidReceiveMessage(listener: (message: unknown) => unknown): Disposable;
     postMessage(message: unknown): Thenable<boolean>;
@@ -201,8 +204,13 @@ declare module 'path' {
 }
 
 declare module 'node:path' {
+  export function basename(path: string): string;
+  export function dirname(path: string): string;
   export function isAbsolute(path: string): boolean;
   export function join(...paths: string[]): string;
+}
+declare module 'node:crypto' {
+  export function randomBytes(size: number): { toString(encoding: 'hex'): string };
 }
 
 declare module 'node:os' {
@@ -215,6 +223,8 @@ declare module 'node:fs' {
 }
 
 declare module 'node:fs/promises' {
+  export function lstat(path: string): Promise<{ isDirectory(): boolean; isFile(): boolean }>;
+  export function realpath(path: string): Promise<string>;
   export function readdir(path: string): Promise<string[]>;
   export function stat(path: string, options: { bigint: true }): Promise<{
     ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint; isFile(): boolean;

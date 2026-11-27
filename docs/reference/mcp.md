@@ -274,6 +274,8 @@ The VS Code extension starts a separate local `tapl-mcp` process with `TAPL_MCP_
 
 | Tool | Required arguments | Options and behavior |
 | --- | --- | --- |
+| `tapl_viewer_get_bundle` | None | Returns `protocol`, `ctl_version`, and the absolute local `asset_root` of the installed Viewer. The extension checks the advertised protocol and asset files before loading them. |
+| `tapl_viewer_dispatch` | `protocol`, `message` | Accepts protocol `1` and a Viewer command object. The current MCP process fixes the workspace. Browser-only folder commands are disabled. Settings and RUN discard retain their confirmation requirements. |
 | `tapl_viewer_get_status` | None | Optional `run_id` and `source_db`. Omit `run_id` for the workspace overview. The Viewer passes the exact RUN ID and source filename when selecting a RUN. Set `full=true` to include record bodies (default `false`). Recent-event options are `include_events` (default `false`) and `events_limit` (default 12, range 0–100). |
 | `tapl_viewer_discard_run` | `source_db`, `run_id`, `target_session_id`, `confirmed`, `confirmation_run_id` | Requires the exact local source filename, active RUN ID and stored owner. A legacy owner can be `""`. Pass literal `confirmed=true` and the exact full RUN ID in `confirmation_run_id`. |
 

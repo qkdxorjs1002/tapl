@@ -369,3 +369,24 @@ export type WebviewCommand = (
 
 /** Requests supported by the standalone browser API. */
 export type BrowserApiCommand = Exclude<WebviewCommand, { command: 'saveTourHistory' }> | { command: 'revision'; workspace?: string };
+
+export const INSTALLED_VIEWER_PROTOCOL = 1;
+
+export interface InstalledViewerRequest {
+  command: 'viewerRequest';
+  protocol: typeof INSTALLED_VIEWER_PROTOCOL;
+  channel: string;
+  requestId: string;
+  message: BrowserApiCommand;
+}
+
+export type InstalledViewerResponse = { type: 'viewer:response'; channel: string; requestId: string } & (
+  { payload: HostMessage | RevisionMessage; error?: never } | { error: string; payload?: never }
+);
+
+export interface InstalledViewerNavigation {
+  type: 'viewer:navigate';
+  channel: string;
+  message: Extract<WebviewCommand, { command: 'ready' | 'refresh' | 'openArchive' | 'search' }>;
+  reset?: true;
+}
