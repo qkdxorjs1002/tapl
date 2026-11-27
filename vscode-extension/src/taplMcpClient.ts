@@ -14,6 +14,10 @@ export interface TaplMcpClientLike {
   onclose?: () => void;
   onerror?: (error: Error) => void;
   connect(transport: TaplMcpTransportLike, options?: { timeout?: number }): Promise<void>;
+  listTools?(
+    params?: { cursor?: string },
+    options?: { timeout?: number }
+  ): Promise<{ tools: Array<{ name: string }>; nextCursor?: string }>;
   callTool(
     params: { name: string; arguments?: Record<string, unknown> },
     resultSchema?: undefined,
@@ -44,6 +48,7 @@ interface Connection {
   client: TaplMcpClientLike;
   command: string;
   closed: boolean;
+  tools: ReadonlySet<string>;
 }
 
 export class TaplMcpToolError extends Error {
@@ -63,12 +68,19 @@ export class WorkspaceTaplMcpClient {
     private readonly factory: TaplMcpConnectionFactory = defaultConnectionFactory
   ) {}
 
+  async supportsTool(name: string): Promise<boolean> {
+    return (await this.getConnection()).tools.has(name);
+  }
+
   async callTool(name: string, args: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     let lastError: unknown;
-    // A lost save acknowledgement must not replay a configuration mutation.
-    const attempts = name === 'tapl_save_settings' ? 1 : 2;
+    // A lost acknowledgement can follow a successful mutation.
+    const attempts = name === 'tapl_save_settings' || name === 'tapl_viewer_discard_run' ? 1 : 2;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const connection = await this.getConnection();
+      if ((name === 'tapl_viewer_get_status' || name === 'tapl_viewer_discard_run') && !connection.tools.has(name)) {
+        throw new TaplMcpToolError(`This TAPL MCP server does not support ${name}.`);
+      }
       try {
         const result = await connection.client.callTool(
           { name, arguments: args },
@@ -143,7 +155,7 @@ export class WorkspaceTaplMcpClient {
     const failures: string[] = [];
     for (const command of this.workspace.commands) {
       const client = this.factory.createClient();
-      const connection: Connection = { client, command, closed: false };
+      const connection: Connection = { client, command, closed: false, tools: new Set() };
       client.onclose = () => {
         connection.closed = true;
         if (this.connection === connection) {
@@ -153,6 +165,9 @@ export class WorkspaceTaplMcpClient {
       try {
         const transport = this.factory.createTransport(command, this.workspace.cwd);
         await client.connect(transport, { timeout: REQUEST_TIMEOUT_MS });
+        if (!connection.closed) {
+          connection.tools = await listToolNames(client);
+        }
         if (!connection.closed) {
           return connection;
         }
@@ -190,10 +205,11 @@ export class TaplMcpClientPool {
     name: string,
     args: Record<string, unknown> = {}
   ): Promise<Record<string, unknown>> {
-    if (this.disposed) {
-      throw new Error('TAPL MCP client pool has been disposed.');
-    }
     return this.sessionFor(workspace).callTool(name, args);
+  }
+
+  async supportsTool(workspace: TaplMcpWorkspace, name: string): Promise<boolean> {
+    return this.sessionFor(workspace).supportsTool(name);
   }
 
   invalidate(workspaceKey?: string): void {
@@ -220,6 +236,9 @@ export class TaplMcpClientPool {
   }
 
   private sessionFor(workspace: TaplMcpWorkspace): WorkspaceTaplMcpClient {
+    if (this.disposed) {
+      throw new Error('TAPL MCP client pool has been disposed.');
+    }
     const fingerprint = JSON.stringify([workspace.cwd, ...workspace.commands]);
     const existing = this.sessions.get(workspace.key);
     if (existing?.fingerprint === fingerprint) {
@@ -255,8 +274,27 @@ export function taplMcpEnvironment(): Record<string, string> {
   );
   return {
     ...inherited,
+    TAPL_CLIENT: 'codex',
+    TAPL_MCP_MODE: 'viewer',
     PATH: [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin'].filter(Boolean).join(delimiter)
   };
+}
+
+async function listToolNames(client: TaplMcpClientLike): Promise<ReadonlySet<string>> {
+  const names = new Set<string>();
+  if (!client.listTools) return names;
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await client.listTools(cursor === undefined ? {} : { cursor }, { timeout: REQUEST_TIMEOUT_MS });
+    for (const tool of page.tools) names.add(tool.name);
+    cursor = page.nextCursor;
+    if (cursor !== undefined) {
+      if (seenCursors.has(cursor)) throw new Error('TAPL MCP repeated a tool list cursor.');
+      seenCursors.add(cursor);
+    }
+  } while (cursor !== undefined);
+  return names;
 }
 
 function uniqueStrings(values: Array<string | undefined>): string[] {

@@ -343,9 +343,10 @@ class BrowserApi implements VsCodeApi {
         : this.activeWorkspace ?? recentWorkspace;
     const request = {
       ...(this.state.selectedSourceDb && message.command !== 'openRun' && message.command !== 'records'
+        && message.command !== 'selectRun' && message.command !== 'discardRun'
         ? { source_db: this.state.selectedSourceDb } : {}),
-      ...message,
       ...(this.state.selectedSessionId !== undefined ? { sessionId: this.state.selectedSessionId } : {}),
+      ...message,
       ...(link?.runId ? { runId: link.runId, source_db: link.source_db } : {}),
       workspace: requestWorkspace,
       locale: navigator.language,
@@ -406,7 +407,7 @@ class BrowserApi implements VsCodeApi {
         return true;
       }
       if (!link && (message.command === 'ready' || message.command === 'selectWorkspace')
-        && (isMemoryView(previous) || isExactView(previous))
+        && (isMemoryView(previous) || isExactView(previous) || overviewRunId(previous))
         && (payload.type === 'hydrate' || payload.type === 'view:update')
         && (!isMemoryView(previous) || payload.capabilities?.associativeMemory === true)
         && payload.workspace === recentWorkspace
@@ -698,6 +699,10 @@ function refreshContext(
   if (view.type === 'run') {
     return { viewType: view.type, runId: view.snapshot.run.id, source_db: view.snapshot.run.source_db };
   }
+  if (view.type === 'overview' || view.type === 'debug') {
+    const runId = overviewRunId(view);
+    return { viewType: view.type, runId, source_db: runId ? view.status.active_run?.source_db ?? view.status.source_db : undefined };
+  }
   if (view.type === 'records') {
     return { viewType: view.type, query: view.query, scope: view.scope, runId: view.runId,
       source_db: view.source_db, offset: view.offset, limit: view.limit };
@@ -722,6 +727,10 @@ function refreshContext(
 
 function isMemoryView(view: WebviewView | undefined): boolean {
   return view?.type === 'memories' || view?.type === 'memory' || view?.type === 'memorySource';
+}
+
+function overviewRunId(view: WebviewView | undefined): string | undefined {
+  return view?.type === 'overview' || view?.type === 'debug' ? view.status.active_run?.id : undefined;
 }
 
 function isExactView(view: WebviewView | undefined): boolean {

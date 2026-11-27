@@ -105,6 +105,36 @@ test('revision polling refreshes exact selectors and stale pages cannot overwrit
   h.api.setPollingActive(false);
 });
 
+test('browser active selections and polls use exact RUN keys across mixed hosts', async () => {
+  const h = harness();
+  const claudeRun = { id: 'claude-run', session_id: 'claude-code:owner', source_db: 'tapl-shared.db', status: 'active' };
+  const mixed = { ...overview, status: { ...overview.status, active_run: claudeRun, session_id: claudeRun.session_id,
+    active_runs: [overview.status.active_run, claudeRun] } };
+  h.api.postMessage({ command: 'ready' }); await h.resolve(reply(overview));
+  h.api.postMessage({ command: 'refresh' });
+  const stale = h.pending.shift();
+  assert.equal(h.calls.at(-1).request.runId, 'active');
+  assert.equal(h.calls.at(-1).request.source_db, 'tapl-local.db');
+  h.api.postMessage({ command: 'selectRun', runId: claudeRun.id, sessionId: claudeRun.session_id, source_db: claudeRun.source_db });
+  assert.equal(h.calls.at(-1).request.runId, claudeRun.id);
+  assert.equal(h.calls.at(-1).request.source_db, claudeRun.source_db);
+  assert.equal(h.calls.at(-1).request.sessionId, claudeRun.session_id);
+  await h.resolve(reply(mixed));
+  stale.resolve({ ok: true, async json() { return reply(overview); } }); await tick(); await tick();
+  assert.equal(h.api.getState().view.status.active_run.id, claudeRun.id);
+  h.api.postMessage({ command: 'refresh' });
+  assert.equal(h.calls.at(-1).request.viewType, 'overview');
+  assert.equal(h.calls.at(-1).request.runId, claudeRun.id);
+  assert.equal(h.calls.at(-1).request.source_db, claudeRun.source_db);
+  await h.resolve(reply(mixed));
+
+  h.api.postMessage({ command: 'selectRun', sessionId: '' });
+  assert.equal(h.calls.at(-1).request.runId, undefined);
+  assert.equal(h.calls.at(-1).request.source_db, undefined);
+  assert.equal(h.calls.at(-1).request.sessionId, '');
+  await h.resolve(reply(overview));
+});
+
 test('workspace modal validation preserves the selected source, exact view and history until success', async () => {
   const h = harness({ workspace: '/work', selectedSessionId: 'active-owner', selectedSourceDb: 'tapl-local.db', view: records, locale: 'en', layout: 'auto' });
   const before = JSON.stringify(h.api.getState());

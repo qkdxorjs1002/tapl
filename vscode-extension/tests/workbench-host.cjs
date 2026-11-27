@@ -30,14 +30,16 @@ test('exact RUN and library host routes keep source/page/context without rebindi
     async dispose() {}
     async callTool(workspace, name, args) {
       calls.push({ root: workspace.cwd, name, args: { ...args } });
-      if (name === 'tapl_get_status') return { active_run: { id: 'active', session_id: args.session_id ?? 'owner' },
-        session_id: args.session_id ?? 'owner', active_runs: [{ id: 'active', session_id: 'owner' }], plans: [], tasks: [], findings: [],
+      if (name === 'tapl_get_status') return { active_run: { id: 'active', session_id: 'owner', source_db: 'tapl-local.db' },
+        session_id: 'owner', active_runs: [{ id: 'active', session_id: 'owner', source_db: 'tapl-local.db' }], plans: [], tasks: [], findings: [],
         viewer_capabilities: { associativeMemory: true, discardRun: true } };
       if (name === 'tapl_list_archives') return { archives: [] };
       if (name === 'tapl_get_run') {
         if (oldHost) throw new Error('Unknown tool tapl_get_run');
         if (args.run_id === 'slow') await new Promise(resolve => { release = resolve; });
-        return snapshot(args.run_id, args.source_db);
+        const detail = snapshot(args.run_id, args.source_db);
+        if (args.run_id === 'active') Object.assign(detail.run, { session_id: 'owner', status: 'active', writable: true });
+        return detail;
       }
       if (name === 'tapl_list_records') return { ...args, total: 65, records: [{ id: revision, run_id: 'past', source_db: args.source_db }],
         runs: [{ id: 'past', source_db: args.source_db, record_count: 65 }] };
@@ -77,7 +79,7 @@ test('exact RUN and library host routes keep source/page/context without rebindi
   vscode.workspace.workspaceFolders = savedFolders;
   assert.deepEqual(executed, commandsBeforeTheme, 'cached theme messages cannot change VS Code or execute arbitrary commands');
   assert.equal(calls.length, beforeTheme, 'local appearance needs no host command or workflow write');
-  await send({ command: 'selectRun', sessionId: 'owner', source_db: 'tapl-local.db' });
+  await send({ command: 'selectRun', runId: 'active', sessionId: 'owner', source_db: 'tapl-local.db' });
   const exact = await send({ command: 'openRun', runId: 'past', source_db: 'tapl-peer.db' });
   assert.equal(exact.snapshot.run.id, 'past');
   assert.equal(exact.snapshot.readonly, true);

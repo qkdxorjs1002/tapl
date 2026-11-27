@@ -11,8 +11,9 @@ const output = buildSync({
   stdin: { contents: "export { RunTabs } from './src/webview/App';", resolveDir: path.resolve(__dirname, '..') },
   bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react-dom']
 }).outputFiles[0].text;
-const runA = { id: 'run-a', session_id: 'owner-a', request_summary: 'Selected RUN' };
-const runB = { id: 'run-b', session_id: 'owner-b', request_summary: 'Unselected RUN' };
+const localSource = 'tapl-local.db';
+const runA = { id: 'run-a', session_id: 'owner-a', source_db: localSource, request_summary: 'Selected RUN' };
+const runB = { id: 'run-b', session_id: 'owner-b', source_db: localSource, request_summary: 'Unselected RUN' };
 function load(react = React) {
   const compiled = new Module(filename, module);
   compiled.filename = filename; compiled.paths = module.paths;
@@ -25,7 +26,7 @@ function load(react = React) {
 function harness(overrides = {}) {
   const slots = []; let cursor = 0; let dirty = false; let effects = []; let tree;
   const commands = [];
-  const props = { runs: [runA, runB], selectedId: 'run-a', workspace: '/workspace/a', discardSupported: true, send: (value) => commands.push(value), ...overrides };
+  const props = { runs: [runA, runB], selectedId: 'run-a', selectedSourceDb: localSource, workspace: '/workspace/a', discardSupported: true, send: (value) => commands.push(value), ...overrides };
   class Element {
     isConnected = true; open = false;
     focus() { global.document.activeElement = this; }
@@ -65,7 +66,7 @@ function harness(overrides = {}) {
     } while (dirty);
   }
   const find = (predicate) => nodes().find(predicate);
-  const close = (id = 'run-b', sourceDb) => nodes(find((node) => node.type === 'div' && node.key === `${sourceDb}:${id}`)).find((node) => node.props?.className === 'tapl-run-tab-close');
+  const close = (id = 'run-b', sourceDb = localSource) => nodes(find((node) => node.type === 'div' && node.key === `${sourceDb}:${id}`)).find((node) => node.props?.className === 'tapl-run-tab-close');
   render();
   return { render, find, close, commands, opener, props, nodes, cleanup() { for (const slot of slots) slot?.cleanup?.(); delete global.document; delete global.HTMLElement; } };
 }
@@ -88,6 +89,7 @@ test('close icons are capability-gated siblings with accessible labels and toolt
   assert.doesNotMatch(renderToStaticMarkup(React.createElement(Component, { ...props, workspace: undefined })), /tapl-run-tab-close/);
   assert.doesNotMatch(renderToStaticMarkup(React.createElement(Component, { ...props, runs: [{ ...runA, id: undefined }] })), /tapl-run-tab-close/);
   assert.doesNotMatch(renderToStaticMarkup(React.createElement(Component, { ...props, runs: [{ ...runA, session_id: undefined }] })), /tapl-run-tab-close/);
+  assert.doesNotMatch(renderToStaticMarkup(React.createElement(Component, { ...props, runs: [{ ...runA, source_db: undefined }] })), /tapl-run-tab-close/);
 });
 
 test('opening and cancelling or pressing Escape never sends a discard', () => withHarness({}, (h) => {
@@ -127,7 +129,7 @@ test('confirmation targets the clicked unselected RUN exactly once with captured
   assert.ok(h.nodes(dialog(h)).some((node) => node.props?.children === 'Unselected RUN'));
   enterRunId(h);
   const submit = confirm(h).props.onClick; submit(); submit(); h.render();
-  assert.deepEqual(h.commands, [{ command: 'discardRun', runId: 'run-b', targetSessionId: 'owner-b', workspace: '/workspace/a', confirmed: true, confirmationRunId: 'run-b', source_db: undefined }]);
+  assert.deepEqual(h.commands, [{ command: 'discardRun', runId: 'run-b', targetSessionId: 'owner-b', workspace: '/workspace/a', confirmed: true, confirmationRunId: 'run-b', source_db: localSource }]);
   assert.equal(confirm(h).props.disabled, true); assert.equal(cancel(h).props.disabled, true);
   h.render({ discardResult: { runId: 'run-b', ok: true }, runs: [runA] });
   assert.equal(dialog(h), undefined); assert.equal(h.props.selectedId, 'run-a');
@@ -217,12 +219,12 @@ test('Cancel, Escape and opening another RUN clear the entered confirmation', ()
   assert.deepEqual(h.commands, []);
 }));
 
-test('arrow, Home and End handlers preserve owner-based selection', () => withHarness({}, (h) => {
-  const tab = h.find((node) => node.props?.id === 'tapl-run-tab-local-run-b');
+test('arrow, Home and End handlers send the exact RUN selection', () => withHarness({}, (h) => {
+  const tab = h.find((node) => node.props?.id === 'tapl-run-tab-tapl-local.db-run-b');
   const list = h.find((node) => node.props?.role === 'tablist');
   list.ref.current.querySelectorAll = () => [{ focus() {} }, { focus() {} }];
   for (const key of ['Home', 'ArrowRight', 'End']) tab.props.onKeyDown({ key, preventDefault() {} });
-  assert.deepEqual(h.commands, [{ command: 'selectRun', sessionId: 'owner-b', source_db: undefined }]);
+  assert.deepEqual(h.commands, [{ command: 'selectRun', runId: 'run-b', sessionId: 'owner-b', source_db: localSource }]);
 }));
 
 
@@ -239,7 +241,7 @@ test('duplicate RUN IDs keep source-specific selection and foreign close control
   assert.ok(h.close('same-run', 'tapl-local.db'));
   assert.equal(h.close('same-run', 'tapl-peer.db'), undefined);
   tabs[1].props.onClick();
-  assert.deepEqual(h.commands, [{ command: 'selectRun', sessionId: 'owner-b', source_db: 'tapl-peer.db' }]);
+  assert.deepEqual(h.commands, [{ command: 'selectRun', runId: 'same-run', sessionId: 'owner-b', source_db: 'tapl-peer.db' }]);
 }));
 
 test('Management opens exact-ID confirmation for the selected RUN without a tab close control', () => withHarness({ managementOnly: true }, (h) => {

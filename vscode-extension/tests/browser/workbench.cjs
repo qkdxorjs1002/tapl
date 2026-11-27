@@ -71,6 +71,20 @@ async function setLanguage(page, locale) {
   await page.locator('.wb-back-layer .wb-back').click();
 }
 
+function readSettings() {
+  const result = spawnSync(python, ['-c', 'import json,sys; from pathlib import Path; from taplctl.settings import SettingsService; print(json.dumps(SettingsService(Path(sys.argv[1])).get()))', workspace], {
+    encoding: 'utf8', env: { ...process.env, PYTHONPATH: path.resolve(__dirname, '../../../tapl') }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
+async function assertSettingsFields(page) {
+  const labels = await page.locator('.wb-settings-field-copy > label')
+    .evaluateAll(elements => elements.map(element => element.htmlFor));
+  assert.deepEqual(labels.sort(), readSettings().fields.map(field => `setting-${field.key}`).sort());
+}
+
 test('RUN tabs keep titles and identifiers on separate lines at every screen size', { timeout: 60000 }, async () => {
   const longSlug = 'long-run-slug-'.repeat(12);
   for (const locale of ['ko', 'en']) {
@@ -147,16 +161,12 @@ test('RUN tabs keep titles and identifiers on separate lines at every screen siz
 test('settings edits all CLI sections, saves model/profile changes together, and confirms reset', { timeout: 60000 }, async () => {
   const { page, errors } = await openPage();
   const configPath = path.join(workspace, '.tapl/config.toml');
-  const readSettings = () => {
-    const result = spawnSync(python, ['-c', 'import json,sys; from pathlib import Path; from taplctl.settings import SettingsService; print(json.dumps(SettingsService(Path(sys.argv[1])).get()))', workspace], { encoding: 'utf8', env: { ...process.env, PYTHONPATH: path.resolve(__dirname, '../../../tapl') } });
-    assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout);
-  };
   try {
     await page.locator('[data-wb-focus="nav:settings"]').click();
     await page.locator('[id="setting-search.max_results"]').waitFor();
     await page.mouse.move(1400, 30); await page.waitForTimeout(650);
     assert.equal(await page.locator('.wb-topbar .wb-language-menu').count(), 0);
-    assert.equal(await page.locator('.wb-settings-field-copy > label').count(), 23);
+    await assertSettingsFields(page);
     await page.locator('[id="setting-viewer.language"]').selectOption('en');
     await page.locator('.wb-settings-savebar button[type=submit]').click();
     await page.waitForFunction(() => document.documentElement.lang === 'en');
@@ -312,7 +322,7 @@ test('settings works without an active RUN and keeps unsaved inputs through back
     await page.evaluate(payload => window.postMessage({ ...payload, type: 'view:update' }, '*'), overview);
     assert.equal(await input.inputValue(), '19');
     assert.equal(await page.locator('[data-wb-focus="nav:settings"]').getAttribute('aria-current'), 'page');
-    assert.equal(await page.locator('.wb-settings-field-copy > label').count(), 23);
+    await assertSettingsFields(page);
   } finally { await page.close(); }
 });
 
@@ -900,11 +910,16 @@ with closing(db.connect(Path(sys.argv[1]), session_id='')) as conn:
     await map.locator('[data-kind="task"]').filter({ hasText: 'Interface task 24' }).waitFor({ state: 'attached' });
     const cardCount = await map.locator('[data-mindmap-node]').count();
     const source = (await selected.getAttribute('title')).split('\n').at(-1);
-    const exact = page.waitForRequest(request => request.url().endsWith('/api/message') &&
-      request.postDataJSON()?.command === 'openRun');
     const id = (await selected.getAttribute('title')).split('\n')[1];
+    const exact = page.waitForResponse(async response => {
+      if (!response.url().endsWith('/api/message')) return false;
+      const request = response.request().postDataJSON();
+      if (request?.command !== 'refresh' || request.runId !== id) return false;
+      const payload = await response.json();
+      return payload.view?.status?.active_run?.status === 'archived';
+    });
     archive('', 'retained-archive');
-    const request = (await exact).postDataJSON();
+    const request = (await exact).request().postDataJSON();
     assert.equal(request.runId, id);
     assert.equal(request.source_db, source);
     const archived = page.locator('.wb-run-tabs [role="tab"]').last();

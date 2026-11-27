@@ -6,6 +6,7 @@ import hashlib
 import json
 import mimetypes
 import sqlite3
+from contextlib import closing
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,7 +15,6 @@ from typing import Any, Callable, Iterable
 from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from . import auto_reindex, config, db, embeddings, recall, sessions, settings, validation
-from .application import WorkflowApplication, WorkflowApplicationError
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -124,6 +124,20 @@ def workspace_database(workspace: str | Path) -> tuple[Path, Path]:
     return root, db_path
 
 
+def discard_viewer_run(workspace: Path, *, source_db: str, run_id: str, target_session_id: str,
+                       confirmed: bool, confirmation_run_id: str) -> dict[str, Any]:
+    db.validate_discard_confirmation(run_id=run_id, confirmed=confirmed, confirmation_run_id=confirmation_run_id)
+    if not isinstance(target_session_id, str):
+        raise ViewerError("Missing target session ID.")
+    owner = sessions.normalize_session_id(target_session_id)
+    local = db.local_db_path(workspace, create_identity=False)
+    if local is None or source_db != local.name or not local.is_file():
+        raise ViewerError("Only the local installation database can discard a RUN.")
+    with closing(db.connect(local, session_id=owner, existing_only=True)) as conn:
+        result = db.discard_run(conn, run_id=run_id, confirmed=confirmed, confirmation_run_id=confirmation_run_id)
+    return {**result, "session_id": owner, "source_db": local.name}
+
+
 class NativeJsonRunner:
     """Run the viewer's small, read-only protocol directly against a database.
 
@@ -158,6 +172,8 @@ class NativeJsonRunner:
                 db_path,
                 full="--full" in args,
                 include_events="--include-events" in args,
+                run_id=self._option(args, "--run-id"),
+                events_limit=int(self._option(args, "--events-limit") or 12),
             )
         if args[:2] == ["run", "show"]:
             from .history import annotate_records
@@ -251,16 +267,20 @@ class NativeJsonRunner:
     def _connection(self, db_path: Path) -> sqlite3.Connection:
         return db.connect_readonly(db_path)
 
-    def _status(self, db_path: Path, *, full: bool, include_events: bool) -> dict[str, Any]:
+    def _status(self, db_path: Path, *, full: bool, include_events: bool, run_id: str | None,
+                events_limit: int) -> dict[str, Any]:
         settings = self._settings(db_path)
-        conn = self._connection(db_path)
+        conn = db.connect_readonly(db_path, session_id="" if run_id is not None else None)
         try:
-            state = db.status_payload(conn)
-            # This is a read-only viewer selection, never a workflow default.
-            # Keep the DB/application write paths strictly owner-scoped.
-            if not state["active_run"] and not db.connection_session_id(conn) and state["active_runs"]:
+            if run_id is not None:
+                row = conn.execute("SELECT session_id FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
+                if row is None:
+                    raise ViewerError(f"RUN not found: {run_id}")
+                db.bind_session(conn, row["session_id"])
+            state = db.status_payload(conn, run_id=run_id, events_limit=events_limit)
+            if run_id is None and not state["active_run"] and not db.connection_session_id(conn) and state["active_runs"]:
                 db.bind_session(conn, state["active_runs"][0]["session_id"])
-                state = db.status_payload(conn)
+                state = db.status_payload(conn, events_limit=events_limit)
             run = state["active_run"] or {}
             state["authoring_policy"] = config.authoring_policy(
                 settings.workflow.authoring_detail, run.get("workflow_mode"),
@@ -271,7 +291,9 @@ class NativeJsonRunner:
         finally:
             conn.close()
         state["config"] = settings.as_dict()
-        return self._status_output(state, full=full, include_events=include_events)
+        if not settings.recall.enabled:
+            state["memory_review"] = {"status": "disabled"}
+        return self._status_output(state, full=full, include_events=include_events, events_limit=events_limit)
 
     @staticmethod
     def _status_output(
@@ -289,11 +311,12 @@ class NativeJsonRunner:
             "title",
             "status",
             "source",
-            "archived", "created_at", "updated_at", "custom_fields",
+            "archived", "created_at", "updated_at", "custom_fields", "execution_timing",
         )
         event_fields = (
             "id",
             "run_id",
+            "session_id",
             "event_type",
             "tool_name",
             "mode",
@@ -305,6 +328,7 @@ class NativeJsonRunner:
             return [{key: item[key] for key in item_fields if key in item} for item in items]
 
         payload: dict[str, Any] = {
+            "ok": True,
             "schema": state.get("schema") or {},
             "viewer_capabilities": {"associativeMemory": True, "discardRun": True},
             "session_id": state.get("session_id", ""),
@@ -323,14 +347,16 @@ class NativeJsonRunner:
                 ),
                 "active_batches": len(state.get("active_batches") or []),
                 "active_executions": len(state.get("active_executions") or []),
+                "queued_runs": len(state.get("queued_runs") or []),
             },
             "plans": plans if full else compact(plans),
             "tasks": tasks if full else compact(tasks),
             "findings": findings if full else compact(findings),
             "active_batches": list(state.get("active_batches") or []),
             "active_executions": list(state.get("active_executions") or []),
+            "queued_runs": list(state.get("queued_runs") or []),
         }
-        for key in ("config", "authoring_policy", "plan_task_execute", "approvals"):
+        for key in ("config", "authoring_policy", "plan_task_execute", "approvals", "memory_review"):
             if key in state:
                 payload[key] = state[key]
         if include_events:
@@ -458,7 +484,8 @@ class ViewerApplication:
         try:
             if isinstance(payload, dict) and payload.get("command") == "discardRun":
                 return self._discard_run(payload)
-            if isinstance(payload, dict) and payload.get("command") == "selectRun" and not isinstance(identity, str):
+            if (isinstance(payload, dict) and payload.get("command") == "selectRun"
+                    and "runId" not in payload and not isinstance(identity, str)):
                 raise ValueError("Missing sessionId.")
             with sessions.session_scope(identity):
                 return self._handle_message(payload)
@@ -528,15 +555,10 @@ class ViewerApplication:
             workspace, db_path = workspace_database(raw_workspace.strip())
             metadata = self._display_metadata(workspace, payload)
             locale, layout = metadata["locale"], metadata["layout"]
-            local = db.local_db_path(workspace, create_identity=False)
             source = payload.get("source_db")
-            if local is None or not local.is_file() or (source is not None and source != local.name):
-                raise ViewerError("Only the local installation database can discard a RUN.")
-            db_path = local
-            # The selected read owner is never used to select the mutation target.
-            with sessions.session_scope(target):
-                WorkflowApplication(workspace, session_id=target).discard_run(
-                    run_id=run_id, confirmed=True, confirmation_run_id=confirmation_run_id)
+            discard_viewer_run(workspace, source_db=source if source is not None else db_path.name,
+                               run_id=run_id, target_session_id=target, confirmed=True,
+                               confirmation_run_id=confirmation_run_id)
             if selected == target:
                 conn = db.connect_readonly(db_path, session_id="")
                 try:
@@ -550,7 +572,7 @@ class ViewerApplication:
             return {"type": "view:update", "view": view, **metadata,
                     "workspace": str(workspace), "capabilities": {"associativeMemory": True, "discardRun": True, "settings": True},
                     "discardResult": {"runId": run_id, "ok": True}}
-        except (ViewerError, WorkflowApplicationError, OSError, sqlite3.Error, ValueError) as exc:
+        except (ViewerError, OSError, sqlite3.Error, ValueError) as exc:
             message = str(exc)
             return {**self._error_message(message, locale=locale, layout=layout),
                     "discardResult": {**result, "message": message}}
@@ -667,6 +689,33 @@ class ViewerApplication:
         identity = [str(selected_workspace or ""), str(path), exists]
         return hashlib.sha256(json.dumps([revisions, identity]).encode() + b"\0" + content).hexdigest()
 
+    def get_status(self, *, run_id: str | None = None, source_db: str | None = None, full: bool = False,
+                   include_events: bool = False, events_limit: int = 12) -> dict[str, Any]:
+        """Read workspace status for a Viewer stdio client without initializing agent state."""
+        try:
+            _, db_path = self.resolve_database(None)
+        except WorkspaceRequired:
+            if run_id is not None or source_db is not None:
+                raise
+            return {**NativeJsonRunner._status_output({}, full=full, include_events=include_events),
+                    "source_errors": [], "local_db": None, "writable": False}
+        with sessions.session_scope(""):
+            return self._read_status(db_path, run_id=run_id, source_db=source_db, full=full,
+                                     include_events=include_events, events_limit=events_limit)
+
+    def _read_status(self, db_path: Path, *, run_id: str | None, source_db: object, full: bool = False,
+                     include_events: bool = False, events_limit: int = 12) -> dict[str, Any]:
+        args = ["status", "--json"]
+        if full:
+            args.append("--full")
+        if include_events:
+            args.append("--include-events")
+        if events_limit != 12:
+            args.extend(["--events-limit", str(events_limit)])
+        if run_id is not None:
+            args.extend(["--run-id", run_id])
+        return self._read(db_path, args, source_db)
+
     def _read(self, db_path: Path, args: list[str], source_db: object = None) -> dict[str, Any]:
         sources = self._sources(db_path)
         if source_db is not None:
@@ -683,30 +732,42 @@ class ViewerApplication:
         if args[0] == "status":
             statuses, errors = [], []
             local = db.local_db_path(workspace, create_identity=False) if workspace else None
+            exact_run = "--run-id" in args
             for path in sources:
                 try:
-                    status = self.json_runner(path, args)
-                    for key in ("plans", "tasks", "findings", "active_runs", "recent_events", "active_batches", "active_executions"):
+                    if exact_run and path != selected:
+                        with closing(db.connect_readonly(path, session_id="")) as conn:
+                            status = {"active_runs": db.active_runs(conn), "counts": {
+                                "archives": conn.execute("SELECT count(*) FROM archives").fetchone()[0]}}
+                    else:
+                        status = self.json_runner(path, args)
+                    for key in ("plans", "tasks", "findings", "active_runs", "recent_events", "active_batches", "active_executions", "queued_runs"):
                         for item in status.get(key, []):
                             item["source_db"] = path.name
                             if key == "active_runs":
                                 item["writable"] = path == local
                     if status.get("active_run"):
                         status["active_run"]["source_db"] = path.name
-                        status["active_run"]["writable"] = path == local
+                        status["active_run"]["writable"] = path == local and status["active_run"]["status"] == "active"
                     status["source_db"] = path.name
+                    status["writable"] = path == local
                     statuses.append(status)
                 except (ViewerError, ValueError, sqlite3.Error, OSError) as exc:
+                    if path == selected and (source_db is not None or exact_run):
+                        raise ViewerError(str(exc)) from exc
                     errors.append({"source_db": path.name, "error": str(exc)})
             if not statuses:
                 raise ViewerError(errors[0]["error"] if errors else "No readable TAPL database found.")
             status = dict(next((entry for entry in statuses if entry["source_db"] == selected.name), statuses[0]))
+            if source_db is None and not exact_run and not status["active_run"] and not sessions.current_session_id():
+                status = dict(next((entry for entry in statuses if entry.get("active_run")), status))
             status["active_runs"] = [run for entry in statuses for run in entry.get("active_runs", [])]
             status["source_errors"] = errors
             status["local_db"] = local.name if local else None
             status["counts"] = {**status.get("counts", {}), "archives": sum(entry.get("counts", {}).get("archives", 0) for entry in statuses)}
-            if "--include-events" in args:
-                status["recent_events"] = sorted([event for entry in statuses for event in entry.get("recent_events", [])], key=lambda event: str(event.get("created_at", "")), reverse=True)[:12]
+            if "--include-events" in args and not exact_run:
+                limit = int(NativeJsonRunner._option(args, "--events-limit") or 12)
+                status["recent_events"] = sorted([event for entry in statuses for event in entry.get("recent_events", [])], key=lambda event: str(event.get("created_at", "")), reverse=True)[:limit]
             return status
         if workspace is None:
             return self.json_runner(selected, args)
@@ -777,11 +838,13 @@ class ViewerApplication:
                 # looking for that ID in another source.
                 return self._overview(db_path, search_query="")
         if command in {"ready", "selectWorkspace", "selectRun"}:
-            return self._overview(db_path, search_query="", source_db=payload.get("source_db"))
+            return self._overview(db_path, search_query="", source_db=payload.get("source_db"),
+                                  run_id=self._selected_run(payload) if command == "selectRun" else None)
         if command == "refresh":
             return self._refresh_view(payload, db_path)
         if command == "debug":
-            status = self._read(db_path, ["status", "--json", "--include-events"], payload.get("source_db"))
+            status = self._read_status(db_path, run_id=self._selected_run(payload),
+                                       source_db=payload.get("source_db"), include_events=True)
             return {"type": "debug", "status": {**DEFAULT_STATUS, **status}}
         if command in {"openArchive", "archiveEvents"}:
             archive_id = self._required_string(payload, "archiveId")
@@ -882,7 +945,8 @@ class ViewerApplication:
         if view_type in {"memories", "memory", "memorySource"}:
             command = {"memories": "memories", "memory": "openMemory", "memorySource": "openMemorySource"}[view_type]
             return self._build_view({**payload, "command": command}, db_path)
-        return self._overview(db_path, search_query=str(payload.get("query") or ""), source_db=payload.get("source_db"))
+        return self._overview(db_path, search_query=str(payload.get("query") or ""), source_db=payload.get("source_db"),
+                              run_id=self._selected_run(payload))
 
     def _run_context(self, db_path: Path, run_id: Any, source_db: Any) -> dict[str, Any]:
         if not isinstance(run_id, str) or not run_id:
@@ -899,8 +963,18 @@ class ViewerApplication:
             # original item/archive/status protocol. Context is additive.
             return {}
 
-    def _overview(self, db_path: Path, *, search_query: str, source_db: object = None) -> dict[str, Any]:
-        status = self._read(db_path, ["status", "--json", "--full"], source_db)
+    @staticmethod
+    def _selected_run(payload: dict[str, Any]) -> str | None:
+        if "runId" not in payload:
+            return None
+        run_id = payload["runId"]
+        if not isinstance(run_id, str) or not run_id or len(run_id) > 256:
+            raise ViewerError("Invalid RUN id.")
+        return run_id
+
+    def _overview(self, db_path: Path, *, search_query: str, source_db: object = None,
+                  run_id: str | None = None) -> dict[str, Any]:
+        status = self._read_status(db_path, run_id=run_id, source_db=source_db, full=True)
         archives_payload = self._read(db_path, ["archive", "list", "--json", "--limit", "8"])
         archives = archives_payload.get("archives")
         return {

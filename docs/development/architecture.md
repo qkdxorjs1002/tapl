@@ -44,7 +44,7 @@ flowchart LR
   CLI[Management CLI] --> DB
 ```
 
-`WorkflowApplication` owns a SQLite connection per public call; MCP and browser adapters call Python directly rather than invoking the CLI in a subprocess. Native Viewer reads also use in-process database/application components. The extension keeps a workspace-scoped MCP subprocess, launched with that folder as `cwd`.
+`WorkflowApplication` owns a SQLite connection per public call. MCP and browser adapters call Python directly. Browser and MCP Viewer status reads share the in-process Viewer application. The VS Code extension starts its local MCP process with the workspace as `cwd` and the [Viewer stdio profile](../reference/mcp.md#viewer-stdio).
 
 A normal write resolves the workspace and session, checks the active RUN and execution authorization where required, merges structured fields, performs an atomic database mutation, and returns current next actions. Plan/task Markdown is derived from canonical fields and custom metadata. Searchable text is refreshed with record changes. Model-generated or source-provided text remains data; records do not replace workflow policy.
 
@@ -56,7 +56,7 @@ The schema stores RUNs, common items, plan/task/finding fields, approvals, archi
 
 The database belongs to a selected workspace; `find_repo_root` resolves only the supplied/current folder without searching Git parents. For Codex hooks, `session_workspace.py` validates the transcript's first session metadata record to recover the selected workspace before resolving the database, configuration, and installation refresh. Invalid or unavailable metadata falls back to the event `cwd`. Claude hook, CLI, and MCP startup folder selection retain their existing contracts. Explicitly selected subdirectory workspaces keep independent history. See [workspace resolution and storage](../guides/storage.md) for validation and fallback boundaries.
 
-`sessions.py` normalizes a hook `session_id` and provides context-local scope; `clients.py` validates the client boundary, and `WorkflowConnection` retains the owner on each connection. A unique index permits one active RUN per session. Codex retains its native owner and omitted-identity legacy `""` scope. Claude Code requires the exact `claude-code:<native-session-id>` hook owner on every MCP call, including reads. Neither client adopts another session's RUN. Viewers can list active owners but must explicitly select the correct owner for mutation.
+`sessions.py` normalizes a hook `session_id` and provides context-local scope. `clients.py` validates the client boundary, and `WorkflowConnection` retains the owner on each connection. A unique index permits one active RUN per session. Codex retains its native owner and omitted-identity legacy `""` scope. Claude Code requires the exact `claude-code:<native-session-id>` hook owner on every agent MCP call, including reads. The Viewer selects a RUN by source database and RUN ID across all stored owners. Confirmed discard checks that identity and the RUN's recorded owner in the local database.
 
 Execution ownership uses persisted batch/execution records and exact `execution_id` checks. These tokens protect settlement against stale agents after cancellation/recovery. They are not time-based leases: there is no separate lease daemon, heartbeat, or automatic TTL expiry. Root records the dispatch selection, spawns the agents, and alone settles TAPL state. `owned_paths` and completed dependencies define the batch contract, not an operating-system file lock.
 

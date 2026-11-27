@@ -45,6 +45,7 @@ export interface TaplRunReference {
 
 export interface TaplRunSnapshot {
   run: TaplWorkflowRun;
+  source_db?: string;
   plans: TaplItem[];
   tasks: TaplItem[];
   findings: TaplItem[];
@@ -71,6 +72,9 @@ export interface TaplStatus {
   active_executions?: TaplExecution[];
   recent_events: TaplEvent[];
   schema: Record<string, string>;
+  config?: unknown;
+  reference_limits?: unknown;
+  source_errors?: unknown;
   viewer_capabilities?: HostCapabilities;
   counts?: { plans?: number; tasks?: number; findings?: number; archives?: number; active_batches?: number; active_executions?: number };
 }
@@ -352,7 +356,8 @@ export type WebviewCommand = (
   | { command: 'chooseWorkspace' }
   | { command: 'selectWorkspace'; workspace: string }
   | { command: 'browseWorkspace'; requestId: string; path?: string }
-  | { command: 'selectRun'; sessionId: string }
+  | { command: 'selectRun'; runId: string; sessionId: string }
+  | { command: 'selectRun'; runId?: undefined; sessionId: '' }
   | { command: 'discardRun'; runId: string; targetSessionId: string; workspace: string; confirmed: true; confirmationRunId: string }
   | { command: 'refresh' }
   | { command: 'back' }

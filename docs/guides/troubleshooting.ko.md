@@ -35,8 +35,8 @@ taplctl config get
 | 프록시·터널에서 `Origin is not allowed.` 표시 | 공개 HTTP(S) origin을 `--allowed-origin` 또는 `viewer.allowed_origins`로 정확히 허용하고 서비스를 재시작합니다. origin에는 경로가 없습니다. [Viewer](viewer.ko.md#역방향-프록시와-터널)를 보세요. |
 | RUN 폐기 확인 버튼이 비활성 | 표시된 전체 RUN ID를 대소문자·공백까지 정확히 입력하거나 붙여 넣습니다. 취소하면 모든 기록이 유지됩니다. |
 | VS Code가 MCP를 실행하지 못함 | `tapl-mcp`를 실행할 수 있는지 확인합니다. 필요하면 `config.toml`의 `viewer.mcp_path`를 실행 파일 경로로 설정합니다. 확장은 서버를 직접 실행하며 브라우저 서비스에 연결하지 않습니다. |
-| VS Code에 다른 폴더나 RUN이 표시됨 | 대시보드에서 의도한 열린 워크스페이스와 RUN을 선택합니다. 폴더마다 연결·DB·선택 세션을 따로 관리합니다. |
-| 메모리 또는 RUN 폐기 UI가 없음 | 확장에서 실행하는 `tapl-mcp`를 업데이트합니다. 해당 화면·동작은 서버 기능 지원에 따라 제공하며 구버전에서도 다른 화면은 유지합니다. |
+| VS Code에 다른 폴더나 RUN이 표시됨 | VS Code에서 사용할 워크스페이스 폴더를 연 뒤 대시보드에서 RUN 탭을 선택합니다. 워크스페이스별로 선택한 원본 DB와 RUN ID를 기억합니다. |
+| 메모리 또는 RUN 폐기 UI가 없음 | 확장이 사용하는 `tapl-mcp` 실행 파일의 버전을 확인합니다. 메모리는 서버가 지원해야 합니다. RUN 폐기는 선택한 로컬 RUN을 폐기할 수 있고 서버가 Viewer 폐기 도구를 제공할 때 사용할 수 있습니다. [VS Code 기능 조건](vscode.ko.md#공유-viewer와-기능-조건) |
 | VS Code 화면이 갱신되지 않음 | **Developer: Show Running Extensions**로 활성 상태를 확인한 뒤 **TAPL Workflow: Refresh Workflow Views**를 실행합니다. 실행 파일 문제를 고친 뒤 VS Code를 재시작합니다. |
 
 ## 검색과 수명주기 확인

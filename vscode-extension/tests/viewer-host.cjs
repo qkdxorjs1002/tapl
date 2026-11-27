@@ -36,11 +36,20 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
       calls.push({ root: workspace.cwd, name, args });
       if (name === 'tapl_get_status' && unavailable) throw new Error('No TAPL database');
       if (name === 'tapl_get_status' && multiRun) return {
-        active_runs: [{ id: 'ra', session_id: 'session-a' }, { id: 'rb', session_id: 'session-b' }],
-        active_run: args.session_id ? { id: args.session_id === 'session-a' ? 'ra' : 'rb', session_id: args.session_id } : null,
-        session_id: args.session_id ?? '', tasks: [{ id: 11, stable_id: 'TASK-001', active_execution: { execution_id: 'execution-a' }, depends_on: ['TASK-002'] }], findings: [],
-        plans: args.session_id ? [{ stable_id: 'PLAN-001', title: args.session_id }] : []
+        source_db: 'tapl-local.db',
+        active_runs: [{ id: 'ra', source_db: 'tapl-local.db', session_id: 'session-a' },
+          { id: 'rb', source_db: 'tapl-local.db', session_id: 'claude-code:session-b' }],
+        active_run: { id: 'ra', source_db: 'tapl-local.db', session_id: 'session-a' },
+        session_id: 'session-a', tasks: [{ id: 11, stable_id: 'TASK-001', active_execution: { execution_id: 'execution-a' }, depends_on: ['TASK-002'] }], findings: [],
+        plans: [{ stable_id: 'PLAN-001', title: 'session-a' }], viewer_capabilities: { associativeMemory: true, discardRun: true },
+        recent_events: [{ run_id: 'ra' }], approvals: { state: 'approved' }, authoring_policy: { owner: 'a' },
+        queued_runs: [{ id: 'queued-a' }], counts: { queued_runs: 1, archives: 3 },
+        config: { workflow: {} }, source_errors: [{ source_db: 'tapl-older.db' }]
       };
+      if (name === 'tapl_get_run' && multiRun) return (args.run_id === 'ra' || args.run_id === 'rb')
+        ? { run: { id: args.run_id, source_db: args.source_db, session_id: args.run_id === 'ra' ? 'session-a' : 'claude-code:session-b' },
+          plans: [{ stable_id: 'PLAN-001', title: args.run_id === 'ra' ? 'session-a' : 'claude-code:session-b' }], tasks: [], findings: [] }
+        : { ok: false, error: 'Unknown RUN' };
       if (name === 'tapl_get_status') return { active_run: null, tasks: [], plans: [], findings: [],
         viewer_capabilities: oldServer ? undefined : { associativeMemory: true } };
       if (name === 'tapl_list_archives') return { archives: [] };
@@ -158,15 +167,28 @@ test('extension uses the shared read-only Viewer protocol and reloads current ro
   const foreignTask = (await send({ command: 'openSearchResult', itemId: 22 })).view.detail;
   assert.equal(foreignTask.active_execution, undefined, 'Run-local TASK-001 must not match another numeric item id');
   assert.equal(foreignTask.depends_on, undefined);
-  await send({ command: 'selectRun', sessionId: 'session-b' });
+  await send({ command: 'selectRun', runId: 'rb', source_db: 'tapl-local.db', sessionId: 'claude-code:session-b' });
   await tick();
-  assert.equal(messages.at(-1).view.status.active_run.id, 'rb');
-  assert.equal(messages.at(-1).view.status.plans[0].title, 'session-b');
-  assert.ok(calls.some(call => call.name === 'tapl_get_status' && call.args.session_id === 'session-b'));
+  const selected = messages.at(-1).view.status;
+  assert.equal(selected.active_run.id, 'rb');
+  assert.equal(selected.session_id, 'claude-code:session-b');
+  assert.equal(selected.plans[0].title, 'claude-code:session-b');
+  assert.equal(selected.active_runs.length, 2);
+  assert.deepEqual(selected.recent_events, []);
+  assert.equal(selected.approvals, undefined);
+  assert.equal(selected.authoring_policy, undefined);
+  assert.equal(selected.queued_runs, undefined);
+  assert.equal(selected.counts.queued_runs, undefined);
+  assert.equal(selected.counts.archives, 3);
+  assert.deepEqual(selected.config, { workflow: {} });
+  assert.deepEqual(selected.source_errors, [{ source_db: 'tapl-older.db' }]);
+  assert.equal(messages.at(-1).capabilities.discardRun, false);
+  assert.deepEqual(calls.findLast(call => call.name === 'tapl_get_run').args, { run_id: 'rb', source_db: 'tapl-local.db' });
+  assert.ok(calls.filter(call => call.name === 'tapl_get_status').every(call => !('session_id' in call.args)));
   assert.ok(calls.every(call => !['tapl_start_task', 'tapl_approve_execution', 'tapl_finish_archive'].includes(call.name)), 'Viewer selection must stay read-only');
   multiRun = false;
   oldServer = true;
-  await commands.get('taplWorkflow.openOverview')();
+  await send({ command: 'selectRun', sessionId: '' });
   assert.equal(messages.at(-1).capabilities.associativeMemory, false);
   const beforeUnsupported = calls.length;
   receive({ command: 'memories' }); await tick();

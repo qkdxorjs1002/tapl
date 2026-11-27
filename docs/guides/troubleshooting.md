@@ -35,8 +35,8 @@ taplctl config get
 | Proxy or tunnel shows `Origin is not allowed.` | Allow the exact public HTTP(S) origin with `--allowed-origin` or `viewer.allowed_origins`, then restart the service. An origin has no path. See [Viewer](viewer.md#reverse-proxies-and-tunnels). |
 | RUN discard confirmation stays disabled | Enter or paste the full displayed RUN ID with exact case and whitespace. Cancelling leaves all records unchanged. |
 | VS Code cannot start MCP | Check `tapl-mcp` is available. Set `viewer.mcp_path` in `config.toml` to its executable path if needed. The extension starts the server itself; it does not connect to the browser service. |
-| VS Code shows another folder or RUN | Select the intended open workspace and RUN in the dashboard. Each folder owns its connection, database, and selected session. |
-| Memory or RUN discard UI is absent | Update the reachable `tapl-mcp`. These screens/actions depend on server capabilities; older servers retain the other views. |
+| VS Code shows another folder or RUN | Open the intended workspace folder in VS Code, then select the RUN tab in the dashboard. Each workspace remembers the selected source database and RUN ID. |
+| Memory or RUN discard UI is absent | Check the version of the `tapl-mcp` executable used by the extension. Memory requires server support. RUN discard requires an eligible local RUN and the advertised Viewer discard tool. [VS Code capabilities](vscode.md#shared-viewer-and-capabilities) |
 | VS Code views do not refresh | Run **Developer: Show Running Extensions**, confirm activation, then **TAPL Workflow: Refresh Workflow Views**. Restart VS Code after correcting executable availability. |
 
 ## Search and lifecycle checks

@@ -4,7 +4,7 @@
 
 TAPL Workflow Viewer adds active-work and archive trees, history search, and a dashboard to VS Code. It reads the workspace through a persistent `tapl-mcp` stdio connection. A running browser Viewer service is not required.
 
-Shared history results, details, and RUN selections preserve their database source. Peer RUNs do not offer the close action. See [Local identity and shared history](storage.md).
+Select Codex and Claude Code RUNs from the same dashboard, including RUNs stored in one database. RUN selection, shared history results, and details preserve their database source. See [Viewer](viewer.md).
 
 ## Install and open
 
@@ -52,19 +52,19 @@ TAPL continues to follow VS Code's live color palette. A matching light/dark app
 
 ## Workspace and session routing
 
-The initial target is the first VS Code workspace folder. Change folders in VS Code; the Viewer does not display a workspace picker. TAPL launches that folder's MCP process with the folder as its working directory and resolves executable settings for that folder. It does not search parent folders for a database.
+The initial target is the first VS Code workspace folder. Change folders in VS Code. The extension starts a separate local stdio process with that folder as its working directory and sets `TAPL_MCP_MODE=viewer` for the process. It resolves the executable settings and database in that workspace. Agent connections continue to use their host hook session rules. See [Viewer stdio tools](../reference/mcp.md#viewer-stdio).
 
 Connections are pooled by workspace. Database and WAL events are coalesced for two seconds, then checked for a changed database or WAL with data frames. SHM bookkeeping and empty WAL creation/removal do not reload the screens. Overlapping refresh requests are combined; a change during a read schedules a follow-up check. Visible Viewer panels keep loading updates even when the VS Code window has no focus. Hidden panels defer data loading and coalesce pending changes into one catch-up refresh when visible again; focusing or clicking the window is not required. **Refresh Workflow Views** still forces a reload.
 
-Changing the executable invalidates connections; changing workspace resets the dashboard route. RUN selection is retained per workspace and reads the selected owner's session. A stale read cannot overwrite a newer navigation or workspace selection. The webview retains compact UI preferences and navigation state; screen data is fetched from TAPL when it reloads.
+Changing the executable invalidates connections. Changing workspace resets the dashboard route. The dashboard remembers the selected source database and RUN ID for each workspace. A stale read cannot overwrite a newer navigation or workspace selection. The webview retains compact UI preferences and navigation state and fetches screen data from TAPL on reload.
 
 ## Shared Viewer and capabilities
 
 The browser and extension share React screens, CSS, and `src/viewer/types.ts`. VS Code supplies workspace/MCP adapters; the browser supplies HTTP and local folder selection. Both provide memory list/search/detail and original-source navigation. Memory editing and deletion require an explicit agent request.
 
-Capabilities come from the server. Older servers without memory support still show the other screens. **Management → Discard RUN** is available only when a current server advertises it; otherwise RUN records remain read-only. The dialog requires the full matching RUN ID and explicit confirmation. Retained work is archived; truly empty RUNs are deleted. External agents keep running. See [Viewer](viewer.md#discard-a-run) for exact effects.
+The extension discovers the server's supported tools when it connects. Earlier servers with `tapl_get_run` can still open exact RUNs. **Management → Discard RUN** requires an eligible local RUN and a server that advertises `tapl_viewer_discard_run`. The dialog requires the full matching RUN ID and explicit confirmation. See [Discard a RUN](viewer.md#discard-a-run).
 
-The shared [Viewer navigation guide](viewer.md#navigate-the-viewer) describes the Current RUN and workspace-centered memory relationship mindmaps, fixed RUN tabs, collapsible icon navigation with pinning and hover expansion, Explore flyouts, per-RUN TASK filters, record browsing and Back. `small` uses a navigation drawer; other layout choices retain the fixed shell when width permits. Upgrade the workspace MCP server to use exact historical RUN pages and the record library; unsupported memory remains capability-gated.
+The shared [Viewer navigation guide](viewer.md#navigate-the-viewer) describes the Current RUN and workspace-centered memory relationship mindmaps, fixed RUN tabs, collapsible icon navigation with pinning and hover expansion, Explore flyouts, per-RUN TASK filters, record browsing and Back. `small` uses a navigation drawer. Other layouts retain the fixed shell when width permits. The record library and memory screens require their corresponding server capabilities.
 
 Open **Management → Settings** to edit, save or reset all `taplctl config` preferences; language selection also lives there. The MCP server must support the settings tools. Older versions show an update notice. See [Viewer settings](configuration.md#viewer-settings) for file scope, revision conflicts and reset behavior.
 

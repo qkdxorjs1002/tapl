@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -12,14 +13,18 @@ from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import __version__, auto_reindex, db, install as tapl_install, prompt as tapl_prompt, run_references, sessions, settings
+from . import __version__, auto_reindex, db, history, install as tapl_install, prompt as tapl_prompt, run_references, sessions, settings
 from .application import WorkflowApplication
 from .command_runtime import configure_stdio
 from .clients import client_scope, resolve_client, user_question_tool, validate_session_key
-from .viewer import workspace_run_url
+from .viewer import ViewerApplication, discard_viewer_run, workspace_run_url
 
 
 SERVER_NAME = "tapl_mcp"
+VIEWER_SHARED_TOOLS = frozenset({
+    "tapl_get_settings", "tapl_save_settings", "tapl_get_run", "tapl_list_records", "tapl_get_item",
+    "tapl_search_history", "tapl_list_archives", "tapl_get_archive", "tapl_recall", "tapl_get_memory",
+})
 PLAN_ID_PATTERN = r"^(?:PLAN|SPEC)-\d{3,}$"
 TASK_ID_PATTERN = r"^TASK-\d{3,}$"
 
@@ -36,7 +41,7 @@ WRITE = ToolAnnotations(
     open_world_hint=False,
 )
 
-MEMORY_WRITE = ToolAnnotations(
+DESTRUCTIVE = ToolAnnotations(
     read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False,
 )
 
@@ -55,6 +60,10 @@ CustomFields = Annotated[
 SessionId = Annotated[
     str | None,
     Field(description="Current host hook session_id. Pass the exact TAPL identity on EVERY call, including reads. Claude Code requires its claude-code: namespaced hook identity; omission is supported only in Codex's isolated legacy namespace.", max_length=256),
+]
+ReaderSessionId = Annotated[
+    str | None,
+    Field(description="Agent connections use the exact host hook session_id. Viewer connections omit it.", max_length=256),
 ]
 SourceDb = Annotated[
     str | None,
@@ -481,20 +490,24 @@ def create_server(
     instructions: str | None = None,
     refresh_install: bool = False,
     client: str | None = None,
+    viewer_mode: bool | None = None,
 ) -> MCPServer[None]:
     """Create a workspace-bound stdio MCP server."""
 
+    if viewer_mode is None:
+        viewer_mode = os.environ.get("TAPL_MCP_MODE") == "viewer"
     with client_scope(resolve_client(client)):
-        return _create_server(workspace_root=workspace_root, instructions=instructions, refresh_install=refresh_install)
+        return _create_server(workspace_root=workspace_root, instructions=instructions,
+                              refresh_install=refresh_install, viewer_mode=viewer_mode)
 
 
 def _create_server(
-    *, workspace_root: Path | None, instructions: str | None, refresh_install: bool,
+    *, workspace_root: Path | None, instructions: str | None, refresh_install: bool, viewer_mode: bool,
 ) -> MCPServer[None]:
     """Keep host policy active while registering tool schemas and help."""
     selected_client = resolve_client()
     root = resolve_workspace_root(workspace_root)
-    if refresh_install:
+    if refresh_install and not viewer_mode:
         refresh_options = {"client": selected_client} if selected_client != "codex" else {}
         tapl_install.auto_install_if_needed(start=root, **refresh_options)
         if auto_reindex.is_homebrew_runtime():
@@ -503,22 +516,70 @@ def _create_server(
     application.tapl_client = selected_client
     server_instructions = instructions
     if server_instructions is None:
-        server_instructions = tapl_prompt.mcp_entry_instructions()
+        server_instructions = ("Workspace Viewer. Select RUNs by their source_db and run_id."
+                               if viewer_mode else tapl_prompt.mcp_entry_instructions())
     server: MCPServer[None] = MCPServer(
         SERVER_NAME,
-        title="TAPL workflow tools",
-        description="Structured agent workflow tools backed directly by the repo-local TAPL application and SQLite state.",
+        title="TAPL Viewer" if viewer_mode else "TAPL workflow tools",
+        description=("Read workspace histories and manage explicit Viewer actions." if viewer_mode else
+                     "Structured agent workflow tools backed directly by the repo-local TAPL application and SQLite state."),
         instructions=server_instructions,
         version=__version__,
     )
+
+    def register_tool(*, name: str, **options: Any) -> Any:
+        # Viewer is an explicit allowlist. Future workflow tools remain agent-only.
+        if viewer_mode and name not in VIEWER_SHARED_TOOLS:
+            return lambda fn: fn
+        return server.tool(name=name, **options)
+
+    async def call_history(method: Any, viewer_read: Any, /, *args: Any,
+                           session_id: str | None, **kwargs: Any) -> dict[str, Any]:
+        if not viewer_mode:
+            return await call_application(method, *args, session_id=session_id, **kwargs)
+
+        # Viewer reads must not record evidence, even for an active legacy RUN.
+        def read() -> dict[str, Any]:
+            return viewer_read(history.HistoryReader(root, session_id=""), *args, **kwargs)
+
+        return await asyncio.to_thread(read)
+
+    if viewer_mode:
+        viewer = ViewerApplication(default_workspace=root)
+
+        @server.tool(name="tapl_viewer_get_status", title="Read TAPL Viewer status", annotations=READ_ONLY)
+        async def viewer_get_status(
+            run_id: Annotated[str | None, Field(min_length=1, max_length=256)] = None,
+            source_db: SourceDb = None,
+            full: bool = False,
+            include_events: bool = False,
+            events_limit: Annotated[int, Field(ge=0, le=100)] = 12,
+        ) -> dict[str, Any]:
+            """Read a selected RUN and its owner from an exact source, or show the active workspace inventory."""
+            return await asyncio.to_thread(viewer.get_status, run_id=run_id, source_db=source_db,
+                                           full=full, include_events=include_events, events_limit=events_limit)
+
+        @server.tool(name="tapl_viewer_discard_run", title="Discard a confirmed Viewer RUN", annotations=DESTRUCTIVE)
+        async def viewer_discard_run(
+            source_db: Annotated[str, Field(min_length=1, strict=True)],
+            run_id: Annotated[str, Field(min_length=1, max_length=256, strict=True)],
+            target_session_id: Annotated[str, Field(max_length=256, strict=True)],
+            confirmed: Annotated[bool, Field(strict=True)],
+            confirmation_run_id: Annotated[str, Field(min_length=1, max_length=256, strict=True)],
+        ) -> dict[str, Any]:
+            """Discard the local active RUN after the user confirms its complete ID and its recorded owner matches."""
+            return await asyncio.to_thread(discard_viewer_run, root, source_db=source_db, run_id=run_id,
+                                           target_session_id=target_session_id, confirmed=confirmed,
+                                           confirmation_run_id=confirmation_run_id)
 
     async def call_settings(session_id: str | None, *, values: dict[str, Any] | None = None,
                             expected_revision: str = "", reset_all: bool = False) -> dict[str, Any]:
         # Configuration actions are independent of RUN ownership.
         try:
-            owner = validate_session_key(session_id, selected_client)
-            if selected_client == "claude-code" and not owner:
-                raise ValueError("session_id is required for every Claude Code TAPL call; pass the exact claude-code: identity from this session's hook")
+            if not viewer_mode:
+                owner = validate_session_key(session_id, selected_client)
+                if selected_client == "claude-code" and not owner:
+                    raise ValueError("session_id is required for every Claude Code TAPL call; pass the exact claude-code: identity from this session's hook")
             service = settings.SettingsService(root)
             if values is None:
                 return {"ok": True, "settings": await asyncio.to_thread(service.get)}
@@ -528,22 +589,22 @@ def _create_server(
         except (OSError, ValueError, TypeError) as exc:
             return {"ok": False, "error": str(exc), "code": "invalid_settings"}
 
-    @server.tool(name="tapl_get_settings", title="Read TAPL settings", annotations=READ_ONLY)
-    async def get_settings(session_id: SessionId = None) -> dict[str, Any]:
+    @register_tool(name="tapl_get_settings", title="Read TAPL settings", annotations=READ_ONLY)
+    async def get_settings(session_id: ReaderSessionId = None) -> dict[str, Any]:
         """Read all CLI-editable preferences, defaults, overrides and revision for this workspace's effective config. Independent of RUNs and workflow state; never writes files."""
         return await call_settings(session_id)
 
-    @server.tool(name="tapl_save_settings", title="Save TAPL settings", annotations=WRITE)
+    @register_tool(name="tapl_save_settings", title="Save TAPL settings", annotations=WRITE)
     async def save_settings(
         values: Annotated[dict[str, Any], Field(description="Canonical settings keys and structured values from tapl_get_settings. Save only changes explicitly requested by the user. Use {} for reset_all.")],
         expected_revision: Annotated[str, Field(min_length=1, description="Exact revision from the settings document being edited; rejects changed files or targets.")],
         reset_all: Annotated[bool, Field(strict=True, description="True only for an explicitly user-confirmed reset of all supported Codex and Claude settings overrides.")] = False,
-        session_id: SessionId = None,
+        session_id: ReaderSessionId = None,
     ) -> dict[str, Any]:
         """Atomically save or reset preferences only as an explicit user settings action. Never call during ordinary workflow entry. A changed configuration may schedule a rebuild of the workspace's local semantic search index. Workflow approvals, RUNs and tasks are unaffected. Reject stale revisions; reload after conflicts instead of retrying writes."""
         return await call_settings(session_id, values=values, expected_revision=expected_revision, reset_all=reset_all)
 
-    @server.tool(
+    @register_tool(
         name="tapl_get_status",
         title="Inspect TAPL workflow status",
         annotations=READ_ONLY,
@@ -565,17 +626,20 @@ def _create_server(
             **compact_payload(source_db=source_db),
         )
 
-    @server.tool(name="tapl_get_run", title="Read an exact TAPL RUN", annotations=READ_ONLY)
+    @register_tool(name="tapl_get_run", title="Read an exact TAPL RUN", annotations=READ_ONLY)
     async def get_run(
         run_id: Annotated[str, Field(min_length=1, max_length=256)],
         source_db: SourceDb = None,
-        session_id: SessionId = None,
+        session_id: ReaderSessionId = None,
     ) -> dict[str, Any]:
         """Read the specified active or historical RUN without changing session selection or ownership."""
-        return await call_application(application.get_run, run_id, session_id=session_id,
-                                      **compact_payload(source_db=source_db))
+        result = await call_history(application.get_run, history.HistoryReader.get_run, run_id,
+                                    session_id=session_id, **compact_payload(source_db=source_db))
+        if viewer_mode:
+            result["readonly"] = not result["run"]["writable"]
+        return result
 
-    @server.tool(name="tapl_list_records", title="Browse TAPL records", annotations=READ_ONLY)
+    @register_tool(name="tapl_list_records", title="Browse TAPL records", annotations=READ_ONLY)
     async def list_records(
         query: Annotated[str, Field(max_length=500)] = "",
         scope: Literal["all", "run"] = "all",
@@ -583,14 +647,14 @@ def _create_server(
         source_db: SourceDb = None,
         offset: Annotated[int, Field(ge=0, le=1000000, strict=True)] = 0,
         limit: Annotated[int, Field(ge=1, le=50, strict=True)] = 50,
-        session_id: SessionId = None,
+        session_id: ReaderSessionId = None,
     ) -> dict[str, Any]:
         """Paginate literal title/body/stable-ID matches. All scope federates sources; run scope requires an exact RUN ID."""
-        return await call_application(application.list_records, query, session_id=session_id,
+        return await call_history(application.list_records, history.HistoryReader.list_records, query, session_id=session_id,
                                       scope=scope, run_id=run_id, offset=offset, limit=limit,
                                       **compact_payload(source_db=source_db))
 
-    @server.tool(name="tapl_get_next", title="Get safest TAPL action", annotations=READ_ONLY)
+    @register_tool(name="tapl_get_next", title="Get safest TAPL action", annotations=READ_ONLY)
     async def get_next(
         available_models: Annotated[dict[str, list[str]] | None, Field(description="Optional live delegation-tool catalog for setup or a user-requested settings check. Omit during ordinary workflow entry. Include every exposed model/effort, including fixed agent-role models, before asserting catalog_complete. Never guess or fill missing entries from saved settings.")] = None,
         catalog_complete: Annotated[bool, Field(description="True only after verifying available_models covers the entire live delegation-tool catalog for an explicit settings check. Default false: supplied entries are incomplete observations and cause no change/removal inference or reconfiguration prompt. Requires available_models; a verified empty catalog is allowed.")] = False,
@@ -607,7 +671,7 @@ def _create_server(
             workflow_policy=instructions,
         ), client=selected_client)
 
-    @server.tool(name="tapl_configure_subagents", title="Save SubAgent preferences", annotations=WRITE)
+    @register_tool(name="tapl_configure_subagents", title="Save SubAgent preferences", annotations=WRITE)
     async def configure_subagents(
         user_confirmed: Annotated[bool, Field(description="True only after the user actually answers the setup question or requests these exact changes; no answer or timeout is not confirmation.")],
         enabled: Annotated[bool, Field(description="Whether the user wants SubAgent delegation enabled.")],
@@ -640,13 +704,13 @@ def _create_server(
             available_models=available_models,
         )
 
-    @server.tool(name="tapl_validate_state", title="Validate TAPL state", annotations=READ_ONLY)
+    @register_tool(name="tapl_validate_state", title="Validate TAPL state", annotations=READ_ONLY)
     async def validate_state(session_id: SessionId = None) -> dict[str, Any]:
         """Validate plan detail, task contracts, dependencies, execution order, and approval state after updates."""
 
         return await call_application(application.validate_state, session_id=session_id)
 
-    @server.tool(name="tapl_get_context", title="Get TAPL lifecycle context", annotations=READ_ONLY)
+    @register_tool(name="tapl_get_context", title="Get TAPL lifecycle context", annotations=READ_ONLY)
     async def get_context(
         event: Annotated[str, Field(description="Lifecycle event name used to select contextual workflow guidance.")] = "Manual",
         session_id: SessionId = None,
@@ -655,27 +719,27 @@ def _create_server(
 
         return await call_application(application.get_context, session_id=session_id, event=event)
 
-    @server.tool(name="tapl_search_history", title="Search TAPL history", annotations=READ_ONLY)
+    @register_tool(name="tapl_search_history", title="Search TAPL history", annotations=READ_ONLY)
     async def search_history(
         query: Annotated[str, Field(description="Compact task-specific query with likely files, features, or errors.", min_length=1, max_length=500)],
         limit: Annotated[int | None, Field(description="Maximum summarized matches.", ge=1, le=50)] = None,
-        session_id: SessionId = None,
+        session_id: ReaderSessionId = None,
     ) -> dict[str, Any]:
         """Search original active and archived records when emitted memory cues are insufficient or prior evidence is needed."""
 
-        return await call_application(application.search_history, query, session_id=session_id, limit=limit)
+        return await call_history(application.search_history, history.HistoryReader.search, query, session_id=session_id, limit=limit)
 
-    @server.tool(name="tapl_recall", title="Recall TAPL memories", annotations=READ_ONLY)
+    @register_tool(name="tapl_recall", title="Recall TAPL memories", annotations=READ_ONLY)
     async def recall(
         query: Annotated[str, Field(description="Cue query; empty lists memories for manual inspection.", max_length=500)] = "",
         limit: Annotated[int, Field(ge=1, le=50)] = 3,
         offset: Annotated[int, Field(ge=0)] = 0,
-        session_id: SessionId = None,
+        session_id: ReaderSessionId = None,
     ) -> dict[str, Any]:
         """Read associative hints without capture or reinforcement. Verify original sources before relying on a hint."""
-        return await call_application(application.recall, query, session_id=session_id, limit=limit, offset=offset)
+        return await call_history(application.recall, history.HistoryReader.recall, query, session_id=session_id, limit=limit, offset=offset)
 
-    @server.tool(name="tapl_list_memory_cues", title="List reusable TAPL memory cues", annotations=READ_ONLY)
+    @register_tool(name="tapl_list_memory_cues", title="List reusable TAPL memory cues", annotations=READ_ONLY)
     async def list_memory_cues(
         query: Annotated[str, Field(description="Literal label fragment; spacing differences also return suggestions.", max_length=200)] = "",
         limit: Annotated[int, Field(ge=1, le=50, strict=True)] = 20,
@@ -687,7 +751,7 @@ def _create_server(
         return await call_application(application.list_memory_cues, query, session_id=session_id,
                                       limit=limit, offset=offset, **compact_payload(source_db=source_db))
 
-    @server.tool(name="tapl_merge_memory_cues", title="Merge equivalent TAPL memory cues", annotations=ToolAnnotations(
+    @register_tool(name="tapl_merge_memory_cues", title="Merge equivalent TAPL memory cues", annotations=ToolAnnotations(
         read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False,
     ))
     async def merge_memory_cues(
@@ -700,16 +764,16 @@ def _create_server(
         return await call_application(application.merge_memory_cues, target_cue, cues, session_id=session_id,
                                       require_session=True, **compact_payload(source_db=source_db))
 
-    @server.tool(name="tapl_get_memory", title="Read one TAPL memory", annotations=READ_ONLY)
+    @register_tool(name="tapl_get_memory", title="Read one TAPL memory", annotations=READ_ONLY)
     async def get_memory(
         memory_id: Annotated[str, Field(description="Memory id returned by tapl_recall.", min_length=1)],
         source_db: SourceDb = None,
-        session_id: SessionId = None,
+        session_id: ReaderSessionId = None,
     ) -> dict[str, Any]:
         """Read a memory and its original source without capture or reinforcement. Deleted or missing memories return null."""
-        return await call_application(application.get_memory, memory_id, session_id=session_id, **compact_payload(source_db=source_db))
+        return await call_history(application.get_memory, history.HistoryReader.get_memory, memory_id, session_id=session_id, **compact_payload(source_db=source_db))
 
-    @server.tool(name="tapl_use_references", title="Record actual TAPL reference usage", annotations=ToolAnnotations(
+    @register_tool(name="tapl_use_references", title="Record actual TAPL reference usage", annotations=ToolAnnotations(
         read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False,
     ))
     async def use_references(
@@ -723,7 +787,7 @@ def _create_server(
             expected_run_id=expected_run_id, references=[entry.model_dump() for entry in references],
         )
 
-    @server.tool(name="tapl_update_memory", title="Update TAPL memory", annotations=MEMORY_WRITE)
+    @register_tool(name="tapl_update_memory", title="Update TAPL memory", annotations=DESTRUCTIVE)
     async def update_memory(
         memory_id: str,
         expected_revision: Annotated[int, Field(ge=1, strict=True)],
@@ -737,7 +801,7 @@ def _create_server(
         return await call_application(application.update_memory, memory_id, session_id=session_id, require_session=True, expected_revision=expected_revision,
                                       note=note, cue=cue, state=state, **compact_payload(source_db=source_db))
 
-    @server.tool(name="tapl_delete_memory", title="Delete TAPL memory", annotations=MEMORY_WRITE)
+    @register_tool(name="tapl_delete_memory", title="Delete TAPL memory", annotations=DESTRUCTIVE)
     async def delete_memory(
         memory_id: str,
         expected_revision: Annotated[int, Field(ge=1, strict=True)],
@@ -747,38 +811,38 @@ def _create_server(
         """Tombstone a memory only on an explicit user request. Deleted memories cannot be recalled or reinforced."""
         return await call_application(application.delete_memory, memory_id, session_id=session_id, require_session=True, expected_revision=expected_revision, **compact_payload(source_db=source_db))
 
-    @server.tool(name="tapl_get_item", title="Read one TAPL item", annotations=READ_ONLY)
+    @register_tool(name="tapl_get_item", title="Read one TAPL item", annotations=READ_ONLY)
     async def get_item(
         item_id: Annotated[int, Field(description="Numeric item id returned by tapl_search_history.", ge=1)],
         compact: Annotated[bool, Field(description="Omit generated body only when exactly reconstructible from retained canonical fields; preserve custom and raw content.")] = False,
         source_db: SourceDb = None,
-        session_id: SessionId = None,
+        session_id: ReaderSessionId = None,
     ) -> dict[str, Any]:
         """Read one complete plan, task, or finding when a search snippet is insufficient."""
 
-        payload = await call_application(application.get_item, item_id, session_id=session_id, **compact_payload(source_db=source_db))
+        payload = await call_history(application.get_item, history.HistoryReader.get_item, item_id, session_id=session_id, **compact_payload(source_db=source_db))
         return compact_item_payload(payload) if compact else payload
 
-    @server.tool(name="tapl_list_archives", title="List TAPL archives", annotations=READ_ONLY)
+    @register_tool(name="tapl_list_archives", title="List TAPL archives", annotations=READ_ONLY)
     async def list_archives(
         limit: Annotated[int | None, Field(description="Maximum recent archives to return.", ge=1, le=100)] = None,
-        session_id: SessionId = None,
+        session_id: ReaderSessionId = None,
     ) -> dict[str, Any]:
         """List recent archived workflow runs for native clients and viewers."""
 
-        return await call_application(application.list_archives, session_id=session_id, limit=limit)
+        return await call_history(application.list_archives, history.HistoryReader.list_archives, session_id=session_id, limit=limit)
 
-    @server.tool(name="tapl_get_archive", title="Read one TAPL archive", annotations=READ_ONLY)
+    @register_tool(name="tapl_get_archive", title="Read one TAPL archive", annotations=READ_ONLY)
     async def get_archive(
         archive_id: Annotated[str, Field(description="Archive numeric id or stable slug.", min_length=1)],
         source_db: SourceDb = None,
-        session_id: SessionId = None,
+        session_id: ReaderSessionId = None,
     ) -> dict[str, Any]:
         """Read an archive with its workflow items and events."""
 
-        return await call_application(application.get_archive, archive_id, session_id=session_id, **compact_payload(source_db=source_db))
+        return await call_history(application.get_archive, history.HistoryReader.get_archive, archive_id, session_id=session_id, **compact_payload(source_db=source_db))
 
-    @server.tool(name="tapl_summarize_run", title="Summarize active TAPL run", annotations=WRITE)
+    @register_tool(name="tapl_summarize_run", title="Summarize active TAPL run", annotations=WRITE)
     async def summarize_run(
         summary: Annotated[str, Field(description=tapl_prompt.field_help("run", "summary"), min_length=1, max_length=2000)],
         work_type: Annotated[
@@ -808,7 +872,7 @@ def _create_server(
             receipt["viewer_url"] = workspace_run_url(application.workspace_root, run["id"], application.db_path.name)
         return receipt
 
-    @server.tool(name="tapl_discard_run", title="Discard confirmed TAPL run", annotations=ToolAnnotations(
+    @register_tool(name="tapl_discard_run", title="Discard confirmed TAPL run", annotations=ToolAnnotations(
         read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False,
     ))
     async def discard_run(
@@ -829,7 +893,7 @@ def _create_server(
             **compact_payload(source_db=source_db),
         )
 
-    @server.tool(name="tapl_split_run", title="Split independent TAPL runs", annotations=WRITE)
+    @register_tool(name="tapl_split_run", title="Split independent TAPL runs", annotations=WRITE)
     async def split_run(
         requests: Annotated[
             list[SplitRunRequest],
@@ -850,7 +914,7 @@ def _create_server(
             operation="run_split",
         )
 
-    @server.tool(name="tapl_apply_plan", title="Create or update TAPL plan", annotations=WRITE)
+    @register_tool(name="tapl_apply_plan", title="Create or update TAPL plan", annotations=WRITE)
     async def apply_plan(
         plan_id: PlanId = "PLAN-001",
         title: Annotated[str | None, Field(description=tapl_prompt.field_help("plan", "title"))] = None,
@@ -892,7 +956,7 @@ def _create_server(
             operation="plan_apply",
         )
 
-    @server.tool(name="tapl_create_task", title="Create TAPL task", annotations=WRITE)
+    @register_tool(name="tapl_create_task", title="Create TAPL task", annotations=WRITE)
     async def create_task(
         task_id: TaskId,
         title: Annotated[str, Field(description=tapl_prompt.field_help("task", "title"), min_length=1)],
@@ -930,7 +994,7 @@ def _create_server(
             operation="task_create",
         )
 
-    @server.tool(name="tapl_start_task", title="Start TAPL task", annotations=WRITE)
+    @register_tool(name="tapl_start_task", title="Start TAPL task", annotations=WRITE)
     async def start_task(task_id: TaskId, custom_fields: CustomFields = None, session_id: SessionId = None) -> dict[str, Any]:
         """Mark one dependency-ready sequential task In Progress immediately before its implementation begins."""
 
@@ -942,7 +1006,7 @@ def _create_server(
             operation="task_start",
         )
 
-    @server.tool(name="tapl_dispatch_tasks", title="Dispatch parallel TAPL tasks", annotations=WRITE)
+    @register_tool(name="tapl_dispatch_tasks", title="Dispatch parallel TAPL tasks", annotations=WRITE)
     async def dispatch_tasks(
         task_ids: Annotated[list[TaskId], Field(description="At least two compatible Pending subagent task ids.", min_length=2)],
         batch_id: Annotated[str | None, Field(description="Optional stable batch id for idempotent retry.")] = None,
@@ -964,7 +1028,7 @@ def _create_server(
             operation="task_dispatch",
         )
 
-    @server.tool(name="tapl_complete_task", title="Complete TAPL task", annotations=WRITE)
+    @register_tool(name="tapl_complete_task", title="Complete TAPL task", annotations=WRITE)
     async def complete_task(
         task_id: TaskId,
         verification: Annotated[str, Field(description=tapl_prompt.field_help("task", "verification"), min_length=1)],
@@ -989,7 +1053,7 @@ def _create_server(
             operation="task_complete",
         )
 
-    @server.tool(name="tapl_block_task", title="Block TAPL task", annotations=WRITE)
+    @register_tool(name="tapl_block_task", title="Block TAPL task", annotations=WRITE)
     async def block_task(
         task_id: TaskId,
         blocker: Annotated[str, Field(description=tapl_prompt.field_help("task", "blocker"), min_length=1)],
@@ -1016,7 +1080,7 @@ def _create_server(
             operation="task_block",
         )
 
-    @server.tool(name="tapl_skip_task", title="Skip TAPL task", annotations=WRITE)
+    @register_tool(name="tapl_skip_task", title="Skip TAPL task", annotations=WRITE)
     async def skip_task(
         task_id: TaskId,
         result: Annotated[str, Field(description=f"Reason the task is intentionally skipped. {tapl_prompt.RECORD_TEXT_HELP}", min_length=1)],
@@ -1035,7 +1099,7 @@ def _create_server(
             operation="task_skip",
         )
 
-    @server.tool(name="tapl_cancel_batch", title="Cancel TAPL batch", annotations=WRITE)
+    @register_tool(name="tapl_cancel_batch", title="Cancel TAPL batch", annotations=WRITE)
     async def cancel_batch(
         batch_id: Annotated[str, Field(description="Active execution batch id.", min_length=1)],
         reason: Annotated[str, Field(description="Why the batch is being cancelled.", min_length=1)],
@@ -1053,7 +1117,7 @@ def _create_server(
             operation="batch_cancel",
         )
 
-    @server.tool(name="tapl_recover_batch", title="Recover TAPL batch", annotations=WRITE)
+    @register_tool(name="tapl_recover_batch", title="Recover TAPL batch", annotations=WRITE)
     async def recover_batch(
         batch_id: Annotated[str, Field(description="Interrupted execution batch id.", min_length=1)],
         reason: Annotated[str, Field(description="Why recovery is required.", min_length=1)],
@@ -1069,7 +1133,7 @@ def _create_server(
             operation="batch_recover",
         )
 
-    @server.tool(name="tapl_add_finding", title="Record TAPL finding", annotations=WRITE)
+    @register_tool(name="tapl_add_finding", title="Record TAPL finding", annotations=WRITE)
     async def add_finding(
         title: Annotated[str, Field(description=tapl_prompt.field_help("finding", "title"), min_length=1)],
         source: Annotated[str, Field(description=tapl_prompt.field_help("finding", "source"))] = "",
@@ -1091,7 +1155,7 @@ def _create_server(
             operation="finding_add",
         )
 
-    @server.tool(name="tapl_approve_execution", title="Approve TAPL execution", annotations=WRITE)
+    @register_tool(name="tapl_approve_execution", title="Approve TAPL execution", annotations=WRITE)
     async def approve_execution(
         prompt: Annotated[str, Field(description=tapl_prompt.field_help("approval", "prompt"), min_length=1)],
         source: Annotated[ApprovalSource, Field(description=tapl_prompt.field_help("approval", "source"))] = "explicit_user",
@@ -1114,7 +1178,7 @@ def _create_server(
             operation="approval_approve",
         )
 
-    @server.tool(name="tapl_reject_execution", title="Reject TAPL execution", annotations=WRITE)
+    @register_tool(name="tapl_reject_execution", title="Reject TAPL execution", annotations=WRITE)
     async def reject_execution(
         prompt: Annotated[str, Field(description="Rejected execution scope.", min_length=1)],
         source: Annotated[ApprovalSource, Field(description=tapl_prompt.field_help("approval", "source"))] = "explicit_user",
@@ -1131,7 +1195,7 @@ def _create_server(
             operation="approval_reject",
         )
 
-    @server.tool(name="tapl_finish_run", title="Finish TAPL run", annotations=WRITE)
+    @register_tool(name="tapl_finish_run", title="Finish TAPL run", annotations=WRITE)
     async def finish_run(
         result: Annotated[str, Field(description=tapl_prompt.field_help("run", "result"), min_length=1)],
         expected_run_id: Annotated[str | None, Field(description="Required with memory arguments; must identify the active run.", min_length=1)] = None,
@@ -1156,7 +1220,7 @@ def _create_server(
             operation="run_finish",
         )
 
-    @server.tool(name="tapl_finish_archive", title="Archive TAPL run", annotations=WRITE)
+    @register_tool(name="tapl_finish_archive", title="Archive TAPL run", annotations=WRITE)
     async def finish_archive(
         slug: Annotated[str, Field(description="Stable timestamped archive slug.", min_length=1, max_length=120)],
         summary: Annotated[str, Field(description="Concise archive summary.", max_length=2000)] = "",

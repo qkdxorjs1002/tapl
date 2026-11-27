@@ -4,7 +4,7 @@
 
 The browser Viewer shows active RUNs, plans, tasks, approvals, findings, archives, history search, and associative memories from a local TAPL workspace. Memory lists, searches, details, and original sources are read-only; ask the agent explicitly to edit or delete a memory.
 
-The same Viewer reads Codex and Claude Code RUNs. Select the owning session explicitly; Claude owners carry the `claude-code:` prefix. See [Claude Code](../getting-started/claude-code.md).
+The browser and VS Code Viewers list Codex and Claude Code RUNs together, including RUNs in the same database. Select a RUN tab to open that exact source database and RUN ID. Codex keeps its raw session ID, Claude Code keeps `claude-code:<native-session-id>`, and legacy RUNs can have an empty owner. This requires no database migration. See [Claude Code session ownership](../getting-started/claude-code.md#hooks-and-session-ownership).
 
 The Viewer reads the folder's `tapl-*.db` files together and preserves the source database through details and refresh. Peer RUNs are viewable but cannot be discarded. Read-only discovery does not create a UUID. See [Local identity and shared history](storage.md).
 
@@ -26,7 +26,7 @@ If the starting folder has no database, choose a folder containing `.tapl/tapl-{
 
 The workspace picker lists subfolders, including hidden folders. Click a folder to enter it, use the first **../** row to go to its parent or **Home** to go home, then choose **Open workspace** for the current folder. It starts at the selected workspace, or the server's starting folder when no workspace is selected. Paths refer to the computer running the Viewer server, including when the page is opened through a proxy. The path field and **Go to folder** remain available as shortcuts. Browsing does not create or initialize folders, and a folder without a TAPL database cannot be opened as a workspace. Permission and missing-folder errors leave the current workspace intact; navigate back or try another path. Folder listing requests require an allowed HTTP `Origin`, like settings requests.
 
-RUN tabs select the session whose records you inspect. Archives and history let you revisit earlier work; the memory view links a reusable cue back to its original evidence. Changing the selected RUN does not transfer its ownership.
+RUN tabs open the selected RUN's records. Archives and history let you revisit earlier work, and the memory view links reusable cues to their original evidence.
 
 Use **Open Viewer** in an agent’s RUN classification notice to open its workspace and RUN in the local browser Viewer. The link uses the default port 8000 and requires the Viewer to be running on the same machine. If the RUN is gone, the link opens the workspace overview. The link applies to the current tab and keeps the browser’s remembered workspace selection.
 
@@ -126,7 +126,7 @@ After confirmation:
 - Active database executions and batches are cancelled, and task timers stop. No queued RUN starts automatically.
 - Other sessions and unrelated requests remain unchanged. An external agent process continues running; discard only changes TAPL state.
 
-The browser request must carry an allowed `Origin`. The server also verifies the selected workspace, owner session, exact RUN ID, and explicit confirmation. See [MCP reference](../reference/mcp.md#confirmed-discard) for the corresponding tool contract.
+Discard is available for RUNs in the local database. The browser requires an allowed `Origin` and verifies the selected workspace, RUN, owner, and confirmation. In VS Code, availability also depends on whether the connected server advertises the Viewer discard tool. See [VS Code capabilities](vscode.md#shared-viewer-and-capabilities).
 
 ## Run as a Homebrew service
 

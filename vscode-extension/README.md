@@ -13,12 +13,13 @@
 
 ## See the work behind the conversation
 
-TAPL keeps workflow state in your working folder's `.tapl/tapl-{UUID}.db`. This optional
-extension brings that record into a native tree view and a detailed dashboard.
+TAPL keeps workflow state in your working folder's `.tapl/tapl-{UUID}.db`. Open the
+dashboard to choose Codex and Claude Code RUNs from the same workspace, including
+RUNs stored in the same database.
 
 | View | What you can inspect |
 | --- | --- |
-| Active work | The current run, plans, tasks, approvals, and findings |
+| Active work | Active RUNs, plans, tasks, approvals, and findings |
 | Dashboard | Workflow details in a layout that fits your editor |
 | Archives | Completed work and the context behind it |
 | History search | Earlier findings and decisions in this workspace |
@@ -76,6 +77,6 @@ for bundled dependencies.
 
 ## Shared Viewer
 
-The extension and browser share fixed RUN navigation, Explore panels, TASK details, record browsing and language/theme controls in the same Viewer. See the [extension guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#shared-viewer-and-capabilities) for feature availability and the [Viewer guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/viewer.md) for RUN discard confirmation and service setup.
+The extension and browser share RUN navigation, TASK details, record browsing and language/theme controls. The extension opens its own local MCP connection. Confirmed RUN discard is available when the connected server advertises the Viewer discard tool and the selected RUN supports it. See the [extension guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/vscode.md#shared-viewer-and-capabilities) and [RUN discard guide](https://github.com/qkdxorjs1002/tapl/blob/main/docs/guides/viewer.md#discard-a-run).
 
 For development checks, use [contributing and verification](https://github.com/qkdxorjs1002/tapl/blob/main/docs/development/contributing.md).

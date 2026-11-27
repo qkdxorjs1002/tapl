@@ -344,7 +344,7 @@ export function RunTabs({
     targetSessionId: string;
     workspace: string;
     title: string;
-    source_db?: string;
+    source_db: string;
   } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -368,9 +368,10 @@ export function RunTabs({
     runs.findIndex((run) => run.id === selectedId && run.source_db === selectedSourceDb)
   );
   const selectRun = (run: TaplWorkflowRun) => {
-    if (run.id !== selectedId || run.source_db !== selectedSourceDb)
+    if (run.id && (run.id !== selectedId || run.source_db !== selectedSourceDb))
       send({
         command: 'selectRun',
+        runId: run.id,
         sessionId: run.session_id ?? '',
         source_db: run.source_db
       });
@@ -412,7 +413,7 @@ export function RunTabs({
   }, [discardResult]);
 
   const requestDiscard = (run: TaplWorkflowRun | undefined) => {
-    if (!discardSupported || !workspace || !run?.id || typeof run.session_id !== 'string' || run.writable === false)
+    if (!discardSupported || !workspace || !run?.id || !run.source_db || typeof run.session_id !== 'string' || run.writable === false)
       return;
     setError('');
     setConfirmationRunId('');
@@ -460,6 +461,7 @@ export function RunTabs({
             !discardSupported ||
             !workspace ||
             !managedRun?.id ||
+            !managedRun.source_db ||
             typeof managedRun.session_id !== 'string' ||
             managedRun.writable === false ||
             pending
@@ -519,6 +521,7 @@ export function RunTabs({
                   run.writable !== false &&
                   workspace &&
                   run.id &&
+                  run.source_db &&
                   typeof run.session_id === 'string' ? (
                     <button
                       className="tapl-run-tab-close"
@@ -526,18 +529,7 @@ export function RunTabs({
                       aria-label={closeLabel}
                       title={closeLabel}
                       disabled={pending}
-                      onClick={() => {
-                        if (!workspace || !run.id || typeof run.session_id !== 'string') return;
-                        setError('');
-                        setConfirmationRunId('');
-                        setTarget({
-                          runId: run.id,
-                          targetSessionId: run.session_id,
-                          workspace,
-                          title,
-                          source_db: run.source_db
-                        });
-                      }}
+                      onClick={() => requestDiscard(run)}
                     >
                       <span aria-hidden="true">×</span>
                     </button>

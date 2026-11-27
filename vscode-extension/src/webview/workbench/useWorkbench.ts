@@ -22,10 +22,11 @@ import {
   type WorkbenchRoute
 } from './model';
 
-export function expectedForCommand(command: WebviewCommand, targetRun?: TaplWorkflowRun): string | undefined {
+export function expectedForCommand(command: WebviewCommand): string | undefined {
   switch (command.command) {
     case 'selectRun':
-      return targetRun ? `run:${runKey(targetRun)}` : 'overview';
+      if (!command.runId) return 'overview';
+      return `run:${runKey({ id: command.runId, source_db: command.source_db })}`;
     case 'openRun':
       return `run:${runKey({ id: command.runId, source_db: command.source_db })}`;
     case 'records':
@@ -61,10 +62,11 @@ export function expectedForCommand(command: WebviewCommand, targetRun?: TaplWork
 }
 export function commandForRun(run: TaplWorkflowRun, active: TaplWorkflowRun[]): WebviewCommand | undefined {
   if (!run.id) return undefined;
-  return typeof run.session_id === 'string' && active.some((candidate) => runKey(candidate) === runKey(run))
+  return active.some((candidate) => runKey(candidate) === runKey(run))
     ? {
         command: 'selectRun',
-        sessionId: run.session_id,
+        runId: run.id,
+        sessionId: run.session_id ?? '',
         source_db: run.source_db
       }
     : { command: 'openRun', runId: run.id, source_db: run.source_db };
@@ -187,7 +189,7 @@ export function useWorkbench({
           update(state => ({ ...navigate(state, route, false), hostIdentity: identity }));
         } else {
           const command = commandForRun(successor, inventory ?? []);
-          update(state => navigate(state, route, false, command && expectedForCommand(command, successor)));
+          update(state => navigate(state, route, false, command && expectedForCommand(command)));
           if (command) send(command);
         }
         setRestore(value => value + 1);
@@ -245,13 +247,12 @@ export function useWorkbench({
   const go = (
     route: WorkbenchRoute,
     command?: WebviewCommand,
-    internal: boolean | 'replace' = false,
-    targetRun?: TaplWorkflowRun
+    internal: boolean | 'replace' = false
   ) => {
     afterRun.current = undefined;
     if (runKey(retainedArchive.current) !== route.runKey) retainedArchive.current = undefined;
     capture();
-    update((current) => navigate(current, route, internal, command && expectedForCommand(command, targetRun)));
+    update((current) => navigate(current, route, internal, command && expectedForCommand(command)));
     setRestore((value) => value + 1);
     if (command) send(command);
   };
@@ -314,12 +315,12 @@ export function useWorkbench({
     const nextFollowUp =
       command && followUp && followUp.command !== 'selectRun' && followUp.command !== 'openRun'
         ? {
-            expected: expectedForCommand(command, run)!,
+            expected: expectedForCommand(command)!,
             route,
             command: followUp
           }
         : undefined;
-    go(route, command, false, run);
+    go(route, command);
     afterRun.current = nextFollowUp;
   };
   const restoreRoute = (route: WorkbenchRoute, trail: WorkbenchRoute[]) => {
@@ -328,8 +329,7 @@ export function useWorkbench({
     capture();
     const command: WebviewCommand | undefined = requestForRoute(route) ??
       (route.page === 'records' ? { command: 'records', scope: 'all' } : undefined);
-    const run = snapshots[route.runKey]?.run ?? knownRuns.find((candidate) => runKey(candidate) === route.runKey);
-    update((current) => navigate({ ...current, trail }, route, 'replace', command && expectedForCommand(command, run)));
+    update((current) => navigate({ ...current, trail }, route, 'replace', command && expectedForCommand(command)));
     setRestore((value) => value + 1);
     if (command) send(command);
   };
@@ -338,9 +338,10 @@ export function useWorkbench({
     const previous = trail[trail.length - 1];
     if (previous) restoreRoute(previous, trail.slice(0, -1));
   };
-  const openCurrentRun = (selection?: TaplWorkflowRun) => go({ page: 'current', runKey: '' }, {
-    command: 'selectRun', sessionId: selection?.session_id ?? '', source_db: selection?.source_db
-  });
+  const openCurrentRun = (selection?: TaplWorkflowRun) => go(
+    { page: 'current', runKey: runKey(selection) },
+    (selection && commandForRun(selection, activeRuns)) ?? { command: 'selectRun', sessionId: '' }
+  );
   const closeTemporaryRun = () => {
     const current = stateRef.current;
     const regularRuns = tabRuns(activeRuns, undefined);
@@ -348,7 +349,7 @@ export function useWorkbench({
       !route.runKey || regularRuns.some((run) => runKey(run) === route.runKey);
     if (!current.route.runKey || regularRoute(current.route)) return;
     if (!regularRuns.length && runKey(retainedArchive.current) === current.route.runKey) {
-      openCurrentRun(retainedArchive.current);
+      openCurrentRun();
       return;
     }
     // Skip details belonging to the temporary RUN so closing cannot reopen it.
@@ -389,7 +390,7 @@ export function useWorkbench({
       );
     } else if (page === 'memories') go({ page, runKey: key }, { command: 'memories' });
     else if (page === 'current' && !selectedRun && current.route.page !== 'current') openCurrentRun(activeRuns[0]);
-    else go({ page, runKey: key }, selectedRun && commandForRun(selectedRun, activeRuns), false, selectedRun);
+    else go({ page, runKey: key }, selectedRun && commandForRun(selectedRun, activeRuns));
   };
   const wrappedSend = (command: WebviewCommand) => {
     if (command.command === 'back' && stateRef.current.trail.length) {

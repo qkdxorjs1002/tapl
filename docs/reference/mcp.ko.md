@@ -2,13 +2,13 @@
 
 [문서 홈](../README.ko.md) · [English](mcp.md)
 
-`tapl-mcp`는 MCP stdio로 워크플로 애플리케이션을 제공합니다. 관리 명령은 [CLI](cli.ko.md)를 사용합니다. 이 페이지는 [`mcp_server.py`](../../tapl/taplctl/mcp_server.py)에 등록된 **공개 도구 37개 전체**를 다룹니다. 정확한 입력 검증은 연결된 서버의 JSON schema가 기준입니다.
+`tapl-mcp`는 MCP stdio로 워크플로 애플리케이션을 제공합니다. 이 페이지는 [`mcp_server.py`](../../tapl/taplctl/mcp_server.py)에 등록된 **Agent 도구 37개**와 별도의 [Viewer stdio 도구](#viewer-stdio)를 다룹니다. 정확한 입력 검증은 연결된 서버의 JSON schema가 기준입니다. 관리 명령은 [CLI](cli.ko.md)를 사용합니다.
 
 Claude Code는 읽기를 포함해 모든 호출에 정확한 hook 소유자 `claude-code:<native-session-id>`가 필요합니다. 생략·원본 ID·다른 클라이언트 ID를 거부하며, 아래 legacy 생략 동작은 Codex에만 적용됩니다. 승인 source `request_user_input`은 Claude `AskUserQuestion` 응답을 포함한 도구 확인 이력의 기존 값으로 유지합니다. 호스트별 정책·모델 설정은 [Claude 가이드](../getting-started/claude-code.ko.md)를 참고하세요.
 
 ## 공통 계약
 
-읽기를 포함해 **모든 호출에 현재 호스트 hook `session_id`**를 전달합니다. 대부분의 schema에서는 호환성을 위해 선택 인자이지만 Codex에서만 생략을 허용하며 다른 세션의 활성 RUN이 아닌 격리된 legacy 범위(`""`)를 선택합니다. Claude Code는 정확한 이름공간 소유자가 필요합니다. 식별자는 최대 256자이며 앞뒤 공백과 제어 문자를 허용하지 않습니다. `tapl_discard_run`은 legacy RUN의 `""`까지 포함해 소유자를 명시해야 합니다.
+Agent 연결에서는 읽기를 포함해 **모든 호출에 현재 호스트 hook `session_id`**를 전달합니다. 대부분의 schema에서 호환성을 위해 선택 인자로 표시합니다. Codex에서만 생략을 허용하며 이 경우 격리된 legacy 범위(`""`)를 선택합니다. Claude Code는 정확한 이름공간 소유자가 필요합니다. 식별자는 최대 256자이며 앞뒤 공백과 제어 문자를 허용하지 않습니다. `tapl_discard_run`은 legacy RUN의 `""`까지 포함해 소유자를 명시해야 합니다.
 
 응답은 구조화된 객체입니다. 호스트가 코드 모드를 제공한다면 필요한 도구를 정확한 이름으로 함께 탐색하고 전체 도구 목록은 출력하지 않습니다. `structuredContent`를 한 번 출력하고 필요할 때만 텍스트를 파싱해 대체합니다. envelope의 두 표현을 모두 출력하지 않습니다. 쓰기 응답은 현재 권고와 축약 검증을 제공합니다. 차단 오류는 모두 남기며 생략한 경고 수는 `omitted_issue_count`로 알립니다.
 
@@ -263,10 +263,21 @@ await call("tapl_finish_archive", {
 
 ## 확인된 폐기
 
-`tapl_discard_run`은 literal `confirmed=true`, 선택한 전체 `run_id`와 대소문자·공백까지 일치하는 `confirmation_run_id`, 명시적 소유 세션이 필요합니다. 선택한 RUN과 같은 소유자·split group의 모든 대기 RUN을 의존성 연결 여부와 무관하게 함께 처리합니다. 각 RUN은 정말 비어 있으면 삭제하고 보존할 기록이 있으면 강제 아카이브합니다. 활성 DB 실행·배치를 취소하며 다른 RUN을 시작하지 않습니다. 외부 에이전트 프로세스를 종료하지 않습니다. 일반 완료·아카이브와 구분되는 명시적 Viewer 닫기 동작입니다. [Viewer](../guides/viewer.ko.md#run-폐기)를 보세요.
+`tapl_discard_run`은 literal `confirmed=true`, 선택한 전체 `run_id`와 대소문자·공백까지 일치하는 `confirmation_run_id`, 명시적 소유 세션이 필요합니다. 선택한 RUN과 같은 소유자·split group의 모든 대기 RUN을 의존성 연결 여부와 무관하게 함께 처리합니다. 각 RUN은 정말 비어 있으면 삭제하고 보존할 기록이 있으면 강제 아카이브합니다. 활성 DB 실행·배치를 취소하며 다른 RUN을 시작하지 않습니다. 외부 에이전트 프로세스는 계속 실행됩니다. Viewer에서 실행하는 방법은 [RUN 폐기](../guides/viewer.ko.md#run-폐기)를 참고하세요.
+
+<a id="viewer-stdio"></a>
+
+## Viewer 전용 stdio
+
+VS Code 확장은 `TAPL_MCP_MODE=viewer`를 설정해 별도의 로컬 `tapl-mcp` 프로세스를 시작하고 `tools/list`로 지원 여부를 확인합니다. Viewer 프로필은 이력과 메모리 조회, 워크스페이스 설정, 아래 Viewer 전용 도구를 제공합니다. Viewer 조회에는 hook 세션 ID가 필요하지 않습니다. Agent 호출에는 [공통 계약](#공통-계약)을 적용합니다.
+
+| 도구 | 필수 인자 | 옵션과 동작 |
+| --- | --- | --- |
+| `tapl_viewer_get_status` | 없음 | `run_id`와 `source_db`는 선택 인자입니다. `run_id`를 생략하면 워크스페이스 개요를 반환합니다. Viewer에서 RUN을 선택하면 정확한 RUN ID와 원본 파일명을 전달합니다. `full=true`로 설정하면 기록 본문을 포함합니다(기본값 `false`). 최근 이벤트 옵션은 `include_events`(기본값 `false`)와 `events_limit`(기본값 12, 범위 0–100)입니다. |
+| `tapl_viewer_discard_run` | `source_db`, `run_id`, `target_session_id`, `confirmed`, `confirmation_run_id` | 정확한 로컬 원본 파일명, 활성 RUN ID, 저장된 소유자가 필요합니다. 기존 RUN의 소유자는 `""`일 수 있습니다. `confirmed=true`를 전달하고 `confirmation_run_id`에 정확한 전체 RUN ID를 넣습니다. |
 
 ## 가용성과 검증
 
-현재 서버는 위 도구를 모두 등록합니다. 선택적 의미 검색 의존성은 도구 등록이 아닌 검색 실행에 영향을 줍니다. `searchd`는 Unix 전용입니다. 자동 회상을 꺼도 수동 메모리 조회는 유지합니다. 메모리 변경에는 여전히 명시적 사용자 요청과 현재 revision이 필요합니다. Viewer는 `associativeMemory`, `discardRun` 기능 표시에 따라 구버전 서버에서 지원하는 화면을 유지합니다.
+연결 프로필에 따라 사용 가능한 도구가 달라집니다. 선택적 의미 검색 의존성은 도구 등록이 아닌 검색 실행에 영향을 줍니다. `searchd`는 Unix 전용입니다. 자동 회상을 꺼도 수동 메모리 조회는 유지합니다. 메모리 변경에는 여전히 명시적 사용자 요청과 현재 revision이 필요합니다. 구버전 서버 호환성은 [VS Code 기능 조건](../guides/vscode.ko.md#공유-viewer와-기능-조건)을 참고하세요.
 
 Schema·세션·수명주기는 `tapl/tests`의 `test_mcp_native.py`, `test_session_mcp.py`, `test_application.py`, `test_context_optimization.py`, 메모리·폐기 테스트에서 검증합니다. [아키텍처](../development/architecture.ko.md), [기여와 검증](../development/contributing.ko.md), [워크플로](../concepts/workflow.ko.md)를 참고하세요.

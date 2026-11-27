@@ -235,18 +235,29 @@ def require_run_owner(conn: sqlite3.Connection, run_id: str) -> sqlite3.Row:
     return run
 
 
-def connect(path: Path | str | None = None, *, session_id: str | None = None) -> sqlite3.Connection:
+def connect(path: Path | str | None = None, *, session_id: str | None = None,
+            existing_only: bool = False) -> sqlite3.Connection:
     owner = sessions.normalize_session_id(session_id) if session_id is not None else sessions.current_session_id()
     db_path = Path(path) if path else default_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1_000, factory=WorkflowConnection)
+    if existing_only:
+        target = db_path.absolute().as_uri() + "?mode=rw"
+    else:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        target = db_path
+    conn = sqlite3.connect(target, uri=existing_only, timeout=SQLITE_BUSY_TIMEOUT_MS / 1_000,
+                           factory=WorkflowConnection)
     conn.tapl_session_id = owner
     conn.row_factory = sqlite3.Row
     try:
         conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        migrate(conn)
+        if existing_only:
+            # A Viewer discard uses existing RUN/archive tables. Opening the
+            # handle must not migrate history before the transaction checks ownership.
+            _check_viewer_schema(conn)
+        else:
+            conn.execute("PRAGMA journal_mode = WAL")
+            migrate(conn)
     except BaseException:
         conn.close()
         raise
@@ -277,32 +288,36 @@ def connect_readonly(
     try:
         conn.execute("PRAGMA query_only = ON")
         conn.execute("BEGIN")
-        has_meta = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'"
-        ).fetchone()
-        row = conn.execute(
-            "SELECT value FROM meta WHERE key = 'schema_version'"
-        ).fetchone() if has_meta else None
-        guidance = "Run `taplctl --db <database-path> init` with write access before viewing."
-        if row is None:
-            raise ReadOnlySchemaError(f"Database has no TAPL schema version. {guidance}")
-        try:
-            version = int(row["value"])
-        except (TypeError, ValueError) as exc:
-            raise ReadOnlySchemaError("Database schema_version is not a valid integer.") from exc
-        if version < min(READONLY_SCHEMA_VERSIONS):
-            raise ReadOnlySchemaError(
-                f"Database schema version {version} requires migration to {SCHEMA_VERSION}. {guidance}"
-            )
-        if version > SCHEMA_VERSION:
-            raise ReadOnlySchemaError(
-                f"Database schema version {version} is newer than supported version {SCHEMA_VERSION}. "
-                "Upgrade TAPL before viewing this database."
-            )
+        _check_viewer_schema(conn)
     except BaseException:
         conn.close()
         raise
     return conn
+
+
+def _check_viewer_schema(conn: sqlite3.Connection) -> None:
+    has_meta = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'"
+    ).fetchone()
+    row = conn.execute(
+        "SELECT value FROM meta WHERE key = 'schema_version'"
+    ).fetchone() if has_meta else None
+    guidance = "Run `taplctl --db <database-path> init` with write access before viewing."
+    if row is None:
+        raise ReadOnlySchemaError(f"Database has no TAPL schema version. {guidance}")
+    try:
+        version = int(row["value"])
+    except (TypeError, ValueError) as exc:
+        raise ReadOnlySchemaError("Database schema_version is not a valid integer.") from exc
+    if version < min(READONLY_SCHEMA_VERSIONS):
+        raise ReadOnlySchemaError(
+            f"Database schema version {version} requires migration to {SCHEMA_VERSION}. {guidance}"
+        )
+    if version > SCHEMA_VERSION:
+        raise ReadOnlySchemaError(
+            f"Database schema version {version} is newer than supported version {SCHEMA_VERSION}. "
+            "Upgrade TAPL before viewing this database."
+        )
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -3148,14 +3163,15 @@ def active_execution_state(
     }
 
 
-def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
+def status_payload(conn: sqlite3.Connection, *, run_id: str | None = None,
+                   events_limit: int = 12) -> dict[str, Any]:
     """Read one consistent snapshot without committing a caller's transaction."""
 
     if conn.in_transaction:
-        return _status_payload(conn)
+        return _status_payload(conn, run_id=run_id, events_limit=events_limit)
     conn.execute("BEGIN")
     try:
-        state = _status_payload(conn)
+        state = _status_payload(conn, run_id=run_id, events_limit=events_limit)
         conn.commit()
         return state
     except BaseException:
@@ -3163,7 +3179,9 @@ def status_payload(conn: sqlite3.Connection) -> dict[str, Any]:
         raise
 
 
-def _status_payload(conn: sqlite3.Connection, *, run_id: str | None = None) -> dict[str, Any]:
+def _status_payload(conn: sqlite3.Connection, *, run_id: str | None = None,
+                    events_limit: int = 12) -> dict[str, Any]:
+    exact_run = run_id is not None
     run = (conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
            if run_id is not None else active_run(conn))
     as_of = utc_now()
@@ -3252,12 +3270,17 @@ def _status_payload(conn: sqlite3.Connection, *, run_id: str | None = None) -> d
 
     archives = list_archives(conn, limit=8)
     queued = queued_runs(conn)
+    if exact_run:
+        queued = [other for other in queued if run and run["split_group_id"]
+                  and other["split_group_id"] == run["split_group_id"]]
     archive_count = int(conn.execute("SELECT COUNT(*) FROM archives").fetchone()[0])
     recent_events = [
         row_to_dict(row)
         for row in conn.execute(
-            "SELECT * FROM events WHERE session_id = ? ORDER BY id DESC LIMIT 12",
-            (connection_session_id(conn),),
+            "SELECT * FROM events WHERE session_id = ?" + (" AND run_id = ?" if exact_run else "")
+            + " ORDER BY id DESC LIMIT ?",
+            (connection_session_id(conn), run_id, events_limit) if exact_run
+            else (connection_session_id(conn), events_limit),
         )
     ]
     incomplete = sum(task_counts[status] for status in ("Pending", "In Progress", "Blocked"))

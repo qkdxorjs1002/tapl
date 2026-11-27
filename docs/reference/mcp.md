@@ -2,13 +2,13 @@
 
 [Documentation](../README.md) · [한국어](mcp.ko.md)
 
-`tapl-mcp` exposes the workflow application over MCP stdio. Management commands belong to [the CLI](cli.md). This page covers all **37 public tools** registered by [`mcp_server.py`](../../tapl/taplctl/mcp_server.py); the connected server's JSON schema is the authority for exact validation.
+`tapl-mcp` exposes the workflow application over MCP stdio. This page covers the **37 agent tools** and the separate [Viewer stdio tools](#viewer-stdio) registered by [`mcp_server.py`](../../tapl/taplctl/mcp_server.py). The connected server's JSON schema is the authority for exact validation. Management commands belong to [the CLI](cli.md).
 
 Claude Code requires the exact `claude-code:<native-session-id>` hook owner on every call, even reads. Its missing/raw/foreign-client IDs are rejected; the legacy omission behavior below applies only to Codex. Approval source `request_user_input` remains the stable tool-confirmed provenance value, including Claude `AskUserQuestion` answers. Host-specific policy and model setup are described in the [Claude guide](../getting-started/claude-code.md).
 
 ## Common contract
 
-Pass the current host hook **`session_id` on every call**, including reads. Most schemas make it optional for compatibility, but only Codex permits omission, selecting the isolated legacy namespace (`""`), not another session's active RUN. Claude Code requires its exact namespaced owner. Identity is at most 256 characters without surrounding whitespace or control characters. `tapl_discard_run` requires an explicit owner, including `""` for a legacy RUN.
+On an agent connection, pass the current host hook **`session_id` on every call**, including reads. Most schemas make it optional for compatibility. Codex alone permits omission and selects the isolated legacy namespace (`""`) in that case. Claude Code requires its exact namespaced owner. Identity is at most 256 characters without surrounding whitespace or control characters. `tapl_discard_run` requires an explicit owner, including `""` for a legacy RUN.
 
 Tool responses are structured objects. When the host provides code mode, discover the needed tools together by exact name without printing the full tool catalog. Emit `structuredContent` once, falling back to parsed text when necessary; do not print both envelope copies. Write receipts include current recommendations and compact validation. All blocking errors are retained; omitted warnings are counted in `omitted_issue_count`.
 
@@ -266,10 +266,19 @@ Capture failures preserve the work result. Inspect the receipt, retry failed slo
 
 ## Confirmed discard
 
-`tapl_discard_run` requires literal `confirmed=true` and `confirmation_run_id` exactly matching the full selected `run_id`, including case and whitespace. The owner session is mandatory. It processes the selected RUN and all queued RUNs with the same owner and split group, regardless of dependency links. Each RUN is deleted if truly empty or force-archived if it has retained work. Active database executions/batches are cancelled, and no other RUN starts. It does not terminate external agent processes. This is the explicit Viewer close action, not the normal finish/archive route; see [Viewer](../guides/viewer.md#discard-a-run).
+`tapl_discard_run` requires literal `confirmed=true` and `confirmation_run_id` exactly matching the full selected `run_id`, including case and whitespace. The owner session is mandatory. It processes the selected RUN and all queued RUNs with the same owner and split group, regardless of dependency links. Each RUN is deleted if truly empty or force-archived if it has retained work. Active database executions and batches are cancelled, and no other RUN starts. External agent processes continue running. See [Discard a RUN](../guides/viewer.md#discard-a-run) for the Viewer operation.
+
+## Viewer stdio
+
+The VS Code extension starts a separate local `tapl-mcp` process with `TAPL_MCP_MODE=viewer` and checks `tools/list` for support. The Viewer profile exposes history and memory reads, workspace settings, and these Viewer-specific tools. Its reads do not require a hook session ID. Agent calls use the [common contract](#common-contract).
+
+| Tool | Required arguments | Options and behavior |
+| --- | --- | --- |
+| `tapl_viewer_get_status` | None | Optional `run_id` and `source_db`. Omit `run_id` for the workspace overview. The Viewer passes the exact RUN ID and source filename when selecting a RUN. Set `full=true` to include record bodies (default `false`). Recent-event options are `include_events` (default `false`) and `events_limit` (default 12, range 0–100). |
+| `tapl_viewer_discard_run` | `source_db`, `run_id`, `target_session_id`, `confirmed`, `confirmation_run_id` | Requires the exact local source filename, active RUN ID and stored owner. A legacy owner can be `""`. Pass literal `confirmed=true` and the exact full RUN ID in `confirmation_run_id`. |
 
 ## Availability and verification
 
-The current server registers every tool listed above. Optional semantic dependencies affect search execution, not tool registration. `searchd` is Unix-only. Disabled automatic recall does not remove manual memory inspection. Memory mutation still requires an explicit user request and current revision. Viewer clients use advertised `associativeMemory` and `discardRun` capabilities so older servers keep supported views available.
+Tool availability follows the connection profile. Optional semantic dependencies affect search execution, not tool registration. `searchd` is Unix-only. Disabled automatic recall does not remove manual memory inspection. Memory mutation still requires an explicit user request and current revision. See [VS Code capabilities](../guides/vscode.md#shared-viewer-and-capabilities) for older server compatibility.
 
 Schema/session/lifecycle behavior is covered by `test_mcp_native.py`, `test_session_mcp.py`, `test_application.py`, `test_context_optimization.py`, and the memory/discard suites in `tapl/tests`. See [Architecture](../development/architecture.md), [Contributing](../development/contributing.md), and [Workflow](../concepts/workflow.md).

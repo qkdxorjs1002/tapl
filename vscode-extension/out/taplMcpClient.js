@@ -20,12 +20,18 @@ class WorkspaceTaplMcpClient {
         this.factory = factory;
         this.disposed = false;
     }
+    async supportsTool(name) {
+        return (await this.getConnection()).tools.has(name);
+    }
     async callTool(name, args = {}) {
         let lastError;
-        // A lost save acknowledgement must not replay a configuration mutation.
-        const attempts = name === 'tapl_save_settings' ? 1 : 2;
+        // A lost acknowledgement can follow a successful mutation.
+        const attempts = name === 'tapl_save_settings' || name === 'tapl_viewer_discard_run' ? 1 : 2;
         for (let attempt = 0; attempt < attempts; attempt += 1) {
             const connection = await this.getConnection();
+            if ((name === 'tapl_viewer_get_status' || name === 'tapl_viewer_discard_run') && !connection.tools.has(name)) {
+                throw new TaplMcpToolError(`This TAPL MCP server does not support ${name}.`);
+            }
             try {
                 const result = await connection.client.callTool({ name, arguments: args }, undefined, { timeout: REQUEST_TIMEOUT_MS });
                 if (result.isError) {
@@ -94,7 +100,7 @@ class WorkspaceTaplMcpClient {
         const failures = [];
         for (const command of this.workspace.commands) {
             const client = this.factory.createClient();
-            const connection = { client, command, closed: false };
+            const connection = { client, command, closed: false, tools: new Set() };
             client.onclose = () => {
                 connection.closed = true;
                 if (this.connection === connection) {
@@ -104,6 +110,9 @@ class WorkspaceTaplMcpClient {
             try {
                 const transport = this.factory.createTransport(command, this.workspace.cwd);
                 await client.connect(transport, { timeout: REQUEST_TIMEOUT_MS });
+                if (!connection.closed) {
+                    connection.tools = await listToolNames(client);
+                }
                 if (!connection.closed) {
                     return connection;
                 }
@@ -137,10 +146,10 @@ class TaplMcpClientPool {
         this.disposed = false;
     }
     async callTool(workspace, name, args = {}) {
-        if (this.disposed) {
-            throw new Error('TAPL MCP client pool has been disposed.');
-        }
         return this.sessionFor(workspace).callTool(name, args);
+    }
+    async supportsTool(workspace, name) {
+        return this.sessionFor(workspace).supportsTool(name);
     }
     invalidate(workspaceKey) {
         if (workspaceKey !== undefined) {
@@ -164,6 +173,9 @@ class TaplMcpClientPool {
         await Promise.all(sessions.map(({ session }) => session.dispose()));
     }
     sessionFor(workspace) {
+        if (this.disposed) {
+            throw new Error('TAPL MCP client pool has been disposed.');
+        }
         const fingerprint = JSON.stringify([workspace.cwd, ...workspace.commands]);
         const existing = this.sessions.get(workspace.key);
         if (existing?.fingerprint === fingerprint) {
@@ -194,8 +206,29 @@ function taplMcpEnvironment() {
     const inherited = Object.fromEntries(Object.entries(process.env).filter((entry) => entry[1] !== undefined));
     return {
         ...inherited,
+        TAPL_CLIENT: 'codex',
+        TAPL_MCP_MODE: 'viewer',
         PATH: [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin'].filter(Boolean).join(delimiter)
     };
+}
+async function listToolNames(client) {
+    const names = new Set();
+    if (!client.listTools)
+        return names;
+    const seenCursors = new Set();
+    let cursor;
+    do {
+        const page = await client.listTools(cursor === undefined ? {} : { cursor }, { timeout: REQUEST_TIMEOUT_MS });
+        for (const tool of page.tools)
+            names.add(tool.name);
+        cursor = page.nextCursor;
+        if (cursor !== undefined) {
+            if (seenCursors.has(cursor))
+                throw new Error('TAPL MCP repeated a tool list cursor.');
+            seenCursors.add(cursor);
+        }
+    } while (cursor !== undefined);
+    return names;
 }
 function uniqueStrings(values) {
     return [...new Set(values.filter((value) => Boolean(value)))];

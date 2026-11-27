@@ -31,12 +31,14 @@ type PanelView = (
   | { type: 'memories'; query: string; offset: number }
   | { type: 'memory' | 'memorySource'; memoryId: string }) & { source_db?: string };
 
+type RunSelection = { runId: string; source_db?: string };
+type TaplMcpResult = { ok: true; value: Record<string, unknown> } | { ok: false; error: string };
+
 const COMMAND_PREFIX = "taplWorkflow";
 const TAPL_DB_WATCH_DEBOUNCE_MS = 2000;
 let taplMcpClients: TaplMcpClientPool | undefined;
 let selectedWorkspacePath: string | undefined;
-const selectedRunSessions = new Map<string, string>();
-const selectedRunSources = new Map<string, string>();
+const selectedRuns = new Map<string, RunSelection>();
 // Keep the transport command stable until a save acknowledgement has been delivered.
 const settingsWriteConfigs = new Map<string, ViewerConfig>();
 
@@ -507,6 +509,10 @@ class WorkflowWebviewManager {
     if (generation !== this.generation || panel !== this.panel || root !== getWorkspaceRoot()) { return; }
     if (!this.panelVisible()) { this.deferredPanelRefresh = true; return; }
     if (view.type === 'overview' || view.type === 'debug') {
+      const activeRun = view.status.active_run;
+      if (workspace && activeRun?.id) {
+        selectedRuns.set(workspace, { runId: activeRun.id, source_db: activeRun.source_db ?? view.status.source_db });
+      }
       this.capabilities = {
         associativeMemory: view.status.viewer_capabilities?.associativeMemory === true,
         discardRun: view.status.viewer_capabilities?.discardRun === true
@@ -641,13 +647,15 @@ class WorkflowWebviewManager {
       }
       case 'selectRun': {
         const root = getWorkspaceRoot();
-        if (root && typeof message.sessionId === 'string' && message.sessionId.length <= 256) {
-          selectedRunSessions.set(root.uri.fsPath, message.sessionId);
-          if (typeof message.source_db === "string") selectedRunSources.set(root.uri.fsPath, message.source_db);
-          else selectedRunSources.delete(root.uri.fsPath);
-          await this.openOverview();
-          this.refreshTreeViews();
-        }
+        if (!root) return;
+        if (typeof message.runId === 'string' && message.runId && message.runId.length <= 256) {
+          selectedRuns.set(root.uri.fsPath, { runId: message.runId,
+            source_db: typeof message.source_db === 'string' ? message.source_db : undefined });
+        } else if (message.runId === undefined && message.sessionId === '' && message.source_db === undefined) {
+          selectedRuns.delete(root.uri.fsPath);
+        } else return;
+        await this.openOverview();
+        this.refreshTreeViews();
         return;
       }
       case 'back': await this.navigate(this.backStack.pop() ?? { type: 'overview' }); return;
@@ -732,7 +740,6 @@ class WorkflowWebviewManager {
         }
       }
       // Configuration belongs to this workspace, independent of selected RUN and source database.
-      // Missing optional session_id deliberately retains the server's runtime identity resolution.
       if (!inWorkspace()) return;
       const result = action === 'get'
         ? await callTaplMcp('tapl_get_settings', {}, root)
@@ -773,6 +780,7 @@ class WorkflowWebviewManager {
     const runId = typeof message.runId === 'string' ? message.runId : '';
     const confirmationRunId = message.confirmationRunId;
     const targetSessionId = message.targetSessionId;
+    const sourceDb = message.source_db;
     const workspace = message.workspace;
     const generation = this.generation;
     const error = async (text: string): Promise<void> => {
@@ -783,29 +791,31 @@ class WorkflowWebviewManager {
     };
     if (!panel || !root) { return; }
     if (!this.capabilities.discardRun || this.discardPending || message.confirmed !== true || !runId.trim()
+      || typeof sourceDb !== 'string' || !sourceDb
       || typeof confirmationRunId !== 'string' || confirmationRunId !== runId
       || typeof targetSessionId !== 'string' || targetSessionId.length > 256
       || targetSessionId !== targetSessionId.trim() || /[\x00-\x1f\x7f]/.test(targetSessionId)
       || workspace !== root.uri.fsPath) {
-      await error('RUN discard requires the complete matching RUN ID, explicit confirmation, and the current workspace.');
+      await error('RUN discard requires the source database, complete matching RUN ID, explicit confirmation, and current workspace.');
       return;
     }
     this.discardPending = true;
     try {
-      // Capture both identities before awaiting; writes never consult the selected read owner.
-      const result = await callTaplMcp('tapl_discard_run', {
-        run_id: runId, confirmed: true, confirmation_run_id: confirmationRunId, session_id: targetSessionId, ...(typeof message.source_db === "string" ? { source_db: message.source_db } : {})
+      const result = await callTaplMcp('tapl_viewer_discard_run', {
+        source_db: sourceDb, run_id: runId, target_session_id: targetSessionId,
+        confirmed: true, confirmation_run_id: confirmationRunId
       }, root);
       if (root !== getWorkspaceRoot() || panel !== this.panel || workspace !== root.uri.fsPath) { return; }
-      if (!result.ok || result.value.ok === false) {
+      if (!result.ok || result.value.ok !== true) {
         await error(result.ok ? String(result.value.error ?? 'RUN discard failed.') : result.error);
         return;
       }
-      if (selectedRunSessions.get(workspace) === targetSessionId) {
-        selectedRunSessions.delete(workspace);
-        selectedRunSources.delete(workspace);
+      const selected = selectedRuns.get(workspace);
+      if (selected?.runId === runId && selected.source_db === sourceDb) {
+        selectedRuns.delete(workspace);
       }
-      if (generation === this.generation) {
+      if (generation === this.generation && this.currentView.type === 'run'
+        && this.currentView.runId === runId && this.currentView.source_db === sourceDb) {
         this.backStack.length = 0;
         this.currentView = { type: 'overview' };
       }
@@ -862,36 +872,87 @@ async function safeStatus(
   options: { full?: boolean; includeEvents?: boolean; eventsLimit?: number } = {},
   root = getWorkspaceRoot()
 ): Promise<{ ok: true; value: TaplStatus } | { ok: false; error: string }> {
-  const selectedSession = root ? selectedRunSessions.get(root.uri.fsPath) : undefined;
+  if (!root) return { ok: false, error: localize('openWorkspaceToUseTapl') };
+  const selected = selectedRuns.get(root.uri.fsPath);
   const args = {
     full: options.full ?? false,
     include_events: options.includeEvents ?? false,
-    events_limit: options.eventsLimit ?? 12,
-    ...(selectedSession !== undefined ? { session_id: selectedSession } : {}),
-    ...(root && selectedRunSources.has(root.uri.fsPath) ? { source_db: selectedRunSources.get(root.uri.fsPath) } : {})
+    events_limit: options.eventsLimit ?? 12
   };
-  let result = await callTaplMcp('tapl_get_status', args, root);
-  if (!result.ok) {
-    return result;
-  }
-  const initial = result.value as unknown as TaplStatus;
-  if (!initial.active_run && initial.active_runs?.length && root) {
-    const owner = initial.active_runs[0].session_id;
-    if (typeof owner === 'string') {
-      selectedRunSessions.set(root.uri.fsPath, owner);
-      const sourceDb = initial.active_runs[0].source_db;
-      if (sourceDb) selectedRunSources.set(root.uri.fsPath, sourceDb);
-      result = await callTaplMcp('tapl_get_status', { ...args, session_id: owner, ...(sourceDb ? { source_db: sourceDb } : {}) }, root);
-      if (!result.ok) { return result; }
+
+  try {
+    const clients = taplMcpClients ??= new TaplMcpClientPool();
+    const workspace = taplMcpWorkspace(root);
+    const supportsTool = (name: string) => clients.supportsTool?.(workspace, name);
+    if (await supportsTool('tapl_viewer_get_status')) {
+      const status = await readTaplStatus('tapl_viewer_get_status', {
+        ...args, ...(selected ? runSelectionArgs(selected) : {})
+      }, root);
+      if (!status.ok) return status;
+      status.value.viewer_capabilities = {
+        associativeMemory: status.value.viewer_capabilities?.associativeMemory === true,
+        discardRun: status.value.viewer_capabilities?.discardRun !== false && await supportsTool('tapl_viewer_discard_run') === true
+      };
+      return status;
     }
+  } catch (error) {
+    return taplMcpFailure(error);
   }
+
+  const initial = await readTaplStatus('tapl_get_status', args, root);
+  if (!initial.ok) return initial;
+  const status = initial.value;
+  status.viewer_capabilities = { associativeMemory: status.viewer_capabilities?.associativeMemory === true, discardRun: false };
+  const firstRun = status.active_runs?.[0];
+  const selection = selected ?? (!status.active_run && firstRun?.id
+    ? { runId: firstRun.id, source_db: firstRun.source_db }
+    : undefined);
+  if (!selection) return initial;
+
+  const exact = await callTaplMcp('tapl_get_run', runSelectionArgs(selection), root);
+  if (!exact.ok) return exact;
+  const snapshot = exact.value as unknown as TaplRunSnapshot;
+  const sourceDb = snapshot.run?.source_db ?? snapshot.source_db ?? selection.source_db;
+  if (exact.value.ok === false || snapshot.run?.id !== selection.runId
+    || (selection.source_db !== undefined && selection.source_db !== sourceDb)) {
+    return { ok: false, error: String(exact.value.error ?? 'The TAPL MCP server returned an invalid RUN snapshot.') };
+  }
+  const { run, tasks = [], plans = [], findings = [], task_counts = {}, active_batches = [], active_executions = [],
+    active_runs, references } = snapshot;
+  const initialRun = status.active_run;
+  const initialSource = initialRun?.source_db ?? status.source_db;
+  const sameRun = initialRun?.id === selection.runId && initialSource === sourceDb;
+  const sharedStatus = sameRun ? status : {
+    ...DEFAULT_STATUS, schema: initialSource === sourceDb ? status.schema : DEFAULT_STATUS.schema,
+    config: status.config, reference_limits: status.reference_limits,
+    source_errors: status.source_errors, viewer_capabilities: status.viewer_capabilities,
+    counts: { archives: status.counts?.archives }
+  };
   return {
     ok: true,
     value: {
-      ...DEFAULT_STATUS,
-      ...(result.value as unknown as TaplStatus)
+      ...sharedStatus, active_run: run, session_id: run.session_id, source_db: sourceDb,
+      tasks, plans, findings, task_counts, active_batches, active_executions, references,
+      active_runs: active_runs ?? status.active_runs,
+      incomplete_tasks: (task_counts.Pending ?? 0) + (task_counts['In Progress'] ?? 0) + (task_counts.Blocked ?? 0),
+      counts: { ...sharedStatus.counts, plans: plans.length, tasks: tasks.length, findings: findings.length,
+        active_batches: active_batches.length, active_executions: active_executions.length }
     }
   };
+}
+
+function runSelectionArgs({ runId, source_db }: RunSelection): Record<string, unknown> {
+  return { run_id: runId, ...(source_db ? { source_db } : {}) };
+}
+
+async function readTaplStatus(tool: 'tapl_get_status' | 'tapl_viewer_get_status', args: Record<string, unknown>,
+  root: vscode.WorkspaceFolder): Promise<{ ok: true; value: TaplStatus } | { ok: false; error: string }> {
+  const result = await callTaplMcp(tool, args, root);
+  if (!result.ok) return result;
+  if (result.value.ok === false) {
+    return { ok: false, error: String(result.value.error ?? 'TAPL status request failed.') };
+  }
+  return { ok: true, value: { ...DEFAULT_STATUS, ...result.value as unknown as TaplStatus } };
 }
 
 async function safeArchives(limit?: number): Promise<{ ok: true; value: TaplArchive[] } | { ok: false; error: string }> {
@@ -989,10 +1050,10 @@ async function searchTapl(query: string): Promise<{ ok: true; value: TaplSearchP
 }
 
 async function callTaplMcp(
-  tool: 'tapl_get_status' | 'tapl_get_run' | 'tapl_list_records' | 'tapl_get_item' | 'tapl_search_history' | 'tapl_list_archives' | 'tapl_get_archive' | 'tapl_recall' | 'tapl_get_memory' | 'tapl_discard_run' | 'tapl_get_settings' | 'tapl_save_settings',
+  tool: 'tapl_get_status' | 'tapl_viewer_get_status' | 'tapl_get_run' | 'tapl_list_records' | 'tapl_get_item' | 'tapl_search_history' | 'tapl_list_archives' | 'tapl_get_archive' | 'tapl_recall' | 'tapl_get_memory' | 'tapl_viewer_discard_run' | 'tapl_get_settings' | 'tapl_save_settings',
   args: Record<string, unknown>,
   root: vscode.WorkspaceFolder | undefined = getWorkspaceRoot()
-): Promise<{ ok: true; value: Record<string, unknown> } | { ok: false; error: string }> {
+): Promise<TaplMcpResult> {
   if (!root) {
     return { ok: false, error: localize('openWorkspaceToUseTapl') };
   }
@@ -1000,12 +1061,13 @@ async function callTaplMcp(
     const clients = taplMcpClients ??= new TaplMcpClientPool();
     return { ok: true, value: await clients.callTool(taplMcpWorkspace(root), tool, args) };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      ok: false,
-      error: `${message} Set viewer.mcp_path in .tapl/config.toml to the tapl-mcp executable path if it is not on PATH.`
-    };
+    return taplMcpFailure(error);
   }
+}
+
+function taplMcpFailure(error: unknown): { ok: false; error: string } {
+  const message = error instanceof Error ? error.message : String(error);
+  return { ok: false, error: `${message} Set viewer.mcp_path in .tapl/config.toml to the tapl-mcp executable path if it is not on PATH.` };
 }
 
 function taplMcpWorkspace(root: vscode.WorkspaceFolder): TaplMcpWorkspace {
