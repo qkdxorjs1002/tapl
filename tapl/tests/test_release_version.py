@@ -160,6 +160,11 @@ class ReleaseWorkflowPrereleaseContractTests(unittest.TestCase):
         self.assertEqual(event["push"]["tags"], ["viewer-*.*.*"])
         jobs = parsed["jobs"]
         self.assertEqual(set(jobs), {"plan", "build", "release", "marketplace"})
+        planning = next(step["run"] for step in jobs["plan"]["steps"]
+                        if step.get("id") == "plan")
+        fetch_tag = 'git fetch --no-tags origin "+${release_ref}:${release_ref}"'
+        self.assertIn('release_ref="refs/tags/${GITHUB_REF_NAME}"', planning)
+        self.assertLess(planning.index(fetch_tag), planning.index("python .github/scripts/viewer_release.py"))
         self.assertIn("needs.plan.outputs.publish == 'true'", jobs["build"]["if"])
         self.assertIn("needs.plan.outputs.publish == 'true'", jobs["release"]["if"])
         self.assertEqual(jobs["release"]["needs"], ["plan", "build"])

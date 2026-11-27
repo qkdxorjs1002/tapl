@@ -42,6 +42,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Checkout can map the tag name to the event commit. Fetch the actual tag ref.
+          release_ref="refs/tags/${GITHUB_REF_NAME}"
+          git fetch --no-tags origin "+${release_ref}:${release_ref}"
           releases_file="${RUNNER_TEMP}/viewer-releases.json"
           gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "${releases_file}"
           python .github/scripts/viewer_release.py "${GITHUB_REF_NAME}" \
